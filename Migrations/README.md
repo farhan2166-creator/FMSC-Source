@@ -108,3 +108,18 @@ migration on a live school database without the standard backup and review proce
 The Communication Center dashboard entry, provider services, worker, webhook and
 obsolete tests are retired in the same application version. A replacement will use
 a separately reviewed schema migration; this removal does not enable messaging.
+
+## Schema 9 — New Communication Center foundation (draft, not published)
+
+Migration `9.sql` requires schema 8 and creates a **new** `msg` schema. It does not
+restore `comm`, `dbo.StudentGuardianCommunication`, historical contact lists,
+provider credentials or any automatic sender. All SMS and WhatsApp channels
+start **disabled**. The existing student admission record holds the one authoritative
+nullable school-message Yes/No choice; historical admissions start without consent.
+
+The migration adds durable batches, recipient snapshots, attempts, provider receipt
+correlation, channel suppression, templates and audit evidence. All changes are
+executed under the installer's existing transaction with pre-migration backup.
+The application must not expose sending until SQL writers, authorization, provider
+validation, verified callbacks and recovery checks are complete. See
+[Communication rebuild contract](../Docs/COMMUNICATION_REBUILD_V2.md).
