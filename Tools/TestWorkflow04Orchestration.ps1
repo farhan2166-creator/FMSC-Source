@@ -19,41 +19,17 @@ Check ($workflow.Contains('AssertSandboxPublicationGate.ps1 -SourceSha') -and $w
 Check ($workflow.IndexOf('  prepare:') -gt 0 -and
     $workflow.IndexOf('  prepare:') -lt $workflow.IndexOf('  sandbox-release-gate:') -and
     $workflow.IndexOf('  sandbox-release-gate:') -lt $workflow.IndexOf('  package:')) 'Release job dependency order is unsafe.'
-# Regression: a literal "$AppVersion" in core.ps1 must not become
-# an unescaped regex end-of-line anchor. Check the actual current source.
+# Release version parsing must match the literal "$AppVersion" and
+# "$DatabaseVersion" variables in the existing installer.
 $core=Get-Content -LiteralPath (Join-Path $root 'Installer/core.ps1') -Raw
-$appPattern='(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r? -and $prep.Contains('Installer/core.ps1') -and
-    $prep.Contains('refs/heads/main') -and $prep.Contains('Reusing pending')) 'Preparation must use feed version and preserve retryability.'
-Check ($prep.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and $prep.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Release secrets are not checked before version commit.'
-Check ($dispatch.Contains('previous_status_id=') -and $dispatch.Contains("ref='main'") -and $dispatch.Contains('source_sha=$SourceSha')) 'Dispatch lacks pinned commit/status baseline.'
-Check ($wait.Contains('$PreviousStatusId') -and $wait.Contains('fmsc/sandbox-mdf-ldf/v1') -and
-    $wait.Contains('AssertSandboxPublicationGate.ps1')) 'Wait accepts old or untrusted private status.'
-Check (-not $wait.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and -not $wait.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Sensitive tokens leaked into polling job.'
-Write-Output 'PASS: one-click exact-commit release preparation, private chaos acceptance and final atomic publication wiring.'
-
-$schemaPattern='(?m)^\$DatabaseVersion = ''([0-9]+)''\r? -and $prep.Contains('Installer/core.ps1') -and
-    $prep.Contains('refs/heads/main') -and $prep.Contains('Reusing pending')) 'Preparation must use feed version and preserve retryability.'
-Check ($prep.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and $prep.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Release secrets are not checked before version commit.'
-Check ($dispatch.Contains('previous_status_id=') -and $dispatch.Contains("ref='main'") -and $dispatch.Contains('source_sha=$SourceSha')) 'Dispatch lacks pinned commit/status baseline.'
-Check ($wait.Contains('$PreviousStatusId') -and $wait.Contains('fmsc/sandbox-mdf-ldf/v1') -and
-    $wait.Contains('AssertSandboxPublicationGate.ps1')) 'Wait accepts old or untrusted private status.'
-Check (-not $wait.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and -not $wait.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Sensitive tokens leaked into polling job.'
-Write-Output 'PASS: one-click exact-commit release preparation, private chaos acceptance and final atomic publication wiring.'
-
-Check ($prep.Contains('[regex]::Match($core,''(?m)^\$AppVersion') -and
-    $prep.Contains('[regex]::Match($core,''(?m)^\$DatabaseVersion')) 'Version parser must match literal dollar-prefixed installer variables.'
+$appPattern='(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$'
+$schemaPattern='(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$'
+Check ($prep.Contains("[regex]::Match(\`$core,'(?m)^\`$AppVersion") -and
+    $prep.Contains("[regex]::Match(\`$core,'(?m)^\`$DatabaseVersion")) 'Version parser must match literal dollar-prefixed installer variables.'
 Check ([regex]::Matches($core,$appPattern).Count -eq 1 -and
-    [regex]::Matches($core,$schemaPattern).Count -eq 1) 'Current Installer/core.ps1 version assignments are not uniquely detectable.'
-Check ([regex]::Match($core,$appPattern).Groups[1].Value -match '^[0-9]+\.[0-9]+\.[0-9]+ -and $prep.Contains('Installer/core.ps1') -and
-    $prep.Contains('refs/heads/main') -and $prep.Contains('Reusing pending')) 'Preparation must use feed version and preserve retryability.'
-Check ($prep.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and $prep.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Release secrets are not checked before version commit.'
-Check ($dispatch.Contains('previous_status_id=') -and $dispatch.Contains("ref='main'") -and $dispatch.Contains('source_sha=$SourceSha')) 'Dispatch lacks pinned commit/status baseline.'
-Check ($wait.Contains('$PreviousStatusId') -and $wait.Contains('fmsc/sandbox-mdf-ldf/v1') -and
-    $wait.Contains('AssertSandboxPublicationGate.ps1')) 'Wait accepts old or untrusted private status.'
-Check (-not $wait.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and -not $wait.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Sensitive tokens leaked into polling job.'
-Write-Output 'PASS: one-click exact-commit release preparation, private chaos acceptance and final atomic publication wiring.'
-) 'Current app version is not valid semver.'
-Check ([regex]::Match($core,$schemaPattern).Groups[1].Value -eq '7') 'Schema-7 chaos fixture no longer matches current production schema.'
+    [regex]::Matches($core,$schemaPattern).Count -eq 1) 'Current installer version assignments are not uniquely detectable.'
+Check ([regex]::Match($core,$appPattern).Groups[1].Value -match '^[0-9]+\.[0-9]+\.[0-9]+$') 'Current app version is invalid.'
+Check ([regex]::Match($core,$schemaPattern).Groups[1].Value -eq '7') 'Schema-7 chaos fixture no longer matches production.'
 Check ($prep.Contains('channel/stable.json') -and $prep.Contains('Installer/core.ps1') -and
     $prep.Contains('refs/heads/main') -and $prep.Contains('Reusing pending')) 'Preparation must use feed version and preserve retryability.'
 Check ($prep.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and $prep.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Release secrets are not checked before version commit.'
