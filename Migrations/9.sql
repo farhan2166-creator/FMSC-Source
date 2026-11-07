@@ -182,6 +182,37 @@ CREATE TABLE msg.Receipt
 );
 CREATE INDEX IX_MsgReceiptCorrelation ON msg.Receipt(ProviderCode,ProviderMessageId);
 
+-- Permission-checked consent recording. This procedure is idempotent and records
+-- evidence only when the authoritative Admission choice actually changes.
+EXEC sys.sp_executesql N'
+CREATE PROCEDURE msg.RecordAdmissionConsent
+    @UserId int, @AdmissionId int, @Consent bit, @Authority nvarchar(40)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF @Consent IS NULL OR @AdmissionId<=0 OR @Authority NOT IN (N''Students.Admit'',N''Students.Administer'')
+        THROW 51012,''An explicit Yes/No and an authorized admission are required.'',1;
+    EXEC dbo.RequirePermission @UserId,@Authority;
+    BEGIN TRANSACTION;
+    DECLARE @Old bit;
+    SELECT @Old=SchoolMessageConsent
+    FROM dbo.Students WITH (UPDLOCK,HOLDLOCK) WHERE AdmissionId=@AdmissionId;
+    IF @@ROWCOUNT<>1
+        THROW 51012,''The admission was not found. Consent was not recorded.'',1;
+    IF @Old IS NULL OR @Old<>@Consent
+    BEGIN
+        UPDATE dbo.Students
+        SET SchoolMessageConsent=@Consent,
+            SchoolMessageConsentUtc=SYSUTCDATETIME(),
+            SchoolMessageConsentBy=@UserId
+        WHERE AdmissionId=@AdmissionId;
+        INSERT msg.ConsentAudit(AdmissionId,Consent,ActorUserId)
+        VALUES(@AdmissionId,@Consent,@UserId);
+    END;
+    COMMIT TRANSACTION;
+END;';
+
 -- No new permission grants or provider activation in a schema-only migration.
 -- Application permissions and transactional send procedures must be reviewed in
 -- the same replacement PR before the Communication Center can be exposed.
