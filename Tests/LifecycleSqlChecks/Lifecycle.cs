@@ -19,6 +19,8 @@ internal sealed class Lifecycle(Fixture f, Report r)
         await r.Stage("Recovery: pending collection blocks ambiguous resubmission", CollectionJournalGuard, next);
         await r.Stage("Negative: stale collection edit and unauthorized finance", FinanceRefusals, next);
         await r.Stage("G: complete two-year history and database invariants", FinalAudit, next);
+        await r.Stage("Communication v2: disabled defaults, Admission consent and authority",
+            () => CommunicationV2SqlChecks.Run(f,r,student), a);
     }
 
     private Task Admission()
