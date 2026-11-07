@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PROJECT = Path(__file__).resolve().parent
 IMAGE = "mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090"
 LABEL = "fmsc.level1.owner"
-STAGES = ["Environment and tooling", "Database provisioning", "Lifecycle SQL", "Quick Registration SQL", "Mutation SQL", "Administration SQL", "Portable regressions", "Performance checks", "Communication database provisioning", "Communication SQL", "Communication provider checks", "Cleanup"]
+STAGES = ["Environment and tooling", "Database provisioning", "Lifecycle SQL", "Quick Registration SQL", "Mutation SQL", "Administration SQL", "Portable regressions", "Performance checks", "Cleanup"]
 
 
 def verify_baseline():
@@ -168,15 +168,12 @@ def main():
     parser.add_argument("--sqlpackage", type=Path)
     parser.add_argument("--dotnet", default="dotnet")
     parser.add_argument("--cleanup", action="store_true")
-    parser.add_argument("--communication-only", action="store_true", help="Focused disposable communication iteration; does not run the other SQL suites.")
     parser.add_argument("--level3", action="store_true", help="Also execute bounded Level 3 faults, backup/restore and measured workloads in a separate owned catalog.")
     parser.add_argument("--diagnostics", type=Path, help="Optional local private diagnostic file; never upload it.")
     parser.add_argument("--inject-provision-failure", action="store_true", help="Exercise failure evidence and container cleanup; always exits nonzero.")
     args = parser.parse_args()
     if args.output is None or args.state is None:
         parser.error("--output and --state are required for execution/cleanup")
-    if args.level3 and args.communication_only:
-        parser.error("--level3 cannot be combined with --communication-only")
     if args.cleanup:
         remove_owned(args.state)
         return 0
@@ -312,7 +309,7 @@ def main():
             verify_baseline()
             if not args.sqlpackage:
                 execute([args.dotnet, "tool", "restore", "--tool-manifest", str(PROJECT / ".config/dotnet-tools.json")], timeout=300)
-            for project in ["LifecycleSqlChecks", "QuickRegistrationSqlChecks", "MutationSqlChecks", "AdministrationSqlChecks", "AuditFixChecks", "PerformanceChecks", "CommunicationChecks"]:
+            for project in ["LifecycleSqlChecks", "QuickRegistrationSqlChecks", "MutationSqlChecks", "AdministrationSqlChecks", "AuditFixChecks", "PerformanceChecks"]:
                 execute([args.dotnet, "build", str(ROOT / "Tests" / project / (project + ".csproj")), "-c", "Release"], timeout=300)
         stage("Environment and tooling", tooling)
         verify_baseline()
@@ -343,25 +340,20 @@ def main():
         current_stage = "Database provisioning"
         if args.inject_provision_failure:
             raise RuntimeError("Controlled provisioning failure for cleanup verification.")
-        if not args.communication_only:
-            stage("Database provisioning", lambda: provision("Lifecycle"))
-            stage("Lifecycle SQL", lambda: run_lifecycle([], "lifecycle.json"))
-            stage("Current release schema provisioning", lambda: provision("Current", current_schema=True))
-            stage("Current release school scenarios", lambda: run_lifecycle(["--school-scenarios"], "school-scenarios.json"))
-            for label, project, suffix, mode in [
-                ("Quick Registration SQL", "QuickRegistrationSqlChecks", "Quick", None),
-                ("Mutation SQL", "MutationSqlChecks", "Mutation", ["--mutation-fixture"]),
-                ("Administration SQL", "AdministrationSqlChecks", "Administration", None)]:
-                count = stage(label, lambda p=project, s=suffix, m=mode: existing(p, s, m))
-                report["scenarios"][-1]["assertions"] = count
-            if args.level3:
-                stage("Level 3 database provisioning", lambda: provision("Reliability"))
-                stage("Level 3 SQL reliability", lambda: run_lifecycle(["--level3"], "reliability.json"))
-        stage("Communication database provisioning", lambda: provision("Communication"))
-        stage("Communication SQL", lambda: run_lifecycle(["--communication"], "communication.json"))
-        if args.communication_only:
-            report["limitations"].append("Focused communication-only iteration; other lifecycle/regression suites were not executed in this run.")
-        for label, project in [("Portable regressions", "AuditFixChecks"), ("Performance checks", "PerformanceChecks"), ("Communication provider checks", "CommunicationChecks")]:
+        stage("Database provisioning", lambda: provision("Lifecycle"))
+        stage("Lifecycle SQL", lambda: run_lifecycle([], "lifecycle.json"))
+        stage("Current release schema provisioning", lambda: provision("Current", current_schema=True))
+        stage("Current release school scenarios", lambda: run_lifecycle(["--school-scenarios"], "school-scenarios.json"))
+        for label, project, suffix, mode in [
+            ("Quick Registration SQL", "QuickRegistrationSqlChecks", "Quick", None),
+            ("Mutation SQL", "MutationSqlChecks", "Mutation", ["--mutation-fixture"]),
+            ("Administration SQL", "AdministrationSqlChecks", "Administration", None)]:
+            count = stage(label, lambda p=project, s=suffix, m=mode: existing(p, s, m))
+            report["scenarios"][-1]["assertions"] = count
+        if args.level3:
+            stage("Level 3 database provisioning", lambda: provision("Reliability"))
+            stage("Level 3 SQL reliability", lambda: run_lifecycle(["--level3"], "reliability.json"))
+        for label, project in [("Portable regressions", "AuditFixChecks"), ("Performance checks", "PerformanceChecks")]:
             text = stage(label, lambda p=project: execute([args.dotnet, "run", "--project", str(ROOT / "Tests" / p / (p + ".csproj")), "-c", "Release", "--no-build"], timeout=180))
             report["scenarios"][-1]["assertions"] = sum(map(int, re.findall(r"PASS:\s+(\d+)\s", text)))
     except (Exception, SystemExit) as error:
@@ -379,7 +371,7 @@ def main():
             report["scenarios"].append({"name": "Cleanup", "result": "FAIL", "assertions": 0, "seconds": 0, "assertion": "Owned container removal could not be verified.", "category": "Test environment/provisioning"})
         private.cleanup()
         existing_names = {s["name"] for s in report["scenarios"]}
-        report["scenarios"] += [{"name": name, "result": "BLOCKED", "assertions": 0, "seconds": 0, "assertion": "An earlier prerequisite did not complete."} for name in (STAGES if not args.communication_only else ["Environment and tooling","SQL container readiness","Communication database provisioning","Communication SQL","Portable regressions","Performance checks","Cleanup"]) if name not in existing_names]
+        report["scenarios"] += [{"name": name, "result": "BLOCKED", "assertions": 0, "seconds": 0, "assertion": "An earlier prerequisite did not complete."} for name in STAGES if name not in existing_names]
         report["result"] = "FAIL" if failed or any(s["result"] != "PASS" for s in report["scenarios"]) else "PASS"
         write_evidence(output, report)
         try:

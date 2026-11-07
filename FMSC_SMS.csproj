@@ -258,7 +258,7 @@
 	<ItemGroup>
 	  <None Include=".editorconfig" />
 	</ItemGroup>
-<ItemGroup><EmbeddedResource Include="Services/Communication/Schema.sql" LogicalName="FMSC_SMS.Communication.Schema.sql" /></ItemGroup>
+
   <Target Name="RemoveRetiredFeeReportTemplates" AfterTargets="CopyFilesToOutputDirectory;Publish">
     <Delete Files="$(TargetDir)Reports\AdmissionBill.rdlc;$(TargetDir)Reports\FeePaymentReceipt.rdlc;$(TargetDir)Reports\FeeReminder.rdlc;$(TargetDir)Reports\FeeAgingReport.rdlc" Condition="'$(TargetDir)' != ''" />
     <Delete Files="$(PublishDir)Reports\AdmissionBill.rdlc;$(PublishDir)Reports\FeePaymentReceipt.rdlc;$(PublishDir)Reports\FeeReminder.rdlc;$(PublishDir)Reports\FeeAgingReport.rdlc" Condition="'$(PublishDir)' != ''" />

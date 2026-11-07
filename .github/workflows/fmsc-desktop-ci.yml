@@ -181,14 +181,6 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tools\TestUpdateRecovery.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell recovery checks failed.' }
 
-      - name: Build optional communication worker and webhook host
-        run: |
-          dotnet build Apps/Worker/Worker.csproj -c Release
-          dotnet build Apps/Host/Host.csproj -c Release
-
-      - name: Run deterministic communication provider checks (no live delivery)
-        run: dotnet run --project Tests/CommunicationChecks/CommunicationChecks.csproj -c Release
-
       - name: Verify offline sqlcmd resolution for new installs and updates
         shell: pwsh
         run: .\Tools\TestOfflineSqlPrerequisites.ps1

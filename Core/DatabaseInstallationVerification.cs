@@ -1,26 +1,12 @@
-using FMSC_SMS.Services.Communication;
 using Microsoft.Data.SqlClient;
 using System.Text.RegularExpressions;
 
 namespace FMSC_SMS.Core;
 
-// Installer-only entry points: explicit connections, no LocalDB attachment,
-// no logged-in school actor, provider configuration or message dispatcher.
-internal static class CommunicationInstallation
+// Installer-only core database verification; no optional communication dependency.
+internal static class DatabaseInstallationVerification
 {
-    internal const int Ready = 0, Missing = 10, BaseIncompatible = 20,
-        ModuleIncompatible = 21, ScriptMismatch = 22, Failed = 23;
-
-    internal static async Task<int> CheckAsync(SqlConnection connection)
-    {
-        try { DatabaseCompatibility.Validate(connection); }
-        catch (Exception ex) when (ex is SqlException or DatabaseCompatibilityException)
-        { return BaseIncompatible; }
-        using var exists = new SqlCommand("SELECT CASE WHEN SCHEMA_ID(N'comm') IS NULL THEN 0 ELSE 1 END;", connection);
-        if (Convert.ToInt32(await exists.ExecuteScalarAsync().ConfigureAwait(false)) == 0) return Missing;
-        try { return await CommunicationSchemaContract.VerifyAsync(connection).ConfigureAwait(false) ? Ready : ModuleIncompatible; }
-        catch (SqlException) { return ModuleIncompatible; }
-    }
+    internal const int Ready = 0, BaseIncompatible = 20, Failed = 23;
 
     internal static int Run(string[] args)
     {
@@ -36,7 +22,9 @@ internal static class CommunicationInstallation
                 IntegratedSecurity = true, TrustServerCertificate = true, ConnectTimeout = 15 };
             using var connection = new SqlConnection(builder.ConnectionString);
             connection.Open();
-            return CheckAsync(connection).GetAwaiter().GetResult();
+            try { DatabaseCompatibility.Validate(connection); return Ready; }
+            catch (Exception ex) when (ex is SqlException or DatabaseCompatibilityException)
+            { return BaseIncompatible; }
         }
         catch (Exception)
         { return Failed; } // Installer explains exit codes; no credentials/raw SQL are logged.

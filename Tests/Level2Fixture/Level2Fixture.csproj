@@ -7,10 +7,8 @@
     <Compile Include="../LifecycleSqlChecks/Fixture.cs" Link="Fixture.cs" />
     <Compile Include="../Level2UiChecks/Identity.cs" Link="Identity.cs" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
-    <Compile Include="../../Services/Communication/*.cs" Exclude="../../Services/Communication/WindowsGatewayStore.cs" Link="Communication/%(Filename)%(Extension)" />
     <Compile Include="../QuickRegistrationSqlChecks/DatabaseContext.cs" Link="DatabaseContext.cs" />
     <Compile Include="../../Core/DatabaseCompatibility.cs" Link="DatabaseCompatibility.cs" />
-    <Compile Include="../../Core/CommunicationInstallation.cs" Link="CommunicationInstallation.cs" />
     <Compile Include="../../Core/DatabaseCompatibilityFailure.cs" Link="DatabaseCompatibilityFailure.cs" />
     <Compile Include="../../Core/WholeRupees.cs" Link="WholeRupees.cs" />
     <Compile Include="../../Core/Tvp.cs" Link="Tvp.cs" />
@@ -24,5 +22,4 @@
     <Using Include="System.Data" /><Using Include="FMSC_SMS" /><Using Include="FMSC_SMS.Core" />
     <Using Include="FMSC_SMS.Pages.Security" /><Using Include="FMSC_SMS.Pages.Finance.Collection" />
   </ItemGroup>
-<ItemGroup><EmbeddedResource Include="../../Services/Communication/Schema.sql" LogicalName="FMSC_SMS.Communication.Schema.sql" /></ItemGroup>
 </Project>

@@ -404,25 +404,11 @@ IF NOT EXISTS(SELECT 1 FROM sys.extended_properties WHERE class=0 AND name=N'FMS
     AND SQL_VARIANT_PROPERTY(value,'BaseType')='uniqueidentifier'
     AND TRY_CONVERT(uniqueidentifier,value)<>'00000000-0000-0000-0000-000000000000')
     THROW 51012,'Disposable fixture lacks required quick-registration identity',1;
--- Schema-only DACPAC snapshots exclude module bootstrap rows.
--- Restore ONLY fixed, non-personal, disabled defaults on this throwaway copy.
-IF SCHEMA_ID(N'comm') IS NOT NULL
-BEGIN
- IF OBJECT_ID(N'comm.Module',N'U') IS NULL OR OBJECT_ID(N'comm.Settings',N'U') IS NULL
-     THROW 51013,'Disposable communication schema missing required bootstrap tables',1;
- IF NOT EXISTS(SELECT 1 FROM comm.Module) INSERT comm.Module(Version) VALUES(1);
- IF NOT EXISTS(SELECT 1 FROM comm.Settings)
-     INSERT comm.Settings(Id,Mode,Paused,MaxBatch,ApprovalThreshold,HourLimit,DayLimit,
-         DailyBudget,MonthlyBudget,SmsUnitCost,WhatsAppUnitCost,Currency,QuietStart,QuietEnd,
-         UtcOffsetMinutes,RegistrationConfirmed,NextSendUtc,UpdatedBy,UpdatedUtc)
-     VALUES(1,'Disabled',1,100,25,60,200,10,100,NULL,NULL,'USD',20,8,300,0,
-         SYSUTCDATETIME(),NULL,SYSUTCDATETIME());
-END;
 '@ | Out-Null
         } finally {
             Sql 'master' "IF DB_ID(N'$templateDb') IS NOT NULL BEGIN ALTER DATABASE [$templateDb] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; EXEC sys.sp_detach_db @dbname=N'$templateDb'; END;" | Out-Null
         }
-        $checks.Add("Prepared schema-$FixtureSchema installer COPY with native recovery GUID and disabled static communication bootstrap")
+        $checks.Add("Prepared schema-$FixtureSchema installer COPY with native quick-registration recovery GUID")
     } else {
     Push-Location (Join-Path $project 'Tests/LifecycleSqlChecks')
     try {
@@ -490,7 +476,7 @@ EXEC sys.sp_addextendedproperty @name=N'FMSC_DisposableFixture',@value=N'approve
     $verify=Start-Process -FilePath $exe -ArgumentList @('--verify-installation',('"'+$instance+'"'),'FMSC_DB') -PassThru
     $null=$verify.Handle
     if (-not $verify.WaitForExit(180000)) { $verify.Kill(); throw 'Installed verification timed out.' }
-    # The historical DACPAC smoke model omits optional Communication (10).
+    # The data-free DACPAC smoke model is independent of retired optional modules.
     # Both frozen Sandbox fixtures contain the complete installed module (0).
     $expectedVerification=if ($FixtureRoot) { 0 } else { 10 }
     if ($verify.ExitCode -ne $expectedVerification) {

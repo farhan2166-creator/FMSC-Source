@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
-<PropertyGroup><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
-<ItemGroup><PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1"/>
-<Compile Include="../../Services/Communication/*.cs" Exclude="../../Services/Communication/WindowsGatewayStore.cs" Link="Communication/%(Filename)%(Extension)" />
-<EmbeddedResource Include="../../Services/Communication/Schema.sql" LogicalName="FMSC_SMS.Communication.Schema.sql" />
-</ItemGroup>
-<ItemGroup><Using Include="System.Data"/></ItemGroup>
-</Project>

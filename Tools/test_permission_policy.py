@@ -69,17 +69,6 @@ class PermissionPolicyChecks(unittest.TestCase):
                 part = checksum.get('Uri').lstrip('/')
                 self.assertEqual(hashlib.sha256(package.read(part)).hexdigest().upper(), checksum.text.upper(), part)
 
-    def test_communication_runtime_has_no_main_version_gate(self):
-        for relative in ('Apps/Worker/Program.cs', 'Apps/Worker/Worker.csproj',
-                         'Apps/Host/Program.cs', 'Apps/Host/Host.csproj',
-                         'Services/Communication/Schema.sql'):
-            text = (ROOT/relative).read_text(encoding='utf-8')
-            self.assertNotIn('DatabaseCompatibility', text, relative)
-            self.assertNotIn('RequiredDatabaseSchemaVersion', text, relative)
-            self.assertNotIn('dbo.DatabaseVersion', text, relative)
-        self.assertIn('IsInstalledAsync', (ROOT/'Apps/Worker/Program.cs').read_text())
-        self.assertIn('CommunicationSchemaContract.VerifyAsync', (ROOT/'Apps/Host/Program.cs').read_text())
-
     def test_metadata_fits_sql_columns(self):
         for entry in self.catalog:
             self.assertTrue(entry['Code'] and len(entry['Code']) <= 100)

@@ -24,9 +24,9 @@ internal static class Program
             return;
         }
 #endif
-        if (args.Length > 0 && args[0] is "--verify-installation" or "--install-communication")
+        if (args.Length > 0 && args[0] == "--verify-installation")
         {
-            Environment.ExitCode = CommunicationInstallation.Run(args);
+            Environment.ExitCode = DatabaseInstallationVerification.Run(args);
             return;
         }
         ApplicationConfiguration.Initialize();

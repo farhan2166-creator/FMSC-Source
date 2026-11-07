@@ -94,3 +94,17 @@ SHA-256-checked Microsoft go-sqlcmd build as the installer is obtained.
 
 **This is a database mutation tool. Test on a disposable copy first.**
 See `Docs/BACKUP_RECOVERY.md` for recovery guidance.
+
+## Schema 8 — Retired Communication Center (staged, not published)
+
+Migration `8.sql` retires the unused optional `comm` module and the separate, unused
+`dbo.StudentGuardianCommunication` Admission add-on. The normal student and staff
+contact fields remain unchanged. The migration refuses to drop operational records,
+unexpected schema objects, external database dependencies or guardian consent rows.
+Migration files 2–7 remain immutable; there is no legacy communication-data upgrade.
+The installer supplies the outer transaction and verified backup. Do not execute this
+migration on a live school database without the standard backup and review process.
+
+The Communication Center dashboard entry, provider services, worker, webhook and
+obsolete tests are retired in the same application version. A replacement will use
+a separately reviewed schema migration; this removal does not enable messaging.
