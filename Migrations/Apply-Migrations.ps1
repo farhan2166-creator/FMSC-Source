@@ -41,11 +41,10 @@ function Write-Status {
 
 function Get-RequiredVersion {
     param([object[]]$Migrations)
-    # In source checkout, check the application's and installer's pinned version.
+    # Installer/core.ps1 is the only version authority in a source checkout.
     # In an extracted release, core.ps1 lives directly beside Migrations.
     $root = Split-Path -Parent $PSScriptRoot
     $sources = @(
-        @{ Path = (Join-Path $root 'DatabaseHelper.cs'); Pattern = 'RequiredDatabaseSchemaVersion\s*=\s*"([0-9]+)"'; Label = 'application' },
         @{ Path = (Join-Path $root 'Installer\core.ps1'); Pattern = '\$DatabaseVersion\s*=\s*''([0-9]+)'''; Label = 'installer' },
         @{ Path = (Join-Path $root 'core.ps1'); Pattern = '\$DatabaseVersion\s*=\s*''([0-9]+)'''; Label = 'release installer' }
     )
@@ -62,7 +61,7 @@ function Get-RequiredVersion {
     if ($found.Count -gt 0) {
         $different = @($found | Where-Object { $_.Version -ne $found[0].Version })
         if ($different.Count -gt 0) {
-            throw "Application and installer schema versions disagree. No migrations were run."
+            throw "Multiple installer core.ps1 schema declarations disagree. No migrations were run."
         }
         return [int]$found[0].Version
     }
