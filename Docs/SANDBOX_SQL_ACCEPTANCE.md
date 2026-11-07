@@ -8,8 +8,8 @@ LocalDB pairs extracted once, pinned at commit
 
 | Baseline | Permanent files | Acceptance |
 | --- | --- | --- |
-| schema 3 | `Database/v3/FMSC_DB.mdf`, `Database/v3/FMSC_DB_log.ldf` | Apply migrations 4–7, verify full contract, then test actual installer |
-| schema 7 | `Database/v7/FMSC_DB.mdf`, `Database/v7/FMSC_DB_log.ldf` | Verify full contract, then test actual installer |
+| schema 3 | `Database/v3/FMSC_DB.mdf`, `Database/v3/FMSC_DB_log.ldf` | Apply consecutive migrations 4 through the declared target, verify full contract, then test actual installer |
+| schema 7 | `Database/v7/FMSC_DB.mdf`, `Database/v7/FMSC_DB_log.ldf` | Apply consecutive migrations 8 through the target when present, verify full contract, then test actual installer |
 
 Check the pinned checkout's original SHA-256/size values against
 `Tests/manifest.json`. Never attach or change the checked-in MDF/LDF:
@@ -39,6 +39,9 @@ not be recreated as workflow dependencies.
    update-feed version, and safely commits the next patch application
    version to Source/main (or reuses an already prepared unpublished
    next patch after failure). The database schema is not auto-bumped.
+   The preflight discovers the required schema from `Installer/core.ps1`
+   and `DatabaseHelper.cs` and refuses mismatches, missing intermediate
+   `Migrations/N.sql` files or files numbered above the declared target.
 2. Source Workflow 04 sends **only the resulting exact Source SHA** to
    Sandbox workflow `private-release-acceptance.yml` by
    `workflow_dispatch`. A Source-side token restricted to **FMSC-Sandbox
@@ -46,18 +49,20 @@ not be recreated as workflow dependencies.
    Sandbox Contents write or access to immutable fixture data.
 3. On **Sandbox/main**, the trusted workflow checks out that exact
    public Source commit and the frozen private fixture commit with
-   `persist-credentials: false`. The SQL jobs validate schema 3
-   (migrations 4–7) and schema 7 against the full production requirements.
-   Both real installer jobs must pass on independent, disposable fixture
-   copies. Additionally, the mandatory `migration-chaos` job injects
-   failures in versions 4 and 5 on a separate historical schema-3 copy:
-   it proves transaction rollback, schema marker preservation,
-   verified backup restore, and successful official migration resumption.
-   Permanent MDF/LDF, backups, and school data are never published.
+   `persist-credentials: false`. The SQL jobs apply genuine numbered
+   migrations to copies of frozen schemas 3 and 7, up to the target schema
+   read from that exact Source commit. Both real installer jobs must
+   pass on independent disposable copies. The mandatory `migration-chaos`
+   job injects failures in historical versions 4 and 5 and, when a new
+   schema is declared, the latest target migration. It proves
+   transaction rollback, schema marker preservation, verified backup
+   restore and successful resumption through the target schema.
+   Permanent MDF/LDF, backups and school data are never published.
 4. The distinct trusted **attestation** job requires successful
    schema-3/7 SQL, real-installer, and chaos jobs. It verifies that
    Source/main still points to the tested SHA, then writes
-   `fmsc/sandbox-mdf-ldf/v1` success to that exact Source commit.
+   `fmsc/sandbox-mdf-ldf/v2` success to that exact Source commit,
+   with a schema-specific description (frozen v3/v7 to target vN).
    On a failed or incomplete job, no success is granted.
 5. **Workflow 04** waits for a **NEW** attestation posted after its
    dispatch (not an old success for a previous attempt). It verifies
@@ -67,6 +72,13 @@ not be recreated as workflow dependencies.
    recheck the trusted status immediately before the atomic fast-forward
    publication to private `FMSC-Updates`. Missing/failing/stale
    approval blocks the final push.
+
+**Ordinary database release:** update application/SQL, create the next
+numbered migration, update both required schema declarations and press
+Workflow 04. The fixtures, Sandbox workflow matrix and chaos target require
+no manual edits for a routine schema increment. An application-only release
+leaves the schema unchanged. Incompatible SQL, migration gaps, schema
+mismatches or failed rollback tests stop the publication.
 
 The Source-to-Sandbox direction is **workflow dispatch only**;
 Sandbox-to-Source direction is an exact-commit **status attestation**.
