@@ -30,8 +30,8 @@ $corePath=Join-Path (Get-Location).Path 'Installer/core.ps1'
 $helperPath=Join-Path (Get-Location).Path 'DatabaseHelper.cs'
 $core=[IO.File]::ReadAllText($corePath)
 $helper=[IO.File]::ReadAllText($helperPath)
-$appMatch=[regex]::Match($core,"(?m)^\`$AppVersion = '([0-9]+\.[0-9]+\.[0-9]+)'\r?$")
-$dbMatch=[regex]::Match($core,"(?m)^\`$DatabaseVersion = '([0-9]+)'\r?$")
+$appMatch=[regex]::Match($core,'(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$')
+$dbMatch=[regex]::Match($core,'(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
 $appDbMatch=[regex]::Match($helper,'RequiredDatabaseSchemaVersion\s*=\s*"([0-9]+)"')
 Require ($appMatch.Success -and $dbMatch.Success -and $appDbMatch.Success) 'Current application/schema versions could not be resolved.'
 Require ($dbMatch.Groups[1].Value -ceq $appDbMatch.Groups[1].Value) 'Installer and application DB versions disagree.'
@@ -58,7 +58,7 @@ if ($publish) {
     $nextVersion=('{0}.{1}.{2}' -f $latest.Major,$latest.Minor,($latest.Build+1))
     if ($current -ceq $channel.latestVersion) {
         # Preserve CRLF/other source lines and change only one exact assignment.
-        Require ([regex]::Matches($core,"(?m)^\`$AppVersion = '([0-9]+\.[0-9]+\.[0-9]+)'\r?$").Count -eq 1) 'Ambiguous installer application-version assignment.'
+        Require ([regex]::Matches($core,'(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$').Count -eq 1) 'Ambiguous installer application-version assignment.'
         $revised=$core.Remove($appMatch.Groups[1].Index,$appMatch.Groups[1].Length).Insert($appMatch.Groups[1].Index,$nextVersion)
         [IO.File]::WriteAllText($corePath,$revised,[Text.UTF8Encoding]::new($false))
         & git add -- Installer/core.ps1

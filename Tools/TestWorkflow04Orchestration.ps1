@@ -19,6 +19,18 @@ Check ($workflow.Contains('AssertSandboxPublicationGate.ps1 -SourceSha') -and $w
 Check ($workflow.IndexOf('  prepare:') -gt 0 -and
     $workflow.IndexOf('  prepare:') -lt $workflow.IndexOf('  sandbox-release-gate:') -and
     $workflow.IndexOf('  sandbox-release-gate:') -lt $workflow.IndexOf('  package:')) 'Release job dependency order is unsafe.'
+# Release version parsing must match the literal "$AppVersion" and
+# "$DatabaseVersion" variables in the existing installer.
+$core=Get-Content -LiteralPath (Join-Path $root 'Installer/core.ps1') -Raw
+$appPattern='(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$'
+$schemaPattern='(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$'
+$appParserMarker='[regex]::Match($core,'+[char]39+'(?m)^\'+[char]36+'AppVersion'
+$schemaParserMarker='[regex]::Match($core,'+[char]39+'(?m)^\'+[char]36+'DatabaseVersion'
+Check ($prep.Contains($appParserMarker) -and $prep.Contains($schemaParserMarker)) 'Parser must use literal-dollar version matching.'
+Check ([regex]::Matches($core,$appPattern).Count -eq 1 -and
+    [regex]::Matches($core,$schemaPattern).Count -eq 1) 'Current installer version assignments are not uniquely detectable.'
+Check ([regex]::Match($core,$appPattern).Groups[1].Value -match '^[0-9]+\.[0-9]+\.[0-9]+$') 'Current app version is invalid.'
+Check ([regex]::Match($core,$schemaPattern).Groups[1].Value -eq '7') 'Schema-7 chaos fixture no longer matches production.'
 Check ($prep.Contains('channel/stable.json') -and $prep.Contains('Installer/core.ps1') -and
     $prep.Contains('refs/heads/main') -and $prep.Contains('Reusing pending')) 'Preparation must use feed version and preserve retryability.'
 Check ($prep.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and $prep.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Release secrets are not checked before version commit.'
