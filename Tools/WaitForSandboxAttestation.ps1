@@ -24,7 +24,7 @@ do {
     $head=(Invoke-RestMethod -Uri "$api/branches/main" -Headers $headers).commit.sha
     if ($head -cne $SourceSha) { throw 'Source/main moved during SQL/installer chaos acceptance; release refused.' }
     $records=@(Invoke-RestMethod -Uri "$api/commits/$SourceSha/statuses?per_page=100" -Headers $headers)
-    $matching=@($records | Where-Object { $_.context -ceq 'fmsc/sandbox-mdf-ldf/v1' } | Select-Object -First 1)
+    $matching=@($records | Where-Object { $_.context -ceq 'fmsc/sandbox-mdf-ldf/v2' } | Select-Object -First 1)
     if ($matching.Count -eq 1 -and [string]$matching[0].id -cne $PreviousStatusId) {
         $attestation=$matching[0]
         if ($attestation.state -cne 'success') {

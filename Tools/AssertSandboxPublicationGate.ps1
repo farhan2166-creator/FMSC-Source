@@ -20,7 +20,20 @@ if ($main.commit.sha -cne $SourceSha) {
     throw 'main moved since this run began. An attestation for a stale revision cannot publish.'
 }
 $contexts=@(Invoke-RestMethod -Uri "$api/commits/$SourceSha/statuses?per_page=100" -Headers $headers -Method Get)
-$context='fmsc/sandbox-mdf-ldf/v1'
+# Bind release authorization to the declared schema at this exact Source checkout.
+# An old success for a different schema must never authorize publication.
+$installer=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../Installer/core.ps1') -Raw
+$helper=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../DatabaseHelper.cs') -Raw
+$schemaMatch=[regex]::Match($installer,'(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
+$helperSchema=[regex]::Match($helper,'RequiredDatabaseSchemaVersion\s*=\s*"([0-9]+)"')
+if (-not $schemaMatch.Success -or -not $helperSchema.Success -or
+    $schemaMatch.Groups[1].Value -cne $helperSchema.Groups[1].Value) {
+    throw 'Source installer and application schema must agree before validating Sandbox status.'
+}
+$targetSchema=[int]$schemaMatch.Groups[1].Value
+if ($targetSchema -lt 7 -or $targetSchema -gt 9999) { throw 'Unsupported private release schema target.' }
+$expectedDescription="MDF/LDF v3+v7 -> v$targetSchema SQL+installer PASS (fixture 5a8c5130)"
+$context='fmsc/sandbox-mdf-ldf/v2'
 # GitHub returns newest first. Do not skip a newer failure to find an older
 # successful status, even when it was posted by the legitimate attestor.
 $latest=@($contexts | Where-Object { $_.context -ceq $context } | Select-Object -First 1)
@@ -28,7 +41,7 @@ if ($latest.Count -ne 1) { throw 'Missing private Sandbox real-installer accepta
 $record=$latest[0]
 if ($record.state -cne 'success' -or
     $record.creator.login -cne 'farhan2166-creator' -or
-    $record.description -cne 'MDF/LDF v3+v7 SQL+installer PASS (fixture 5a8c5130)' -or
+    $record.description -cne $expectedDescription -or
     $record.target_url -cnotmatch '^https://github[.]com/farhan2166-creator/FMSC-Sandbox/actions/runs/[0-9]+$') {
     throw 'The latest Sandbox acceptance status was unsuccessful, unauthorized or invalid.'
 }

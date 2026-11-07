@@ -15,7 +15,7 @@ $headers=@{Authorization="Bearer $env:GITHUB_TOKEN";Accept='application/vnd.gith
 $main=(Invoke-RestMethod -Uri "$sourceApi/branches/main" -Headers $headers).commit.sha
 if ($main -cne $SourceSha) { throw 'Source main moved before Sandbox dispatch. No release is authorized.' }
 $statuses=@(Invoke-RestMethod -Uri "$sourceApi/commits/$SourceSha/statuses?per_page=100" -Headers $headers)
-$prior=@($statuses | Where-Object { $_.context -ceq 'fmsc/sandbox-mdf-ldf/v1' } | Select-Object -First 1)
+$prior=@($statuses | Where-Object { $_.context -ceq 'fmsc/sandbox-mdf-ldf/v2' } | Select-Object -First 1)
 $baseline=if ($prior.Count) { [string]$prior[0].id } else { '0' }
 if ($baseline -notmatch '^[0-9]+$') { throw 'Unexpected GitHub status identifier.' }
 $dispatch=@{ref='main';inputs=@{source_sha=$SourceSha}} | ConvertTo-Json -Depth 5 -Compress

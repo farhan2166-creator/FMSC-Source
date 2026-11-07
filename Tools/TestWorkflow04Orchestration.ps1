@@ -30,12 +30,16 @@ Check ($prep.Contains($appParserMarker) -and $prep.Contains($schemaParserMarker)
 Check ([regex]::Matches($core,$appPattern).Count -eq 1 -and
     [regex]::Matches($core,$schemaPattern).Count -eq 1) 'Current installer version assignments are not uniquely detectable.'
 Check ([regex]::Match($core,$appPattern).Groups[1].Value -match '^[0-9]+\.[0-9]+\.[0-9]+$') 'Current app version is invalid.'
-Check ([regex]::Match($core,$schemaPattern).Groups[1].Value -eq '7') 'Schema-7 chaos fixture no longer matches production.'
+Check ([int][regex]::Match($core,$schemaPattern).Groups[1].Value -ge 7) 'Schema is below frozen private schema-7 baseline.'
+Check ($prep.Contains('Missing consecutive migration') -and $prep.Contains('outside the declared target schema')) 'Migration inventory fail-closed preflight missing.'
 Check ($prep.Contains('channel/stable.json') -and $prep.Contains('Installer/core.ps1') -and
     $prep.Contains('refs/heads/main') -and $prep.Contains('Reusing pending')) 'Preparation must use feed version and preserve retryability.'
 Check ($prep.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and $prep.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Release secrets are not checked before version commit.'
-Check ($dispatch.Contains('previous_status_id=') -and $dispatch.Contains("ref='main'") -and $dispatch.Contains('source_sha=$SourceSha')) 'Dispatch lacks pinned commit/status baseline.'
-Check ($wait.Contains('$PreviousStatusId') -and $wait.Contains('fmsc/sandbox-mdf-ldf/v1') -and
+Check ($dispatch.Contains('fmsc/sandbox-mdf-ldf/v2') -and $dispatch.Contains('previous_status_id=') -and $dispatch.Contains("ref='main'") -and $dispatch.Contains('source_sha=$SourceSha')) 'Dispatch lacks pinned commit/status baseline.'
+$gate=Get-Content (Join-Path $root 'Tools/AssertSandboxPublicationGate.ps1') -Raw
+Check ($gate.Contains('fmsc/sandbox-mdf-ldf/v2') -and $gate.Contains('expectedDescription') -and
+    $gate.Contains('targetSchema')) 'Publication gate is not bound to the declared migration target.'
+Check ($wait.Contains('$PreviousStatusId') -and $wait.Contains('fmsc/sandbox-mdf-ldf/v2') -and
     $wait.Contains('AssertSandboxPublicationGate.ps1')) 'Wait accepts old or untrusted private status.'
 Check (-not $wait.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and -not $wait.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Sensitive tokens leaked into polling job.'
 Write-Output 'PASS: one-click exact-commit release preparation, private chaos acceptance and final atomic publication wiring.'

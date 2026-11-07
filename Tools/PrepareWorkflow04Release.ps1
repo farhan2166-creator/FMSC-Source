@@ -35,8 +35,23 @@ $dbMatch=[regex]::Match($core,'(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
 $appDbMatch=[regex]::Match($helper,'RequiredDatabaseSchemaVersion\s*=\s*"([0-9]+)"')
 Require ($appMatch.Success -and $dbMatch.Success -and $appDbMatch.Success) 'Current application/schema versions could not be resolved.'
 Require ($dbMatch.Groups[1].Value -ceq $appDbMatch.Groups[1].Value) 'Installer and application DB versions disagree.'
-# The permanent private schema-3/7 negative test is currently fixed to target 7.
-Require ($dbMatch.Groups[1].Value -ceq '7') 'Schema changed: update the private chaos harness before using this one-click flow.'
+# Frozen schema-3/7 private fixtures remain unchanged. Sandbox uses copies
+# and upgrades them through the declared production migration target.
+$targetSchema=[int]$dbMatch.Groups[1].Value
+Require ($targetSchema -ge 7 -and $targetSchema -le 9999) 'Schema target is outside the reviewed frozen-fixture migration range.'
+$migrationsDir=Join-Path (Get-Location).Path 'Migrations'
+Require (Test-Path -LiteralPath $migrationsDir -PathType Container) 'Source migration directory missing.'
+$scriptVersions=@{}
+foreach ($file in @(Get-ChildItem -LiteralPath $migrationsDir -Filter '*.sql' -File)) {
+    Require ($file.BaseName -cmatch '^[1-9][0-9]*$') "Invalid numbered migration filename: $($file.Name)."
+    $v=[int]$file.BaseName
+    Require ($v -ge 2 -and $v -le $targetSchema) "Migration $v.sql lies outside the declared target schema $targetSchema."
+    Require (-not $scriptVersions.ContainsKey($v)) "Duplicate migration $v.sql."
+    $scriptVersions[$v]=$true
+}
+for ($v=2;$v -le $targetSchema;$v++) {
+    Require ($scriptVersions.ContainsKey($v)) "Missing consecutive migration $v.sql for schema $targetSchema."
+}
 $current=$appMatch.Groups[1].Value
 $release=$current
 $releaseSha=$checkout
@@ -65,7 +80,7 @@ if ($publish) {
         Require ($LASTEXITCODE -eq 0) 'Could not stage the application version bump.'
         $changes=@(& git diff --cached --name-only)
         Require ($changes.Count -eq 1 -and $changes[0] -ceq 'Installer/core.ps1') 'Version-bump commit includes unexpected files.'
-        & git -c 'user.name=github-actions[bot]' -c 'user.email=41898282+github-actions[bot]@users.noreply.github.com' commit -m "release: prepare FMSC $nextVersion (schema 7 unchanged)"
+        & git -c 'user.name=github-actions[bot]' -c 'user.email=41898282+github-actions[bot]@users.noreply.github.com' commit -m "release: prepare FMSC $nextVersion (schema $targetSchema)"
         Require ($LASTEXITCODE -eq 0) 'Failed to prepare the new release commit.'
         $releaseSha=(& git rev-parse HEAD).Trim()
         Require ($LASTEXITCODE -eq 0 -and $releaseSha -cmatch '^[0-9a-f]{40}$') 'No valid release-commit SHA.'
@@ -97,15 +112,15 @@ Require $verified 'Main no longer points at the prepared release SHA; publicatio
 @(
     "release_sha=$releaseSha",
     "release_version=$release",
-    "release_schema=$($dbMatch.Groups[1].Value)",
+    "release_schema=$targetSchema",
     "version_bumped=$($bumped.ToString().ToLowerInvariant())"
 ) | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
-Write-Host "Prepared FMSC $release, schema $($dbMatch.Groups[1].Value), exact Source commit $releaseSha. Publish=$publish."
+Write-Host "Prepared FMSC $release, schema $targetSchema, exact Source commit $releaseSha. Publish=$publish."
 if ($env:GITHUB_STEP_SUMMARY) {
     @(
         '## Workflow 04 release preparation',
         "- Application: $release",
-        "- SQL schema (unchanged): $($dbMatch.Groups[1].Value)",
+        "- SQL schema (migration target): $targetSchema",
         "- Exact Source SHA: $releaseSha",
         "- New version commit: $bumped",
         "- Publication requested: $publish"

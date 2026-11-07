@@ -207,8 +207,15 @@ from that installer assignment. If a previous workflow failed after preparing
 a not-yet-published next patch, a rerun reuses its exact version rather than
 bumping twice. Unexpected version drift, a moved Source main, missing token,
 or schema mismatch is refused; the database schema is never automatically
-incremented. This schema-7-specific chaos harness must be reviewed before
-publishing a future schema-8 migration.
+incremented. For a new database migration, add the next numbered SQL file
+and update BOTH schema declarations in Installer/core.ps1 and
+DatabaseHelper.cs. Workflow 04 enforces a complete numbered migration
+inventory and the private Sandbox automatically upgrades independent copies
+of frozen schema-3/7 MDF/LDF fixtures to that declared target, tests both
+real installer paths, and fault-injects the newest migration. SQL failure,
+missing files, schema-contract failure, or rollback failure blocks
+publication. Frozen fixtures never change and no manual Sandbox workflow
+edit is needed for a routine schema increment.
 
 **One-time credentials (not workflow inputs):**
 
