@@ -243,7 +243,7 @@ try {
     Invoke-Expression $migrationFunction.Extent.Text
     $migrationFixture = Join-Path $script:fixture 'inert-migrations'
     $null = New-Item -ItemType Directory -Path $migrationFixture
-    foreach ($migrationNumber in @(6,7)) {
+    foreach ($migrationNumber in (6..$schema)) {
         Set-Content -LiteralPath (Join-Path $migrationFixture "$migrationNumber.sql") -Value '-- inert fixture; never executed'
     }
     $script:faultBackup = Join-Path $script:fixture 'inert-pre-migration-backup.bak'
@@ -258,7 +258,7 @@ try {
     $previousAppHash = (Get-FileHash -LiteralPath (Join-Path $app 'FMSC_SMS.exe') -Algorithm SHA256).Hash
     function New-PreMigrationBackup {
         param($FromVersion, $ToVersion)
-        if ("$FromVersion->$ToVersion" -ne '5->7') { throw 'Unexpected fixture backup version.' }
+        if ("$FromVersion->$ToVersion" -ne "5->$schema") { throw 'Unexpected fixture backup version.' }
         $script:faultEvents.Add('backup-created')
         [IO.File]::WriteAllText($script:faultBackup, 'FAKE BACKUP ONLY -- TEST FILE, NOT SQL SERVER DATA')
         $hash = (Get-FileHash -LiteralPath $script:faultBackup -Algorithm SHA256).Hash
@@ -275,12 +275,12 @@ try {
         throw 'INJECTED_FAILURE_BEFORE_SQL_MIGRATION_6'
     }
     $faultMessage = ''
-    try { Invoke-PendingMigrations -Directory $migrationFixture -RequiredVersion 7 }
+    try { Invoke-PendingMigrations -Directory $migrationFixture -RequiredVersion $schema }
     catch { $faultMessage = $_.Exception.Message }
     Require ($faultMessage -like '*INJECTED_FAILURE_BEFORE_SQL_MIGRATION_6*') 'Expected test-only failure was not raised.'
     $failedRecord = Read-FmscRecoveryJournal $script:RecoveryRoot
     Require ($failedRecord.Phase -eq 'Migrating' -and $failedRecord.BeforeSchema -eq 5 -and
-        $failedRecord.Schema -eq 7 -and $failedRecord.LastSchema -eq 0 -and
+        $failedRecord.Schema -eq $schema -and $failedRecord.LastSchema -eq 0 -and
         $script:syntheticSchema -eq 5) 'Injected failure modified the simulated database or did not journal the baseline.'
     Require ((Get-FileHash -LiteralPath $failedRecord.Backup -Algorithm SHA256).Hash -eq
         $failedRecord.BackupSha256) 'Injected failure did not preserve the verified backup.'
@@ -292,7 +292,7 @@ try {
     Require ((Get-FileHash -LiteralPath (Join-Path $app 'FMSC_SMS.exe') -Algorithm SHA256).Hash -eq
         $previousAppHash -and $script:syntheticSchema -eq 5) 'Fault-recovery test changed the app or schema.'
     Refuse { Complete-FmscAbortedTransaction -ObservedSchema 5 -ApplicationDirectory $app -RollbackDirectory $rollback }
-    Write-Output 'PASS: fault injected AFTER verified backup and BEFORE migration 6; verified baseline 5 -> 7 recorded; no SQL applied, old app unchanged, recovery Aborted, no repeat.'
+    Write-Output "PASS: fault injected AFTER verified backup and BEFORE migration 6; verified baseline 5 -> $schema recorded; no SQL applied, old app unchanged, recovery Aborted, no repeat."
     # An Aborted journal is terminal; a subsequent approved update may start.
     # Verify the actual v1.0.8 C# startup guard accepts the terminal journal.
     # Older FMSC rejects a novel Aborted phase but accepts Completed.
