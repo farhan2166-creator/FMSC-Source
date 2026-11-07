@@ -24,8 +24,9 @@ Check ($workflow.IndexOf('  prepare:') -gt 0 -and
 $core=Get-Content -LiteralPath (Join-Path $root 'Installer/core.ps1') -Raw
 $appPattern='(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$'
 $schemaPattern='(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$'
-Check ($prep.Contains("[regex]::Match(\`$core,'(?m)^\`$AppVersion") -and
-    $prep.Contains("[regex]::Match(\`$core,'(?m)^\`$DatabaseVersion")) 'Version parser must match literal dollar-prefixed installer variables.'
+$appParserMarker='[regex]::Match($core,'+[char]39+'(?m)^\'+[char]36+'AppVersion'
+$schemaParserMarker='[regex]::Match($core,'+[char]39+'(?m)^\'+[char]36+'DatabaseVersion'
+Check ($prep.Contains($appParserMarker) -and $prep.Contains($schemaParserMarker)) 'Parser must use literal-dollar version matching.'
 Check ([regex]::Matches($core,$appPattern).Count -eq 1 -and
     [regex]::Matches($core,$schemaPattern).Count -eq 1) 'Current installer version assignments are not uniquely detectable.'
 Check ([regex]::Match($core,$appPattern).Groups[1].Value -match '^[0-9]+\.[0-9]+\.[0-9]+$') 'Current app version is invalid.'
