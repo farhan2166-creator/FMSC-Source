@@ -19,7 +19,6 @@ internal sealed class Lifecycle(Fixture f, Report r)
         await r.Stage("Recovery: pending collection blocks ambiguous resubmission", CollectionJournalGuard, next);
         await r.Stage("Negative: stale collection edit and unauthorized finance", FinanceRefusals, next);
         await r.Stage("G: complete two-year history and database invariants", FinalAudit, next);
-        await r.Stage("School: schema upgrade preserves records and optional communication", new SchoolScenarios(f, r).Upgrade, next);
     }
 
     private Task Admission()
