@@ -22,9 +22,12 @@ ALTER TABLE dbo.Students ADD
     SchoolMessageConsent bit NULL,
     SchoolMessageConsentUtc datetime2(3) NULL,
     SchoolMessageConsentBy int NULL;
+-- SQL Server binds all statements in a batch before executing ALTER TABLE.
+-- Compile the constraint only after the new columns exist (no GO in installer).
+EXEC sys.sp_executesql N'
 ALTER TABLE dbo.Students ADD CONSTRAINT CK_Students_SchoolMessageConsentEvidence
     CHECK ((SchoolMessageConsent IS NULL AND SchoolMessageConsentUtc IS NULL AND SchoolMessageConsentBy IS NULL)
-        OR (SchoolMessageConsent IS NOT NULL AND SchoolMessageConsentUtc IS NOT NULL AND SchoolMessageConsentBy IS NOT NULL));
+        OR (SchoolMessageConsent IS NOT NULL AND SchoolMessageConsentUtc IS NOT NULL AND SchoolMessageConsentBy IS NOT NULL));';
 
 EXEC(N'CREATE SCHEMA msg AUTHORIZATION dbo;');
 
