@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       publish_update:
-        description: 'Publish this approved version to private FMSC-Updates (disable for build only)'
+        description: 'One-click version bump, Sandbox SQL/installer/chaos acceptance and atomic publication (false = build only)'
         required: true
         type: boolean
-        default: false
+        default: true
 
 concurrency:
   group: fmsc-owner-private-update-publication
@@ -18,32 +18,81 @@ permissions:
   statuses: read
 
 jobs:
-  # Private FMSC-Sandbox tests the exact PUBLIC Source SHA and publishes
-  # a tightly scoped commit status only after two real installer matrices pass.
-  # No Sandbox read token and no publishing credential enters this job.
-  sandbox-release-gate:
-    name: Require successful schema-3 and schema-7 real installer attestation
+  prepare:
+    name: Preflight, prepare or reuse next patch-version Source commit
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: write
+      statuses: read
+    outputs:
+      release_sha: ${{ steps.release.outputs.release_sha }}
+      release_version: ${{ steps.release.outputs.release_version }}
+      release_schema: ${{ steps.release.outputs.release_schema }}
+    steps:
+      - name: Checkout original main SHA without stored credentials
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Preflight credentials/feed and prepare exact release commit
+        id: release
+        shell: pwsh
+        env:
+          GH_SOURCE_TOKEN: ${{ github.token }}
+          FMSC_UPDATES_PUBLISH_TOKEN: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
+          FMSC_SANDBOX_DISPATCH_TOKEN: ${{ secrets.FMSC_SANDBOX_DISPATCH_TOKEN }}
+          FMSC_WORKFLOW04_PUBLISH: ${{ inputs.publish_update }}
+        run: ./Tools/PrepareWorkflow04Release.ps1
+
+  sandbox-release-gate:
+    name: Require NEW private SQL, real installer and chaos acceptance
+    needs: prepare
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
     permissions:
       contents: read
       statuses: read
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout exact prepared Source SHA
+        uses: actions/checkout@v7
         with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
           persist-credentials: false
-      - name: Verify current commit was accepted in private Sandbox
+      - name: Verify the checked out revision
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+      - name: Dispatch private Sandbox acceptance of this exact commit
+        if: inputs.publish_update
+        id: dispatch
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./Tools/AssertSandboxPublicationGate.ps1
-
+          FMSC_SANDBOX_DISPATCH_TOKEN: ${{ secrets.FMSC_SANDBOX_DISPATCH_TOKEN }}
+        run: ./Tools/DispatchSandboxAcceptance.ps1 -SourceSha '${{ needs.prepare.outputs.release_sha }}'
+      - name: Wait for fresh SQL, real installers and chaos attestation
+        if: inputs.publish_update
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./Tools/WaitForSandboxAttestation.ps1 -SourceSha '${{ needs.prepare.outputs.release_sha }}' -PreviousStatusId '${{ steps.dispatch.outputs.previous_status_id }}' -MaxMinutes 105
+      - name: Build-only requires prior exact commit acceptance
+        if: ${{ !inputs.publish_update }}
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./Tools/AssertSandboxPublicationGate.ps1 -SourceSha '${{ needs.prepare.outputs.release_sha }}'
   package:
     name: Verify and package Windows x64
-    needs: sandbox-release-gate
+    needs: [prepare, sandbox-release-gate]
     if: github.ref == 'refs/heads/main'
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     steps:
       - name: Check owner publication credential
@@ -56,10 +105,344 @@ jobs:
             throw 'One-time setup required: add FMSC_UPDATES_PUBLISH_TOKEN with Contents read/write access to FMSC-Updates only.'
           }
 
-      - name: Checkout repository
+      - name: Checkout exact approved Source commit
         uses: actions/checkout@v7
         with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
           persist-credentials: false
+
+      - name: Check approved commit, version and schema
+        shell: pwsh
+        env:
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+          RELEASE_SCHEMA: ${{ needs.prepare.outputs.release_schema }}
+        run: |
+          $sha=(& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sha -cne $env:RELEASE_SHA) { throw 'Wrong Source commit in publication runner.' }
+          $core=Get-Content -LiteralPath Installer/core.ps1 -Raw
+          if ($core -cnotmatch ('(?m)^\$AppVersion = '''+[regex]::Escape($env:RELEASE_VERSION)+'''\r?      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Restore and compile desktop application
+        run: |
+          dotnet restore FMSC_SMS.sln
+          dotnet build FMSC_SMS.sln -c Release --no-restore
+
+      - name: Compile WinForms smoke fixtures (no interactive UI)
+        run: dotnet build Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release
+
+      - name: Verify maintenance tool lifecycle without downloads or SQL
+        shell: pwsh
+        run: .\Tools\TestMaintenanceTools.ps1
+
+      - name: Run portable C# regression checks
+        run: dotnet run --project Tests/AuditFixChecks/AuditFixChecks.csproj -c Release
+
+      - name: Run synthetic performance and lifecycle checks
+        run: dotnet run --project Tests/PerformanceChecks/PerformanceChecks.csproj -c Release
+
+      - name: Verify updater packages, retention and safe dialog shutdown
+        shell: pwsh
+        run: |
+          $commands = @(
+            @('Tools/UpdatePackages/UpdatePackages.csproj', '--self-test'),
+            @('Tools/UpdateDistribution/UpdateDistribution.csproj', '--self-test'),
+            @('Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj', '--update-dialog'),
+            @('Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj', '--post-fix')
+          )
+          foreach ($command in $commands) {
+            dotnet run --project $command[0] -c Release -- $command[1]
+            if ($LASTEXITCODE -ne 0) { throw "Updater gate failed: $($command[1])" }
+          }
+          dotnet run --project Tests/UpdateAuthorizationChecks/UpdateAuthorizationChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Git key/transport checks failed.' }
+          & .\Tools\TestOfflineSqlPrerequisites.ps1
+          & .\Tools\TestPreparedUpdate.ps1
+          & .\Tools\TestWindowlessLauncher.ps1
+          & .\Tools\TestInstallerMigrations.ps1
+          & .\Tools\TestUpdateCleanup.ps1
+          & .\Tools\TestUpdateRecovery.ps1
+          & .\Tools\TestPublishPrivateUpdate.ps1
+
+      - name: Prepare verified maintenance tools
+        shell: pwsh
+        run: |
+          & .\Tools\PrepareMaintenanceTools.ps1 -ToolsDirectory (Join-Path $env:GITHUB_WORKSPACE 'out/prerequisites') -DownloadMissing
+
+      # The ordinary PortableRelease publish remains subject to its installer/MSI
+      # and optional detached-MDF/LDF validation. Only this GitHub Actions
+      # app-only bundle skips those full-installer preparation/copy targets.
+      - name: Publish self-contained Windows x64 application
+        shell: pwsh
+        run: |
+          dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output out/windows-x64-app -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$env:GITHUB_WORKSPACE/out/prerequisites/MinGit" "-p:LocalDbMsiPath=$env:GITHUB_WORKSPACE/out/prerequisites/SqlLocalDB.msi" "-p:BundledSqlCmdPath=$env:GITHUB_WORKSPACE/out/prerequisites/sqlcmd.exe" -p:PublishSingleFile=false -p:PublishTrimmed=false
+          if ($LASTEXITCODE -ne 0) { throw "Windows publish failed." }
+
+      - name: Verify ZIP contents and add build manifest
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE 'out/windows-x64-app'
+          $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $root 'FMSC_SMS.dll')).ProductVersion.Split('+')[0]
+          $installer = Get-Content -LiteralPath (Join-Path $root 'UpdateSupport/core.ps1') -Raw
+          $schema = [regex]::Match($installer, '(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$').Groups[1].Value
+          if (-not $schema) { throw 'Required database schema is missing from the bundled installer.' }
+          foreach ($name in @('FMSC_SMS.exe', 'FMSC_SMS.dll', 'FMSC_SMS.deps.json', 'FMSC_SMS.runtimeconfig.json',
+              'UpdateTransport/cmd/git.exe', 'UpdateTransport/usr/bin/ssh.exe',
+              'UpdateTransport/COPYING-GIT.txt',
+              'UpdateTransport/THIRD_PARTY_NOTICES.txt',
+              'UpdateSupport/Tools/SqlCmd/sqlcmd.exe',
+              'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
+              'UpdateSupport/MaintenanceTools.ps1',
+              'UpdateSupport/ToolCatalog.json')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $root $name) -PathType Leaf)) {
+              throw "Missing Windows application output: $name"
+            }
+          }
+          $toolApp = $root
+          . (Join-Path $toolApp 'UpdateSupport/MaintenanceTools.ps1')
+          foreach ($toolName in @('Git','SqlCmd','LocalDb')) {
+            $spec = Get-FmscToolSpec $toolName
+            $bundle = Join-Path $toolApp $spec.folder
+            if ($toolName -ne 'Git') { $bundle = Join-Path $bundle $toolName }
+            if (-not (Test-FmscTool $bundle $toolName)) { throw "Published maintenance bundle failed integrity verification: $toolName" }
+          }
+          foreach ($pair in @(
+            ,@('out/prerequisites/sqlcmd.exe','UpdateSupport/Tools/SqlCmd/sqlcmd.exe')
+            ,@('out/prerequisites/SqlLocalDB.msi','UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')
+          )) {
+            $source = Join-Path $env:GITHUB_WORKSPACE $pair[0]
+            $published = Join-Path $root $pair[1]
+            if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne
+                (Get-FileHash -LiteralPath $published -Algorithm SHA256).Hash) {
+              throw "Published SQL prerequisite changed: $($pair[1])"
+            }
+          }
+          # Only the signed Microsoft LocalDB dependency MSI may accompany an
+          # app-only update. School database files and arbitrary MSIs are forbidden.
+          $forbidden = @(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
+            $rel = [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+            $_.Extension.ToLowerInvariant() -in @('.mdf','.ldf','.ndf','.bak','.bacpac','.dacpac') -or
+            ($_.Extension.ToLowerInvariant() -eq '.msi' -and $rel -cne 'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')
+          })
+          if ($forbidden.Count -gt 0) { throw 'Unauthorized database or installer assets in application ZIP.' }
+          @(
+            'FMSC_SMS - Windows x64 application-only download'
+            'Source commit: ${{ needs.prepare.outputs.release_sha }}'
+            'Build run: ${{ github.run_number }}'
+            'Built with: .NET 8 (self-contained, WinForms)'
+            "Application version: $version"
+            "Required database schema: $schema"
+            ''
+            'This is NOT a complete installer or a GitHub public Release.'
+            'It contains no student records, MDF/LDF or database backups.'
+            'Contains a Microsoft-signed SQL LocalDB repair MSI and pinned sqlcmd for offline future maintenance.'
+            'UpdateSupport contains the existing installer and numbered database migrations.'
+            'UpdateTransport bundles pinned Git, OpenSSH, dependencies and license notices; system Git is not required.'
+            'Existing school databases are preserved. Pending migrations run only through the post-exit installer safeguards.'
+            'Fresh installations still require the separately validated complete installer and approved database snapshot.'
+            'GitHub Actions CI does not run interactive Windows UI, physical printer, or school-database tests.'
+          ) | Set-Content -LiteralPath (Join-Path $root 'BUILD_INFO.txt') -Encoding utf8
+          $lines = @(Get-ChildItem -LiteralPath $root -File -Recurse | Sort-Object FullName | ForEach-Object {
+            $rel = [System.IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+            '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $rel
+          })
+          $lines | Set-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt') -Encoding utf8
+
+      # Source is public: this contains only the current source-built application.
+      # Private feed history/snapshots and credentials must never be artifacts here.
+      - name: Upload Windows application ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          name: FMSC_SMS-Windows-x64-app-only-${{ github.run_number }}
+          path: out/windows-x64-app/
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Verify and atomically publish approved update
+        if: inputs.publish_update
+        shell: pwsh
+        timeout-minutes: 25
+        env:
+          FMSC_UPDATES_PUBLISH_TOKEN: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # Recheck the main SHA and the latest signed-off status just before
+          # publication; a failed or revoked run must not reuse old approval.
+          .\Tools\AssertSandboxPublicationGate.ps1 -SourceSha '${{ needs.prepare.outputs.release_sha }}'
+          .\Tools\PublishPrivateUpdate.ps1 `
+            -ApplicationDirectory (Join-Path $env:GITHUB_WORKSPACE 'out/windows-x64-app') `
+            -WorkDirectory (Join-Path $env:RUNNER_TEMP ('fmsc-publication-' + [Guid]::NewGuid().ToString('N')))
+) -or
+              $core -cnotmatch ('(?m)^\$DatabaseVersion = '''+[regex]::Escape($env:RELEASE_SCHEMA)+'''\r?      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Restore and compile desktop application
+        run: |
+          dotnet restore FMSC_SMS.sln
+          dotnet build FMSC_SMS.sln -c Release --no-restore
+
+      - name: Compile WinForms smoke fixtures (no interactive UI)
+        run: dotnet build Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release
+
+      - name: Verify maintenance tool lifecycle without downloads or SQL
+        shell: pwsh
+        run: .\Tools\TestMaintenanceTools.ps1
+
+      - name: Run portable C# regression checks
+        run: dotnet run --project Tests/AuditFixChecks/AuditFixChecks.csproj -c Release
+
+      - name: Run synthetic performance and lifecycle checks
+        run: dotnet run --project Tests/PerformanceChecks/PerformanceChecks.csproj -c Release
+
+      - name: Verify updater packages, retention and safe dialog shutdown
+        shell: pwsh
+        run: |
+          $commands = @(
+            @('Tools/UpdatePackages/UpdatePackages.csproj', '--self-test'),
+            @('Tools/UpdateDistribution/UpdateDistribution.csproj', '--self-test'),
+            @('Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj', '--update-dialog'),
+            @('Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj', '--post-fix')
+          )
+          foreach ($command in $commands) {
+            dotnet run --project $command[0] -c Release -- $command[1]
+            if ($LASTEXITCODE -ne 0) { throw "Updater gate failed: $($command[1])" }
+          }
+          dotnet run --project Tests/UpdateAuthorizationChecks/UpdateAuthorizationChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Git key/transport checks failed.' }
+          & .\Tools\TestOfflineSqlPrerequisites.ps1
+          & .\Tools\TestPreparedUpdate.ps1
+          & .\Tools\TestWindowlessLauncher.ps1
+          & .\Tools\TestInstallerMigrations.ps1
+          & .\Tools\TestUpdateCleanup.ps1
+          & .\Tools\TestUpdateRecovery.ps1
+          & .\Tools\TestPublishPrivateUpdate.ps1
+
+      - name: Prepare verified maintenance tools
+        shell: pwsh
+        run: |
+          & .\Tools\PrepareMaintenanceTools.ps1 -ToolsDirectory (Join-Path $env:GITHUB_WORKSPACE 'out/prerequisites') -DownloadMissing
+
+      # The ordinary PortableRelease publish remains subject to its installer/MSI
+      # and optional detached-MDF/LDF validation. Only this GitHub Actions
+      # app-only bundle skips those full-installer preparation/copy targets.
+      - name: Publish self-contained Windows x64 application
+        shell: pwsh
+        run: |
+          dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output out/windows-x64-app -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$env:GITHUB_WORKSPACE/out/prerequisites/MinGit" "-p:LocalDbMsiPath=$env:GITHUB_WORKSPACE/out/prerequisites/SqlLocalDB.msi" "-p:BundledSqlCmdPath=$env:GITHUB_WORKSPACE/out/prerequisites/sqlcmd.exe" -p:PublishSingleFile=false -p:PublishTrimmed=false
+          if ($LASTEXITCODE -ne 0) { throw "Windows publish failed." }
+
+      - name: Verify ZIP contents and add build manifest
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE 'out/windows-x64-app'
+          $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $root 'FMSC_SMS.dll')).ProductVersion.Split('+')[0]
+          $installer = Get-Content -LiteralPath (Join-Path $root 'UpdateSupport/core.ps1') -Raw
+          $schema = [regex]::Match($installer, '(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$').Groups[1].Value
+          if (-not $schema) { throw 'Required database schema is missing from the bundled installer.' }
+          foreach ($name in @('FMSC_SMS.exe', 'FMSC_SMS.dll', 'FMSC_SMS.deps.json', 'FMSC_SMS.runtimeconfig.json',
+              'UpdateTransport/cmd/git.exe', 'UpdateTransport/usr/bin/ssh.exe',
+              'UpdateTransport/COPYING-GIT.txt',
+              'UpdateTransport/THIRD_PARTY_NOTICES.txt',
+              'UpdateSupport/Tools/SqlCmd/sqlcmd.exe',
+              'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
+              'UpdateSupport/MaintenanceTools.ps1',
+              'UpdateSupport/ToolCatalog.json')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $root $name) -PathType Leaf)) {
+              throw "Missing Windows application output: $name"
+            }
+          }
+          $toolApp = $root
+          . (Join-Path $toolApp 'UpdateSupport/MaintenanceTools.ps1')
+          foreach ($toolName in @('Git','SqlCmd','LocalDb')) {
+            $spec = Get-FmscToolSpec $toolName
+            $bundle = Join-Path $toolApp $spec.folder
+            if ($toolName -ne 'Git') { $bundle = Join-Path $bundle $toolName }
+            if (-not (Test-FmscTool $bundle $toolName)) { throw "Published maintenance bundle failed integrity verification: $toolName" }
+          }
+          foreach ($pair in @(
+            ,@('out/prerequisites/sqlcmd.exe','UpdateSupport/Tools/SqlCmd/sqlcmd.exe')
+            ,@('out/prerequisites/SqlLocalDB.msi','UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')
+          )) {
+            $source = Join-Path $env:GITHUB_WORKSPACE $pair[0]
+            $published = Join-Path $root $pair[1]
+            if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne
+                (Get-FileHash -LiteralPath $published -Algorithm SHA256).Hash) {
+              throw "Published SQL prerequisite changed: $($pair[1])"
+            }
+          }
+          # Only the signed Microsoft LocalDB dependency MSI may accompany an
+          # app-only update. School database files and arbitrary MSIs are forbidden.
+          $forbidden = @(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
+            $rel = [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+            $_.Extension.ToLowerInvariant() -in @('.mdf','.ldf','.ndf','.bak','.bacpac','.dacpac') -or
+            ($_.Extension.ToLowerInvariant() -eq '.msi' -and $rel -cne 'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')
+          })
+          if ($forbidden.Count -gt 0) { throw 'Unauthorized database or installer assets in application ZIP.' }
+          @(
+            'FMSC_SMS - Windows x64 application-only download'
+            'Source commit: ${{ github.sha }}'
+            'Build run: ${{ github.run_number }}'
+            'Built with: .NET 8 (self-contained, WinForms)'
+            "Application version: $version"
+            "Required database schema: $schema"
+            ''
+            'This is NOT a complete installer or a GitHub public Release.'
+            'It contains no student records, MDF/LDF or database backups.'
+            'Contains a Microsoft-signed SQL LocalDB repair MSI and pinned sqlcmd for offline future maintenance.'
+            'UpdateSupport contains the existing installer and numbered database migrations.'
+            'UpdateTransport bundles pinned Git, OpenSSH, dependencies and license notices; system Git is not required.'
+            'Existing school databases are preserved. Pending migrations run only through the post-exit installer safeguards.'
+            'Fresh installations still require the separately validated complete installer and approved database snapshot.'
+            'GitHub Actions CI does not run interactive Windows UI, physical printer, or school-database tests.'
+          ) | Set-Content -LiteralPath (Join-Path $root 'BUILD_INFO.txt') -Encoding utf8
+          $lines = @(Get-ChildItem -LiteralPath $root -File -Recurse | Sort-Object FullName | ForEach-Object {
+            $rel = [System.IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+            '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $rel
+          })
+          $lines | Set-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt') -Encoding utf8
+
+      # Source is public: this contains only the current source-built application.
+      # Private feed history/snapshots and credentials must never be artifacts here.
+      - name: Upload Windows application ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          name: FMSC_SMS-Windows-x64-app-only-${{ github.run_number }}
+          path: out/windows-x64-app/
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Verify and atomically publish approved update
+        if: inputs.publish_update
+        shell: pwsh
+        timeout-minutes: 25
+        env:
+          FMSC_UPDATES_PUBLISH_TOKEN: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # Recheck the main SHA and the latest signed-off status just before
+          # publication; a failed or revoked run must not reuse old approval.
+          .\Tools\AssertSandboxPublicationGate.ps1
+          .\Tools\PublishPrivateUpdate.ps1 `
+            -ApplicationDirectory (Join-Path $env:GITHUB_WORKSPACE 'out/windows-x64-app') `
+            -WorkDirectory (Join-Path $env:RUNNER_TEMP ('fmsc-publication-' + [Guid]::NewGuid().ToString('N')))
+)) {
+            throw 'Prepared application/schema versions do not match approved Source commit.'
+          }
 
       - name: Install .NET 8 SDK
         uses: actions/setup-dotnet@v6
