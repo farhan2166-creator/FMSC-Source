@@ -34,50 +34,69 @@ not be recreated as workflow dependencies.
 
 ## Trusted execution and publication
 
-1. On **Sandbox main**, run the permanent **Private SQL + Windows Installer
-   Acceptance** workflow. Its jobs check out a **specific public Source
-   commit** and the exact pinned private fixture revision with Git LFS,
-   with `persist-credentials: false`. The dedicated SQL jobs must pass
-   schema-3 migrations 4–7, full `Core/DatabaseCompatibilityRequirements.json`
-   checks (objects, columns, parameters, table types, unique indexes,
-   triggers, trusted FKs, check constraints, typed recovery GUID) and
-   schema-7 compatibility. Only then can the real Windows-installer jobs
-   run against both independent fixture copies. No real school data,
-   fixture bytes or database backups are uploaded as artifacts.
-2. A distinct, trusted **attestation** job runs only after *both* SQL
-   and *both* installer jobs pass. It verifies that the tested Source SHA
-   is still the current `FMSC-Source/main` head, then writes a single
-   commit status in FMSC-Source:
-   `fmsc/sandbox-mdf-ldf/v1` = `success`, bound to that exact SHA.
-   No attestation is issued for PR heads, moving main branches, skipped
-   matrix jobs, failures, missing credentials, or cancelled runs.
-3. **Workflow 04** in public Source checks the newest matching status
-   for its exact `github.sha` and the expected attestor identity,
-   description and Sandbox run target. It also verifies that `main`
-   still points at that SHA. A missing/failing/untrusted status blocks
-   **both build-only and publication** before packaging. The publishing
-   step repeats the gate immediately before it uses the separate
-   `FMSC_UPDATES_PUBLISH_TOKEN` credential.
+1. The owner starts **Source Workflow 04** from `FMSC-Source/main`.
+   Its preflight verifies separate credentials, reads the current private
+   update-feed version, and safely commits the next patch application
+   version to Source/main (or reuses an already prepared unpublished
+   next patch after failure). The database schema is not auto-bumped.
+2. Source Workflow 04 sends **only the resulting exact Source SHA** to
+   Sandbox workflow `private-release-acceptance.yml` by
+   `workflow_dispatch`. A Source-side token restricted to **FMSC-Sandbox
+   Actions: Read and write** can trigger this workflow but has no
+   Sandbox Contents write or access to immutable fixture data.
+3. On **Sandbox/main**, the trusted workflow checks out that exact
+   public Source commit and the frozen private fixture commit with
+   `persist-credentials: false`. The SQL jobs validate schema 3
+   (migrations 4–7) and schema 7 against the full production requirements.
+   Both real installer jobs must pass on independent, disposable fixture
+   copies. Additionally, the mandatory `migration-chaos` job injects
+   failures in versions 4 and 5 on a separate historical schema-3 copy:
+   it proves transaction rollback, schema marker preservation,
+   verified backup restore, and successful official migration resumption.
+   Permanent MDF/LDF, backups, and school data are never published.
+4. The distinct trusted **attestation** job requires successful
+   schema-3/7 SQL, real-installer, and chaos jobs. It verifies that
+   Source/main still points to the tested SHA, then writes
+   `fmsc/sandbox-mdf-ldf/v1` success to that exact Source commit.
+   On a failed or incomplete job, no success is granted.
+5. **Workflow 04** waits for a **NEW** attestation posted after its
+   dispatch (not an old success for a previous attempt). It verifies
+   exact Source main, latest status, expected attestor creator,
+   description and Sandbox run URL. Only then does it package the
+   **same checked-out Source SHA**, run its build/regressions, and
+   recheck the trusted status immediately before the atomic fast-forward
+   publication to private `FMSC-Updates`. Missing/failing/stale
+   approval blocks the final push.
 
-The cross-repository flow is **Sandbox → public Source commit status**:
-Source never needs permission to read the private Sandbox. Sandboxed
-source scripts never have access to the attestation or publication token.
-Public Source PRs may run independent synthetic smoke checks; those are
-not release authorization.
+The Source-to-Sandbox direction is **workflow dispatch only**;
+Sandbox-to-Source direction is an exact-commit **status attestation**.
+Source does not read private Sandbox fixtures, credentials or run logs;
+Sandbox scripts never receive any Source publication token.
+Public Source PR smoke tests are not release authorization.
 
-## One-time least-privilege credential
+## One-time least-privilege credentials
 
-In **FMSC-Sandbox → Settings → Secrets and variables → Actions**, configure
-`FMSC_SOURCE_ATTEST_TOKEN`. Use a fine-grained GitHub token restricted to
-**only `farhan2166-creator/FMSC-Source`**, with **Commit statuses:
-Read and write** and automatic Metadata read. No Contents write,
-Actions write, repository admin, Sandbox read, or FMSC-Updates access.
-Keep this token only in the final Sandbox attestation job. If unavailable
-or expired, do not write approval, and Workflow 04 stays blocked.
+- In **FMSC-Sandbox Actions secrets**, retain
+  `FMSC_SOURCE_ATTEST_TOKEN`, scoped to
+  **only FMSC-Source → Commit statuses: Read and write**.
+  It must remain exclusive to the final trusted Sandbox attestation job.
+- In **FMSC-Source Actions secrets**, retain
+  `FMSC_UPDATES_PUBLISH_TOKEN`, scoped to
+  **only FMSC-Updates → Contents: Read and write**.
+  It reads the feed during trusted preflight and authorizes the final
+  feed publication only, never the Sandbox tests.
+- Also in **FMSC-Source Actions secrets**, add
+  `FMSC_SANDBOX_DISPATCH_TOKEN`, scoped to
+  **only FMSC-Sandbox → Actions: Read and write** with automatic
+  Metadata read. It is used only for preflight and to dispatch the
+  approved workflow by name; do not grant private contents write.
+- Source's GitHub Actions `GITHUB_TOKEN` must permit Contents write
+  **only for the version-preparation job**. No Source-side
+  `FMSC_SANDBOX_READ_TOKEN` is required.
 
-The public Source workflow continues using its existing, separate
-`FMSC_UPDATES_PUBLISH_TOKEN` solely for final updates publication.
-It does **not** require `FMSC_SANDBOX_READ_TOKEN`.
+A missing, expired or unauthorized token refuses the run. Published
+feed changes are a single final fast-forward; a failed run may leave a
+nonpublished Source version-bump commit, safely reused by the next run.
 
 ## Testing, limitations and release discipline
 
