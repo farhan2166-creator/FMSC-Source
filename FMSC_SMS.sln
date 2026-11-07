@@ -5,9 +5,6 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FMSC_SMS", "FMSC_SMS.csproj", "{AC5E6CCC-228F-4BDD-AE7D-981BBBDC273D}"
 EndProject
-EndProject
-EndProject
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
