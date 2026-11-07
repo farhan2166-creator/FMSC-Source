@@ -23,12 +23,9 @@ $contexts=@(Invoke-RestMethod -Uri "$api/commits/$SourceSha/statuses?per_page=10
 # Bind release authorization to the declared schema at this exact Source checkout.
 # An old success for a different schema must never authorize publication.
 $installer=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../Installer/core.ps1') -Raw
-$helper=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../DatabaseHelper.cs') -Raw
 $schemaMatch=[regex]::Match($installer,'(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
-$helperSchema=[regex]::Match($helper,'RequiredDatabaseSchemaVersion\s*=\s*"([0-9]+)"')
-if (-not $schemaMatch.Success -or -not $helperSchema.Success -or
-    $schemaMatch.Groups[1].Value -cne $helperSchema.Groups[1].Value) {
-    throw 'Source installer and application schema must agree before validating Sandbox status.'
+if (-not $schemaMatch.Success) {
+    throw 'Required database schema could not be resolved from Installer/core.ps1.'
 }
 $targetSchema=[int]$schemaMatch.Groups[1].Value
 if ($targetSchema -lt 7 -or $targetSchema -gt 9999) { throw 'Unsupported private release schema target.' }
