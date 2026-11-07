@@ -115,7 +115,7 @@ internal static partial class HelpCatalog
             "Quick Registration does not require a phone number. Save the required identity and placement details and add a contact later if needed. A saved phone number is a contact detail, not a message-sending authorization.",
             "phone optional mobile quick registration", "Dashboard → Quick Registration",
             new[] { HelpRule.Choice, HelpRule.System }, HelpOwner.SQL | HelpOwner.CSharp,
-            new[] { "Pages/Students/Admissions/QuickRegistrationFormPage.cs#QuickRegistrationFormPage", "Pages/Students/Admissions/QuickRegistrationWriter.cs#QuickRegistrationWriter" }, System.Array.Empty<string>(), ""),
+            new[] { "Pages/Students/Admissions/QuickRegistrationFormPage.cs#QuickRegistrationFormPage", "Pages/Students/Admissions/QuickRegistrationWriter.cs#QuickRegistrationWriter", "fmsc.dacpac#CompleteQuickAdmission" }, System.Array.Empty<string>(), ""),
         new("FAQ-083", "Admissions", "How do I register siblings who are both new to the school?",
             "Save the first child as a pending Quick Registration. For the next child, use Link Existing Parent and find the first child’s pending record; confirmation is not required just to form the family. Check the parent identity before linking. Save each child’s own placement and fees separately.",
             "siblings new family pending first time parent", "Dashboard → Quick Registration",

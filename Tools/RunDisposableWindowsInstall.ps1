@@ -476,11 +476,10 @@ EXEC sys.sp_addextendedproperty @name=N'FMSC_DisposableFixture',@value=N'approve
     $verify=Start-Process -FilePath $exe -ArgumentList @('--verify-installation',('"'+$instance+'"'),'FMSC_DB') -PassThru
     $null=$verify.Handle
     if (-not $verify.WaitForExit(180000)) { $verify.Kill(); throw 'Installed verification timed out.' }
-    # The data-free DACPAC smoke model is independent of retired optional modules.
-    # Both frozen Sandbox fixtures contain the complete installed module (0).
-    $expectedVerification=if ($FixtureRoot) { 0 } else { 10 }
-    if ($verify.ExitCode -ne $expectedVerification) {
-        throw "Installed FMSC CLI verification failed (expected $expectedVerification; got $($verify.ExitCode))."
+    # Installer verification checks the required core schema only. The retired
+    # optional communication module must never influence this exit code.
+    if ($verify.ExitCode -ne 0) {
+        throw "Installed FMSC CLI core schema verification failed (expected 0; got $($verify.ExitCode))."
     }
     Sql 'FMSC_DB' @'
 IF EXISTS(SELECT 1 FROM dbo.Students) OR EXISTS(SELECT 1 FROM dbo.Users)

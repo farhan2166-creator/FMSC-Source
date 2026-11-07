@@ -1,6 +1,6 @@
 # Help & FAQ Center
 
-Open **Help & FAQ** from the account menu. It works offline, needs no school database connection or additional action permission, and never grants access to the workflows it describes. The catalog has **126 questions in 15 topics**: all 77 original question IDs retained, with retired workflow answers revised to describe current actions. Overlapping questions about departure and history, or partial collection and remaining balance, answer different operator concerns and are retained.
+Open **Help & FAQ** from the account menu. It works offline, needs no school database connection or additional action permission, and never grants access to the workflows it describes. The catalog has **111 questions in 14 topics**. Seventy of the 77 original questions remain; seven original Communication Center questions and eight later communication-only questions were removed with the unused module. Overlapping questions about departure and history, or partial collection and remaining balance, answer different operator concerns and are retained.
 
 Search using ordinary words such as `unpaid fees`, `pending siblings`, `payment refresh`, `correction unknown`, `stop transport` or `photo zoom`. All meaningful search terms must match. Titles rank above keywords, workspace/rule labels and answer-only matches. Case, punctuation and explicit spelling aliases are normalized; there is no approximate substring or online AI search. An exact question ranks first. Explicit term groups cover dues/unpaid/balance, admission spellings, enrollment/enrolment, parent/guardian, family/sibling, payment/collection, cancellation spellings, database/LocalDB/SQL and more. Context-sensitive concepts such as transfer vs departure, and refund vs cancellation, remain distinct.
 
@@ -25,7 +25,7 @@ Maintainer-only ownership records SQL, C#, configurable data and external provid
 ## Structure and maintenance
 
 - `Pages/Help/HelpCatalog.cs`: model, rule labels, precomputed search index, fixed synonym groups, filters, ranking and related lookup. The existing two-argument `Find` API remains supported, with an optional rule filter.
-- `HelpCatalog.Basics.cs`, `.Students.cs`, `.Finance.cs`, `.Communication.cs`: module content. One shared catalog/search API; no SQL-backed help store or new runtime dependency.
+- `HelpCatalog.Basics.cs`, `.Students.cs`, `.Finance.cs`: retained module content. The retired communication-only catalog is absent. One shared catalog/search API; no SQL-backed help store or new runtime dependency.
 - `Pages/Help/HelpCenterPage.cs`: existing dashboard page enhanced with rule filtering, keyboard access, related questions and responsive themed reading.
 - `Tests/HelpChecks`: portable production-catalog checks without WinForms, database or network access.
 - `Tests/ThemeSmokeChecks/Program.HelpCenter.cs`: Windows control contracts, integrated into the existing suite and available independently with `--help-center`.
@@ -33,7 +33,7 @@ Maintainer-only ownership records SQL, C#, configurable data and external provid
 To change an answer:
 
 1. Inspect the current screen, writer, SQL procedure/trigger/constraint and permission code. Do not treat historical audit prose as an executable rule.
-2. Preserve its ID. IDs `FAQ-001`–`FAQ-077` were assigned to the original order because the initial catalog had no IDs. Append new IDs; never derive them from mutable titles.
+2. Preserve stable IDs for retained questions; the retired communication-specific IDs are intentionally unavailable. Append new IDs; never derive them from mutable titles.
 3. Explain the supported next action, relevant authorization and history/balance consequences. Add a caution for uncertain outcomes or financial effects. Avoid procedure names in the operator answer.
 4. Attach precise existing source paths, with method/type/object symbols where practical. Record all relevant ownership layers. Mark genuine configuration only when an authorized editor exists.
 5. Link a few useful, distinct follow-up questions by ID. No self-links, duplicates, broken references or cycles.
