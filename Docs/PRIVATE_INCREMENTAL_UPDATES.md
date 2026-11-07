@@ -190,19 +190,63 @@ live installation change or app/schema version reset has been performed.
 
 ### Normal developer path: one manual GitHub workflow
 
-Use the existing **04 - Build and Publish Private Update** workflow on `main`.
-`publish_update` defaults to true; disable it only for an artifact-only build.
-After editing and testing locally, increase the application version in both
-`FMSC_SMS.csproj` and `Installer/core.ps1`, push approved source to main, and
-select Run workflow. The workflow uses that checked-in version; it does not
-invent, reset or commit a version number. A duplicate published version is refused.
+After the code is approved on `FMSC-Source/main`, the owner uses
+**Actions → 04 - Build and Publish Private Update → Run workflow**.
+The default `publish_update=true` is the **single-click release path**:
+version preparation, private Sandbox SQL/installer/chaos acceptance, Windows
+build and packaging, and final private-feed publication happen in ONE
+serialized workflow run. `publish_update=false` is a safe artifact-only
+build of the already accepted main SHA; it never increments a version,
+dispatches Sandbox or publishes an update.
 
-One-time credential setup: create a fine-grained GitHub personal access token
-limited to **FMSC-Updates**, with **Contents: Read and write**, and store it as
-the **FMSC_UPDATES_PUBLISH_TOKEN** Actions repository secret in **FMSC-Source**.
-The ordinary source GITHUB_TOKEN cannot write a different private repository.
-Do not paste the token into source, workflow inputs, school enrollment or the app.
-School computers continue to use their individual read-only SSH deploy keys.
+The workflow reads `channel/stable.json` from the private feed. If Source
+still has the published version, it increments ONLY the patch application
+version in `Installer/core.ps1` and fast-forward commits the change to
+Source/main. `FMSC_SMS.csproj` already derives assembly version metadata
+from that installer assignment. If a previous workflow failed after preparing
+a not-yet-published next patch, a rerun reuses its exact version rather than
+bumping twice. Unexpected version drift, a moved Source main, missing token,
+or schema mismatch is refused; the database schema is never automatically
+incremented. This schema-7-specific chaos harness must be reviewed before
+publishing a future schema-8 migration.
+
+**One-time credentials (not workflow inputs):**
+
+- In **FMSC-Source** Actions secrets, retain
+  `FMSC_UPDATES_PUBLISH_TOKEN`, a fine-grained token restricted to
+  **FMSC-Updates** with **Contents: Read and write**. It reads the stable
+  pointer during preflight and authorizes only the final atomic feed push.
+- Add `FMSC_SANDBOX_DISPATCH_TOKEN` in **FMSC-Source** Actions secrets,
+  restricted to **FMSC-Sandbox** with **Actions: Read and write** and automatic
+  Metadata read. It only dispatches the existing trusted
+  `private-release-acceptance.yml` workflow; no Sandbox Contents write,
+  fixture access or Sandbox read token is needed.
+- Keep `FMSC_SOURCE_ATTEST_TOKEN` in **FMSC-Sandbox** (scoped to
+  **FMSC-Source Commit statuses: Read and write**). This is separate from
+  both Source secrets. The preparatory Source job needs
+  `GITHUB_TOKEN` Contents write to fast-forward its one-file version bump;
+  branch rules must allow this trusted owner-triggered action. If not, it
+  fails closed and the private feed remains unchanged.
+
+The private Sandbox dispatch receives only the **new exact Source commit
+SHA**. It tests both historical/current SQL contracts and both real
+installer paths, and must also pass historical migration fault injection.
+The Sandbox attests that same Source SHA to a public Source commit status.
+Workflow 04 requires a **new** successful status from the dispatched run,
+checks its trusted creator and run reference, verifies Source main still
+points to that SHA, then packages the identical revision. The gate runs
+again immediately before the publisher uses its separate credential.
+
+Missing acceptance, failed chaos, stale Source SHA, invalid status,
+unavailable dependencies, missing secrets or failed packaging blocks
+publication. Git distribution is changed only by the publisher's final
+non-forced, checked fast-forward commit. **One click is not a distributed
+all-or-nothing transaction:** an attempted release may leave its harmless
+Source version-bump commit after a failure, but it does not partially change
+the private school update feed; rerun after correcting the failure.
+
+Never paste tokens into source, workflow inputs, school enrollment or the app.
+School PCs continue using individual read-only SSH deploy keys.
 
 The workflow builds/tests the source, publishes the self-contained application,
 fetches the current private snapshot, reconstructs and verifies its full package
@@ -212,11 +256,13 @@ every chunk/ZIP and reconstructs the complete target from both new archives befo
 publication. The log/summary identifies version, schema, sizes, retained/retired
 versions and expected Git parent before the final atomic push. Concurrent runs are
 serialized; a concurrent external distribution update is rejected without force.
-Failures before the push leave the current school feed unchanged. Source and school
-databases are never modified by this workflow.
+Failures before the push leave the current school feed unchanged.
+The version-preparation step may commit the next application version to
+Source/main; the workflow never changes a school database.
 
-The owner publishing credential is provided only to the runner's Git processes,
-never saved in a remote URL, application or downloadable artifact. The public source
+The owner publishing credential is only present in the trusted feed preflight
+and final publisher steps, never in the SQL/installer/chaos jobs or any artifact.
+It is not saved in a remote URL, application or downloadable artifact. The public source
 workflow retains its existing current-application artifact. Private baseline packages,
 history and distribution snapshots stay in runner temporary storage and are not
 uploaded as public artifacts. GitHub no-reply commit identity avoids email-privacy
@@ -225,10 +271,10 @@ push rejection. Buffered HTTPS publication supports the approved large chunks.
 On the school side, publication does nothing until someone manually selects
 Account → Check for Updates. There is no automatic download or forced installation.
 
-The new orchestration is covered by offline trigger refusal, real package reconstruction
-and local atomic-publication regressions. Its first authenticated GitHub run still
-requires the owner's one-time secret configuration and manual Run workflow; it was
-not invoked to publish a real update during development.
+The package publisher is covered by offline trigger refusal, real package
+reconstruction and local atomic-publication regressions. Source-to-Sandbox
+dispatch/version orchestration must be validated via the first owner-triggered
+Workflow 04 run; merging workflow code alone does not publish an update.
 
 ### Local CLI alternative
 
