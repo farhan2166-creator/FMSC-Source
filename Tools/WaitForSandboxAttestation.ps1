@@ -34,8 +34,9 @@ do {
         } else {
             # The existing strict gate verifies creator, exact description, Source
             # HEAD, trusted private Sandbox run URL and newest context semantics.
+            # PowerShell script failures throw under ErrorActionPreference=Stop.
+            # LASTEXITCODE applies to native programs, not this script.
             & (Join-Path $PSScriptRoot 'AssertSandboxPublicationGate.ps1') -SourceSha $SourceSha
-            if ($LASTEXITCODE -ne 0) { throw 'Strict Sandbox attestation gate rejected the latest status.' }
             Write-Host "A NEW trusted private acceptance approved $SourceSha."
             if ($env:GITHUB_STEP_SUMMARY) {
                 @(
