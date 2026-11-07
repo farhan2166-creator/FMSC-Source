@@ -18,6 +18,11 @@ on:
       - 'FMSC_SMS.csproj'
       - 'Tools/PrepareBundledGit.ps1'
       - 'Tools/TestPublishPowerShell.ps1'
+      - 'Tools/PrepareWorkflow04Release.ps1'
+      - 'Tools/DispatchSandboxAcceptance.ps1'
+      - 'Tools/WaitForSandboxAttestation.ps1'
+      - 'Tools/TestWorkflow04Orchestration.ps1'
+      - '.github/workflows/fmsc-windows-download.yml'
       - '.github/workflows/fmsc-desktop-ci.yml'
   push:
     branches: ['feature/private-incremental-updates']
@@ -67,6 +72,10 @@ jobs:
       - name: Refuse unintended private publication triggers without network access
         shell: pwsh
         run: .\Tools\TestPublishPrivateUpdate.ps1
+
+      - name: Validate one-click Source-to-Sandbox release wiring offline
+        shell: pwsh
+        run: .\Tools\TestWorkflow04Orchestration.ps1
 
       - name: Validate private Git SSH key enrollment and Windows DPAPI protection
         run: dotnet run --project Tests/UpdateAuthorizationChecks/UpdateAuthorizationChecks.csproj -c Release
