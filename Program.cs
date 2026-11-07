@@ -29,6 +29,13 @@ internal static class Program
             Environment.ExitCode = DatabaseInstallationVerification.Run(args);
             return;
         }
+        // A retired installer command must fail headlessly rather than open
+        // the normal login window or re-create optional communication services.
+        if (args.Length > 0 && args[0] == "--install-communication")
+        {
+            Environment.ExitCode = DatabaseInstallationVerification.Failed;
+            return;
+        }
         ApplicationConfiguration.Initialize();
 #if !FMSC_LEVEL2
         if (!FMSC_SMS.Core.Updates.UpdateStartupGuard.AllowStartup()) return;
