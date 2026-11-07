@@ -27,14 +27,10 @@ Require ($LASTEXITCODE -eq 0 -and $origin -in @(
     'https://github.com/farhan2166-creator/FMSC-Source.git')) 'Source origin is not the expected GitHub repository.'
 
 $corePath=Join-Path (Get-Location).Path 'Installer/core.ps1'
-$helperPath=Join-Path (Get-Location).Path 'DatabaseHelper.cs'
 $core=[IO.File]::ReadAllText($corePath)
-$helper=[IO.File]::ReadAllText($helperPath)
 $appMatch=[regex]::Match($core,'(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$')
 $dbMatch=[regex]::Match($core,'(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
-$appDbMatch=[regex]::Match($helper,'RequiredDatabaseSchemaVersion\s*=\s*"([0-9]+)"')
-Require ($appMatch.Success -and $dbMatch.Success -and $appDbMatch.Success) 'Current application/schema versions could not be resolved.'
-Require ($dbMatch.Groups[1].Value -ceq $appDbMatch.Groups[1].Value) 'Installer and application DB versions disagree.'
+Require ($appMatch.Success -and $dbMatch.Success) 'Current application/schema versions could not be resolved from Installer/core.ps1.'
 # Frozen schema-3/7 private fixtures remain unchanged. Sandbox uses copies
 # and upgrades them through the declared production migration target.
 $targetSchema=[int]$dbMatch.Groups[1].Value

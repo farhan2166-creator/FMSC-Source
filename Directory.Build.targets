@@ -1,0 +1,22 @@
+<Project>
+  <!-- Only Installer/core.ps1 is edited when the required schema changes.
+       Generate the production and SQL-test constants at compilation time. -->
+  <Target Name="GenerateFmscRequiredSchema"
+          BeforeTargets="CoreCompile"
+          Condition="'$(MSBuildProjectName)' == 'FMSC_SMS' Or '$(MSBuildProjectName)' == 'QuickRegistrationSqlChecks' Or '$(MSBuildProjectName)' == 'MutationSqlChecks' Or '$(MSBuildProjectName)' == 'LifecycleSqlChecks'">
+    <PropertyGroup>
+      <_FmscVersionFile>$(MSBuildThisFileDirectory)Installer/core.ps1</_FmscVersionFile>
+      <_FmscInstallerVersionText>$([System.IO.File]::ReadAllText('$(_FmscVersionFile)'))</_FmscInstallerVersionText>
+      <_FmscSchemaVersion>$([System.Text.RegularExpressions.Regex]::Match('$(_FmscInstallerVersionText)', '[$]DatabaseVersion = [^0-9]*([0-9]+)').Groups[1].Value)</_FmscSchemaVersion>
+      <_FmscGeneratedSchemaFile>$(IntermediateOutputPath)FmscRequiredSchema.g.cs</_FmscGeneratedSchemaFile>
+    </PropertyGroup>
+    <Error Condition="'$(_FmscSchemaVersion)' == ''" Text="Cannot resolve database schema from Installer/core.ps1; compilation refused." />
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <WriteLinesToFile File="$(_FmscGeneratedSchemaFile)"
+                      Lines="namespace FMSC_SMS%3B public static partial class DatabaseHelper { public const string RequiredDatabaseSchemaVersion = &quot;$(_FmscSchemaVersion)&quot;%3B }"
+                      Overwrite="true" Encoding="UTF-8" />
+    <ItemGroup>
+      <Compile Include="$(_FmscGeneratedSchemaFile)" />
+    </ItemGroup>
+  </Target>
+</Project>
