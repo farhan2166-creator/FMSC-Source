@@ -39,9 +39,11 @@ not be recreated as workflow dependencies.
    update-feed version, and safely commits the next patch application
    version to Source/main (or reuses an already prepared unpublished
    next patch after failure). The database schema is not auto-bumped.
-   The preflight discovers the required schema from `Installer/core.ps1`
-   and `DatabaseHelper.cs` and refuses mismatches, missing intermediate
+   The preflight discovers the required schema from
+   **`Installer/core.ps1` alone** and refuses missing intermediate
    `Migrations/N.sql` files or files numbered above the declared target.
+   The application's `DatabaseHelper.RequiredDatabaseSchemaVersion` is
+   generated automatically at compile time; no manual C# schema edit.
 2. Source Workflow 04 sends **only the resulting exact Source SHA** to
    Sandbox workflow `private-release-acceptance.yml` by
    `workflow_dispatch`. A Source-side token restricted to **FMSC-Sandbox
@@ -74,8 +76,8 @@ not be recreated as workflow dependencies.
    approval blocks the final push.
 
 **Ordinary database release:** update application/SQL, create the next
-numbered migration, update both required schema declarations and press
-Workflow 04. The fixtures, Sandbox workflow matrix and chaos target require
+numbered migration, update the **single** required schema assignment in
+`Installer/core.ps1`, and press Workflow 04. The fixtures, Sandbox workflow matrix and chaos target require
 no manual edits for a routine schema increment. An application-only release
 leaves the schema unchanged. Incompatible SQL, migration gaps, schema
 mismatches or failed rollback tests stop the publication.

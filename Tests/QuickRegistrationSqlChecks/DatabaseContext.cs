@@ -3,9 +3,9 @@ using Microsoft.Data.SqlClient;
 namespace FMSC_SMS
 {
     // Test connection only; never use the production app's auto-attach path.
-    public static class DatabaseHelper
+    public static partial class DatabaseHelper
     {
-        public const string RequiredDatabaseSchemaVersion="7";
+        // Required schema is generated from Installer/core.ps1 at compilation.
         internal static string ConnectionString = "";
         public static SqlConnection GetConnection()=>new(ConnectionString);
         public static void OpenConnection(SqlConnection connection)=>connection.Open();

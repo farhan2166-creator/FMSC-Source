@@ -45,15 +45,15 @@ class PermissionPolicyChecks(unittest.TestCase):
         self.assertEqual(self.codes, sql_codes | cs_codes)
 
     def test_application_and_installer_require_current_baseline(self):
-        application = re.search(r'RequiredDatabaseSchemaVersion = "(\d+)"', (ROOT/'DatabaseHelper.cs').read_text())
         installer = re.search(r"\$DatabaseVersion = '(\d+)'", (ROOT/'Installer/core.ps1').read_text())
-        self.assertIsNotNone(application)
         self.assertIsNotNone(installer)
-        required = int(application.group(1))
+        required = int(installer.group(1))
+        self.assertIn('GenerateFmscRequiredSchema', (ROOT/'Directory.Build.targets').read_text())
+        self.assertNotRegex((ROOT/'DatabaseHelper.cs').read_text(),
+                            r'RequiredDatabaseSchemaVersion\s*=\s*"[0-9]+"')
         migrations = {int(path.stem) for path in (ROOT/'Migrations').glob('*.sql')}
         self.assertGreaterEqual(required, 1)
         self.assertEqual(set(range(2, required + 1)), migrations)
-        self.assertEqual(int(installer.group(1)), required)
         self.assertEqual({f'{version}.sql' for version in range(2, required + 1)},
                          {path.name for path in (ROOT/'Migrations').glob('*.sql')})
         self.assertFalse((ROOT/'Tests/LifecycleSqlChecks/Migrations').exists(), 'Pre-release migration replay has been retired.')

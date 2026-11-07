@@ -28,11 +28,15 @@ approved update.
 ## Database versions are independent
 
 Do **not** increase `$DatabaseVersion` for UI or application-only changes.
-Database version **1** remains correct until an approved database migration is
-required. A database change needs `Migrations/2.sql` (and consecutive scripts
-after it), the application schema requirement in `DatabaseHelper.cs`, and
-matching compatibility/fixture checks. Those are intentional compatibility
-changes, not an automatic side-effect of bumping an application version.
+Database schema is bumped only when an approved numbered SQL migration is
+added. Edit **only** `$DatabaseVersion` in `Installer/core.ps1`, then add
+`Migrations/N.sql` (and consecutive intermediate scripts if necessary).
+`Directory.Build.targets` automatically generates the C# constant
+`DatabaseHelper.RequiredDatabaseSchemaVersion` from that same installer
+assignment at compilation. Runtime compatibility and private Sandbox
+acceptance both use this exact schema. Never manually edit a second C# value.
+Workflow 04 automatically bumps `$AppVersion` on owner-triggered publication
+and refuses incomplete migration chains.
 
 **Published 1.0.0 is immutable.** This versioning convenience makes no release
 or database change by itself. Test and approve every new version before

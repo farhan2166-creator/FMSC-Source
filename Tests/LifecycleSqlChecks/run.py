@@ -32,11 +32,12 @@ def verify_baseline():
     The test fixture is deliberately not a production-schema approval source.
     The real SQL scenarios and live runtime contract enforce their own behavior.
     """
-    requirement = re.search(r'RequiredDatabaseSchemaVersion\s*=\s*"(\d+)"', (ROOT / "DatabaseHelper.cs").read_text())
     installer = re.search(r"\$DatabaseVersion\s*=\s*'(\d+)'", (ROOT / "Installer/core.ps1").read_text())
-    if requirement is None or installer is None or requirement.group(1) != installer.group(1):
-        raise ValueError("Application and installer schema targets differ; review the SQL test fixture.")
-    target = int(requirement.group(1))
+    if installer is None:
+        raise ValueError("Required schema missing from Installer/core.ps1.")
+    target = int(installer.group(1))
+    if 'GenerateFmscRequiredSchema' not in (ROOT / "Directory.Build.targets").read_text():
+        raise ValueError("The build must generate the application schema from core.ps1.")
     migrations = {int(p.stem) for p in (ROOT / "Migrations").glob("*.sql") if p.stem.isdecimal()}
     if migrations != set(range(2, target + 1)):
         raise ValueError("Numbered migration chain must be complete through the required schema.")
@@ -45,12 +46,12 @@ def verify_baseline():
         raise ValueError("Tests must start from the complete data-free baseline 1.")
     if hashlib.sha256((PROJECT / "Baseline/schema.dacpac").read_bytes()).hexdigest() != provenance["packageSha256"]:
         raise ValueError("Baseline fixture checksum differs from the reviewed provenance.")
-    # Shared SQL test contexts must not silently lag the runtime contract.
+    # SQL test context classes must use the same generated schema constant.
     for context in ("QuickRegistrationSqlChecks", "MutationSqlChecks"):
         fixture = (ROOT / "Tests" / context / "DatabaseContext.cs").read_text()
-        declared = re.search(r'RequiredDatabaseSchemaVersion\s*=\s*"(\d+)"', fixture)
-        if declared is None or int(declared.group(1)) != target:
-            raise ValueError(context + " test context schema must match the application.")
+        if 'public static partial class DatabaseHelper' not in fixture or re.search(
+                r'RequiredDatabaseSchemaVersion\s*=', fixture):
+            raise ValueError(context + " must use the generated schema; no duplicate literal allowed.")
 
     def provider_version(project):
         return next(e.get("Version") for e in ET.parse(project).getroot().iter("PackageReference") if e.get("Include") == "Microsoft.Data.SqlClient")
