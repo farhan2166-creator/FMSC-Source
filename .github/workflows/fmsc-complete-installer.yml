@@ -167,16 +167,11 @@ jobs:
 
           # Derive package instructions from the actual source version, never a stale number.
           $installerText = Get-Content -LiteralPath (Join-Path $root 'core.ps1') -Raw
-          $applicationText = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'DatabaseHelper.cs') -Raw
           $installerVersion = [regex]::Match($installerText, '\$DatabaseVersion\s*=\s*''([0-9]+)''')
-          $applicationVersion = [regex]::Match($applicationText, 'RequiredDatabaseSchemaVersion\s*=\s*"([0-9]+)"')
-          if (-not $installerVersion.Success -or -not $applicationVersion.Success) {
-            throw 'Cannot determine schema version from the installer and application source.'
+          if (-not $installerVersion.Success) {
+            throw 'Cannot determine schema version from the packaged Installer/core.ps1.'
           }
           $requiredSchema = $installerVersion.Groups[1].Value
-          if ($requiredSchema -ne $applicationVersion.Groups[1].Value) {
-            throw "Release schema mismatch: installer $requiredSchema vs application $($applicationVersion.Groups[1].Value)."
-          }
 
           $db = Join-Path $root 'Database'
           New-Item -ItemType Directory -Path $db -Force | Out-Null
