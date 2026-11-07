@@ -208,8 +208,9 @@ a not-yet-published next patch, a rerun reuses its exact version rather than
 bumping twice. Unexpected version drift, a moved Source main, missing token,
 or schema mismatch is refused; the database schema is never automatically
 incremented. For a new database migration, add the next numbered SQL file
-and update BOTH schema declarations in Installer/core.ps1 and
-DatabaseHelper.cs. Workflow 04 enforces a complete numbered migration
+and update **only** `$DatabaseVersion` in `Installer/core.ps1`.
+The C# application schema is generated automatically during compilation;
+`DatabaseHelper.cs` requires no manual edit. Workflow 04 enforces a complete numbered migration
 inventory and the private Sandbox automatically upgrades independent copies
 of frozen schema-3/7 MDF/LDF fixtures to that declared target, tests both
 real installer paths, and fault-injects the newest migration. SQL failure,
