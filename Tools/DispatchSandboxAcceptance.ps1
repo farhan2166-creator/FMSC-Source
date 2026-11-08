@@ -14,7 +14,8 @@ $sourceApi='https://api.github.com/repos/farhan2166-creator/FMSC-Source'
 $headers=@{Authorization="Bearer $env:GITHUB_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
 $main=(Invoke-RestMethod -Uri "$sourceApi/branches/main" -Headers $headers).commit.sha
 if ($main -cne $SourceSha) { throw 'Source main moved before Sandbox dispatch. No release is authorized.' }
-$statuses=@(Invoke-RestMethod -Uri "$sourceApi/commits/$SourceSha/statuses?per_page=100" -Headers $headers)
+. (Join-Path $PSScriptRoot 'GetGitHubCommitStatuses.ps1')
+$statuses=@(Get-FmscGitHubCommitStatuses -Uri "$sourceApi/commits/$SourceSha/statuses?per_page=100" -Headers $headers)
 $prior=@($statuses | Where-Object { $_.context -ceq 'fmsc/sandbox-mdf-ldf/v2' } | Select-Object -First 1)
 $baseline=if ($prior.Count) { [string]$prior[0].id } else { '0' }
 if ($baseline -notmatch '^[0-9]+$') { throw 'Unexpected GitHub status identifier.' }

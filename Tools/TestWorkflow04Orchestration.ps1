@@ -43,4 +43,36 @@ Check ($prep.Contains('$targetSchema -ne 8') -and $gate.Contains('$targetSchema 
 Check ($wait.Contains('$PreviousStatusId') -and $wait.Contains('fmsc/sandbox-mdf-ldf/v2') -and
     $wait.Contains('AssertSandboxPublicationGate.ps1')) 'Wait accepts old or untrusted private status.'
 Check (-not $wait.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and -not $wait.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Sensitive tokens leaked into polling job.'
+
+# Behavioral regression: REST JSON arrays must be individual status records,
+# preserving newest-first API order. A prior failure must not mask a new
+# success, nor can an older success override a newer failure.
+. (Join-Path $root 'Tools/GetGitHubCommitStatuses.ps1')
+$script:mockStatusRecords=@(
+    [pscustomobject]@{ id=303; context='fmsc/sandbox-mdf-ldf/v2'; state='success' },
+    [pscustomobject]@{ id=302; context='fmsc/sandbox-mdf-ldf/v2'; state='failure' },
+    [pscustomobject]@{ id=301; context='unrelated/ci'; state='success' }
+)
+function Invoke-RestMethod {
+    param($Uri,$Headers,$Method)
+    # Emulate Invoke-RestMethod emitting one object[] instead of three objects.
+    Write-Output -NoEnumerate $script:mockStatusRecords
+}
+try {
+    $statuses=@(Get-FmscGitHubCommitStatuses -Uri 'https://example.invalid/statuses' -Headers @{})
+    Check ($statuses.Count -eq 3 -and $statuses[0].id -eq 303 -and $statuses[1].id -eq 302) 'REST status array was not enumerated in newest-first order.'
+    $latest=@($statuses | Where-Object { $_.context -ceq 'fmsc/sandbox-mdf-ldf/v2' } | Select-Object -First 1)
+    Check ($latest.Count -eq 1 -and $latest[0].state -ceq 'success') 'Fresh success was masked by an older failure.'
+    $script:mockStatusRecords=@(
+        [pscustomobject]@{ id=304; context='fmsc/sandbox-mdf-ldf/v2'; state='failure' },
+        [pscustomobject]@{ id=303; context='fmsc/sandbox-mdf-ldf/v2'; state='success' }
+    )
+    $statuses=@(Get-FmscGitHubCommitStatuses -Uri 'https://example.invalid/statuses' -Headers @{})
+    $latest=@($statuses | Where-Object { $_.context -ceq 'fmsc/sandbox-mdf-ldf/v2' } | Select-Object -First 1)
+    Check ($latest.Count -eq 1 -and $latest[0].state -ceq 'failure') 'Newer failure must take precedence over older success.'
+} finally {
+    Remove-Item Function:Invoke-RestMethod -ErrorAction SilentlyContinue
+    Remove-Variable mockStatusRecords -Scope Script -ErrorAction SilentlyContinue
+}
+
 Write-Output 'PASS: one-click exact-commit release preparation, private chaos acceptance and final atomic publication wiring.'

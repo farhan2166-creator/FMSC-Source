@@ -19,7 +19,8 @@ $main=Invoke-RestMethod -Uri "$api/branches/main" -Headers $headers -Method Get
 if ($main.commit.sha -cne $SourceSha) {
     throw 'main moved since this run began. An attestation for a stale revision cannot publish.'
 }
-$contexts=@(Invoke-RestMethod -Uri "$api/commits/$SourceSha/statuses?per_page=100" -Headers $headers -Method Get)
+. (Join-Path $PSScriptRoot 'GetGitHubCommitStatuses.ps1')
+$contexts=@(Get-FmscGitHubCommitStatuses -Uri "$api/commits/$SourceSha/statuses?per_page=100" -Headers $headers)
 # Bind release authorization to the declared schema at this exact Source checkout.
 # An old success for a different schema must never authorize publication.
 $installer=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../Installer/core.ps1') -Raw
