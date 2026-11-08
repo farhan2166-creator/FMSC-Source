@@ -66,8 +66,10 @@ BEGIN
     SET NOCOUNT ON; SET XACT_ABORT ON;
     EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
     IF NOT ((@Channel=''Sms'' AND @ProviderCode=''Twilio'')
-        OR (@Channel=''WhatsApp'' AND @ProviderCode IN (''Twilio'',''MetaCloud''))
-        OR (@Channel=''Email'' AND @ProviderCode=''Smtp''))
+        OR (@Channel=''WhatsApp'' AND @ProviderCode IN
+            (''Twilio'',''MetaCloud'',''WhatsAppBusinessManual''))
+        OR (@Channel=''Email'' AND @ProviderCode IN
+            (''Smtp'',''EmailClientManual'')))
         THROW 51098,''Unsupported approved messaging provider profile.'',1;
     UPDATE msg.ChannelSettings
       SET ProviderCode=@ProviderCode,Enabled=0,

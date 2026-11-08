@@ -45,3 +45,14 @@ Email and Meta provider adapters, the authoritative email audience and
 transactional claim, callbacks, failure/reconciliation and opt-outs. Keep
 Confirm & Send disabled and demand exact-SHA disposable SQL, Windows and
 private Sandbox acceptance before release.
+
+## Stable operator workflow and free/basic integrations
+
+Provider independence is now the product design contract, including manual
+WhatsApp Business and email-client handoff paths. **Staging either provider in
+schema 10 does not make it send-capable.** Manual handoff has no provider
+receipt; it must never be recorded as automatic submission or delivery.
+
+See [the long-term Communication Center product and provider contract](COMMUNICATION_CENTER_TARGET_DESIGN.md)
+for free/basic rollout, no-server operation, permissions, recipient eligibility,
+status semantics, risk controls, and the no-redesign extension boundary.

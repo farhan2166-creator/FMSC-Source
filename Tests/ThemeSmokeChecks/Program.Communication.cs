@@ -92,9 +92,10 @@ internal static partial class Program
         var planned = registry.GetMethod("IsPlannedProfile", BindingFlags.NonPublic | BindingFlags.Static)!;
         bool Planned(string channel, string provider) => (bool)planned.Invoke(null, new object[] { channel, provider })!;
         Check(Planned("WhatsApp", "MetaCloud") && Planned("Email", "Smtp")
-            && Planned("WhatsApp", "Twilio") && !Planned("Sms", "Smtp")
-            && !Planned("Email", "Twilio"),
-            "Provider-neutral registry accepts only reviewed channel/provider pairings.");
+            && Planned("WhatsApp", "Twilio") && Planned("WhatsApp", "WhatsAppBusinessManual")
+            && Planned("Email", "EmailClientManual") && !Planned("Sms", "Smtp")
+            && !Planned("Email", "Twilio") && !Planned("Sms", "WhatsAppBusinessManual"),
+            "Provider-neutral registry accepts only reviewed channel/provider and free-manual pairings.");
         var adapterSelector = registry.GetMethod("ResolveForDispatch", BindingFlags.NonPublic | BindingFlags.Static)!;
         bool NoLiveAdapter(string channel, string provider)
         {
@@ -103,8 +104,10 @@ internal static partial class Program
             { return true; }
         }
         Check(NoLiveAdapter("WhatsApp", "MetaCloud") && NoLiveAdapter("Email", "Smtp")
+            && NoLiveAdapter("WhatsApp", "WhatsAppBusinessManual")
+            && NoLiveAdapter("Email", "EmailClientManual")
             && NoLiveAdapter("Sms", "Smtp"),
-            "Unimplemented Meta and Email transports reject dispatch before any provider credential or network request.");
+            "Manual handoff and unimplemented transports reject API dispatch before any claim or network request.");
 
         var type = assembly.GetType("FMSC_SMS.Pages.Communication.CommunicationCenterPage")!;
         using var page = (Control)Activator.CreateInstance(type,

@@ -393,10 +393,20 @@ internal static class CommunicationV2SqlChecks
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='WhatsApp' AND ProviderCode='MetaCloud' AND Enabled=0;")==1,
             "School-owned Meta WhatsApp provider can be staged but not activated.");
         Sql.Proc("msg.ConfigureChannel",
+            Sql.P("@UserId",f.Admin),Sql.P("@Channel","WhatsApp"),
+            Sql.P("@ProviderCode","WhatsAppBusinessManual"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='WhatsApp' AND ProviderCode='WhatsAppBusinessManual' AND Enabled=0;")==1,
+            "Free WhatsApp handoff is a disabled operator-only profile, never a silent API sender.");
+        Sql.Proc("msg.ConfigureChannel",
             Sql.P("@UserId",f.Admin),Sql.P("@Channel","Email"),
             Sql.P("@ProviderCode","Smtp"));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='Email' AND ProviderCode='Smtp' AND Enabled=0;")==1,
             "School-controlled SMTP is a disabled provider profile only.");
+        Sql.Proc("msg.ConfigureChannel",
+            Sql.P("@UserId",f.Admin),Sql.P("@Channel","Email"),
+            Sql.P("@ProviderCode","EmailClientManual"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='Email' AND ProviderCode='EmailClientManual' AND Enabled=0;")==1,
+            "Manual email client handoff stays separate from authenticated SMTP submission.");
         await r.Refused("SMTP cannot be misconfigured as an SMS gateway",
             () => { Sql.Proc("msg.ConfigureChannel",
                 Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),
