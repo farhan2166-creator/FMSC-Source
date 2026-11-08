@@ -23,22 +23,32 @@ internal static partial class Program
                 ((LookupBox)Field(page,field)).Bind(locations,"Id","Name","All");
             typeof(CanonicalFinanceReportPage).GetField("_lookupsReady",flags)!.SetValue(page,true);
             var order=(ModernComboBox)Field(page,"_orderBy");
-            void Select(ModernComboBox combo,string text)=>combo.SelectedItem=combo.Items.Cast<object>().Single(item=>item.ToString()==text);
             var bar=ReleaseReportControls(page).OfType<ReportSavedViewsBar>().Single();bar.RefreshAvailability();
-            Select(order,"Outstanding: highest first");
+            var outstandingChoice=order.Items.Cast<ReportRowOrder.Choice>()
+                .Single(choice=>choice.Column=="Outstanding" && choice.Descending);
+            order.SelectedItem=outstandingChoice;
             var saved=bar.Snapshot();
-            Check(saved["Order by"]=="choice:Outstanding: highest first","Finance saved views capture their selected report order");
-            var view=(ModernComboBox)Field(page,"View");view.SelectedItem="Aging";
-            Check(!order.Items.Cast<object>().Any(item=>item.ToString()!.StartsWith("Days overdue")),"Aging buckets do not offer unavailable individual day ordering");
+            Check(saved.TryGetValue("Order by",out string? serialized) &&
+                  serialized=="choice:"+outstandingChoice.Label,
+                "Finance saved views retain the selected sort choice without hardcoding its display text");
+            var view=(ModernComboBox)Field(page,"View");
+            object? originalView=view.SelectedItem;
+            view.SelectedItem="Aging";
+            Check(!order.Items.Cast<ReportRowOrder.Choice>().Any(choice=>choice.Column=="Days Overdue"),
+                "Aging buckets do not offer unavailable individual day ordering");
             bar.ApplyState(saved);
-            Check(view.Text=="Students" && order.Text=="Outstanding: highest first","Applying a saved view restores the view before its sort choices");
+            var restored=(ReportRowOrder.Choice)order.SelectedItem!;
+            Check(Equals(view.SelectedItem,originalView) &&
+                  restored.Column==outstandingChoice.Column && restored.Descending==outstandingChoice.Descending,
+                "Applying a saved view restores its report scope and semantic sort direction");
             saved.Remove("Order by");bar.ApplyState(saved);
-            Check(order.Text=="Default","Earlier saved views retain the report's default order");
+            Check(order.SelectedIndex==0,
+                "Earlier saved views retain the report's default sort choice");
             typeof(CanonicalFinanceReportPage).GetField("_displayed",flags)!.SetValue(page,new DataTable());
             string signature=(string)typeof(CanonicalFinanceReportPage).GetMethod("Signature",flags)!.Invoke(page,null)!;
             typeof(CanonicalFinanceReportPage).GetField("_appliedSignature",flags)!.SetValue(page,signature);
             var print=(ModernButton)Field(page,"_print");print.Enabled=true;
-            Select(order,"Outstanding: highest first");
+            order.SelectedItem=outstandingChoice;
             Check(!print.Enabled && signature!=(string)typeof(CanonicalFinanceReportPage).GetMethod("Signature",flags)!.Invoke(page,null)!,
                 "Changing order marks existing results stale and refuses printing until Run Report");
             using var billing=new BillingDiscountsReportPage();
@@ -50,10 +60,15 @@ internal static partial class Program
             Check(!billingOrder.Items.Cast<ReportRowOrder.Choice>().Any(c=>c.Column=="Net Billed"),"Concession summaries offer their own applicable ordering");
             using var certificates=new CertificateIssueRegisterPage();
             var certificateOrder=(ModernComboBox)typeof(CertificateIssueRegisterPage).GetField("orderBy",flags)!.GetValue(certificates)!;
-            Select(certificateOrder,"Recorded on: oldest first");
+            var oldestFirst=certificateOrder.Items.Cast<ReportRowOrder.Choice>()
+                .Single(choice=>choice.Column=="Recorded On" && !choice.Descending);
+            certificateOrder.SelectedItem=oldestFirst;
             var certBar=ReleaseReportControls(certificates).OfType<ReportSavedViewsBar>().Single();
             var certView=certBar.Snapshot();certificateOrder.SelectedIndex=0;certBar.ApplyState(certView);
-            Check(certificateOrder.Text=="Recorded on: oldest first","Certificate register saved views restore their sort order");
+            var restoredCertificateOrder=(ReportRowOrder.Choice)certificateOrder.SelectedItem!;
+            Check(restoredCertificateOrder.Column==oldestFirst.Column &&
+                  restoredCertificateOrder.Descending==oldestFirst.Descending,
+                "Certificate register saved views restore sort meaning without depending on label wording");
             Check(new Control[]{page,billing,certificates}.All(p=>!p.IsHandleCreated),"Report ordering controls initialize without deferred database reads");
         }
         finally

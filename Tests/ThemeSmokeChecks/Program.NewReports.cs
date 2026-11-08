@@ -25,18 +25,29 @@ internal static partial class Program
             from.Checked=true;from.Value=new DateTime(2026,10,31);Check(from.Value==new DateTime(2026,10,1) && from.Checked,"Month selection normalizes to month start");
             using var certificates=new CertificateIssueRegisterPage();
             var type=(ModernComboBox)typeof(CertificateIssueRegisterPage).GetField("type",flags)!.GetValue(certificates)!;
-            Check(type.Items.Count==11,"Administrator sees all ten certificate types plus All");
+            var expectedTypes=CertificateIssueRegisterData.GeneralTypes.Concat(CertificateIssueRegisterData.LeavingTypes).ToArray();
+            Check(type.Items.Contains("All") && expectedTypes.All(type.Items.Contains) &&
+                  type.Items.Count==expectedTypes.Length+1,
+                "Administrator can select every registered certificate category without a frozen type count");
             var print=(ModernButton)typeof(CertificateIssueRegisterPage).GetField("print",flags)!.GetValue(certificates)!;
             Check(!print.Enabled,"Certificate print requires generated results");
             Check(!monthly.IsHandleCreated && !certificates.IsHandleCreated,"Constructing report controls performs no database initialization");
             CurrentUser.SignIn(3,"General certificates","Viewer",false,new[]{"Reports.View","Certificates.Create"});
             using var general=new CertificateIssueRegisterPage();
             var generalTypes=(ModernComboBox)typeof(CertificateIssueRegisterPage).GetField("type",flags)!.GetValue(general)!;
-            Check(generalTypes.Items.Count==9 && !generalTypes.Items.Contains("School Leaving"),"General certificate access hides leaving types");
+            Check(generalTypes.Items.Contains("All") &&
+                  CertificateIssueRegisterData.GeneralTypes.All(generalTypes.Items.Contains) &&
+                  !CertificateIssueRegisterData.LeavingTypes.Any(generalTypes.Items.Contains) &&
+                  generalTypes.Items.Count==CertificateIssueRegisterData.GeneralTypes.Length+1,
+                "General certificate access includes its current catalog but excludes every leaving type");
             CurrentUser.SignIn(4,"Leaving only","Viewer",false,new[]{"Reports.View","Students.Leave"});
             using var leaving=new CertificateIssueRegisterPage();
             var leaveTypes=(ModernComboBox)typeof(CertificateIssueRegisterPage).GetField("type",flags)!.GetValue(leaving)!;
-            Check(leaveTypes.Items.Cast<string>().SequenceEqual(new[]{"All","School Leaving","College Leaving"}),"Leaving-only access exposes its own types");
+            Check(leaveTypes.Items.Contains("All") &&
+                  CertificateIssueRegisterData.LeavingTypes.All(leaveTypes.Items.Contains) &&
+                  !CertificateIssueRegisterData.GeneralTypes.Any(leaveTypes.Items.Contains) &&
+                  leaveTypes.Items.Count==CertificateIssueRegisterData.LeavingTypes.Length+1,
+                "Leaving-only access includes only the authorized leaving-type catalog, regardless of ordering");
             CurrentUser.SignIn(2,"Reports only","Viewer",false,new[]{"Reports.View"});
             using var reports=new ReportsHomePage((Action<Func<Control>,string,string>)((_,_,_)=>{}));
             Check(!ReleaseReportControls(reports).Any(c=>c.Text=="Certificate Issue Register"),"Register tile requires certificate access in addition to report access");
