@@ -231,13 +231,13 @@ WHERE NOT EXISTS(SELECT 1 FROM dbo.Permissions P WHERE P.PermissionCode=V.Code);
 
 -- A snapshot of the exact review list. SQL must independently derive and
 -- compare the complete eligible audience, not trust client-controlled IDs.
-CREATE TYPE msg.RecipientSelection AS TABLE
+EXEC(N'CREATE TYPE msg.RecipientSelection AS TABLE
 (
     RecipientKind varchar(8) NOT NULL,
     RecordId int NOT NULL,
     PhoneE164 varchar(16) NOT NULL,
     PRIMARY KEY(RecipientKind,RecordId)
-);
+);');
 EXEC sys.sp_executesql N'CREATE FUNCTION msg.NormalizeMobile(@Value nvarchar(100))
 RETURNS varchar(16)
 AS
@@ -282,7 +282,8 @@ BEGIN
         EXEC dbo.RequirePermission @UserId,N''Students.View'';
     IF @Audience=N''OutstandingFees''
         EXEC dbo.RequirePermission @UserId,N''Fees.View'';
-    IF @ClientRequestId IS NULL OR @Channel NOT IN (''Sms'',''WhatsApp'')
+    IF @ClientRequestId IS NULL OR @Channel IS NULL OR @Purpose IS NULL OR @Audience IS NULL
+       OR @Body IS NULL OR @Channel NOT IN (''Sms'',''WhatsApp'')
        OR @Purpose NOT IN (''Announcement'',''FeeReminder'',''Individual'',''Staff'')
        OR @Audience NOT IN (''School'',''Campus'',''Class'',''OutstandingFees'',''Student'',''Family'',''Staff'')
        OR LEN(LTRIM(RTRIM(ISNULL(@Body,N''''))))=0 OR LEN(@Body)>1600
