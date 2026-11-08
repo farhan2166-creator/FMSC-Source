@@ -108,7 +108,7 @@ jobs:
         timeout-minutes: 12
         run: |
           $ErrorActionPreference = 'Stop'
-          $suites = @('--direct-pdf-review', '--finance-report-async', '--spreadsheet-export', '--action-shortcuts', '--report-ordering', '--saved-report-views', '--report-purpose', '--class-section-setup', '--registration-workflow', '--placement-workspace', '--fee-account', '--fee-documents', '--collection-fee-actions', '--student-purchase-collection', '--billing-grid')
+          $suites = @('--direct-pdf-review', '--finance-report-async', '--spreadsheet-export', '--action-shortcuts', '--report-ordering', '--saved-report-views', '--report-purpose', '--class-section-setup', '--registration-workflow', '--placement-workspace', '--fee-account', '--fee-documents', '--collection-fee-actions', '--student-purchase-collection', '--billing-grid', '--communication-workflow')
           foreach ($suite in $suites) {
             Write-Output "Checking $suite"
             & dotnet run --project Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release --no-build -- $suite

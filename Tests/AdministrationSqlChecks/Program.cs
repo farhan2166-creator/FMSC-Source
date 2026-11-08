@@ -72,7 +72,7 @@ Check(memberAdmin.Record.Protected&&memberAdmin.Catalog.Items.Single(item=>item.
 Check((await users.SaveAsync(AccessDraft.From(memberAdmin.Record) with { Choices=Array.Empty<int>() },memberAdmin.Record.Snapshot,memberAdmin.Catalog.Token)).Outcome==AccessSaveOutcome.Rejected,"a protected membership cannot be removed through normal user maintenance");
 
 var roleCatalog=await roles.LoadCatalogAsync();
-Check(roleCatalog.Roles.Length==2&&roleCatalog.Permissions.Length==28,"migration exposes exactly Administrator, Accountant and 28 implemented permissions");
+Check(roleCatalog.Roles.Length==2&&roleCatalog.Permissions.Length==31&&roleCatalog.Permissions.Length==PermissionCatalog.All.Count,"migration exposes exactly Administrator, Accountant and 31 implemented permissions");
 int accountant=office;
 var baselineRole=await roles.LoadAsync(accountant);
 int[] originalGrants=baselineRole.Record.Choices.ToArray();
@@ -104,7 +104,7 @@ finally{Query("DROP TRIGGER dbo.FMSC_Admin_FailPermissionSave;");}
 var emptyFrame=await roles.LoadAsync(accountant);
 var empty=await roles.SaveAsync(AccessDraft.From(emptyFrame.Record) with { Choices=Array.Empty<int>() },emptyFrame.Record.Snapshot,emptyFrame.Catalog.Token);
 Check(empty.Outcome==AccessSaveOutcome.Saved,"Accountant may deliberately have an empty permission set");
-Check(Query("EXEC dbo.GetUserPermissions @UserId;",DatabaseHelper.Int("@UserId",admin)).Rows.Count==28,"Administrator retains all implemented permissions independently of Accountant grants");
+Check(Query("EXEC dbo.GetUserPermissions @UserId;",DatabaseHelper.Int("@UserId",admin)).Rows.Count==PermissionCatalog.All.Count,"Administrator retains all implemented permissions independently of Accountant grants");
 Query("EXEC dbo.RequireAnyPermission @UserId,N'Unknown.Future.Action';",DatabaseHelper.Int("@UserId",zeroNew.Id));
 Check(true,"Administrator membership has the same unconditional bypass in RequireAnyPermission as the primary role");
 bool protectedSql=false;

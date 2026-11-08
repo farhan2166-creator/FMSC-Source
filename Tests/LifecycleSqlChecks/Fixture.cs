@@ -19,9 +19,22 @@ internal sealed class Fixture
         Sql.Query("DECLARE @Scope uniqueidentifier=NEWID(); EXEC sys.sp_updateextendedproperty @name=N'FMSC_QuickRegistrationScope',@value=@Scope;");
         using (var c = DatabaseHelper.GetConnection()) { c.Open(); DatabaseCompatibility.Validate(c); }
         Sql.Query("INSERT dbo.Roles(RoleName,Description) VALUES(N'Administrator',N'Fictional full-authority test role'),(N'Accountant',N'Fictional restricted test role');");
+        // The baseline installs 28 codes; migration 9 supplies three new
+        // communication codes. Seed only missing fixture permissions, then
+        // verify that every pre-existing definition exactly matches the catalog.
         foreach (var definition in PermissionCatalog.All.Values)
-            Sql.Query("INSERT dbo.Permissions(PermissionCode,PermissionName,Description) VALUES(@Code,@Name,@Description);",
-                Sql.P("@Code", definition.Code), Sql.P("@Name", definition.Name), Sql.P("@Description", definition.Description));
+            Sql.Query("""
+                IF NOT EXISTS(SELECT 1 FROM dbo.Permissions WHERE PermissionCode=@Code)
+                    INSERT dbo.Permissions(PermissionCode,PermissionName,Description)
+                    VALUES(@Code,@Name,@Description);
+                IF NOT EXISTS(SELECT 1 FROM dbo.Permissions
+                    WHERE PermissionCode=@Code AND PermissionName=@Name AND Description=@Description)
+                    THROW 51099,'Permission metadata drifted from the audited catalog.',1;
+                """,
+                Sql.P("@Code", definition.Code), Sql.P("@Name", definition.Name),
+                Sql.P("@Description", definition.Description));
+        if (Sql.Count("SELECT COUNT(*) FROM dbo.Permissions;") != PermissionCatalog.All.Count)
+            throw new InvalidOperationException("The fixture contains unexpected permission entries.");
         var f = new Fixture();
         byte[] salt = RandomNumberGenerator.GetBytes(32);
         byte[] hash = Rfc2898DeriveBytes.Pbkdf2(Guid.NewGuid().ToString("N"), salt, 100_000, HashAlgorithmName.SHA512, 64);

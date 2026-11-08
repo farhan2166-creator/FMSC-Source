@@ -34,6 +34,12 @@ internal static partial class Program
 
     private static void RunChecks(string[] args)
     {
+        if (args.Contains("--communication-workflow"))
+        {
+            CheckCommunicationWorkflow();
+            Console.WriteLine($"PASS: {checks} automatic school recipient, consent and no-send checks.");
+            return;
+        }
         if (args.Contains("--login-connection"))
         {
             CheckLoginConnection();
@@ -148,6 +154,7 @@ internal static partial class Program
             CheckShortcutPermissions();
             CheckSelectiveWorkspaceGuards();
             CheckAdmissionActions();
+            CheckCommunicationWorkflow();
             Console.WriteLine($"PASS: {checks} navigation recovery, palette dispatch, permission, busy/draft and admission-action checks (no database connection).");
             return;
         }

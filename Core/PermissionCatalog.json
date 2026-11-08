@@ -30,6 +30,21 @@
     "Description": "Print certificates."
   },
   {
+    "Code": "Communication.Configure",
+    "Name": "Configure Communication",
+    "Description": "Manage school messaging channels and templates; no automatic provider activation."
+  },
+  {
+    "Code": "Communication.Send",
+    "Name": "Confirm School Messages",
+    "Description": "Confirm explicit, previewed school communication batches. Requires source record access."
+  },
+  {
+    "Code": "Communication.View",
+    "Name": "View Communication History",
+    "Description": "Read message history and delivery states. No contact export."
+  },
+  {
     "Code": "Enrollment.Manage",
     "Name": "Manage Enrollment",
     "Description": "Manage enrollment records."

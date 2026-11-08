@@ -120,6 +120,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
     private readonly ModernTextBox placeOfBirthInput = HumanUi.TextBox(false, SchemaLengths.StudentPlaceOfBirth);
     private readonly ModernTextBox contact = HumanUi.TextBox(false, SchemaLengths.StudentContactNumber);
     private readonly ModernTextBox altContact = HumanUi.TextBox(false, SchemaLengths.AlternateContactNumber);
+    private readonly ModernComboBox schoolMessagesConsent = HumanUi.Combo();
     private readonly ModernTextBox name = HumanUi.TextBox(false, SchemaLengths.StudentName);
     private readonly ModernDatePicker dob = HumanUi.Date();
     private readonly ModernComboBox gender = HumanUi.Combo();
@@ -425,7 +426,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         // Enabled can also change while a save releases its busy scope; it must not
         // turn a saved value into an empty value in the baseline.
         Control[] editors = { admissionIdValue, name, fatherName, fatherOccupation,
-            address, placeOfBirthInput, contact, altContact, dob, gender, bform,
+            address, placeOfBirthInput, contact, altContact, schoolMessagesConsent, dob, gender, bform,
             religion, blood, prevSchool, casteTribe, disability, enrolmentNo };
         IEnumerable<Control> tracked = editors;
         if (currentAdmissionId <= 0)
@@ -788,6 +789,8 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         transport.Items.Clear();
         transport.Items.AddRange(new object[] { "No", "Yes" });
         transport.SelectedIndex = 0;
+        schoolMessagesConsent.Items.AddRange(new object[] { "Not recorded", "Yes", "No" });
+        schoolMessagesConsent.SelectedIndex = 0;
         ConfigureFieldSuggestions();
         /* Keep student search and admission actions together in the toolbar. */
         quickStudent.Dock = DockStyle.None;
@@ -1133,7 +1136,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         var guardianGrid = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 4,
-            RowCount = 2,
+            RowCount = 3,
             Padding = Padding.Empty,
             Margin = new Padding(0)
         };
@@ -1145,7 +1148,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                     25F));
         }
         /* Add fields in keyboard-entry order. */
-        for (int row = 0; row < 2; row++)
+        for (int row = 0; row < 3; row++)
         {
             guardianGrid.RowStyles.Add(
                 new RowStyle(
@@ -1195,10 +1198,14 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                 altContact),
             3,
             1);
+        var schoolConsentField = AdmissionField(
+            "School messages (SMS / WhatsApp, notices and fees)", schoolMessagesConsent);
+        guardianGrid.Controls.Add(schoolConsentField, 0, 2);
+        guardianGrid.SetColumnSpan(schoolConsentField, 2);
         int studentInfoHeight =
             AdmissionFieldRowHeight * 3;
         int guardianInfoHeight =
-            AdmissionFieldRowHeight * 2;
+            AdmissionFieldRowHeight * 3;
         /* Separate student and parent fields with headings. */
         int informationHeight =
             studentInfoHeight +
@@ -2856,6 +2863,9 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                     : Convert.ToString(
                         row["AlternateContactNumber"])
                       ?? string.Empty;
+            bool? recordedSchoolConsent = await AdmissionConsentStore.ReadAsync(admissionId);
+            if (IsDisposed || version != admissionLoadVersion) return false;
+            schoolMessagesConsent.SelectedIndex = recordedSchoolConsent is null ? 0 : recordedSchoolConsent.Value ? 1 : 2;
             address.Text =
                 row["Address"] == DBNull.Value
                     ? string.Empty
@@ -3658,7 +3668,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                     Warn("Admission was not confirmed. Your edits have been kept.\n\n" + DbMessage.UserMessage(refused));
                     return;
                 }
-                await ApplyAdmissionConfirmationAsync(submitted, confirmation);
+                await ApplyAdmissionConfirmationAsync(submitted, confirmation, RequestedSchoolMessageConsent);
             }, this);
         }
         catch (Exception ex)
@@ -4074,6 +4084,13 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                 UpdateStudentWorkspace();
         }
     }
+    private bool? RequestedSchoolMessageConsent => schoolMessagesConsent.SelectedIndex switch
+    {
+        1 => true,
+        2 => false,
+        _ => null
+    };
+
     private async Task SaveAndStartNextAsync()
     {
         if (saveBusy || currentAdmissionId > 0)
@@ -4239,7 +4256,7 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
                 () => SaveAdmissionRecordAsync("AdmitStudent", 0, admissionParameters.ToArray()),
                 ReadSubmittedAdmissionAsync);
             if (IsDisposed || submittedVersion != admissionLoadVersion) return;
-            await ApplyAdmissionConfirmationAsync(submitted, confirmation);
+            await ApplyAdmissionConfirmationAsync(submitted, confirmation, RequestedSchoolMessageConsent);
         }
         catch (Exception ex)
         {
@@ -4284,13 +4301,13 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
             var confirmation = await AdmissionSaveConfirmation.RecheckAsync(submitted,
                 registrationReview || IsPendingRegistration ? value => ReadCompletedRegistrationAsync(currentAdmissionId, value) : ReadSubmittedAdmissionAsync);
             if (IsDisposed || version != admissionLoadVersion || !ReferenceEquals(unconfirmedAdmission, submitted)) return;
-            await ApplyAdmissionConfirmationAsync(submitted, confirmation);
+            await ApplyAdmissionConfirmationAsync(submitted, confirmation, RequestedSchoolMessageConsent);
         }
         finally { saveBusy = false; if (!IsDisposed) UpdateStudentWorkspace(); }
         FinishRegistrationReview();
     }
 
-    private async Task ApplyAdmissionConfirmationAsync(AdmissionSubmission submitted, AdmissionConfirmation confirmation)
+    private async Task ApplyAdmissionConfirmationAsync(AdmissionSubmission submitted, AdmissionConfirmation confirmation, bool? desiredConsent)
     {
         if (confirmation.WriteError is { } writeError) AppExceptionHandler.LogNonFatal(writeError, "Admission write response");
         if (confirmation.ReadError is { } readError) AppExceptionHandler.LogNonFatal(readError, "Checking admission after an uncertain write");
@@ -4311,6 +4328,18 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
         StudentSearchCache.Invalidate();
         currentAdmissionId = admitted.Id;
         registrationNo.Text = admitted.RegistrationNumber;
+        bool consentStored = true;
+        string consentFailure = string.Empty;
+        if (desiredConsent is bool decision)
+        {
+            try { await AdmissionConsentStore.RecordAsync(admitted.Id, decision); }
+            catch (Exception ex)
+            {
+                consentStored = false;
+                consentFailure = DbMessage.UserMessage(ex);
+                AppExceptionHandler.LogNonFatal(ex, "Recording school communication consent after admission");
+            }
+        }
         int version = admissionLoadVersion;
         // Confirmation precedes all photo writes, reloads and success messages.
         bool photoSaved = await PersistPendingPhotoIfAnyAsync(admitted.Id);
@@ -4337,11 +4366,17 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
         message += reloaded ? ""
             : " Refresh failed. Reopen from Find Student before editing. " + reloadError;
         if (!photoSaved) message += " Photo retained but not saved. Use Retry Photo Save.";
-        SetStatus(message, photoSaved && reloaded ? PageStatusKind.Success : PageStatusKind.Warning);
-        savedAdmissionReadyForNext = photoSaved && reloaded;
+        if (!consentStored)
+        {
+            message += " Admission saved, but school communication consent is not confirmed. Retry Save after checking the record. " + consentFailure;
+            if (desiredConsent is bool retryChoice)
+                schoolMessagesConsent.SelectedIndex = retryChoice ? 1 : 2;
+        }
+        SetStatus(message, photoSaved && reloaded && consentStored ? PageStatusKind.Success : PageStatusKind.Warning);
+        savedAdmissionReadyForNext = photoSaved && reloaded && consentStored;
         // Keep failed photo storage or refresh visible. Modal owners can close
         // only after the full busy scope has released.
-        registrationReadyToClose = registrationReview && photoSaved && reloaded;
+        registrationReadyToClose = registrationReview && photoSaved && reloaded && consentStored;
     }
     /// <summary>Save details, discounts and optional first enrollment in one SQL transaction.</summary>
     private async Task SaveDetailsAndDiscountsAsync(
@@ -4460,6 +4495,9 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
                 studentName,
                 bloodGroup,
                 feeDiscounts);
+            // No automatic send: this only persists an explicit Admission choice.
+            if (RequestedSchoolMessageConsent is bool decision)
+                await AdmissionConsentStore.RecordAsync(savedStudent, decision);
             StudentSearchCache.Invalidate();
             if (IsDisposed || currentAdmissionId != savedStudent || admissionLoadVersion != savedVersion) return;
             AddSuggestionIfNew(fatherOccupation, fatherOccupation.Text);
@@ -4611,6 +4649,7 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
         fatherName.Clear();
         contact.Clear();
         altContact.Clear();
+        schoolMessagesConsent.SelectedIndex = 0;
         address.Clear();
         placeOfBirthInput.Clear();
         prevSchool.Clear();
