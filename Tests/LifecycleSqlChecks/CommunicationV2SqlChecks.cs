@@ -123,6 +123,31 @@ internal static class CommunicationV2SqlChecks
         await r.Refused("Reusing a request key for different content must fail closed",
             () => { Sql.Proc("msg.ConfirmBatch", Args(f.Admin, body: "Wrong-content replay")); return Task.CompletedTask; }, 51084);
 
+        long recipientId = Convert.ToInt64(Sql.Scalar(
+            "SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Batch;",
+            Sql.P("@Batch", batch)));
+        SqlParameter[] Claim(int actor, Guid? key = null, string provider = "FMSC-Synthetic-NoNetwork") => new[]
+        {
+            Sql.P("@UserId", actor), Sql.P("@RecipientId", recipientId),
+            Sql.P("@AttemptKey", key ?? Guid.NewGuid()),
+            Sql.P("@ExpectedProviderCode", provider)
+        };
+        await r.Refused("A viewer without Communication.Send cannot claim messages",
+            () => { Sql.Proc("msg.ClaimRecipient", Claim(f.Restricted)); return Task.CompletedTask; }, 50003);
+        await r.Refused("Claim refuses a provider not matching approved settings",
+            () => { Sql.Proc("msg.ClaimRecipient", Claim(f.Admin, provider: "Wrong-Provider")); return Task.CompletedTask; }, 51092);
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt;") == 0,
+            "Authorization and provider mismatch refuse to reserve external attempts.");
+        Guid attemptKey = Guid.NewGuid();
+        DataTable claimed = Sql.Proc("msg.ClaimRecipient", Claim(f.Admin, attemptKey));
+        r.Check(Convert.ToBoolean(claimed.Rows[0]["Claimed"])
+            && (Guid)claimed.Rows[0]["AttemptKey"] == attemptKey
+            && Sql.Count("SELECT COUNT(*) FROM msg.Attempt A JOIN msg.Recipient R ON R.RecipientId=A.RecipientId WHERE A.AttemptKey=@Key AND A.Outcome='Unknown' AND R.State='Unknown';",
+                Sql.P("@Key", attemptKey)) == 1,
+            "Atomic claim persists a stable attempt as Unknown before any possible external request.");
+        await r.Refused("Concurrent or repeated claiming cannot send an Unknown destination again",
+            () => { Sql.Proc("msg.ClaimRecipient", Claim(f.Admin, attemptKey)); return Task.CompletedTask; }, 51093);
+
         // Bulk school selection is ONE group action. A second consenting
         // student without a mobile must be excluded rather than failing SQL.
         int siblingId = Sql.Count("""
@@ -155,6 +180,18 @@ internal static class CommunicationV2SqlChecks
             Sql.P("@Authority", "Students.Admit"));
         await r.Refused("A withdrawn Admission Yes cancels a stale confirmation snapshot",
             () => { Sql.Proc("msg.ConfirmBatch", Args(f.Admin, id: Guid.NewGuid())); return Task.CompletedTask; }, 51086);
+        long schoolRecipient = Convert.ToInt64(Sql.Scalar(
+            "SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Batch;",
+            Sql.P("@Batch", (Guid)schoolBatch.Rows[0]["BatchId"])));
+        DataTable excluded = Sql.Proc("msg.ClaimRecipient",
+            Sql.P("@UserId", f.Admin),Sql.P("@RecipientId", schoolRecipient),
+            Sql.P("@AttemptKey", Guid.NewGuid()),
+            Sql.P("@ExpectedProviderCode", "FMSC-Synthetic-NoNetwork"));
+        r.Check(!Convert.ToBoolean(excluded.Rows[0]["Claimed"])
+            && Sql.Count("SELECT COUNT(*) FROM msg.Recipient WHERE RecipientId=@Id AND State='Excluded' AND ExclusionCode='NoLongerEligible';",
+                Sql.P("@Id", schoolRecipient)) == 1
+            && Sql.Count("SELECT COUNT(*) FROM msg.Attempt;") == 1,
+            "A previously confirmed school-wide recipient loses eligibility immediately when Admission consent is withdrawn.");
         Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin),
             Sql.P("@AdmissionId", admissionId), Sql.P("@Consent", true),
             Sql.P("@Authority", "Students.Admit"));

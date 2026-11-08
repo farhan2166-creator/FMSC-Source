@@ -96,12 +96,20 @@ CREATE TABLE msg.Batch
     Channel varchar(10) NOT NULL,
     Purpose varchar(20) NOT NULL,
     Body nvarchar(1600) NOT NULL,
+    -- Capture target identity for mandatory live scope revalidation at dispatch.
+    Audience varchar(20) NOT NULL,
+    CampusId int NOT NULL CONSTRAINT DF_MsgBatchCampus DEFAULT(0),
+    ClassId int NOT NULL CONSTRAINT DF_MsgBatchClass DEFAULT(0),
+    StudentId int NOT NULL CONSTRAINT DF_MsgBatchStudent DEFAULT(0),
+    StaffId int NOT NULL CONSTRAINT DF_MsgBatchStaff DEFAULT(0),
     State varchar(14) NOT NULL CONSTRAINT DF_MsgBatchState DEFAULT('Draft'),
     CreatedBy int NOT NULL,
     CreatedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgBatchCreated DEFAULT SYSUTCDATETIME(),
     ConfirmedBy int NULL,
     ConfirmedUtc datetime2(3) NULL,
     CONSTRAINT CK_MsgBatchChannel CHECK (Channel IN ('Sms','WhatsApp')),
+    CONSTRAINT CK_MsgBatchAudience CHECK
+       (Audience IN ('School','Campus','Class','OutstandingFees','Student','Family','Staff')),
     CONSTRAINT CK_MsgBatchPurpose CHECK (Purpose IN ('Announcement','FeeReminder','Individual','Staff')),
     CONSTRAINT CK_MsgBatchState CHECK (State IN ('Draft','Confirmed','Sending','Completed','Partial','Cancelled')),
     CONSTRAINT CK_MsgBatchBody CHECK (LEN(LTRIM(RTRIM(Body)))>0),
@@ -316,7 +324,9 @@ BEGIN
     IF @OldBatch IS NOT NULL
     BEGIN
         IF NOT EXISTS(SELECT 1 FROM msg.Batch WHERE BatchId=@OldBatch AND CreatedBy=@UserId
-          AND Channel=@Channel AND Purpose=@Purpose AND Body=@Body)
+          AND Channel=@Channel AND Purpose=@Purpose AND Body=@Body
+          AND Audience=@Audience AND CampusId=@CampusId AND ClassId=@ClassId
+          AND StudentId=@StudentId AND StaffId=@StaffId)
             THROW 51084,''Confirmation key already belongs to a different request.'',1;
         SELECT @OldBatch BatchId,COUNT_BIG(*) RecipientCount,CONVERT(bit,1) AlreadyConfirmed
         FROM msg.Recipient WHERE BatchId=@OldBatch;
@@ -395,9 +405,11 @@ BEGIN
        THROW 51086,''Recipients changed since preview. Refresh before confirming.'',1;
 
     DECLARE @BatchId uniqueidentifier=NEWID();
-    INSERT msg.Batch(BatchId,ClientRequestId,Channel,Purpose,Body,State,
+    INSERT msg.Batch(BatchId,ClientRequestId,Channel,Purpose,Body,
+        Audience,CampusId,ClassId,StudentId,StaffId,State,
         CreatedBy,ConfirmedBy,ConfirmedUtc)
-    VALUES(@BatchId,@ClientRequestId,@Channel,@Purpose,@Body,''Confirmed'',
+    VALUES(@BatchId,@ClientRequestId,@Channel,@Purpose,@Body,
+        @Audience,@CampusId,@ClassId,@StudentId,@StaffId,''Confirmed'',
         @UserId,@UserId,SYSUTCDATETIME());
     INSERT msg.Recipient(BatchId,RecipientKind,AdmissionId,StaffId,PhoneE164)
     SELECT @BatchId,RecipientKind,
@@ -409,6 +421,140 @@ BEGIN
     FROM msg.Recipient WHERE BatchId=@BatchId;
     COMMIT TRANSACTION;
 END;';
+
+EXEC sys.sp_executesql N'CREATE PROCEDURE msg.ClaimRecipient
+    @UserId int,
+    @RecipientId bigint,
+    @AttemptKey uniqueidentifier,
+    @ExpectedProviderCode varchar(40)
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+    IF @RecipientId IS NULL OR @RecipientId<=0
+       OR @AttemptKey IS NULL OR @AttemptKey=''00000000-0000-0000-0000-000000000000''
+       OR NULLIF(LTRIM(RTRIM(@ExpectedProviderCode)),'''') IS NULL
+        THROW 51090,''A valid recipient, attempt key and approved provider are required.'',1;
+
+    BEGIN TRANSACTION;
+    DECLARE @BatchId uniqueidentifier,@Kind varchar(8),@AdmissionId int,@StaffId int,
+        @SnapshotPhone varchar(16),@RecipientState varchar(12),@BatchState varchar(14),
+        @Channel varchar(10),@Purpose varchar(20),@Body nvarchar(1600),
+        @Audience varchar(20),@CampusId int,@ClassId int,@StudentId int,@TargetStaffId int,
+        @ProviderCode varchar(40),@CurrentPhone varchar(16),@Exclusion varchar(32),
+        @AttemptId bigint;
+
+    -- This UPDLOCK serializes competing workers before any attempt is created.
+    SELECT @BatchId=R.BatchId,@Kind=R.RecipientKind,@AdmissionId=R.AdmissionId,
+        @StaffId=R.StaffId,@SnapshotPhone=R.PhoneE164,@RecipientState=R.State,
+        @BatchState=B.State,@Channel=B.Channel,@Purpose=B.Purpose,@Body=B.Body,
+        @Audience=B.Audience,@CampusId=B.CampusId,@ClassId=B.ClassId,
+        @StudentId=B.StudentId,@TargetStaffId=B.StaffId
+    FROM msg.Recipient R WITH(UPDLOCK,HOLDLOCK)
+    JOIN msg.Batch B WITH(HOLDLOCK) ON B.BatchId=R.BatchId
+    WHERE R.RecipientId=@RecipientId;
+    IF @BatchId IS NULL OR @BatchState NOT IN (''Confirmed'',''Sending'')
+       OR @RecipientState<>''Pending''
+        THROW 51093,''Recipient is not pending. Never resend an uncertain attempt.'',1;
+
+    IF @Kind=''Staff''
+        EXEC dbo.RequirePermission @UserId,N''Staff.View'';
+    ELSE
+        EXEC dbo.RequirePermission @UserId,N''Students.View'';
+    IF @Audience=''OutstandingFees''
+        EXEC dbo.RequirePermission @UserId,N''Fees.View'';
+
+    SELECT @ProviderCode=C.ProviderCode FROM msg.ChannelSettings C WITH(HOLDLOCK)
+    WHERE C.Channel=@Channel AND C.Enabled=1;
+    IF @ProviderCode IS NULL OR @ProviderCode<>@ExpectedProviderCode
+        THROW 51092,''Channel is paused or runtime provider does not match the approved profile.'',1;
+
+    -- Re-read live records while locks protect the verification transaction.
+    -- The persisted scope prevents a campus/class/fee/family target from silently
+    -- becoming eligible just because an old batch retained a valid phone.
+    IF @Kind=''Staff''
+    BEGIN
+        IF @Audience=''Staff'' AND @TargetStaffId=@StaffId
+            SELECT @CurrentPhone=msg.NormalizeMobile(S.ContactNumber)
+            FROM dbo.Staff S WITH(HOLDLOCK)
+            WHERE S.StaffId=@StaffId AND S.Status=N''Active'';
+    END
+    ELSE
+    BEGIN
+        SELECT @CurrentPhone=msg.NormalizeMobile(S.ContactNumber)
+        FROM dbo.Students S WITH(HOLDLOCK)
+        OUTER APPLY (
+            SELECT TOP(1) E.ClassSectionId,E.Status
+            FROM dbo.Enrollments E WITH(HOLDLOCK)
+            WHERE E.AdmissionId=S.AdmissionId
+            ORDER BY CASE WHEN E.Status=N''Active'' THEN 0 ELSE 1 END,E.EnrollmentId DESC
+        ) E
+        LEFT JOIN dbo.CampusClassSections CCS WITH(HOLDLOCK)
+            ON CCS.ClassSectionId=E.ClassSectionId
+        OUTER APPLY (
+            SELECT SUM(dbo.GetFeeChargeBalance(BC.BillingChargeId)) Outstanding
+            FROM dbo.BillingCharges BC WITH(HOLDLOCK)
+            WHERE @Audience=''OutstandingFees''
+              AND BC.AdmissionId=S.AdmissionId AND BC.Status<>N''Cancelled''
+        ) F
+        WHERE S.AdmissionId=@AdmissionId AND S.Status=N''Active''
+          AND S.SchoolMessageConsent=1
+          AND (@Audience=''School''
+            OR (@Audience=''Campus'' AND E.Status=N''Active'' AND CCS.CampusId=@CampusId)
+            OR (@Audience=''Class'' AND E.Status=N''Active''
+                AND CCS.CampusId=@CampusId AND CCS.ClassId=@ClassId)
+            OR (@Audience=''OutstandingFees'' AND E.Status=N''Active''
+                AND (@CampusId=0 OR CCS.CampusId=@CampusId)
+                AND (@ClassId=0 OR CCS.ClassId=@ClassId) AND F.Outstanding>0)
+            OR (@Audience=''Student'' AND S.AdmissionId=@StudentId)
+            OR (@Audience=''Family'' AND
+                (S.AdmissionId=@StudentId OR EXISTS(
+                    SELECT 1 FROM dbo.FamilyMembers FM WITH(HOLDLOCK)
+                    WHERE FM.AdmissionId=S.AdmissionId AND FM.FamilyId IN (
+                        SELECT X.FamilyId FROM dbo.FamilyMembers X WITH(HOLDLOCK)
+                        WHERE X.AdmissionId=@StudentId)))));
+    END;
+
+    SET @Exclusion=CASE
+        WHEN @CurrentPhone IS NULL THEN ''NoLongerEligible''
+        WHEN @CurrentPhone<>@SnapshotPhone THEN ''DestinationChanged''
+        WHEN EXISTS(SELECT 1 FROM msg.Suppression O WITH(HOLDLOCK)
+                    WHERE O.Channel=@Channel AND O.PhoneE164=@CurrentPhone)
+            THEN ''ChannelOptOut''
+        ELSE NULL END;
+    IF @Exclusion IS NOT NULL
+    BEGIN
+        UPDATE msg.Recipient
+        SET State=''Excluded'',ExclusionCode=@Exclusion,UpdatedUtc=SYSUTCDATETIME()
+        WHERE RecipientId=@RecipientId;
+        -- No provider call may occur after an excluded result.
+        SELECT CONVERT(bit,0) Claimed,CONVERT(bigint,NULL) AttemptId,
+               CONVERT(uniqueidentifier,NULL) AttemptKey,
+               CONVERT(varchar(16),NULL) PhoneE164,
+               CONVERT(varchar(10),NULL) Channel,
+               CONVERT(varchar(40),NULL) ProviderCode,
+               CONVERT(nvarchar(1600),NULL) Body,@Exclusion ExclusionCode;
+        COMMIT TRANSACTION; RETURN;
+    END;
+
+    IF EXISTS(SELECT 1 FROM msg.Attempt WITH(HOLDLOCK) WHERE RecipientId=@RecipientId)
+        THROW 51093,''An existing attempt requires explicit reconciliation, not automatic retry.'',1;
+
+    -- Reserve the attempt BEFORE HTTP. Unknown is deliberately conservative:
+    -- a crash/timeout must never make this recipient eligible for blind replay.
+    INSERT msg.Attempt(RecipientId,AttemptNumber,AttemptKey,Channel,ProviderCode,Outcome)
+    VALUES(@RecipientId,1,@AttemptKey,@Channel,@ProviderCode,''Unknown'');
+    SET @AttemptId=CONVERT(bigint,SCOPE_IDENTITY());
+    UPDATE msg.Recipient
+    SET State=''Unknown'',UpdatedUtc=SYSUTCDATETIME()
+    WHERE RecipientId=@RecipientId;
+    UPDATE msg.Batch SET State=''Sending''
+    WHERE BatchId=@BatchId AND State=''Confirmed'';
+    SELECT CONVERT(bit,1) Claimed,@AttemptId AttemptId,@AttemptKey AttemptKey,
+           @CurrentPhone PhoneE164,@Channel Channel,@ProviderCode ProviderCode,
+           @Body Body,CONVERT(varchar(32),NULL) ExclusionCode;
+    COMMIT TRANSACTION;
+END';
 
 EXEC sys.sp_executesql N'CREATE PROCEDURE msg.ReadHistory @UserId int,@Limit int=100
 AS
