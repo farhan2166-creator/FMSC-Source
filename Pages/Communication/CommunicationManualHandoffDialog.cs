@@ -98,9 +98,9 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private void ApplyAvailability()
     {
         bool allowed=!busy && actorId==CurrentUser.UserId;
-        open.Enabled=allowed && current?.State is "Pending" or "Opened";
+        open.Enabled=allowed && (current?.State is "Pending" or "Opened");
         reported.Enabled=allowed && current?.State=="Opened";
-        skip.Enabled=allowed && current?.State is "Pending" or "Opened";
+        skip.Enabled=allowed && (current?.State is "Pending" or "Opened");
         close.Enabled=!busy;
     }
 
@@ -142,6 +142,8 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             if(actorId!=CurrentUser.UserId)
                 throw new InvalidOperationException("Signed-in account changed.");
             CommunicationManualOpen handoff=await CommunicationManualHandoffStore.OpenAsync(id);
+            if(actorId!=CurrentUser.UserId)
+                throw new InvalidOperationException("Signed-in account changed. No chat was launched.");
             if(!IsDisposed && handoff.Allowed && handoff.Link is not null)
             {
                 // Browser or linked app opens only after SQL has persisted
