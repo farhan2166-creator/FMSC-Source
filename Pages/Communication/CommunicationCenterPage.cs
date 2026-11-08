@@ -47,7 +47,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private readonly List<HumanCard> cards = new();
     private readonly Panel campusField, classField, studentField, staffField;
     private readonly ModernButton previous, next, confirm, historyButton, settingsButton,
-        newMessageButton, pauseSmsButton, pauseWhatsAppButton;
+        newMessageButton, pauseSmsButton, pauseWhatsAppButton, enableFreeWhatsAppButton;
     private CommunicationPreview? preview;
     private CommunicationTarget? previewTarget;
     private string? previewMessage;
@@ -65,7 +65,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     // SQL-free construction supports synthetic Windows UI tests.
     internal CommunicationCenterPage(bool initialize)
-        : base("Communication Center", "Choose a group once. Admission Yes is the sole guardian consent.")
+        : base("Communication Center", "Free WhatsApp: Settings > Use Free WhatsApp (admin), then preview and open chats.")
     {
         audience.Items.AddRange(new object[]
         {
@@ -73,8 +73,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             "One student", "Family / siblings", "One staff member"
         });
         audience.SelectedIndex = 0;
-        channel.Items.AddRange(new object[] { "SMS", "WhatsApp" });
-        channel.SelectedIndex = 0;
+        channel.Items.AddRange(new object[] { "SMS (unavailable)", "WhatsApp Business (manual)" });
+        // Default to the only approved sending path; SMS remains visible as unavailable.
+        channel.SelectedIndex = 1;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
 
@@ -253,12 +254,13 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             ("Purpose", "Purpose", 115),
             ("State", "Batch state", 100),
             ("Destinations", "Targets", 70),
-            ("InProgress", "Pending", 75),
+            ("InProgress", "Unfinished", 90),
             ("Delivered", "Delivered", 85),
             ("Failed", "Failed", 70),
             ("Unknown", "Unknown", 75),
             ("Method", "Method", 160),
             ("ManualReported", "Operator reported", 105),
+            ("ManualOpened", "Opened chats", 95),
             ("ManualSkipped", "Manual skipped", 95)
         })
             historyGrid.Columns.Add(new DataGridViewTextBoxColumn
@@ -284,12 +286,12 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private HumanCard SettingsCard()
     {
         var card = HumanUi.Card("Settings",
-            "Administrator-controlled SMS and WhatsApp status, pause controls and school templates. Credentials are never stored here.");
+            "Enable or resume free manual WhatsApp below. Provider API and school email sending are unavailable.");
         settingsGrid.AutoGenerateColumns = false;
         foreach (var (field, caption, width) in new[]
         {
-            ("Channel", "Channel", 85), ("ProviderCode", "Provider", 175),
-            ("Enabled", "Enabled", 90), ("UpdatedUtc", "Updated (UTC)", 160)
+            ("Channel", "Channel", 85), ("SendingMethod", "Sending method", 205),
+            ("StatusText", "Status", 190), ("UpdatedUtc", "Updated (UTC)", 160)
         })
             settingsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -312,7 +314,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             });
         var tables = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5,
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6,
             Padding = new Padding(8), Margin = Padding.Empty
         };
         tables.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -320,8 +322,11 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         tables.RowStyles.Add(new RowStyle(SizeType.Percent, 35));
         tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
         tables.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
-        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(52)));
-        tables.Controls.Add(HumanUi.GroupHeading("Provider status — direct delivery disabled; free manual WhatsApp available"), 0, 0);
+        // Keep administrative and template actions in separate rows so the
+        // shared wrapping button layout cannot hide a second line of controls.
+        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(64)));
+        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(64)));
+        tables.Controls.Add(HumanUi.GroupHeading("Sending methods — only manual WhatsApp can be activated"), 0, 0);
         tables.Controls.Add(settingsGrid, 0, 1);
         tables.Controls.Add(HumanUi.GroupHeading("Templates (read-only until editor acceptance)"), 0, 2);
         tables.Controls.Add(templateGrid, 0, 3);
@@ -332,13 +337,13 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         };
         configureProvider.Enabled = CurrentUser.HasPermission("Communication.Configure");
         configureProvider.Click += async (_, _) => await ConfigureProviderAsync();
-        var enableFreeWhatsApp = new ModernButton
+        enableFreeWhatsAppButton = new ModernButton
         {
-            Text = "Use Free WhatsApp", ThemeRole = "Secondary",
-            Width = AppScale.Scale(170), Height = AppMetrics.ButtonHeight,
+            Text = "Use Free WhatsApp", ThemeRole = "Primary",
+            Width = AppScale.Scale(185), Height = AppMetrics.ButtonHeight,
             Enabled = CurrentUser.HasPermission("Communication.Configure")
         };
-        enableFreeWhatsApp.Click += async (_, _) => await EnableFreeWhatsAppAsync();
+        enableFreeWhatsAppButton.Click += async (_, _) => await EnableFreeWhatsAppAsync();
         var addTemplate = new ModernButton
         {
             Text = "New Template", ThemeRole = "Primary",
@@ -353,7 +358,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             CurrentUser.HasPermission("Communication.Configure");
         addTemplate.Click += async (_, _) => await EditTemplateAsync(false);
         editTemplate.Click += async (_, _) => await EditTemplateAsync(true);
-        tables.Controls.Add(HumanUi.ButtonRow(configureProvider, enableFreeWhatsApp, addTemplate, editTemplate), 0, 4);
+        tables.Controls.Add(HumanUi.ButtonRow(enableFreeWhatsAppButton, configureProvider), 0, 4);
+        tables.Controls.Add(HumanUi.ButtonRow(addTemplate, editTemplate), 0, 5);
         card.Content.Controls.Add(tables);
         return card;
     }
@@ -509,6 +515,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             {
                 channels.Dispose(); templates.Dispose(); return;
             }
+            PrepareSettingsForDisplay(channels);
             var oldChannels = settingsGrid.DataSource as DataTable;
             var oldTemplates = templateGrid.DataSource as DataTable;
             settingsGrid.DataSource = null;
@@ -517,9 +524,57 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             templateGrid.DataSource = templates;
             oldChannels?.Dispose(); oldTemplates?.Dispose();
             SetStep(5);
-            SetStatus("Only free/manual WhatsApp can be activated. Automatic provider delivery remains disabled.");
+            SetStatus("Manual WhatsApp requires the operator to press Send in WhatsApp. School email and API delivery are unavailable.");
         }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+    }
+
+    // UI-only presentation: SQL remains the authority for actual mode and permissions.
+    // Keep raw settings untouched while displaying plain-language statuses.
+    private void PrepareSettingsForDisplay(DataTable channels)
+    {
+        if (!channels.Columns.Contains("SendingMethod"))
+            channels.Columns.Add("SendingMethod", typeof(string));
+        if (!channels.Columns.Contains("StatusText"))
+            channels.Columns.Add("StatusText", typeof(string));
+
+        bool whatsappActive = false, whatsappManual = false;
+        bool smsActive = false;
+        foreach (DataRow row in channels.Rows)
+        {
+            string name = Convert.ToString(row["Channel"]) ?? "";
+            string provider = Convert.ToString(row["ProviderCode"]) ?? "";
+            bool enabled = Convert.ToBoolean(row["Enabled"]);
+            row["SendingMethod"] = (name, provider) switch
+            {
+                ("WhatsApp", "WhatsAppBusinessManual") => "WhatsApp Business — manual",
+                ("WhatsApp", "MetaCloud") => "WhatsApp Cloud API — future",
+                ("WhatsApp", "Twilio") => "Twilio WhatsApp — future",
+                ("Sms", "Twilio") => "Twilio SMS — unavailable",
+                ("Email", "Smtp") => "School email — future",
+                ("Email", "EmailClientManual") => "Email app — future",
+                _ => "Not configured"
+            };
+            row["StatusText"] = name == "Email" ? "Not available yet"
+                : enabled && name == "WhatsApp" && provider == "WhatsAppBusinessManual"
+                    ? "Ready for manual chats"
+                    : enabled ? "Check provider (not approved)" : "Paused / unavailable";
+            if (name == "WhatsApp")
+            {
+                whatsappActive = enabled;
+                whatsappManual = provider == "WhatsAppBusinessManual";
+            }
+            if (name == "Sms") smsActive = enabled;
+        }
+        enableFreeWhatsAppButton.Text = whatsappActive && whatsappManual
+            ? "Free WhatsApp Active"
+            : whatsappManual ? "Resume Free WhatsApp" : "Use Free WhatsApp";
+        enableFreeWhatsAppButton.Enabled = CurrentUser.HasPermission("Communication.Configure")
+            && !(whatsappActive && whatsappManual);
+        pauseWhatsAppButton.Enabled = CurrentUser.HasPermission("Communication.Configure")
+            && whatsappActive;
+        pauseSmsButton.Enabled = CurrentUser.HasPermission("Communication.Configure")
+            && smsActive;
     }
 
     private async Task PauseChannelAsync(string name)

@@ -140,6 +140,33 @@ internal static partial class Program
         var templates = (ModernComboBox)type.GetField("templateChoice",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         Check(templates.Items.Count == 1, "Composition has one optional template picker without a separate workflow page");
-        Check(!send.Enabled, "A preview-only rebuild must never enable delivery before provider acceptance");
+        var channelChoice = (ModernComboBox)type.GetField("channel", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        Check(channelChoice.SelectedIndex == 1 && channelChoice.Items[1]!.ToString()!.Contains("manual", StringComparison.OrdinalIgnoreCase)
+            && channelChoice.Items[0]!.ToString()!.Contains("unavailable", StringComparison.OrdinalIgnoreCase),
+            "Communication starts with the only approved manual WhatsApp option, not unavailable SMS");
+        var cards = (List<HumanCard>)type.GetField("cards", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        var settingsLayout = cards[5].Content.Controls.OfType<TableLayoutPanel>().Single();
+        Check(settingsLayout.RowCount == 6
+            && settingsLayout.GetControlFromPosition(0, 4) is TableLayoutPanel
+            && settingsLayout.GetControlFromPosition(0, 5) is TableLayoutPanel,
+            "Settings places provider controls and template actions on separate visible rows");
+        var manualActivation = (ModernButton)type.GetField("enableFreeWhatsAppButton", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        var decorate = type.GetMethod("PrepareSettingsForDisplay", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        using var modeRows = new DataTable();
+        modeRows.Columns.Add("Channel", typeof(string));
+        modeRows.Columns.Add("ProviderCode", typeof(string));
+        modeRows.Columns.Add("Enabled", typeof(bool));
+        modeRows.Rows.Add("WhatsApp", "WhatsAppBusinessManual", false);
+        decorate.Invoke(page, new object[] { modeRows });
+        Check(manualActivation.Text == "Resume Free WhatsApp"
+            && (string)modeRows.Rows[0]["StatusText"] == "Paused / unavailable",
+            "Paused manual WhatsApp clearly offers resumption without implying delivery");
+        modeRows.Rows[0]["Enabled"] = true;
+        decorate.Invoke(page, new object[] { modeRows });
+        Check(manualActivation.Text == "Free WhatsApp Active"
+            && !manualActivation.Enabled
+            && (string)modeRows.Rows[0]["StatusText"] == "Ready for manual chats",
+            "Already active manual WhatsApp is displayed plainly and cannot be re-enabled by mistake");
+        Check(!send.Enabled, "An unreviewed page cannot send or open a chat before preview and confirmation");
     }
 }

@@ -63,3 +63,14 @@ For very large school-wide sends, individual handoff is slow. An optional
 official Cloud API can later replace the handoff under the same school
 audience/consent workflow after separate provider acceptance and pricing
 approval. Neither SMTP nor Meta Cloud API is yet enabled in this PR.
+
+## WinForms visibility and local acceptance (do not send real messages)
+
+1. Verify the **running executable** from Windows Task Manager or PowerShell, not merely the SQL migration number. An uninstalled source commit or schema 10 alone cannot change a 1.0.15 desktop UI.
+2. Open the dashboard **Communication Center** with `Communication.View`. The composer must default to **WhatsApp Business (manual)**; **SMS (unavailable)** remains non-send-capable.
+3. As an administrator with `Communication.Configure`, choose **Settings**. Confirm that **Use Free WhatsApp**, **Configure Provider**, **New Template** and **Edit Selected** are all visible at normal and 125%/150% Windows display scaling. Provider controls and template controls occupy separate rows. Confirm **Email** is marked unavailable.
+4. On a disposable, consented synthetic dataset, activate **Use Free WhatsApp** once. Settings now reads **Free WhatsApp Active** (disabled). Pause using **Pause WhatsApp**; Settings changes to **Resume Free WhatsApp**. Resume and verify that no existing school records were changed.
+5. Select a school, campus or class audience **without choosing individual students**, then compose, preview and confirm. Confirm remains unavailable for SMS, unavailable/unconfigured WhatsApp, or zero eligible recipients. A valid manual preview enables **Open WhatsApp Chats** only with `Communication.Send`.
+6. With only test recipients, open one chat and **do not press Send**. Close the handoff; confirm History shows an opened unfinished recipient, not Delivered. Resume and use **Skip**. Repeat with a separate synthetic recipient and deliberately report **I Sent It**; it must count as operator-reported, not provider-delivered.
+7. Test account without Send, withdrawn Admission Yes, invalid phone, changed number, WhatsApp suppression, fee permission failure, application restart and paused mode. No chat should open when eligibility or authorization fails. Use the existing disposable SQL test harness; do not use production school contacts for this acceptance.
+8. Do not publish Workflow 04 until the resulting exact source commit has passed Windows UI smoke checks and the private Sandbox gate. Historical acceptance for source `2f29f3dcdfeb234616cb86ec4c7f5c7490d10546` remains evidence for that commit only.

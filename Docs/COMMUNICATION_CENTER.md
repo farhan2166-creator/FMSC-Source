@@ -1,4 +1,4 @@
-# Communication Center — legacy retirement and preview-only replacement
+# Communication Center — schema 10 and manual WhatsApp Business
 
 The original `comm` module and `dbo.StudentGuardianCommunication` are retired by
 `Migrations/8.sql`. The owner approved deletion of their **old data even when
@@ -24,7 +24,7 @@ fail closed with rollback rather than delete unrelated data. Historical migratio
 **Release gate:** PR #128 must not merge or publish before the user's restored
 schema-7 test, SQL rollback checks and exact-commit release acceptance.
 
-## Provider-neutral extension — schema 10 (draft)
+## Provider-neutral extension — schema 10 (merged; not yet published)
 
 The existing Twilio adapter is optional. New provider-neutral dispatcher
 interfaces select an explicitly enabled SQL provider, while unknown providers
@@ -40,11 +40,7 @@ for Email, so the existing phone-only confirmation/claim procedures continue to
 reject it. No old guardian email choices are migrated; a future admission UI
 must collect email deliberately under the existing consent authority.
 
-Release blocker: implement/test secure provider-specific credentials, live
-Email and Meta provider adapters, the authoritative email audience and
-transactional claim, callbacks, failure/reconciliation and opt-outs. Keep
-Confirm & Send disabled and demand exact-SHA disposable SQL, Windows and
-private Sandbox acceptance before release.
+Email and Meta Cloud API need separate provider-specific acceptance before **their** delivery can be enabled. They are not prerequisites for the approved, operator-controlled free WhatsApp Business workflow. Manual opening and operator reports must never become provider Delivered status. Publishing any updated executable still requires exact-head Windows/UI checks, disposable SQL and private Sandbox acceptance.
 
 ## Stable operator workflow and free/basic integrations
 
@@ -57,7 +53,7 @@ See [the long-term Communication Center product and provider contract](COMMUNICA
 for free/basic rollout, no-server operation, permissions, recipient eligibility,
 status semantics, risk controls, and the no-redesign extension boundary.
 
-## Free WhatsApp Business manual implementation on the draft branch
+## Free WhatsApp Business manual implementation (merged source)
 
 After the administrator explicitly chooses **Use Free WhatsApp** in Settings,
 operators holding `Communication.Send` may use the existing school/campus/class/
@@ -76,3 +72,11 @@ active/scope membership, current phone and WhatsApp opt-out before exposing
 its phone/message. Direct API attempts from manually configured WhatsApp are
 blocked both in C# and by a database trigger. All other direct channels remain
 disabled pending actual provider acceptance. Migration 10 is still **draft**.
+
+## Current UI and release distinction
+
+Migration 10 updates the database but does **not** replace the installed FMSC executable. The manual handoff UI is in the merged source; an installation still running 1.0.15 will not show the new controls until a validated later application build is installed. Do not publish a new update merely because SQL migration 10 succeeded.
+
+In the new WinForms build, open **Communication Center** from the dashboard (requires `Communication.View`). The only operational option in Compose is **WhatsApp Business (manual)**; SMS and Email provider delivery remain unavailable. An administrator with `Communication.Configure` opens **Settings** and chooses **Use Free WhatsApp**; the button then reads **Free WhatsApp Active** rather than offering a second activation. **Pause WhatsApp** disables new chat openings, and the same settings button changes to **Resume Free WhatsApp** while paused. Sending operators additionally need `Communication.Send` plus the corresponding `Students.View` / `Staff.View` and `Fees.View` for fee notices. Use Preview, then Confirm to open one chat at a time; **History > Resume Manual WhatsApp** restores unfinished work. No button sends automatically.
+
+For local acceptance, first confirm which executable Windows is actually running, and use synthetic destinations in a disposable copy of the database. See `COMMUNICATION_MANUAL_WHATSAPP_ACCEPTANCE.md`.
