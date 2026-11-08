@@ -36,8 +36,8 @@ public sealed class FirstRunSetupForm : ApplicationWindowForm
             Padding = new Padding(AppScale.Scale(30, AppScale.SpacingScale))
         };
         var logo = new PictureBox {
-            Image = File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "logo.png"))
-                ? UiHelper.LoadImageUnlocked(Path.Combine(AppContext.BaseDirectory, "Assets", "logo.png"))
+            Image = File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "FMSC_Logo_Rectangular.png"))
+                ? UiHelper.LoadImageUnlocked(Path.Combine(AppContext.BaseDirectory, "Assets", "FMSC_Logo_Rectangular.png"))
                 : null,
             SizeMode = PictureBoxSizeMode.Zoom,
             Dock = DockStyle.Fill,
