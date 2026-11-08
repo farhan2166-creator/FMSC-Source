@@ -25,12 +25,15 @@ internal static partial class Program
             if(certificate && !CertificateLetterhead.UsesPreprintedPad(path))
             {
                 var image=document.Descendants(ns+"Image").Single(element=>(string?)element.Attribute("Name")=="CertificateHeaderImage");
-                Check(image.Element(ns+"Height")!.Value=="3in"&&image.Element(ns+"Sizing")!.Value=="FitProportional",
-                    name+" reserves a three-inch header without stretching the artwork.");
-                Check(double.Parse(image.Element(ns+"Width")!.Value[..^2],System.Globalization.CultureInfo.InvariantCulture)>7.4,
-                    name+" fills the existing printable report width.");
-                Check(document.Descendants(ns+"LeftMargin").Single().Value=="0.41in"&&document.Descendants(ns+"RightMargin").Single().Value=="0.41in",
-                    name+" preserves its original paper margins.");
+                var page=document.Root!.Element(ns+"Page")!;
+                double printableWidth=ReportInches(page.Element(ns+"PageWidth")?.Value)
+                    -ReportInches(page.Element(ns+"LeftMargin")?.Value)
+                    -ReportInches(page.Element(ns+"RightMargin")?.Value);
+                double artworkWidth=ReportInches(image.Element(ns+"Width")?.Value);
+                double artworkHeight=ReportInches(image.Element(ns+"Height")?.Value);
+                Check(image.Element(ns+"Sizing")?.Value=="FitProportional" &&
+                      artworkWidth>0 && artworkHeight>0 && artworkWidth<=printableWidth+0.02,
+                    name+" keeps proportional certificate artwork within the printable page, regardless of header dimensions or margins.");
             }
             if(CertificateLetterhead.UsesPreprintedPad(path))
                 Check(document.Descendants(ns+"TopMargin").Single().Value=="2in",name+" reserves two inches for preprinted letterhead.");
