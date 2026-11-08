@@ -70,7 +70,7 @@ public class ApplicationWindowForm : Form
         if (TopLevel) ApplyDpiGeometry(DeviceDpi, resizeWindow: true);
         if (UsesCaption && caption is null)
         {
-            string path = Path.Combine(AppContext.BaseDirectory, "Assets", "FMSC_Logo Icon.ico");
+            string path = Path.Combine(AppContext.BaseDirectory, "Assets", "FMSC_Logo_Circular.ico");
             if (File.Exists(path)) { schoolIcon = new Icon(path); Icon = schoolIcon; }
             caption = new ApplicationTitleBar(this);
             // Reclaim the native caption's space while preserving the requested
