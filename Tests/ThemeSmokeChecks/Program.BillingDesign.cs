@@ -41,7 +41,8 @@ internal static partial class Program
         months.Rows.Add(month.AddMonths(-1), 25, 30, 250000m); months.Rows.Add(month, 25, 30, 250000m);
         Draw(Create("FMSC_SMS.Core.BillingRecoveryDialog", months), "missed-month-choice");
         Draw(Create("FMSC_SMS.Pages.Finance.Collection.StudentCreditDialog", 1, false), "student-credit");
-        Draw(Create("FMSC_SMS.Pages.Finance.Configuration.FeeRateCorrectionDialog", 1, 1, 1), "bill-rate-corrections");
+        Draw(Create("FMSC_SMS.Pages.Finance.Configuration.FeeRateCorrectionDialog", 1, 1, 1,
+            "Synthetic campus / class / fee"), "bill-rate-corrections");
         var period = new DataTable();
         period.Columns.Add("Frequency"); period.Columns.Add("ConcessionLabel"); period.Columns.Add("EndDate", typeof(DateTime));
         period.Rows.Add("Monthly", "Scholarship", month.AddMonths(8));
