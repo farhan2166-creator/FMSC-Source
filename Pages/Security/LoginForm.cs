@@ -55,9 +55,9 @@ public sealed class LoginForm : ApplicationWindowForm
         };
         var logo = new PictureBox {
             Image = File.Exists(
-                Path.Combine(AppContext.BaseDirectory, "Assets", "logo.png"))
+                Path.Combine(AppContext.BaseDirectory, "Assets", "FMSC_Logo_Rectangular.png"))
                     ? UiHelper.LoadImageUnlocked(
-                        Path.Combine(AppContext.BaseDirectory, "Assets", "logo.png"))
+                        Path.Combine(AppContext.BaseDirectory, "Assets", "FMSC_Logo_Rectangular.png"))
                     : null,
             SizeMode = PictureBoxSizeMode.Zoom,
             Dock = DockStyle.Fill,

@@ -1201,7 +1201,7 @@ public sealed class MainDashboardForm : ApplicationWindowForm
         string logoPath = Path.Combine(
             AppContext.BaseDirectory,
             "Assets",
-            "logo.png");
+            "FMSC_Logo_Rectangular.png");
         if (File.Exists(logoPath))
         {
             try
