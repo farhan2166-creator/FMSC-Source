@@ -73,7 +73,7 @@ internal static partial class Program
             readiness[0].Result.SetResult(new DataTable());
             var setup = (Control)type.GetField("setupReadinessBar", flags)!.GetValue(page)!;
             PumpUntil(() => !setup.Visible, "A completed setup check releases its dashboard space");
-             Check(descendants(page).OfType<Label>().Count(label => label.Text == "0") >= 5,
+            Check(descendants(page).OfType<Label>().Count(label => label.Text == "0") >= 5,
                 "An academic-year failure cannot erase valid totals");
             var profile = descendants(page).OfType<ModernButton>().Single(button => button.Text == "Student Profile");
             profile.PerformClick(); Check(route == ("Students", "Student Profile"), "Profile quick actions preserve the sidebar route");
