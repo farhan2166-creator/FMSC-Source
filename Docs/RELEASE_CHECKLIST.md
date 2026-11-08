@@ -34,6 +34,14 @@
 - [ ] DB snapshot is **not** included in Actions. The owner locally supplies matching **detached** `FMSC_DB.mdf` and `FMSC_DB_log.ldf` only for fresh-install validation.
 - [ ] Confirm expected `FMSC_DB` schema and database version against supplied snapshot; **do not replace existing school data or publish DACPAC over MDF/LDF**.
 
+### Exact-source release and installed-binary provenance (Audit Issue 04)
+
+- [ ] Record the **exact Source commit used by Workflow 04**, its successful gated run, and the matching private Updates manifest; do **not** substitute the current `main` SHA if it has advanced.
+- [ ] Compare the installed `FMSC_SMS.exe` SHA-256 to the independently verified published manifest (not just `1.0.16` ProductVersion); use [the read-only local probe](../Tools/VerifyInstalledFmscRelease.ps1) and retain its safe version/hash/status lines privately.
+- [ ] Confirm the running Windows process points to that same installed executable and the active LocalDB schema equals the release requirement. Run the application's read-only installation compatibility check only on a trusted matching EXE.
+- [ ] Verify Communication Center visible controls and permissions in the **actual installed UI**; exercise chat handoff only on a disposable synthetic database with test destinations. Opening a chat or reporting a send is not provider delivery.
+- [ ] Record the local operator's acceptance; until then the installed-device result is **PENDING**, even if CI and private publication succeeded. A published source SHA that predates later fixes does **not** prove those fixes are installed.
+
 ## 4. Isolated installation and recovery acceptance
 
 - [ ] Fresh install on a disposable Windows test PC with a verified matching database pair.

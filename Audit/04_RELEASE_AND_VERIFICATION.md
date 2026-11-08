@@ -1,6 +1,6 @@
 # 04 — Release and SQL verification
 
-The first-production baseline is application 1.0.0 and required database schema 1. Older schema-20/21/69/75 claims are dated historical records. Source inspection, CI, disposable SQL, real native UI, printing and installer acceptance must be distinguished.
+The original first-production baseline was application 1.0.0/schema 1. As of the **8 November 2026** audit, current source is **application 1.0.16/schema 10**, but the private published **1.0.16** artifact was built from an **earlier exact source commit**. Do not infer deployed code from a version string. Separate source inspection, trusted private release provenance, installed executable bytes, live database schema, native UI and owner acceptance. See [Audit Issue 04 evidence](Reviews/FMSC_RELEASE_INSTALLED_ACCEPTANCE_2026-11-08.md). Older schema-20/21/69/75 records remain historical.
 
 ## Full records and their purposes
 
@@ -14,3 +14,7 @@ The first-production baseline is application 1.0.0 and required database schema 
 ## Retention and use
 
 This is a numbered, consolidated subject document, not a copy of the source reports. Read the linked records for details and original evidence. Existing filenames, decisions and audits remain unchanged; this indexing work does not change source code, SQL or test status.
+
+## Read-only owner-side check
+
+Run `Tools/VerifyInstalledFmscRelease.ps1` from the current source checkout on the **same Windows account** that runs FMSC. It compares the actual on-disk executable to the published 1.0.16 SHA-256, queries only `dbo.DatabaseVersion`, and—only if the executable bytes match—runs the existing read-only `--verify-installation` compatibility entry point. It neither installs an update nor inspects student/guardian data. See the [evidence guide](Reviews/FMSC_RELEASE_INSTALLED_ACCEPTANCE_2026-11-08.md) for commands and manual UI checks. A passing script proves the **older 1.0.16 published binary**, not the three newer audit fixes; those require a later exact-head publication.
