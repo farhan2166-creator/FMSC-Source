@@ -16,6 +16,7 @@ $checks = @(
     '--admission-header',
     '--dialog-size-tiers',
     '--billing-layout',
+    '--billing-design',
     '--class-sheet-buttons',
     '--collection-counter-layout',
     '--grid-alignment',

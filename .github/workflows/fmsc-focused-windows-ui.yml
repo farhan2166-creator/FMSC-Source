@@ -1,0 +1,40 @@
+name: '10 - CI - Focused Windows UI Contracts'
+
+on:
+  pull_request:
+    paths:
+      - 'Tests/ThemeSmokeChecks/**'
+      - 'Tools/RunDurableUiContracts.ps1'
+      - '.github/workflows/fmsc-focused-windows-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fmsc-focused-windows-ui-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  standalone-ui-contracts:
+    name: SQL-free standalone WinForms modes
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Check out review candidate
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Execute standalone UI contracts and rendered report fixtures
+        shell: pwsh
+        timeout-minutes: 20
+        run: .\Tools\RunDurableUiContracts.ps1 -IncludePdfReports
+
+# No application installation, school SQL, private Sandbox or publication.
+# This is an auxiliary test-only gate; Workflow 04 remains dispatch-only.

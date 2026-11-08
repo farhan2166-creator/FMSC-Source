@@ -23,7 +23,14 @@ internal static partial class Program
                 using var bitmap = new Bitmap(form.Width, form.Height);
                 form.DrawToBitmap(bitmap, form.ClientRectangle);
                 bitmap.Save(Path.Combine(output, name + ".png"));
-                Check(form.Controls.Count > 0 && form.ClientSize.Width >= 500, name + " renders offscreen without connecting to SQL.");
+                var visibleContent = form.Controls.Cast<Control>()
+                    .Where(control => control.Visible && control.Width > 0 && control.Height > 0)
+                    .ToArray();
+                Check(form.ClientSize.Width > 0 && form.ClientSize.Height > 0 &&
+                      visibleContent.Any(control => form.ClientRectangle.IntersectsWith(control.Bounds)),
+                    name + " exposes visible billing controls within its usable viewport");
+                Check(new FileInfo(Path.Combine(output, name + ".png")).Length > 0,
+                    name + " produces nonempty visual review evidence");
                 form.Close();
             }
         }

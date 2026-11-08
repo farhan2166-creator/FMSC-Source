@@ -67,3 +67,13 @@ financial and class/certificate evidence. The script builds the test project
 once, invokes each focused mode explicitly, and stops at the first failure.
 It does not replace the existing mandatory CI, SQL migrations, private Sandbox
 acceptance, or installer/Workflow 04 checks.
+
+### Dedicated pull-request verification
+
+The narrowly scoped `fmsc-focused-windows-ui.yml` workflow runs the focused
+SQL-free WinForms contract modes on an ephemeral Windows runner when the UI-test
+suite or its driver changes. It is independent of the standard desktop CI and
+does **not** dispatch Workflow 04, install software, or publish an update.
+The opt-in script remains available for a local disposable Windows profile.
+A green dedicated run verifies only the listed modes and synthetic data;
+interactive DPI/physical printing checks still require separate acceptance.
