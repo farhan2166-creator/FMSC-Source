@@ -33,16 +33,21 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         TextAlign = ContentAlignment.TopLeft, Padding = new Padding(16)
     };
     private readonly DataGridView previewGrid = HumanUi.Grid(false);
+    private readonly DataGridView historyGrid = HumanUi.Grid(false);
+    private readonly DataGridView settingsGrid = HumanUi.Grid(false);
+    private readonly DataGridView templateGrid = HumanUi.Grid(false);
     private readonly Panel steps = new() { Dock = DockStyle.Fill };
     private readonly List<HumanCard> cards = new();
     private readonly Panel campusField, classField, studentField, staffField;
-    private readonly ModernButton previous, next, confirm;
+    private readonly ModernButton previous, next, confirm, historyButton, settingsButton,
+        newMessageButton, pauseSmsButton, pauseWhatsAppButton;
     private CommunicationPreview? preview;
     private CommunicationTarget? previewTarget;
     private string? previewMessage;
     private DataTable? previewTable;
     private int step;
     private int previewReadVersion;
+    private int managementReadVersion;
 
     public bool IsBusy => BusyOperationRunning;
     public string BusyMessage => "School records are being checked for current recipient eligibility.";
@@ -71,6 +76,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         cards.Add(ComposeCard());
         cards.Add(PreviewCard());
         cards.Add(ConfirmCard());
+        cards.Add(HistoryCard());
+        cards.Add(SettingsCard());
         foreach (var card in cards)
         {
             card.Dock = DockStyle.Fill;
@@ -96,6 +103,16 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             Warn("Sending is disabled until secure provider acceptance passes."), "Primary");
         // Absolutely no send path exists at this stage.
         confirm.Enabled = false;
+        historyButton = AddBusyAction("History", LoadHistoryAsync, "Secondary");
+        settingsButton = AddBusyAction("Settings", LoadSettingsAsync, "Secondary");
+        newMessageButton = AddAction("New Message", (_, _) => SetStep(0), "Secondary");
+        pauseSmsButton = AddBusyAction("Pause SMS", () => PauseChannelAsync("Sms"), "Secondary");
+        pauseWhatsAppButton = AddBusyAction("Pause WhatsApp",
+            () => PauseChannelAsync("WhatsApp"), "Secondary");
+        GateAction(historyButton, "Communication.View");
+        GateAction(settingsButton, "Communication.Configure");
+        GateAction(pauseSmsButton, "Communication.Configure");
+        GateAction(pauseWhatsAppButton, "Communication.Configure");
         SetContent(root);
 
         audience.SelectedIndexChanged += (_, _) => { ChangeAudienceFields(); InvalidatePreview(); };
@@ -111,7 +128,13 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         ChangeAudienceFields();
         SetStep(0);
         if (initialize) Defer(BindLookupsAsync);
-        Disposed += (_, _) => previewTable?.Dispose();
+        Disposed += (_, _) =>
+        {
+            previewTable?.Dispose();
+            (historyGrid.DataSource as DataTable)?.Dispose();
+            (settingsGrid.DataSource as DataTable)?.Dispose();
+            (templateGrid.DataSource as DataTable)?.Dispose();
+        };
     }
 
     private HumanCard TargetCard()
@@ -193,6 +216,141 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         return card;
     }
 
+    private HumanCard HistoryCard()
+    {
+        var card = HumanUi.Card("History",
+            "Confirmed is not Delivered. Distinguish pending, provider acknowledgements, failures and unknown outcomes.");
+        historyGrid.AutoGenerateColumns = false;
+        foreach (var (field, caption, width) in new[]
+        {
+            ("CreatedUtc", "Created (UTC)", 155),
+            ("Channel", "Channel", 75),
+            ("Purpose", "Purpose", 115),
+            ("State", "Batch state", 100),
+            ("Destinations", "Targets", 70),
+            ("InProgress", "Pending", 75),
+            ("Delivered", "Delivered", 85),
+            ("Failed", "Failed", 70),
+            ("Unknown", "Unknown", 75)
+        })
+            historyGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = field, DataPropertyName = field, HeaderText = caption,
+                MinimumWidth = width, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            });
+        card.Content.Controls.Add(historyGrid);
+        return card;
+    }
+
+    private HumanCard SettingsCard()
+    {
+        var card = HumanUi.Card("Settings",
+            "Administrator-controlled SMS and WhatsApp status, pause controls and school templates. Credentials are never stored here.");
+        settingsGrid.AutoGenerateColumns = false;
+        foreach (var (field, caption, width) in new[]
+        {
+            ("Channel", "Channel", 85), ("ProviderCode", "Provider", 175),
+            ("Enabled", "Enabled", 90), ("UpdatedUtc", "Updated (UTC)", 160)
+        })
+            settingsGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = field, DataPropertyName = field, HeaderText = caption,
+                MinimumWidth = width, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            });
+        templateGrid.AutoGenerateColumns = false;
+        foreach (var (field, caption, width) in new[]
+        {
+            ("Name", "Template", 150), ("Channel", "Channel", 85),
+            ("Purpose", "Purpose", 110), ("Body", "Message", 260),
+            ("Active", "Active", 70)
+        })
+            templateGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = field, DataPropertyName = field, HeaderText = caption,
+                MinimumWidth = width, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            });
+        var tables = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4,
+            Padding = new Padding(8), Margin = Padding.Empty
+        };
+        tables.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
+        tables.RowStyles.Add(new RowStyle(SizeType.Percent, 35));
+        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
+        tables.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
+        tables.Controls.Add(HumanUi.GroupHeading("Provider status — channels cannot be activated yet"), 0, 0);
+        tables.Controls.Add(settingsGrid, 0, 1);
+        tables.Controls.Add(HumanUi.GroupHeading("Templates (read-only until editor acceptance)"), 0, 2);
+        tables.Controls.Add(templateGrid, 0, 3);
+        card.Content.Controls.Add(tables);
+        return card;
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        try
+        {
+            int actor = CurrentUser.UserId;
+            int version = ++managementReadVersion;
+            DataTable table = await CommunicationManagementStore.ReadHistoryAsync();
+            if (IsDisposed || actor != CurrentUser.UserId || version != managementReadVersion)
+            {
+                table.Dispose(); return;
+            }
+            var old = historyGrid.DataSource as DataTable;
+            historyGrid.DataSource = null;
+            historyGrid.DataSource = table;
+            old?.Dispose();
+            SetStep(4);
+            SetStatus($"{table.Rows.Count} historical batches loaded. Provider submission does not imply delivery.");
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+    }
+
+    private async Task LoadSettingsAsync()
+    {
+        try
+        {
+            int actor = CurrentUser.UserId;
+            int version = ++managementReadVersion;
+            var channelTask = CommunicationManagementStore.ReadSettingsAsync();
+            var templateTask = CommunicationManagementStore.ReadTemplatesAsync();
+            await Task.WhenAll(channelTask, templateTask);
+            DataTable channels = channelTask.Result, templates = templateTask.Result;
+            if (IsDisposed || actor != CurrentUser.UserId || version != managementReadVersion)
+            {
+                channels.Dispose(); templates.Dispose(); return;
+            }
+            var oldChannels = settingsGrid.DataSource as DataTable;
+            var oldTemplates = templateGrid.DataSource as DataTable;
+            settingsGrid.DataSource = null;
+            templateGrid.DataSource = null;
+            settingsGrid.DataSource = channels;
+            templateGrid.DataSource = templates;
+            oldChannels?.Dispose(); oldTemplates?.Dispose();
+            SetStep(5);
+            SetStatus("Provider profiles are read-only; sending remains disabled pending verification.");
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+    }
+
+    private async Task PauseChannelAsync(string name)
+    {
+        if (!Confirm("Pause " + name + " school messaging? No queued message will be dispatched while paused.",
+                "Pause Channel", false))
+            return;
+        try
+        {
+            await CommunicationManagementStore.PauseAsync(name);
+            if (!IsDisposed) await LoadSettingsAsync();
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+    }
+
     private void ChangeAudienceFields()
     {
         var target = (CommunicationAudience)Math.Max(audience.SelectedIndex, 0);
@@ -219,16 +377,21 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     private void SetStep(int number)
     {
-        step = Math.Clamp(number, 0, 3);
+        step = Math.Clamp(number, 0, 5);
         string[] stages = { "1 / 4   Select Recipients", "2 / 4   Compose Message",
-            "3 / 4   Preview", "4 / 4   Confirm & Send" };
+            "3 / 4   Preview", "4 / 4   Confirm & Send",
+            "Communication History", "Communication Settings" };
         heading.Text = stages[step];
         for (int i = 0; i < cards.Count; i++) cards[i].Visible = i == step;
         cards[step].BringToFront();
-        previous.Enabled = step > 0;
+        previous.Visible = step < 4;
+        previous.Enabled = step is > 0 and < 4;
         next.Visible = step < 3;
         confirm.Visible = step == 3;
         confirm.Enabled = false;
+        newMessageButton.Visible = step >= 4;
+        pauseSmsButton.Visible = step == 5 && CurrentUser.HasPermission("Communication.Configure");
+        pauseWhatsAppButton.Visible = step == 5 && CurrentUser.HasPermission("Communication.Configure");
         if (step == 3)
             SetStatus("Sending remains disabled until the complete release acceptance is passed.",
                 PageStatusKind.Warning);
