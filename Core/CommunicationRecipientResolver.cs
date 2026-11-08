@@ -139,12 +139,12 @@ internal static class CommunicationRecipientResolver
             throw new ArgumentException("Choose SMS or WhatsApp.", nameof(target));
         if (!Enum.IsDefined(target.Audience))
             throw new ArgumentException("Unknown school message audience.", nameof(target));
-        if (target.Audience == CommunicationAudience.Campus && target.CampusId <= 0
-            || target.Audience == CommunicationAudience.Class
-                && (target.CampusId <= 0 || target.ClassId <= 0)
-            || target.Audience is CommunicationAudience.Student or CommunicationAudience.Family
-                && target.StudentId <= 0
-            || target.Audience == CommunicationAudience.Staff && target.StaffId <= 0)
+        if ((target.Audience == CommunicationAudience.Campus && target.CampusId <= 0)
+            || (target.Audience == CommunicationAudience.Class
+                && (target.CampusId <= 0 || target.ClassId <= 0))
+            || ((target.Audience is CommunicationAudience.Student or CommunicationAudience.Family)
+                && target.StudentId <= 0)
+            || (target.Audience == CommunicationAudience.Staff && target.StaffId <= 0))
             throw new ArgumentException("Select the required campus, class or school record.", nameof(target));
     }
 
