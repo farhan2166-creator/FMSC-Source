@@ -16,7 +16,8 @@ class PermissionPolicyChecks(unittest.TestCase):
         self.codes = {entry['Code'] for entry in self.catalog}
 
     def test_unique_base_catalog(self):
-        self.assertEqual(28, len(self.codes))
+        # Pinned 28 school permissions plus three separately-authorized Communication permissions.
+        self.assertEqual(31, len(self.codes))
         self.assertEqual(len(self.codes), len(self.catalog))
 
     def test_catalog_covers_actual_consumers_without_dead_options(self):
