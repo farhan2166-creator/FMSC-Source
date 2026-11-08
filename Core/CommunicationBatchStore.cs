@@ -15,9 +15,11 @@ internal static class CommunicationBatchStore
 {
     internal static async Task<CommunicationConfirmation> ConfirmPreviewAsync(
         CommunicationTarget target, CommunicationPreview preview,
-        string message, Guid clientRequestId)
+        string message, Guid clientRequestId, bool manualWhatsApp = false)
     {
         CommunicationRecipientResolver.Validate(target);
+        if (manualWhatsApp && target.Channel != "WhatsApp")
+            throw new ArgumentException("Manual handoff is only approved for WhatsApp.");
         if (!CurrentUser.HasPermission("Communication.Send"))
             throw new UnauthorizedAccessException("Communication.Send is required.");
         if (clientRequestId == Guid.Empty)
@@ -50,7 +52,8 @@ internal static class CommunicationBatchStore
             Value = destinations
         };
         int actor = CurrentUser.UserId;
-        DataTable result = await DatabaseHelper.QueryUserAsync("msg.ConfirmBatch",
+        DataTable result = await DatabaseHelper.QueryUserAsync(
+            manualWhatsApp ? "msg.ConfirmManualBatch" : "msg.ConfirmBatch",
             DatabaseHelper.P("@ClientRequestId", clientRequestId),
             DatabaseHelper.P("@Channel", target.Channel),
             DatabaseHelper.P("@Purpose", purpose),

@@ -5,7 +5,7 @@ using Microsoft.Data.SqlClient;
 namespace FMSC_SMS.Core;
 
 /// <summary>
-/// Explicit, one-at-a-time manual dispatch boundary. No background worker,
+/// Provider-neutral one-at-a-time manual dispatch boundary. No background worker,
 /// no automatic retry, no UI activation, and no sender startup side effects.
 /// Each outbound attempt is persisted by SQL BEFORE HTTP is invoked.
 /// </summary>
@@ -22,15 +22,21 @@ internal static class CommunicationDispatchStore
         if (!CurrentUser.HasPermission("Communication.Send"))
             throw new UnauthorizedAccessException("Manual school message sending is not authorized.");
         int actor=CurrentUser.UserId;
-        var credentials=CommunicationProviderCredentialStore.LoadForDispatch(
-            channel,CommunicationTwilioTransport.ProviderCode);
-        CommunicationTwilioTransport.ValidateCredentials(credentials);
+        // The stored channel profile is authoritative. Never select a provider
+        // merely from the local credential file or a hard-coded Twilio constant.
+        DataTable providerRows=await DatabaseHelper.QueryUserAsync("msg.ReadDispatchProvider",
+            DatabaseHelper.P("@Channel",channel)).ConfigureAwait(false);
+        if (actor!=CurrentUser.UserId || providerRows.Rows.Count!=1)
+            throw new InvalidOperationException("Channel authorization or signed-in account changed.");
+        string providerCode=Convert.ToString(providerRows.Rows[0]["ProviderCode"]) ?? "";
+        ICommunicationTransportAdapter adapter=CommunicationTransportRegistry.ResolveForDispatch(
+            channel,providerCode);
         Guid attemptKey=Guid.NewGuid();
         // A claim moves Pending to Unknown and records the attempt under lock.
         DataTable claim=await DatabaseHelper.QueryUserAsync("msg.ClaimRecipient",
             DatabaseHelper.P("@RecipientId",recipientId),
             DatabaseHelper.P("@AttemptKey",attemptKey),
-            DatabaseHelper.P("@ExpectedProviderCode",CommunicationTwilioTransport.ProviderCode));
+            DatabaseHelper.P("@ExpectedProviderCode",adapter.ProviderCode));
         if (actor!=CurrentUser.UserId)
             throw new InvalidOperationException("Signed-in account changed after claim. The attempt is Unknown and cannot be automatically resent.");
         if (claim.Rows.Count!=1)
@@ -40,17 +46,17 @@ internal static class CommunicationDispatchStore
             return new DispatchResult(false,null,"Excluded",Convert.ToString(row["ExclusionCode"]));
         long attemptId=Convert.ToInt64(row["AttemptId"]);
         if ((Guid)row["AttemptKey"]!=attemptKey
-            || Convert.ToString(row["ProviderCode"])!=CommunicationTwilioTransport.ProviderCode
+            || Convert.ToString(row["ProviderCode"])!=adapter.ProviderCode
             || Convert.ToString(row["Channel"])!=channel)
             throw new InvalidOperationException("Provider claim identity changed; the attempt remains Unknown.");
 
         // Do not retry on cancellation, timeouts, 5xx or lost SQL responses.
         // The corresponding recipient is already Unknown until resolved.
-        CommunicationTwilioTransport.Outcome outcome;
+        CommunicationDeliveryOutcome outcome;
         using (var handler=new HttpClientHandler { AllowAutoRedirect=false,UseCookies=false })
         using (var client=new HttpClient(handler) { Timeout=TimeSpan.FromSeconds(25) })
-            outcome=await CommunicationTwilioTransport.SendOnceAsync(
-                credentials,Convert.ToString(row["PhoneE164"])!,
+            outcome=await adapter.SendOnceAsync(
+                Convert.ToString(row["PhoneE164"])!,
                 Convert.ToString(row["Body"])!,client,token).ConfigureAwait(false);
 
         // Persist response using a non-cancelled bounded DB operation.
@@ -59,8 +65,8 @@ internal static class CommunicationDispatchStore
         await DatabaseHelper.QueryUserAsync("msg.RecordProviderResult",
             DatabaseHelper.P("@AttemptKey",attemptKey),
             DatabaseHelper.P("@Outcome",outcome.State),
-            DatabaseHelper.P("@ProviderMessageId",outcome.MessageSid),
-            DatabaseHelper.P("@FailureCode",outcome.ErrorCode)).ConfigureAwait(false);
+            DatabaseHelper.P("@ProviderMessageId",outcome.ProviderMessageId),
+            DatabaseHelper.P("@FailureCode",outcome.FailureCode)).ConfigureAwait(false);
         return new DispatchResult(true,attemptId,outcome.State,null);
     }
 
@@ -82,11 +88,12 @@ internal static class CommunicationDispatchStore
         string channel=Convert.ToString(rows.Rows[0]["Channel"])!;
         string provider=Convert.ToString(rows.Rows[0]["ProviderCode"])!;
         string sid=Convert.ToString(rows.Rows[0]["ProviderMessageId"])!;
-        var credential=CommunicationProviderCredentialStore.LoadForDispatch(channel,provider);
+        ICommunicationTransportAdapter adapter=CommunicationTransportRegistry.ResolveForDispatch(
+            channel,provider);
         using var handler=new HttpClientHandler { AllowAutoRedirect=false,UseCookies=false };
         using var client=new HttpClient(handler) { Timeout=TimeSpan.FromSeconds(25) };
-        var result=await CommunicationTwilioTransport.ReadStatusAsync(
-            credential,sid,client,token).ConfigureAwait(false);
+        CommunicationDeliveryOutcome result=await adapter.ReadStatusAsync(
+            sid,client,token).ConfigureAwait(false);
         if (result.State=="Unknown") return "Unknown";
         if (actor!=CurrentUser.UserId)
             throw new InvalidOperationException("Account changed during reconciliation.");

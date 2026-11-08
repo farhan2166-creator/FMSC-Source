@@ -88,6 +88,47 @@ internal static partial class Program
         fields["MessageStatus"] = "failed";
         Check(!Verified(url, header), "Callback body modification fails signed-payload verification");
 
+        var registry = assembly.GetType("FMSC_SMS.Core.CommunicationTransportRegistry")!;
+        var planned = registry.GetMethod("IsPlannedProfile", BindingFlags.NonPublic | BindingFlags.Static)!;
+        bool Planned(string channel, string provider) => (bool)planned.Invoke(null, new object[] { channel, provider })!;
+        Check(Planned("WhatsApp", "MetaCloud") && Planned("Email", "Smtp")
+            && Planned("WhatsApp", "Twilio") && Planned("WhatsApp", "WhatsAppBusinessManual")
+            && Planned("Email", "EmailClientManual") && !Planned("Sms", "Smtp")
+            && !Planned("Email", "Twilio") && !Planned("Sms", "WhatsAppBusinessManual"),
+            "Provider-neutral registry accepts only reviewed channel/provider and free-manual pairings.");
+        var adapterSelector = registry.GetMethod("ResolveForDispatch", BindingFlags.NonPublic | BindingFlags.Static)!;
+        bool NoLiveAdapter(string channel, string provider)
+        {
+            try { adapterSelector.Invoke(null, new object[] { channel, provider }); return false; }
+            catch (TargetInvocationException ex) when (ex.InnerException is NotSupportedException or InvalidOperationException)
+            { return true; }
+        }
+        Check(NoLiveAdapter("WhatsApp", "MetaCloud") && NoLiveAdapter("Email", "Smtp")
+            && NoLiveAdapter("WhatsApp", "WhatsAppBusinessManual")
+            && NoLiveAdapter("Email", "EmailClientManual")
+            && NoLiveAdapter("Sms", "Smtp"),
+            "Manual handoff and unimplemented transports reject API dispatch before any claim or network request.");
+
+        var manualStore = assembly.GetType("FMSC_SMS.Core.CommunicationManualHandoffStore")!;
+        var click = manualStore.GetMethod("BuildClickToChatLink",
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+        var chat = (Uri)click.Invoke(null,new object[] { "+923001234567", "School notice & fee #1\nReady?" })!;
+        Check(chat.Scheme == "https" && chat.Host == "wa.me"
+            && chat.AbsolutePath == "/923001234567"
+            && chat.Query.Contains("School%20notice",StringComparison.Ordinal)
+            && chat.Query.Contains("%26",StringComparison.Ordinal)
+            && Uri.UnescapeDataString(chat.Query).Contains("fee #1\nReady?",StringComparison.Ordinal),
+            "Free WhatsApp handoff generates only an official digits-only, URI-encoded click-to-chat link.");
+        bool invalidManualDestination = false;
+        try { click.Invoke(null,new object[] { "+9212345", "Hello" }); }
+        catch(TargetInvocationException ex) when (ex.InnerException is ArgumentException)
+        { invalidManualDestination = true; }
+        Check(invalidManualDestination,
+            "Manual WhatsApp cannot open a malformed or non-Pakistan-mobile destination.");
+        var manualDialogType = assembly.GetType("FMSC_SMS.Pages.Communication.CommunicationManualHandoffDialog")!;
+        Check(manualDialogType is not null,
+            "Operator-controlled WhatsApp session can be resumed with a dedicated native dialog.");
+
         var type = assembly.GetType("FMSC_SMS.Pages.Communication.CommunicationCenterPage")!;
         using var page = (Control)Activator.CreateInstance(type,
             BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { false }, null)!;

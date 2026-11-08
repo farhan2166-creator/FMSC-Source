@@ -53,11 +53,20 @@ internal static class CommunicationManagementStore
             DatabaseHelper.P("@ProviderCode", credential.ProviderCode));
     }
 
+    /// <summary>Explicit administrator activation of operator-controlled
+    /// WhatsApp Business handoff. No credentials, API or automatic sender.</summary>
+    internal static Task EnableManualWhatsAppAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication.Configure is required.");
+        return DatabaseHelper.ExecuteUserAsync("msg.EnableManualWhatsApp");
+    }
+
     internal static async Task PauseAsync(string channel)
     {
         if (!CurrentUser.HasPermission("Communication.Configure"))
             throw new UnauthorizedAccessException("Communication Settings permission is required.");
-        if (channel is not ("Sms" or "WhatsApp"))
+        if (channel is not ("Sms" or "WhatsApp" or "Email"))
             throw new ArgumentException("Unknown messaging channel.", nameof(channel));
         await DatabaseHelper.ExecuteUserAsync("msg.PauseChannel",
             DatabaseHelper.P("@Channel", channel));

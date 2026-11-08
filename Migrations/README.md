@@ -132,3 +132,30 @@ executed under the installer's existing transaction with pre-migration backup.
 The application must not expose sending until SQL writers, authorization, provider
 validation, verified callbacks and recovery checks are complete. See
 [Communication rebuild contract](../Docs/COMMUNICATION_REBUILD_V2.md).
+
+## Schema 10 — Provider-neutral groundwork (draft, not published)
+
+Migration `10.sql` requires version 9. It adds empty optional guardian/staff email
+fields on their existing school records, an opt-out-only email suppression table,
+a disabled Email channel, and a provider mapping for direct Meta WhatsApp and
+SMTP alongside Twilio. No historical guardian email is imported, and the single
+Admission school-message consent remains authoritative. Configuration never
+enables a channel.
+
+SMS/WhatsApp transactional confirmation and dispatch remain as in schema 9.
+**Email is not yet an eligible send channel**: no email audience resolver,
+provider credential vault, email recipient snapshots, email claim, SMTP adapter,
+verified email delivery or sending UI exists. Those require a separately reviewed
+migration and real acceptance. The manual dispatcher now selects an approved
+SQL provider identity and rejects unimplemented adapters before claiming an
+attempt. No publication, Workflow 04 bypass or automatic delivery is permitted.
+
+### Free WhatsApp manual extension within draft schema 10
+
+Schema 10 also supplies `msg.ManualBatch` and `msg.ManualHandoff` with a
+permission-checked, atomic manual confirmation, per-chat live revalidation,
+resume/skip/operator-report semantics, and a database trigger refusing a
+provider API attempt from manual profiles. The administrator must explicitly
+enable the free WhatsApp handoff; it never sends itself or produces verified
+delivery receipts. This is part of the unmerged migration-10 implementation,
+not a modification to the already-applied schema-9 migration.
