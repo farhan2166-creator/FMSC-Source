@@ -108,8 +108,9 @@ internal static partial class Program
                 }
                 fields["ContactNumber"].Text = "03001234567"; fields["Email"].Text = "office@example.com";
                 Application.DoEvents();
-                Check((bool)page.GetType().GetMethod("CanSaveRecord", flags)!.Invoke(page, null)!,
-                    "Correcting campus contacts restores validation without requiring a fixed card height");
+                Check(new[] { "ContactNumber", "Email" }
+                        .All(key => !messages[fields[key]].Visible || string.IsNullOrWhiteSpace(messages[fields[key]].Text)),
+                    "Correcting campus contacts clears their errors regardless of unrelated required fields or card height");
             }
             host.ClientSize = new Size(size.Width == 1100 ? 850 : 1100, size.Height);
             Application.DoEvents();
