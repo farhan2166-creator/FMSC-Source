@@ -6,7 +6,7 @@
 
 One primary page, four visible steps:
 
-1. **Select Recipients.** Use existing `StudentPicker`, `StaffPicker` and family/sibling selection, not an isolated communication contact editor. Broader filters are Campus, Class, All active students and Outstanding Fees. Recipient selection always resolves the *current* student/staff record and current placement/fee data; it never creates a second contact directory.
+1. **Select Recipients.** **Whole school, Campus, Class and Outstanding Fees are automatic group targets:** the administrator selects a scope once, not each student. Every active matching student whose Admission consent is **Yes** is automatically a candidate. The existing `StudentPicker` and `StaffPicker` are used **only for one specific record**, and one Student Picker selection may target an entire sibling/family group. No isolated communication contact editor or separate consent screen is permitted. Recipients always resolve from the current school record, placement and financial data; never from a second contact directory.
 2. **Compose Message.** Choose SMS or WhatsApp and a template or enter an approved direct message. Only relevant template placeholders appear; reject unexpanded fields.
 3. **Preview.** Display exact destination count, included recipients, suppressed or invalid destinations, missing Admission consent, duplicates, and estimated SMS segments. For outstanding fees display the billing period and amount snapshot and warn that balances may change.
 4. **Confirm & Send.** Explicit second confirmation after preview. No send at Admission, Fee Collection, opening the page, scheduling, or application start. No default enabled automation.
@@ -15,7 +15,7 @@ Keep **History** reachable from the same page, with Pending, Submitted, Accepted
 
 ## Consent authority
 
-- One Yes/No field in Student Admission covers the school's supported guardian SMS, WhatsApp, school notices and fee reminders. The authoritative value is `dbo.Students.SchoolMessageConsent`; NULL means **not recorded** and is excluded.
+- **Admission Yes is final.** A recorded Yes automatically qualifies the student for supported guardian SMS, WhatsApp, school notices and fee reminders whenever the student matches the administrator's chosen group; no second confirmation, verification or consent step. A recorded No never qualifies a student. The authoritative value is `dbo.Students.SchoolMessageConsent`; NULL means **not recorded** and is excluded.
 - The existing `ContactNumber` and `AlternateContactNumber` are unchanged. Never infer consent from a phone number, a family/sibling relationship or historical migration 5–7 choices.
 - `msg.ConsentAudit` logs changes without becoming another consent source. The write procedure checks `Students.Admit` or `Students.Administer`, holds a row lock, is idempotent and updates the admission authority.
 - Separate `msg.Suppression` holds channel-specific opt-outs only, not a second contact book. Opt-out overrides Admission Yes. A phone changed since preview, a withdrawn consent or an opt-out must exclude the recipient again at claim time.
@@ -42,3 +42,10 @@ The fresh `msg` schema holds only the necessary operational state: `ChannelSetti
 5. Merge only a reviewed, fully accepted replacement. Workflow 04 must remain manual and require fresh exact-commit private Sandbox attestation. Never publish a schema-8 retirement-only build.
 
 **Known incomplete pieces while this is a draft:** recipient query engine, send/claim SQL procedures, encrypted provider configuration, real adapters, verified webhooks, user-facing Communication Center, and end-to-end acceptance. The database tables alone do not authorize sending.
+
+## Implementation checkpoint — automatic selection and preview
+
+- `Core/CommunicationRecipientResolver.cs` now resolves **all active students, one campus, one campus/class, unpaid balances, one student, a family, or one staff member** directly from live school records. It never requires a picker for bulk campus/class/school selections. An Admission Yes qualifies automatically; No and Not Recorded are counted as excluded. Only current valid Pakistan mobile destinations can be considered, channel opt-outs override Yes, and shared guardian numbers deduplicate in the same preview.
+- `Pages/Communication/CommunicationCenterPage.cs` implements the four visible steps, including a live SQL-backed read-only preview and exclusion counts. **Confirm & Send is deliberately disabled**, and the page is not yet in production navigation; it is not a working delivery feature.
+- `Tests/ThemeSmokeChecks/Program.Communication.cs` checks phone normalization, automatic Yes eligibility, exclusion/deduplication and the disabled send action; desktop CI invokes the focused suite.
+- **Still required before exposure:** transactionally authorized, idempotent send confirmation and live revalidation; provider adapters and secret storage, verified callbacks, retries/unknown recovery; History/Settings; real installer and private exact-commit acceptance. No messages have been sent by the rebuild.
