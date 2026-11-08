@@ -28,10 +28,16 @@ BEGIN
     IF EXISTS (SELECT 1 FROM sys.triggers
                WHERE parent_id=OBJECT_ID(N'dbo.StudentGuardianCommunication'))
         THROW 51044,'Unknown guardian communication trigger; review before retirement.',1;
+    -- Ignore dependencies owned by the retired table itself (such as its
+    -- CK_StudentGuardianCommunication_ConsentPhone check constraint).
+    -- Independently owned procedures/views still block retirement. Internal
+    -- comm functions are already scoped for retirement below.
     IF EXISTS (SELECT 1 FROM sys.sql_expression_dependencies D
                JOIN sys.objects R ON R.object_id=D.referencing_id
                WHERE D.referenced_id=OBJECT_ID(N'dbo.StudentGuardianCommunication')
-                 AND R.schema_id<>ISNULL(SCHEMA_ID(N'comm'),-1))
+                 AND R.schema_id<>ISNULL(SCHEMA_ID(N'comm'),-1)
+                 AND R.object_id<>OBJECT_ID(N'dbo.StudentGuardianCommunication')
+                 AND R.parent_object_id<>OBJECT_ID(N'dbo.StudentGuardianCommunication'))
         THROW 51045,'External SQL code depends on guardian communication; review before retirement.',1;
 END;
 

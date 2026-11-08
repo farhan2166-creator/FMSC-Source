@@ -302,6 +302,17 @@ def main():
                 expect_migration8_refusal(migration, 51042)
                 checked("remove unsupported guardian extension",
                     lambda: sql(catalog, "ALTER TABLE dbo.StudentGuardianCommunication DROP COLUMN FMSC_Test_UnsupportedExtension;"))
+                # The guardian table's own schema-5 CHECK constraint must not
+                # be mistaken for an independently owned SQL dependency.
+                # An actual dbo view referencing guardian communication must fail.
+                checked("create external guardian SQL dependency",
+                    lambda: sql(catalog, """
+                        EXEC(N'CREATE VIEW dbo.FMSC_Test_Migration8ExternalGuardianView
+                            AS SELECT AdmissionId FROM dbo.StudentGuardianCommunication;');
+                        """))
+                expect_migration8_refusal(migration, 51045)
+                checked("remove external guardian SQL dependency",
+                    lambda: sql(catalog, "DROP VIEW dbo.FMSC_Test_Migration8ExternalGuardianView;"))
                 # An external FK must also fail safely instead of being dropped.
                 checked("create external legacy dependency",
                     lambda: sql(catalog, """
