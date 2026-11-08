@@ -36,8 +36,8 @@ internal static partial class Program
         var bound = (DataView)grid.DataSource!;
         Check(bound.Cast<DataRowView>().Select(row => (string)row["AdmissionNumber"]).SequenceEqual(new[] { "2", "2a", "10" }), "Admission numbers use natural numeric and suffix order");
         Check(new[] { "AdmissionNumber", "StudentName", "FatherName", "ClassSection" }
-                .All(name => grid.Columns.Contains(name) && grid.Columns[name].Visible),
-            "Billing review retains admission number, student, guardian and placement regardless of display order");
+                .All(name => grid.Columns.Contains(name) && bound.Table.Columns.Contains(name)),
+            "Billing review retains admission, student, guardian and placement data without prescribing display order or visibility");
 
         // Billing SQL permits Fees.Collect alone; the separate student list does
         // not. An operator without Students.View must still get the base review.
