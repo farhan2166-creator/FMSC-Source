@@ -1,6 +1,8 @@
 # Production database migrations
 
-The first production release uses application **1.0.0**, database **1**.
+**Current source target (8 November 2026): FMSC application 1.0.16, database schema 10.** The committed consecutive production migration chain is `2.sql`–`10.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
+
+**Historical starting point:** The first production release used application **1.0.0**, database **1**.
 The schema-1 baseline contains the complete original production schema.
 Application **1.0.1** requires schema **2**. Migration `2.sql` removes the
 generic audit trail. Fee Change History continues to show stored fee-rate
@@ -35,7 +37,7 @@ communication module, when present, gets a permission-checked contact-linking
 procedure plus pre-send consent revalidation. No messages send automatically and
 the migration does not install the optional module.
 
-Disposable tests publish the complete schema-only baseline directly at version 1. Old development migrations are retired and must never be replayed on baseline 1. See [the baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
+Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed **2.sql–10.sql** production chain where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts. See [the historical baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
 
 # Apply migrations without the installer
 
@@ -95,7 +97,7 @@ SHA-256-checked Microsoft go-sqlcmd build as the installer is obtained.
 **This is a database mutation tool. Test on a disposable copy first.**
 See `Docs/BACKUP_RECOVERY.md` for recovery guidance.
 
-## Schema 8 — Retired Communication Center (staged, not published)
+## Schema 8 — Retired Communication Center (committed destructive migration)
 
 Migration `8.sql` retires the optional `comm` module and
 `dbo.StudentGuardianCommunication` (the former Admission communication add-on).
@@ -110,15 +112,13 @@ legacy tables, external foreign keys / SQL dependencies, and unexpected guardian
 schema extensions are refused before retirement. Migrations 2–7 are unchanged.
 The installer provides a verified backup and the enclosing SQL transaction;
 if migration fails, recovery restores the previous working application/database.
-**Do not use this destructive retirement on a live school database until its
-separate restored schema-7 test is accepted.** The backup remains the only
-retention source for intentionally discarded old communication records.
+**Do not apply this destructive retirement to any live school database without the owner's approved backup and release-specific restored-schema acceptance.** The prior schema-7 testing and the owner's successful local schema-10 upgrade do not authorize arbitrary future live migrations. The backup remains the only retention source for intentionally discarded old communication records.
 
 The new `msg` foundation in migration 9 starts with disabled channels and no
 outbound work. Dashboard access to preview, history and permitted settings does
 not enable Confirm & Send, the provider, a worker or automatic messaging.
 
-## Schema 9 — New Communication Center foundation (draft, not published)
+## Schema 9 — New Communication Center foundation (committed migration)
 
 Migration `9.sql` requires schema 8 and creates a **new** `msg` schema. It does not
 restore `comm`, `dbo.StudentGuardianCommunication`, historical contact lists,
@@ -133,7 +133,7 @@ The application must not expose sending until SQL writers, authorization, provid
 validation, verified callbacks and recovery checks are complete. See
 [Communication rebuild contract](../Docs/COMMUNICATION_REBUILD_V2.md).
 
-## Schema 10 — Provider-neutral groundwork (draft, not published)
+## Schema 10 — Provider-neutral groundwork and manual WhatsApp (current source target)
 
 Migration `10.sql` requires version 9. It adds empty optional guardian/staff email
 fields on their existing school records, an opt-out-only email suppression table,
@@ -148,14 +148,13 @@ provider credential vault, email recipient snapshots, email claim, SMTP adapter,
 verified email delivery or sending UI exists. Those require a separately reviewed
 migration and real acceptance. The manual dispatcher now selects an approved
 SQL provider identity and rejects unimplemented adapters before claiming an
-attempt. No publication, Workflow 04 bypass or automatic delivery is permitted.
+attempt. An actual application publication still requires the normal release gates and exact-commit Sandbox acceptance; no automatic delivery is enabled.
 
-### Free WhatsApp manual extension within draft schema 10
+### Free WhatsApp Business manual extension within schema 10
 
 Schema 10 also supplies `msg.ManualBatch` and `msg.ManualHandoff` with a
 permission-checked, atomic manual confirmation, per-chat live revalidation,
 resume/skip/operator-report semantics, and a database trigger refusing a
 provider API attempt from manual profiles. The administrator must explicitly
 enable the free WhatsApp handoff; it never sends itself or produces verified
-delivery receipts. This is part of the unmerged migration-10 implementation,
-not a modification to the already-applied schema-9 migration.
+delivery receipts. This extension is in the **committed `10.sql`**; migration 9 is not retroactively edited. An operator report does not prove provider delivery. A database upgrade to 10 alone cannot add the new WinForms UI to an older installed executable; use a validated matching application build.

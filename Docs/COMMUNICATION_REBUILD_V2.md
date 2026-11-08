@@ -1,5 +1,7 @@
 # Communication Center v2 — clean rebuild contract (schema 9)
 
+> **Historical design/checkpoint record, not current implementation status.** Draft and unmerged descriptions below document development decisions; the current source target is **schema 10 / application 1.0.16**, including the operator-controlled free WhatsApp Business handoff. For operative behavior see [Communication Center](COMMUNICATION_CENTER.md) and [migrations 8–10](../Migrations/README.md). No statement in this historical record constitutes current release acceptance.
+
 **Status:** implementation branch, **not deployable** until real SQL, native UI, provider and private-Sandbox acceptance pass. Schema 8 is an intentionally unreleasable retirement waypoint. This design does not reuse `comm` or `dbo.StudentGuardianCommunication`.
 
 ## Operator workflow

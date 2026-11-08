@@ -2,7 +2,7 @@
 
 **Release candidate commit:** `________________`  
 **Application version:** `________________`  
-**Required DB schema version:** `________________`. Verify both `DatabaseHelper.cs` and `Installer/core.ps1` match at the candidate commit. The original baseline is schema 1. See [production migrations](../Migrations/README.md).
+**Required DB schema version:** `________________`. Verify the application-required version and `Installer/core.ps1` match at the candidate commit. As of 8 November 2026 the current source/installer specifies **application 1.0.16 / schema 10**; schema 1 is the historical baseline, not the active target. See [production migrations](../Migrations/README.md).
 **Reviewer and test date:** `________________`  
 **Windows account / OS / target hardware:** `________________`
 
@@ -28,8 +28,8 @@
 
 - [ ] [Complete installer workflow](../.github/workflows/fmsc-complete-installer.yml) finished **successfully** at the same SHA.
 - [ ] Downloaded database-free Actions artifact and recorded URL, run ID and checksum.
-- [ ] Package contains `FMSC_SMS/`, `Install FMSC_SMS.bat`, `core.ps1`, `Tools/SqlLocalDB.msi`, `Tools/sqlcmd.exe`, a `Migrations/` folder (empty when there are no pending scripts), required app resources, readme and communication deployment guide. The original schema-1 baseline shipped no migrations; current source 1.0.3/schema 3 includes `2.sql` and `3.sql`. Confirm the release's complete migration chain and matching database requirements. Never replay old development versions 20–70 onto the baseline-1 school database.
-- [ ] Copied installer and any pending numbered SQL files match the source commit; copied-helper migration discovery/version tests passed. Start a new workflow run for new source rather than rerunning an older run.
+- [ ] Package contains `FMSC_SMS/`, `Install FMSC_SMS.bat`, `core.ps1`, `Tools/SqlLocalDB.msi`, `Tools/sqlcmd.exe`, the applicable versioned `Migrations/` folder, required app resources, readme and communication deployment guide. For the current source **1.0.16/schema 10**, the committed production chain contains **2.sql through 10.sql**. The installer applies only pending numbers for the attached database. Confirm every required intermediate migration is present and verify the supported source/target versions; **never replay retired pre-baseline development migrations**.
+- [ ] Copied installer and numbered SQL files match the source commit; copied-helper migration discovery/version tests passed. The staged application's files also pass source-to-staging SHA-256 checks before activation (Audit 02). Start a new workflow run for new source rather than rerunning an older run.
 - [ ] Microsoft LocalDB MSI signature and pinned sqlcmd digest were verified by the workflow; double-check source of prerequisites if changed.
 - [ ] DB snapshot is **not** included in Actions. The owner locally supplies matching **detached** `FMSC_DB.mdf` and `FMSC_DB_log.ldf` only for fresh-install validation.
 - [ ] Confirm expected `FMSC_DB` schema and database version against supplied snapshot; **do not replace existing school data or publish DACPAC over MDF/LDF**.
@@ -41,7 +41,7 @@
 - [ ] Existing schema version upgraded with correct migration order using a restored **disposable clone**; original data and recovery scope preserved.
 - [ ] Verified pre-migration backup and rollback/recovery scenario tested.
 - [ ] App startup and full schema compatibility check pass after install/upgrade.
-- [ ] Communication module: current installers preserve the supplied/installed module and verify its runtime contract; the migrations align the supported callback and retire its audit write. The retired optional setup is not offered again. Verify contacts/history/settings are preserved and sending remains disabled until explicitly configured.
+- [ ] Communication Center: confirm that `8.sql` deliberately retires `comm` and old `dbo.StudentGuardianCommunication` data **without archiving/importing it** (approved owner decision); preserve unrelated student/staff/finance records. Confirm `9.sql` creates disabled `msg` messaging and explicit Admission consent, `10.sql` adds the provider-neutral/manual WhatsApp handoff, and the schema-10 runtime structure check passes. Test manual one-chat-at-a-time open, pause, opt-out, consent and operator-report behavior on a disposable clone. Never interpret a chat link or operator report as provider-verified delivery; SMTP, Meta Cloud API and automatic sends remain disabled.
 - [ ] Deliberately invalid, newer, missing and mismatched database/prerequisite scenarios refuse unsafe installation.
 
 ## 5. School workflow acceptance

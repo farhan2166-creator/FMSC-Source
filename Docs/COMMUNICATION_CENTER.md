@@ -11,20 +11,24 @@ Normal student/admission/staff/financial records are never discarded. An old
 communication preference is not treated as consent under the new schema.
 
 `Migrations/9.sql` creates a separate `msg` system with new explicit consent
-on the student Admission record. Both SMS and WhatsApp are disabled at
-installation. Authorized operators can open the dashboard Communication Center
-to select recipients, compose and preview, inspect history, and access permitted
-settings. **Confirm & Send remains disabled** until secured callbacks, a real
-provider and end-to-end acceptance are complete. No automatic messaging.
+on the student Admission record. SMS and WhatsApp are initially disabled.
+Authorized operators can select recipients, compose and preview, inspect
+history and use permitted settings. Schema 10 supports **explicitly enabled free
+WhatsApp Business manual handoff** (one operator-opened chat at a time).
+Automatic SMS/WhatsApp sending and provider-verified delivery remain unavailable
+without separately approved live provider integration. No automatic messaging.
 
 Unknown legacy schema changes, external dependencies or unreviewed objects must
 fail closed with rollback rather than delete unrelated data. Historical migrations
 2–7 are immutable.
 
-**Release gate:** PR #128 must not merge or publish before the user's restored
-schema-7 test, SQL rollback checks and exact-commit release acceptance.
+**Release gate:** The relevant schema-8/9/10 source changes are committed;
+PR #128 is no longer a pending merge gate. A **new application publication**
+still requires its own exact-commit Windows, disposable SQL and private Sandbox
+acceptance. An already-applied migration is not proof that the new UI binary
+was installed.
 
-## Provider-neutral extension — schema 10 (merged; not yet published)
+## Provider-neutral extension — schema 10 (committed source; publication separately gated)
 
 The existing Twilio adapter is optional. New provider-neutral dispatcher
 interfaces select an explicitly enabled SQL provider, while unknown providers
@@ -71,7 +75,8 @@ Every subsequent chat opening rechecks the student's live Admission Yes,
 active/scope membership, current phone and WhatsApp opt-out before exposing
 its phone/message. Direct API attempts from manually configured WhatsApp are
 blocked both in C# and by a database trigger. All other direct channels remain
-disabled pending actual provider acceptance. Migration 10 is still **draft**.
+disabled pending actual provider acceptance. Migration 10 is **committed in the
+source**; publication and local executable installation are separate steps.
 
 ## Current UI and release distinction
 
