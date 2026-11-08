@@ -115,8 +115,37 @@ Write-Output 'LATEST SOURCE NOT PROVEN INSTALLED: this published release predate
 Write-Output 'COMMUNICATION CENTER UI: MANUAL ACCEPTANCE PENDING (use synthetic recipients; do not send real messages).'
 Write-Output 'No files, school database rows, permissions, messages, or update channels were changed.'
 
-$automatedPass = $binaryMatchesPublication -and $schema -eq $publishedSchema -and
-    $compatibilityStatus -eq 'PASS: published application structural compatibility' -and
-    $runningSelection -ne 'DIFFERENT RUNNING EXECUTABLE OR MULTIPLE PROCESSES'
+# An executable hash is not enough when a published BUILD_INFO exists but has
+# been replaced or corrupted. Keep BUILD_INFO optional for older installations,
+# while requiring a byte-for-byte match whenever the file is present.
+# Pure outcome predicate is reusable by synthetic, no-installation regression tests.
+function Test-ReleaseProbeAcceptance {
+    param(
+        [bool]$BinaryMatchesPublication,
+        [string]$BuildInfoStatus,
+        [int]$Schema,
+        [int]$RequiredSchema,
+        [string]$CompatibilityStatus,
+        [string]$RunningSelection
+    )
+    return (
+        $BinaryMatchesPublication -and
+        $BuildInfoStatus -ne 'DIFFERS FROM PUBLISHED BUILD_INFO' -and
+        $Schema -eq $RequiredSchema -and
+        $CompatibilityStatus -eq 'PASS: published application structural compatibility' -and
+        $RunningSelection -ne 'DIFFERENT RUNNING EXECUTABLE OR MULTIPLE PROCESSES'
+    )
+}
+
+$automatedPass = Test-ReleaseProbeAcceptance `
+    -BinaryMatchesPublication $binaryMatchesPublication `
+    -BuildInfoStatus $buildInfoStatus `
+    -Schema $schema `
+    -RequiredSchema $publishedSchema `
+    -CompatibilityStatus $compatibilityStatus `
+    -RunningSelection $runningSelection
+if ($buildInfoStatus -eq 'DIFFERS FROM PUBLISHED BUILD_INFO') {
+    Write-Output 'REJECTED: BUILD_INFO.txt does not match the verified published build.'
+}
 if (-not $automatedPass) { exit 2 }
 exit 0
