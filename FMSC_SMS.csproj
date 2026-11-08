@@ -76,7 +76,7 @@
             Inputs="$(MSBuildProjectDirectory)/Installer/FMSC.Setup.cs"
             Outputs="$(BaseIntermediateOutputPath)FmscSetup/$(Configuration)/FMSC.Setup.exe">
         <MakeDir Directories="$(BaseIntermediateOutputPath)FmscSetup/$(Configuration)" />
-        <Exec Command="&quot;$(windir)\Microsoft.NET\Framework64\v4.0.30319\csc.exe&quot; /nologo /target:winexe /optimize+ /win32icon:&quot;$(MSBuildProjectDirectory)\Assets\FMSC_Logo Icon.ico&quot; /out:&quot;$(BaseIntermediateOutputPath)FmscSetup\$(Configuration)\FMSC.Setup.exe&quot; &quot;$(MSBuildProjectDirectory)\Installer\FMSC.Setup.cs&quot;" />
+        <Exec Command="&quot;$(windir)\Microsoft.NET\Framework64\v4.0.30319\csc.exe&quot; /nologo /target:winexe /optimize+ /win32icon:&quot;$(MSBuildProjectDirectory)\Assets\FMSC_Logo_Circular.ico&quot; /out:&quot;$(BaseIntermediateOutputPath)FmscSetup\$(Configuration)\FMSC.Setup.exe&quot; &quot;$(MSBuildProjectDirectory)\Installer\FMSC.Setup.cs&quot;" />
     </Target>
     <!-- Opt-in test binary; normal builds contain no disposable-target override. -->
     <PropertyGroup Condition="'$(FmscLevel2)' == 'true'">
@@ -106,7 +106,7 @@
 		<!-- Keep English and Urdu library translations; neutral English resources remain embedded. -->
 		<SatelliteResourceLanguages>en;en-US;en-GB;ur;ur-PK;ur-IN</SatelliteResourceLanguages>
 		<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-		<ApplicationIcon>Assets\FMSC_Logo Icon.ico</ApplicationIcon>
+		<ApplicationIcon>Assets\FMSC_Logo_Circular.ico</ApplicationIcon>
 		<!-- The installer version is the only editable application version; keep assembly/file metadata in sync. -->
 		<!-- Read the same exact source used by installer schema validation. -->
 		<_FmscInstallerText>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)/Installer/core.ps1'))</_FmscInstallerText>
@@ -133,7 +133,7 @@
 		<Content Include="Assets\finance.png">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
-		<Content Include="Assets\FMSC_Logo Icon.ico" CopyToOutputDirectory="PreserveNewest" />
+		<Content Include="Assets\FMSC_Logo_Circular.ico" CopyToOutputDirectory="PreserveNewest" />
 		<Content Include="Assets\logo.png" CopyToOutputDirectory="PreserveNewest" />
 		<Content Include="Assets\header.png" CopyToOutputDirectory="PreserveNewest" />
 		<Content Include="Assets\promotion.png">
