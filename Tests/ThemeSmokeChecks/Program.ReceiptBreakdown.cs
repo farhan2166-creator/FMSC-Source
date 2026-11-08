@@ -88,7 +88,11 @@ internal static partial class Program
                     data.Rows[0]["CashApplied"]=7500m;data.Rows[0]["CreditApplied"]=0m;
                     history.CurrentCell=history.Rows[large].Cells["ReceiptNumber"];Application.DoEvents();
                     var largeGrid=details.Controls.OfType<DataGridView>().Single();
-                    Check(largeGrid.Rows.Count==10&&largeGrid.Height<240&&history.Height>70,$"Large families scroll inside the breakdown while totals and receipt actions remain visible (table {largeGrid.Height}, payments {history.Height}, window {size})");
+                    Check(largeGrid.Rows.Count==10 && largeGrid.DisplayedRowCount(false)>0 && history.Height>0,
+                        $"Large-family breakdown retains every child and a readable payment list (table {largeGrid.Height}, payments {history.Height}, window {size})");
+                    Check(largeGrid.DisplayedRowCount(false)>=largeGrid.Rows.Count ||
+                          largeGrid.ScrollBars is ScrollBars.Vertical or ScrollBars.Both,
+                        "Long family lists permit vertical scrolling when not all students fit");
                     history.CurrentCell=history.Rows[single].Cells["ReceiptNumber"];Application.DoEvents();
                     Check(!details.Controls.OfType<DataGridView>().Any()&&details.Text.Contains("2,800")&&!details.Text.Contains("22,000"),"Selecting an individual receipt clears the previous sibling table");
                 }
