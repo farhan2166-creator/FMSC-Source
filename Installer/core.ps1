@@ -141,6 +141,26 @@ function Open-UpdateWindow {
     Add-Type -AssemblyName System.Drawing
     [Windows.Forms.Application]::EnableVisualStyles()
     $script:UpdateWindow = New-Object Windows.Forms.Form
+    # The installer UI runs in PowerShell, but its window/taskbar should carry
+    # FMSC's own icon. Prefer the packaged GUI setup binary, then the working
+    # installation, then the candidate payload (first-time setup).
+    # Icon loading is cosmetic and must never interfere with recovery.
+    foreach ($iconExe in @(
+        (Join-Path $PSScriptRoot 'FMSC.Setup.exe'),
+        (Join-Path $AppDir 'FMSC_SMS.exe'),
+        (Join-Path $AppSource 'FMSC_SMS.exe')
+    )) {
+        if (-not (Test-Path -LiteralPath $iconExe -PathType Leaf)) { continue }
+        try {
+            $icon = [Drawing.Icon]::ExtractAssociatedIcon($iconExe)
+            if ($icon) {
+                $script:UpdateWindow.Icon = $icon
+                break
+            }
+        } catch {
+            # Fall back to the next icon; never fail the installation for branding.
+        }
+    }
     $script:UpdateWindow.AutoScaleMode = 'None' # Avoid a second WinForms font-based size pass.
     $script:UpdateWindow.Text = if ($PreparedRoot) { 'FMSC - Installing update' } else { 'FMSC - First-time setup' }
     # Shared first-install and prepared-update window: match the FMSC login dialog
