@@ -190,5 +190,47 @@ foreach ($mustHave in @('4c5b5201851b202e2b7ff33c26cabc20bcd00b9c4486be5e99df22d
 if ($probeSource -match '(?i)\b(INSERT\s+INTO|UPDATE\s+dbo[.]|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE)\b') {
     throw 'Audit 04 verifier must never edit school SQL records.'
 }
+# Audit 05: execute only the isolated acceptance predicate with synthetic
+# evidence; never launch FMSC, inspect real SQL, or alter an installed file.
+$acceptanceHelpers = @($probeAst.FindAll({
+    param($n)
+    $n -is [Management.Automation.Language.FunctionDefinitionAst] -and
+    $n.Name -eq 'Test-ReleaseProbeAcceptance'
+},$true))
+if ($acceptanceHelpers.Count -ne 1) {
+    throw 'The release probe needs exactly one testable acceptance decision.'
+}
+Invoke-Expression $acceptanceHelpers[0].Extent.Text
+$probeCase = @{
+    BinaryMatchesPublication = $true
+    BuildInfoStatus = 'MATCHES PUBLISHED BUILD_INFO'
+    Schema = 10
+    RequiredSchema = 10
+    CompatibilityStatus = 'PASS: published application structural compatibility'
+    RunningSelection = 'MATCH'
+}
+if (-not (Test-ReleaseProbeAcceptance @probeCase)) {
+    throw 'Matching publication evidence should pass the release probe.'
+}
+$probeCase.BuildInfoStatus = 'DIFFERS FROM PUBLISHED BUILD_INFO'
+if (Test-ReleaseProbeAcceptance @probeCase) {
+    throw 'Different BUILD_INFO bytes must refuse release-probe acceptance.'
+}
+$probeCase.BuildInfoStatus = 'NOT PRESENT'
+if (-not (Test-ReleaseProbeAcceptance @probeCase)) {
+    throw 'The existing optional BUILD_INFO policy must be preserved.'
+}
+$probeCase.BinaryMatchesPublication = $false
+if (Test-ReleaseProbeAcceptance @probeCase) { throw 'Untrusted executable bytes must fail.' }
+$probeCase.BinaryMatchesPublication = $true
+$probeCase.RunningSelection = 'DIFFERENT RUNNING EXECUTABLE OR MULTIPLE PROCESSES'
+if (Test-ReleaseProbeAcceptance @probeCase) { throw 'Wrong running executable must fail.' }
+$probeCase.RunningSelection = 'MATCH'
+$probeCase.Schema = 9
+if (Test-ReleaseProbeAcceptance @probeCase) { throw 'Wrong SQL schema must fail.' }
+$probeCase.Schema = 10
+$probeCase.CompatibilityStatus = 'FAILED: verifier exit 2'
+if (Test-ReleaseProbeAcceptance @probeCase) { throw 'Incompatible SQL must fail.' }
+Write-Output 'PASS: 7 isolated publication acceptance cases, including mismatched and optional BUILD_INFO, without SQL or executable launch.'
 Write-Output 'PASS: read-only installed-release helper parses and retains pinned provenance, SQL read and verified executable guard.'
 $global:LASTEXITCODE = 0
