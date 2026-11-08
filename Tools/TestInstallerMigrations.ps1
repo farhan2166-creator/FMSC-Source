@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseInput((Get-Content -LiteralPath $InstallerPath -Raw),[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw 'Installer PowerShell does not parse.' }
-foreach ($name in @('Convert-ToVersion','Compare-ApplicationVersion','Convert-ToDbVersion','Invoke-PendingMigrations','Invoke-SqlMigration','Invoke-InstallationDatabaseCheck')) {
+foreach ($name in @('Convert-ToVersion','Compare-ApplicationVersion','Convert-ToDbVersion','Invoke-PendingMigrations','Invoke-SqlMigration','Invoke-InstallationDatabaseCheck','Get-ApplicationFileManifest','Test-StagedApplication')) {
     $functions = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name },$true))
     if ($functions.Count -ne 1) { throw "Expected one $name helper." }
     Invoke-Expression $functions[0].Extent.Text
@@ -108,6 +108,65 @@ try {
     $script:sqlExit=1; $failure=''
     try{& $sqlRunner -FilePath $fixturePath -VersionBefore 6 -ExpectedVersion 8}catch{$failure=$_.Exception.Message}
     if(-not $failure.Contains('Migration 8 failed') -or (Test-Path -LiteralPath $script:wrapperPath)){throw 'SQL failure/cleanup must be reported.'}
+    # Audit 02: exercise the production staging verifier against owned scratch files.
+    # A size-only comparison would incorrectly accept the equal-byte corruption.
+    $published = Join-Path $scratch 'published'
+    $staged = Join-Path $scratch 'staged'
+    $live = Join-Path $scratch 'existing-app'
+    foreach ($folder in @($published,$staged,$live)) {
+        New-Item -ItemType Directory -Path (Join-Path $folder 'assets') -Force | Out-Null
+    }
+    $publishedExe = Join-Path $published 'FMSC_SMS.exe'
+    $stagedExe = Join-Path $staged 'FMSC_SMS.exe'
+    $publishedAsset = Join-Path $published 'assets\theme.ini'
+    $stagedAsset = Join-Path $staged 'assets\theme.ini'
+    $liveExe = Join-Path $live 'FMSC_SMS.exe'
+    [IO.File]::WriteAllBytes($publishedExe,[Text.Encoding]::ASCII.GetBytes('GOOD'))
+    [IO.File]::WriteAllBytes($publishedAsset,[Text.Encoding]::ASCII.GetBytes('SAFE'))
+    [IO.File]::WriteAllBytes($liveExe,[Text.Encoding]::ASCII.GetBytes('LIVE'))
+    Copy-Item -LiteralPath $publishedExe -Destination $stagedExe
+    Copy-Item -LiteralPath $publishedAsset -Destination $stagedAsset
+    $originalLiveHash=(Get-FileHash -LiteralPath $liveExe -Algorithm SHA256).Hash
+    $verified=Test-StagedApplication -Source $published -Staging $staged
+    if ($verified.Files -ne 2 -or $verified.Bytes -ne 8) {
+        throw 'Identical published and staged files failed to verify or changed the existing count/size report.'
+    }
+    $integrityChecks=1
+
+    function Assert-StagingRejected([string]$ExpectedProblem) {
+        $message=''
+        try { $null=Test-StagedApplication -Source $published -Staging $staged }
+        catch { $message=$_.Exception.Message }
+        if (-not $message.Contains($ExpectedProblem) -or
+            -not $message.Contains('Nothing has been changed')) {
+            throw "Staged application did not fail closed for $ExpectedProblem; got '$message'."
+        }
+        if ((Get-FileHash -LiteralPath $liveExe -Algorithm SHA256).Hash -ne $originalLiveHash) {
+            throw 'Failed staging verification modified the installed application.'
+        }
+        $script:integrityChecks++
+    }
+    [IO.File]::WriteAllBytes($stagedExe,[Text.Encoding]::ASCII.GetBytes('EVIL'))
+    if ((Get-Item -LiteralPath $stagedExe).Length -ne (Get-Item -LiteralPath $publishedExe).Length) {
+        throw 'Equal-length corruption fixture invalid.'
+    }
+    Assert-StagingRejected 'SHA-256 differs: FMSC_SMS.exe'
+    Copy-Item -LiteralPath $publishedExe -Destination $stagedExe -Force
+    [IO.File]::WriteAllBytes($stagedAsset,[Text.Encoding]::ASCII.GetBytes('FAIL'))
+    Assert-StagingRejected 'SHA-256 differs: assets\theme.ini'
+    Copy-Item -LiteralPath $publishedAsset -Destination $stagedAsset -Force
+    [IO.File]::WriteAllBytes($stagedExe,[Text.Encoding]::ASCII.GetBytes('BAD'))
+    Assert-StagingRejected 'size differs: FMSC_SMS.exe'
+    Copy-Item -LiteralPath $publishedExe -Destination $stagedExe -Force
+    Remove-Item -LiteralPath $stagedAsset
+    Assert-StagingRejected 'missing: assets\theme.ini'
+    Copy-Item -LiteralPath $publishedAsset -Destination $stagedAsset -Force
+    [IO.File]::WriteAllBytes((Join-Path $staged 'extra.txt'),[Text.Encoding]::ASCII.GetBytes('EXTRA'))
+    Assert-StagingRejected 'unexpected: extra.txt'
+    if ((Get-FileHash -LiteralPath $liveExe -Algorithm SHA256).Hash -ne $originalLiveHash) {
+        throw 'Integrity checks altered the live-install sentinel.'
+    }
+    Write-Output "PASS: $integrityChecks staged-application integrity checks: identical, equal-sized executable and nested-asset corruption, truncated, missing, extra and unchanged live application."
     Write-Output "PASS: 15 application-version cases; $checks folder/version/backup scenarios plus SQL wrapper, failure cleanup and activation-order checks."
 } finally {
     $resolved=[IO.Path]::GetFullPath($scratch)
