@@ -29,6 +29,21 @@ INSERT comm.Attempt(MessageId,Outcome) VALUES(@Message,'Failed');
 INSERT comm.Audit(MessageId,EventName) VALUES(@Message,'FixtureOnly');
 CREATE TABLE dbo.FMSC_Test_Migration8SchoolSentinel(Marker nvarchar(80) NOT NULL PRIMARY KEY);
 INSERT dbo.FMSC_Test_Migration8SchoolSentinel(Marker) VALUES(N'Core school records are outside comm');
+-- Populate an ordinary role/permission/grant, since the schema-only baseline
+-- intentionally has no application users or seeded school permissions.
+IF NOT EXISTS (SELECT 1 FROM dbo.Permissions WHERE PermissionCode=N'Students.View')
+    INSERT dbo.Permissions(PermissionCode,PermissionName,Description)
+    VALUES(N'Students.View',N'View Students',N'Synthetic noncommunication permission');
+INSERT dbo.Roles(RoleName,Description)
+VALUES(N'FMSC Migration8 Test Role',N'Disposable authorization sentinel');
+INSERT dbo.RolePermissions(RoleId,PermissionId)
+SELECT R.RoleId,P.PermissionId FROM dbo.Roles R CROSS JOIN dbo.Permissions P
+WHERE R.RoleName=N'FMSC Migration8 Test Role' AND P.PermissionCode=N'Students.View';
+IF (SELECT COUNT_BIG(*) FROM dbo.RolePermissions RP
+    JOIN dbo.Roles R ON R.RoleId=RP.RoleId
+    JOIN dbo.Permissions P ON P.PermissionId=RP.PermissionId
+    WHERE R.RoleName=N'FMSC Migration8 Test Role' AND P.PermissionCode=N'Students.View')<>1
+    THROW 51100,'Ordinary school role grant was not seeded.',1;
 IF (SELECT COUNT_BIG(*) FROM comm.Contact)<>1
  OR (SELECT COUNT_BIG(*) FROM comm.Campaign)<>1
  OR (SELECT COUNT_BIG(*) FROM comm.Message)<>1
