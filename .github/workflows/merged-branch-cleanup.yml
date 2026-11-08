@@ -1,0 +1,130 @@
+name: '02 - Maintenance - Merged Branch Cleanup'
+
+on:
+  schedule:
+    # Daily 02:43 Pakistan time (21:43 UTC); away from the top of the hour.
+    - cron: '43 21 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview eligible branches without deleting them'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: merged-branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  delete-merged-pr-branches:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Safely prune branches of merged pull requests
+        uses: actions/github-script@v9
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const dryRun = context.eventName === 'workflow_dispatch' &&
+              process.env.DRY_RUN !== 'false';
+            const { data: repository } = await github.rest.repos.get({ owner, repo });
+            const reserved = name => name === repository.default_branch ||
+              ['main', 'master', 'develop', 'development', 'production', 'staging', 'stable'].includes(name) ||
+              name.startsWith('release/');
+
+            const [branches, openPRs, closedPRs] = await Promise.all([
+              github.paginate(github.rest.repos.listBranches, { owner, repo, per_page: 100 }),
+              github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 }),
+              github.paginate(github.rest.pulls.list, { owner, repo, state: 'closed', per_page: 100 })
+            ]);
+            const ownRepo = `${owner}/${repo}`;
+            const openHeads = new Set(openPRs
+              .filter(pr => pr.head.repo?.full_name === ownRepo)
+              .map(pr => pr.head.ref));
+            const mergedHeads = new Map();
+            for (const pr of closedPRs) {
+              if (!pr.merged_at || pr.head.repo?.full_name !== ownRepo) continue;
+              const list = mergedHeads.get(pr.head.ref) || [];
+              list.push(pr);
+              mergedHeads.set(pr.head.ref, list);
+            }
+
+            let deleted = 0;
+            let eligible = 0;
+            let preserved = 0;
+            for (const branch of branches) {
+              const name = branch.name;
+              if (branch.protected || reserved(name) || openHeads.has(name)) {
+                preserved++;
+                continue;
+              }
+
+              // The branch must still be at the EXACT SHA of a merged PR.
+              const prs = mergedHeads.get(name) || [];
+              if (!prs.some(pr => pr.head.sha === branch.commit.sha)) {
+                preserved++;
+                continue;
+              }
+              eligible++;
+              if (dryRun) {
+                core.info(`[preview] ${name} (${branch.commit.sha})`);
+                continue;
+              }
+
+              // Recheck the live branch, its protection, active PRs, and ref.
+              // Changes after merge or a newly opened PR prevent deletion.
+              let current;
+              try {
+                ({ data: current } = await github.rest.repos.getBranch({
+                  owner, repo, branch: name
+                }));
+              } catch (error) {
+                if (error.status === 404) { preserved++; continue; }
+                throw error;
+              }
+              if (current.protected || current.commit.sha !== branch.commit.sha) {
+                core.warning(`Skipped changed/protected branch: ${name}`);
+                preserved++;
+                continue;
+              }
+              const { data: active } = await github.rest.pulls.list({
+                owner, repo, head: `${owner}:${name}`, state: 'open', per_page: 1
+              });
+              if (active.length) {
+                core.warning(`Skipped branch with a newly opened PR: ${name}`);
+                preserved++;
+                continue;
+              }
+              const { data: liveRef } = await github.rest.git.getRef({
+                owner, repo, ref: `heads/${name}`
+              });
+              if (liveRef.object.sha !== branch.commit.sha) {
+                core.warning(`Skipped moved branch: ${name}`);
+                preserved++;
+                continue;
+              }
+
+              await github.rest.git.deleteRef({ owner, repo, ref: `heads/${name}` });
+              deleted++;
+              core.info(`Deleted merged-PR branch: ${name}`);
+            }
+
+            await core.summary
+              .addHeading(dryRun ? 'Merged branch cleanup preview' : 'Merged branch cleanup')
+              .addTable([
+                [{ data: 'Metric', header: true }, { data: 'Count', header: true }],
+                ['Branches examined', String(branches.length)],
+                ['Eligible merged-PR branches', String(eligible)],
+                ['Branches deleted', String(deleted)],
+                ['Branches preserved or skipped', String(preserved)]
+              ])
+              .addRaw('Only same-repository merged-PR branches at the original merged head SHA are eligible. Open PRs, protected, long-lived, changed and unmerged branches are preserved.\n')
+              .write();
