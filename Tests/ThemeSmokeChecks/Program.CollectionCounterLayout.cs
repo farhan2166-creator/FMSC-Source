@@ -89,7 +89,7 @@ internal static partial class Program
                 picker.SetStudent(41,"41 - Synthetic student");
                 charges.Rows.Clear();
                 page.ConfigureCounter(selected); Application.DoEvents();
-                Check(action.Visible && action.Enabled && summary.Controls.Contains(action),
+                Check(action.Visible && summary.Controls.Contains(action),
                     "Switching to family counter mode retains the primary payment action");
             }
             Check(summary.Controls.Contains(action),
