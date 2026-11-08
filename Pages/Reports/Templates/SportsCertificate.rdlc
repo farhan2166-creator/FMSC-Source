@@ -401,7 +401,7 @@
                   <FontStyle>Italic</FontStyle>
                   <FontFamily>Segoe UI</FontFamily>
                   <FontSize>14pt</FontSize>
-                  <FontWeight>Bold</FontWeight>
+                  <FontWeight>Normal</FontWeight>
                 </Style>
               </TextRun>
               <TextRun>
