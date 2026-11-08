@@ -422,6 +422,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             }
             else if (step == 2)
             {
+                // Preview does not confer sending authority. SQL independently
+                // checks this permission when confirmation is eventually enabled.
+                RequirePermission("Communication.Send");
                 if (preview is null || previewTarget != CurrentTarget()
                     || previewMessage != message.Text)
                 {
