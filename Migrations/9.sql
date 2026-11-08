@@ -329,7 +329,7 @@ BEGIN
 
     DECLARE @Live TABLE(
         RecipientKind varchar(8) NOT NULL, RecordId int NOT NULL,
-        PhoneE164 varchar(16) NOT NULL, RecordName nvarchar(250) NULL
+        PhoneE164 varchar(16) NULL, RecordName nvarchar(250) NULL
     );
     IF @Audience=''Staff''
     BEGIN
