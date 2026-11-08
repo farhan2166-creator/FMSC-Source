@@ -245,3 +245,17 @@ additive enhancements; **no software design can guarantee zero future changes**.
 - [Meta — WhatsApp Business Platform developer hub](https://whatsappbusiness.com/developers/developer-hub/)
 - [Google — Gmail SMTP and OAuth](https://developers.google.com/workspace/gmail/imap/imap-smtp)
 - [Google — App passwords and 2-Step Verification](https://support.google.com/mail/answer/185833)
+
+## Implementation status — draft PR #131
+
+The free WhatsApp Business handoff is now implemented behind explicit admin
+activation and consent-preserving SQL confirmation. It opens one verified
+`wa.me` link per recipient, separately records operator-reported sends,
+with skip/resume and permission checks. No automatic WhatsApp API submission,
+verified message delivery, hosted infrastructure or server credentials exist
+in this mode. Native and SQL regression tests must pass before this branch
+can be considered ready; no application release has been authorized.
+
+Direct SMTP with an optional school mailbox and official Meta API remain
+**planned**, not operational; their adapters, credential onboarding, revised
+email consent disclosure and delivery acceptance require subsequent stages.

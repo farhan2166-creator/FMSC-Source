@@ -421,5 +421,101 @@ internal static class CommunicationV2SqlChecks
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='Email' AND Enabled=0;")==1,
             "Email is independently pausable without a delivery implementation.");
         Sql.Query("UPDATE msg.ChannelSettings SET ProviderCode=NULL WHERE Channel='Sms';");
+
+        // New free WhatsApp Business path. This uses SQL only: absolutely no
+        // actual WhatsApp account, browser or network is touched by tests.
+        await r.Refused("Ordinary sender cannot activate WhatsApp Business handoff",
+            () => { Sql.Proc("msg.EnableManualWhatsApp", Sql.P("@UserId",f.Restricted));
+                return Task.CompletedTask; },50003);
+        r.Check(!Convert.ToBoolean(Sql.Proc("msg.ReadManualWhatsAppMode",
+                Sql.P("@UserId",f.Admin)).Rows[0]["Enabled"]),
+            "Manual WhatsApp starts disabled even though the provider is installed in schema 10.");
+        Sql.Proc("msg.EnableManualWhatsApp",Sql.P("@UserId",f.Admin));
+        r.Check(Convert.ToBoolean(Sql.Proc("msg.ReadManualWhatsAppMode",
+                Sql.P("@UserId",f.Admin)).Rows[0]["Enabled"])
+            && Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='WhatsApp' AND Enabled=1 AND ProviderCode='WhatsAppBusinessManual';")==1,
+            "The administrator explicitly enables the free/manual mode without credentials.");
+        await r.Refused("Manual WhatsApp cannot be selected as an HTTP dispatch provider",
+            () => { Sql.Proc("msg.ReadDispatchProvider",Sql.P("@UserId",f.Admin),
+                Sql.P("@Channel","WhatsApp"));return Task.CompletedTask; },51092);
+        SqlParameter[] ManualArgs() {
+            var args=Args(f.Admin,id:Guid.NewGuid());
+            args.Single(p=>p.ParameterName=="@Channel").Value="WhatsApp";
+            return args;
+        }
+        DataTable manual=Sql.Proc("msg.ConfirmManualBatch",ManualArgs());
+        Guid manualBatch=(Guid)manual.Rows[0]["BatchId"];
+        long manualRecipient=Convert.ToInt64(Sql.Scalar(
+            "SELECT R.RecipientId FROM msg.Recipient R WHERE R.BatchId=@Batch;",
+            Sql.P("@Batch",manualBatch)));
+        r.Check(Convert.ToInt64(manual.Rows[0]["RecipientCount"])==1
+            && Sql.Count("SELECT COUNT(*) FROM msg.ManualBatch WHERE BatchId=@Batch;",
+                Sql.P("@Batch",manualBatch))==1
+            && Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND State='Pending';",
+                Sql.P("@Id",manualRecipient))==1,
+            "Reviewed manual WhatsApp batch and per-recipient ledger are saved atomically.");
+        await r.Refused("Manual batches cannot create provider attempts through direct SQL",
+            () => { Sql.Proc("msg.ClaimRecipient",
+                Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualRecipient),
+                Sql.P("@AttemptKey",Guid.NewGuid()),
+                Sql.P("@ExpectedProviderCode","WhatsAppBusinessManual"));
+                return Task.CompletedTask; },51116);
+        await r.Refused("Cannot report manual sending before a WhatsApp chat was opened",
+            () => { Sql.Proc("msg.MarkManualHandoff",
+                Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualRecipient),
+                Sql.P("@Outcome","ReportedSent"));return Task.CompletedTask; },51115);
+        await r.Refused("Unauthorized user cannot open a confirmed guardian WhatsApp chat",
+            () => { Sql.Proc("msg.OpenManualHandoff",
+                Sql.P("@UserId",f.Restricted),Sql.P("@RecipientId",manualRecipient));
+                return Task.CompletedTask; },50003);
+        DataTable manualOpened=Sql.Proc("msg.OpenManualHandoff",
+            Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualRecipient));
+        r.Check(Convert.ToBoolean(manualOpened.Rows[0]["Opened"])
+            && Convert.ToString(manualOpened.Rows[0]["PhoneE164"])=="+923001234567"
+            && Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND State='Opened' AND OpenCount=1;",
+                Sql.P("@Id",manualRecipient))==1,
+            "Opening a single eligible chat records Opened, never Accepted or Delivered.");
+        Sql.Proc("msg.MarkManualHandoff",
+            Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualRecipient),
+            Sql.P("@Outcome","ReportedSent"));
+        Sql.Proc("msg.MarkManualHandoff",
+            Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualRecipient),
+            Sql.P("@Outcome","ReportedSent"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND State='ReportedSent' AND ReportedUtc IS NOT NULL;",
+                Sql.P("@Id",manualRecipient))==1
+            && Sql.Count("SELECT COUNT(*) FROM msg.Attempt A WHERE A.RecipientId=@Id;",
+                Sql.P("@Id",manualRecipient))==0,
+            "An operator-reported click is idempotent and never creates a provider delivery record.");
+        await r.Refused("A reported manual message cannot be reopened for an accidental duplicate",
+            () => { Sql.Proc("msg.OpenManualHandoff",
+                Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualRecipient));
+                return Task.CompletedTask; },51114);
+        DataTable manualHistory=Sql.Proc("msg.ReadHistory",Sql.P("@UserId",f.Admin));
+        var manualRow=manualHistory.Rows.Cast<DataRow>()
+            .Single(row=> (Guid)row["BatchId"]==manualBatch);
+        r.Check(Convert.ToString(manualRow["Method"])=="WhatsApp Business (manual)"
+            && Convert.ToInt32(manualRow["ManualReported"])==1
+            && Convert.ToInt32(manualRow["Delivered"])==0,
+            "History distinguishes operator-reported sends from verified delivery.");
+
+        DataTable staleManual=Sql.Proc("msg.ConfirmManualBatch",ManualArgs());
+        long staleRecipient=Convert.ToInt64(Sql.Scalar(
+            "SELECT R.RecipientId FROM msg.Recipient R WHERE R.BatchId=@Batch;",
+            Sql.P("@Batch",(Guid)staleManual.Rows[0]["BatchId"])));
+        Sql.Proc("msg.RecordAdmissionConsent",Sql.P("@UserId",f.Admin),
+            Sql.P("@AdmissionId",admissionId),Sql.P("@Consent",false),
+            Sql.P("@Authority","Students.Admit"));
+        DataTable blockedManual=Sql.Proc("msg.OpenManualHandoff",
+            Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",staleRecipient));
+        r.Check(!Convert.ToBoolean(blockedManual.Rows[0]["Opened"])
+            && Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND State='Excluded';",
+                Sql.P("@Id",staleRecipient))==1
+            && Sql.Count("SELECT COUNT(*) FROM msg.Attempt A WHERE A.RecipientId=@Id;",
+                Sql.P("@Id",staleRecipient))==0,
+            "Withdrawal of Admission consent blocks manual WhatsApp at handoff time.");
+        Sql.Proc("msg.PauseChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","WhatsApp"));
+        r.Check(!Convert.ToBoolean(Sql.Proc("msg.ReadManualWhatsAppMode",
+                Sql.P("@UserId",f.Admin)).Rows[0]["Enabled"]),
+            "Administrator pause immediately disables new WhatsApp handoffs.");
     }
 }

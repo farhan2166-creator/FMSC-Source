@@ -4,9 +4,9 @@ using FMSC_SMS.Core;
 namespace FMSC_SMS.Pages.Communication;
 
 /// <summary>
-/// Preview-only Communication Center with protected History and Settings.
-/// Production navigation is available to permitted users, but Confirm & Send
-/// remains fail-closed until trusted provider end-to-end acceptance passes.
+/// Communication Center with a separately authorized FREE manual WhatsApp
+/// handoff and protected History / Settings. Direct API delivery remains
+/// disabled until real provider acceptance; opening a chat never means Sent.
 /// </summary>
 public sealed class CommunicationCenterPage : V2Page, IBusyPage
 {
@@ -52,6 +52,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private CommunicationTarget? previewTarget;
     private string? previewMessage;
     private DataTable? previewTable;
+    private bool manualModeAvailable;
+    private Guid manualRequestId = Guid.Empty;
     private int step;
     private int previewReadVersion;
     private int managementReadVersion;
@@ -108,13 +110,16 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             if (step > 0) SetStep(step - 1);
         }, "Secondary");
         next = AddBusyAction("Continue", ContinueAsync, "Primary");
-        confirm = AddAction("Confirm & Send", (_, _) =>
-            Warn("Sending is disabled until secure provider acceptance passes."), "Primary");
-        // Absolutely no send path exists at this stage.
+        confirm = AddBusyAction("Open WhatsApp Chats", StartManualHandoffAsync, "Primary");
+        // Only the operator-controlled handoff may be activated in this version.
         confirm.Enabled = false;
         historyButton = AddBusyAction("History", LoadHistoryAsync, "Secondary");
         settingsButton = AddBusyAction("Settings", LoadSettingsAsync, "Secondary");
-        newMessageButton = AddAction("New Message", (_, _) => SetStep(0), "Secondary");
+        newMessageButton = AddAction("New Message", (_, _) =>
+        {
+            InvalidatePreview();
+            SetStep(0);
+        }, "Secondary");
         pauseSmsButton = AddBusyAction("Pause SMS", () => PauseChannelAsync("Sms"), "Secondary");
         pauseWhatsAppButton = AddBusyAction("Pause WhatsApp",
             () => PauseChannelAsync("WhatsApp"), "Secondary");
@@ -230,8 +235,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     private HumanCard ConfirmCard()
     {
-        var card = HumanUi.Card("4. Confirm & Send",
-            "Final confirmation remains unavailable until provider delivery is implemented and accepted.");
+        var card = HumanUi.Card("4. Confirm",
+            "Free WhatsApp mode opens one prepared chat at a time. You must press Send manually. Direct provider delivery remains disabled.");
         card.Content.Controls.Add(confirmation);
         return card;
     }
@@ -251,7 +256,10 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             ("InProgress", "Pending", 75),
             ("Delivered", "Delivered", 85),
             ("Failed", "Failed", 70),
-            ("Unknown", "Unknown", 75)
+            ("Unknown", "Unknown", 75),
+            ("Method", "Method", 160),
+            ("ManualReported", "Operator reported", 105),
+            ("ManualSkipped", "Manual skipped", 95)
         })
             historyGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -259,7 +267,17 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                 MinimumWidth = width, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
+        var resume = new ModernButton
+        {
+            Text = "Resume Manual WhatsApp", ThemeRole = "Secondary",
+            Width = AppScale.Scale(225), Height = AppMetrics.ButtonHeight,
+            Enabled = CurrentUser.HasPermission("Communication.Send")
+        };
+        resume.Click += async (_, _) => await ResumeManualFromHistoryAsync();
+        var footer = HumanUi.ButtonRow(resume);
+        footer.Dock = DockStyle.Bottom;
         card.Content.Controls.Add(historyGrid);
+        card.Content.Controls.Add(footer);
         return card;
     }
 
@@ -303,7 +321,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
         tables.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
         tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(52)));
-        tables.Controls.Add(HumanUi.GroupHeading("Provider status — channels cannot be activated yet"), 0, 0);
+        tables.Controls.Add(HumanUi.GroupHeading("Provider status — direct delivery disabled; free manual WhatsApp available"), 0, 0);
         tables.Controls.Add(settingsGrid, 0, 1);
         tables.Controls.Add(HumanUi.GroupHeading("Templates (read-only until editor acceptance)"), 0, 2);
         tables.Controls.Add(templateGrid, 0, 3);
@@ -314,6 +332,13 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         };
         configureProvider.Enabled = CurrentUser.HasPermission("Communication.Configure");
         configureProvider.Click += async (_, _) => await ConfigureProviderAsync();
+        var enableFreeWhatsApp = new ModernButton
+        {
+            Text = "Use Free WhatsApp", ThemeRole = "Secondary",
+            Width = AppScale.Scale(170), Height = AppMetrics.ButtonHeight,
+            Enabled = CurrentUser.HasPermission("Communication.Configure")
+        };
+        enableFreeWhatsApp.Click += async (_, _) => await EnableFreeWhatsAppAsync();
         var addTemplate = new ModernButton
         {
             Text = "New Template", ThemeRole = "Primary",
@@ -328,9 +353,28 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             CurrentUser.HasPermission("Communication.Configure");
         addTemplate.Click += async (_, _) => await EditTemplateAsync(false);
         editTemplate.Click += async (_, _) => await EditTemplateAsync(true);
-        tables.Controls.Add(HumanUi.ButtonRow(configureProvider, addTemplate, editTemplate), 0, 4);
+        tables.Controls.Add(HumanUi.ButtonRow(configureProvider, enableFreeWhatsApp, addTemplate, editTemplate), 0, 4);
         card.Content.Controls.Add(tables);
         return card;
+    }
+
+    private async Task EnableFreeWhatsAppAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+        {
+            Warn("Communication administrator permission is required.");
+            return;
+        }
+        if (!Confirm("Activate the free, MANUAL WhatsApp Business method? FMSC will only open chats. "
+            + "The operator must send each message; this is not automatic delivery.",
+            "Enable Free WhatsApp", false))
+            return;
+        try
+        {
+            await CommunicationManagementStore.EnableManualWhatsAppAsync();
+            if (!IsDisposed) await LoadSettingsAsync();
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
 
     private async Task ConfigureProviderAsync()
@@ -473,7 +517,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             templateGrid.DataSource = templates;
             oldChannels?.Dispose(); oldTemplates?.Dispose();
             SetStep(5);
-            SetStatus("Provider profiles are read-only; sending remains disabled pending verification.");
+            SetStatus("Only free/manual WhatsApp can be activated. Automatic provider delivery remains disabled.");
         }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
@@ -507,6 +551,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         preview = null;
         previewTarget = null;
         previewMessage = null;
+        manualModeAvailable = false;
+        manualRequestId = Guid.Empty;
         previewReadVersion++;
     }
 
@@ -528,13 +574,75 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         previous.Enabled = step is > 0 and < 4;
         next.Visible = step < 3;
         confirm.Visible = step == 3;
-        confirm.Enabled = false;
+        confirm.Text = manualModeAvailable ? "Open WhatsApp Chats" : "Confirm & Send";
+        confirm.Enabled = step == 3 && manualModeAvailable
+            && CurrentUser.HasPermission("Communication.Send");
         newMessageButton.Visible = step >= 4;
         pauseSmsButton.Visible = step == 5 && CurrentUser.HasPermission("Communication.Configure");
         pauseWhatsAppButton.Visible = step == 5 && CurrentUser.HasPermission("Communication.Configure");
         if (step == 3)
-            SetStatus("Sending remains disabled until the complete release acceptance is passed.",
+            SetStatus(manualModeAvailable
+                ? "Free/manual WhatsApp: open each chat and press Send yourself. Not verified delivery."
+                : "Direct sending remains disabled until provider acceptance.",
                 PageStatusKind.Warning);
+    }
+
+    private async Task StartManualHandoffAsync()
+    {
+        try
+        {
+            CommunicationTarget? target = previewTarget;
+            CommunicationPreview? reviewed = preview;
+            string? body = previewMessage;
+            if (!manualModeAvailable || target?.Channel != "WhatsApp"
+                || target != CurrentTarget() || reviewed is null
+                || body != message.Text || manualRequestId == Guid.Empty)
+            {
+                Warn("Free WhatsApp is unavailable or the preview changed. Review recipients again.");
+                return;
+            }
+            RequirePermission("Communication.Send");
+            if (!Confirm("FMSC will open one WhatsApp chat at a time. YOU must press Send "
+                + "in your school's WhatsApp Business account; FMSC cannot verify delivery. "
+                + "Your progress will be recorded for later resumption. Continue?",
+                "Start Manual WhatsApp", false))
+                return;
+            int actor = CurrentUser.UserId;
+            CommunicationConfirmation saved = await CommunicationBatchStore.ConfirmPreviewAsync(
+                target, reviewed, body, manualRequestId, manualWhatsApp: true);
+            if (IsDisposed) return;
+            if (actor != CurrentUser.UserId)
+                throw new InvalidOperationException("Signed-in user changed. Reopen History.");
+            using (var handoff = new CommunicationManualHandoffDialog(saved.BatchId))
+                handoff.ShowDialog(FindForm());
+            if (!IsDisposed && CurrentUser.HasPermission("Communication.View"))
+                await LoadHistoryAsync();
+            else if (!IsDisposed) SetStep(0);
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+    }
+
+    private async Task ResumeManualFromHistoryAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Send"))
+        {
+            Warn("Communication.Send permission is required to resume a handoff.");
+            return;
+        }
+        if (historyGrid.CurrentRow?.DataBoundItem is not DataRowView row
+            || Convert.ToString(row["Method"]) != "WhatsApp Business (manual)")
+        {
+            Warn("Choose a manual WhatsApp batch from History.");
+            return;
+        }
+        try
+        {
+            var batchId = (Guid)row["BatchId"];
+            using (var handoff = new CommunicationManualHandoffDialog(batchId))
+                handoff.ShowDialog(FindForm());
+            if (!IsDisposed) await LoadHistoryAsync();
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
 
     private async Task ContinueAsync()
@@ -578,6 +686,12 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                     Warn("No eligible destinations. Review the Admission consent and phone numbers.");
                     return;
                 }
+                manualModeAvailable = previewTarget.Channel == "WhatsApp"
+                    && await CommunicationManualHandoffStore.IsEnabledAsync();
+                if (IsDisposed || previewTarget != CurrentTarget()
+                    || previewMessage != message.Text) return;
+                if (manualModeAvailable && manualRequestId == Guid.Empty)
+                    manualRequestId = Guid.NewGuid();
                 confirmation.Text = "Channel: " + previewTarget.Channel
                     + Environment.NewLine + "Selected school records: " + preview.Entries.Count
                     + Environment.NewLine + "Unique eligible destinations: " + preview.Included
@@ -585,7 +699,10 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                     + Environment.NewLine + Environment.NewLine + "Message:"
                     + Environment.NewLine + (previewMessage ?? "")
                     + Environment.NewLine + Environment.NewLine
-                    + "Sending is currently DISABLED. No message has been queued or delivered.";
+                    + (manualModeAvailable
+                        ? "Free WhatsApp mode: you will open one chat at a time, press Send in WhatsApp, "
+                          + "then report your action. FMSC cannot verify delivery."
+                        : "Direct sending is currently DISABLED. No message has been queued or delivered.");
                 SetStep(3);
             }
         }

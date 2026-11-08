@@ -149,3 +149,13 @@ verified email delivery or sending UI exists. Those require a separately reviewe
 migration and real acceptance. The manual dispatcher now selects an approved
 SQL provider identity and rejects unimplemented adapters before claiming an
 attempt. No publication, Workflow 04 bypass or automatic delivery is permitted.
+
+### Free WhatsApp manual extension within draft schema 10
+
+Schema 10 also supplies `msg.ManualBatch` and `msg.ManualHandoff` with a
+permission-checked, atomic manual confirmation, per-chat live revalidation,
+resume/skip/operator-report semantics, and a database trigger refusing a
+provider API attempt from manual profiles. The administrator must explicitly
+enable the free WhatsApp handoff; it never sends itself or produces verified
+delivery receipts. This is part of the unmerged migration-10 implementation,
+not a modification to the already-applied schema-9 migration.

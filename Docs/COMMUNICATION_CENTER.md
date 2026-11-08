@@ -56,3 +56,23 @@ receipt; it must never be recorded as automatic submission or delivery.
 See [the long-term Communication Center product and provider contract](COMMUNICATION_CENTER_TARGET_DESIGN.md)
 for free/basic rollout, no-server operation, permissions, recipient eligibility,
 status semantics, risk controls, and the no-redesign extension boundary.
+
+## Free WhatsApp Business manual implementation on the draft branch
+
+After the administrator explicitly chooses **Use Free WhatsApp** in Settings,
+operators holding `Communication.Send` may use the existing school/campus/class/
+fee/student/family/staff audience and admission-consent preview to confirm a
+**manual WhatsApp handoff**. The app stores a durable batch and one state per
+recipient. The native dialog opens one validated `wa.me` chat at a time.
+Operators must press Send in their own signed-in WhatsApp Business app/browser,
+then explicitly choose **I Sent It** or **Skip**. A closed app can reopen the
+batch from History. Opening the link is **not sending**; I Sent It is
+**operator-reported**, not provider-verified delivery. No API credentials,
+subscription, own server, auto-clicking or unattended bulk sender is required.
+
+The first handoff obtains current validated recipients under a SQL transaction.
+Every subsequent chat opening rechecks the student's live Admission Yes,
+active/scope membership, current phone and WhatsApp opt-out before exposing
+its phone/message. Direct API attempts from manually configured WhatsApp are
+blocked both in C# and by a database trigger. All other direct channels remain
+disabled pending actual provider acceptance. Migration 10 is still **draft**.
