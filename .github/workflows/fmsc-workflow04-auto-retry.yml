@@ -1,0 +1,101 @@
+name: '11 - Maintenance - Automatic Workflow 04 Retry'
+
+# Runs independently after a completed owner-requested Workflow 04 failure.
+# Never creates a fresh release request, changes Source/main or handles feed secrets.
+on:
+  workflow_run:
+    workflows: ['04 - Build and Publish Private Update']
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: fmsc-workflow04-autoretry-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  retry-failed-jobs:
+    name: Retry failed release jobs at most twice, after 60 seconds
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.actor.login == 'farhan2166-creator' &&
+      github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Allow transient runner and service failures to recover
+        shell: bash
+        run: sleep 60
+      - name: Revalidate the latest attempt, original owner and publication safety
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          set -euo pipefail
+          repo='farhan2166-creator/FMSC-Source'
+          api="repos/$repo"
+
+          # Use the authenticated current run, not untrusted webhook text.
+          run="$(gh api "$api/actions/runs/$RUN_ID")"
+          if ! jq -e --argjson attempt "$EVENT_ATTEMPT" '
+              .repository.full_name == "farhan2166-creator/FMSC-Source" and
+              .path == ".github/workflows/fmsc-windows-download.yml" and
+              .event == "workflow_dispatch" and
+              .head_branch == "main" and
+              .actor.login == "farhan2166-creator" and
+              .status == "completed" and
+              .conclusion == "failure" and
+              .run_attempt == $attempt and
+              .run_attempt >= 1 and .run_attempt <= 2
+            ' <<<"$run" >/dev/null; then
+            echo 'No retry: run changed, already restarted, or not eligible.'
+            exit 0
+          fi
+
+          # A later merge invalidates the release; allow only the original SHA
+          # or the one-file version bump prepared by this same Workflow 04.
+          original="$(jq -r '.head_sha' <<<"$run")"
+          main="$(gh api "$api/branches/main" --jq '.commit.sha')"
+          if [[ "$main" != "$original" ]]; then
+            diff="$(gh api "$api/compare/$original...$main")"
+            if ! jq -e '
+                .ahead_by == 1 and .behind_by == 0 and
+                (.files | length) == 1 and
+                .files[0].filename == "Installer/core.ps1" and
+                .files[0].status == "modified" and
+                (.commits | length) == 1 and
+                (.commits[0].commit.message | startswith("release: prepare FMSC "))
+              ' <<<"$diff" >/dev/null; then
+              echo 'No retry: Source/main changed beyond the expected release version bump.'
+              exit 0
+            fi
+          fi
+
+          # Never automatically retry a publication step which ran and might
+          # have committed to the private feed before a connection was lost.
+          jobs="$(gh api "$api/actions/runs/$RUN_ID/attempts/$EVENT_ATTEMPT/jobs?per_page=100")"
+          if jq -e '
+              [.jobs[]?.steps[]? |
+                select(.name == "Verify and atomically publish approved update") |
+                select(.conclusion != "skipped")] | length > 0
+            ' <<<"$jobs" >/dev/null; then
+            echo 'No retry: publication was attempted; manual feed-state review is required.'
+            exit 0
+          fi
+
+          echo "Automatically retrying failed jobs: run $RUN_ID, attempt $EVENT_ATTEMPT of 3."
+          gh api -X POST "$api/actions/runs/$RUN_ID/rerun-failed-jobs"
+          {
+            echo '## Workflow 04 automatic recovery'
+            echo "- Run: https://github.com/$repo/actions/runs/$RUN_ID"
+            echo "- Previous attempt: $EVENT_ATTEMPT"
+            echo "- Retry starts after a one-minute delay."
+            echo '- Maximum total attempts: 3 (original + 2 retries).'
+            echo '- Release SHA and sandbox/publication safeguards remain unchanged.'
+          } >> "$GITHUB_STEP_SUMMARY"
