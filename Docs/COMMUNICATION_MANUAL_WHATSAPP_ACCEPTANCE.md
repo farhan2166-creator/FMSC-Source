@@ -66,6 +66,8 @@ approval. Neither SMTP nor Meta Cloud API is yet enabled in this PR.
 
 ## WinForms visibility and local acceptance (do not send real messages)
 
+**Release provenance prerequisite:** See [Audit Issue 04](../Audit/Reviews/FMSC_RELEASE_INSTALLED_ACCEPTANCE_2026-11-08.md) and run `Tools/VerifyInstalledFmscRelease.ps1` under the actual FMSC Windows account. The published version 1.0.16 is grounded in Source SHA `4abe2d037f9ce51c0922875e7c0241cb112ac88d`, not in the newer source HEAD. A matching file version alone does not prove newer merged fixes are included. Do not declare local acceptance until the executable, schema-10 verifier, and actual UI are all reviewed.
+
 1. Verify the **running executable** from Windows Task Manager or PowerShell, not merely the SQL migration number. An uninstalled source commit or schema 10 alone cannot change a 1.0.15 desktop UI.
 2. Open the dashboard **Communication Center** with `Communication.View`. The composer must default to **WhatsApp Business (manual)**; **SMS (unavailable)** remains non-send-capable.
 3. As an administrator with `Communication.Configure`, choose **Settings**. Confirm that **Use Free WhatsApp**, **Configure Provider**, **New Template** and **Edit Selected** are all visible at normal and 125%/150% Windows display scaling. Provider controls and template controls occupy separate rows. Confirm **Email** is marked unavailable.

@@ -173,4 +173,22 @@ try {
     if(-not $resolved.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)){throw 'Refusing cleanup outside test temp directory.'}
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }
+# Audit 04: the owner-side probe is review-only, parseable PowerShell and must
+# retain its independently pinned published EXE hash and SELECT-only SQL read.
+$localProbePath = Join-Path $PSScriptRoot 'VerifyInstalledFmscRelease.ps1'
+if (-not (Test-Path -LiteralPath $localProbePath -PathType Leaf)) {
+    throw 'Read-only local release acceptance helper is missing.'
+}
+$probeTokens=$null; $probeErrors=$null
+$probeAst=[Management.Automation.Language.Parser]::ParseFile($localProbePath,[ref]$probeTokens,[ref]$probeErrors)
+if ($probeErrors.Count) { throw 'Read-only local release acceptance helper does not parse.' }
+$probeSource=Get-Content -LiteralPath $localProbePath -Raw
+foreach ($mustHave in @('4c5b5201851b202e2b7ff33c26cabc20bcd00b9c4486be5e99df22de819c8990',
+    'Get-FileHash','--verify-installation','SELECT TOP(1)','dbo.DatabaseVersion','Source/main at audit')) {
+    if (-not $probeSource.Contains($mustHave)) { throw "Audit 04 verifier missing review safeguard $mustHave." }
+}
+if ($probeSource -match '(?i)\\b(INSERT\\s+INTO|UPDATE\\s+dbo[.]|DELETE\\s+FROM|DROP\\s+TABLE|ALTER\\s+TABLE)\\b') {
+    throw 'Audit 04 verifier must never edit school SQL records.'
+}
+Write-Output 'PASS: read-only installed-release helper parses and retains pinned provenance, SQL read and verified executable guard.'
 $global:LASTEXITCODE = 0
