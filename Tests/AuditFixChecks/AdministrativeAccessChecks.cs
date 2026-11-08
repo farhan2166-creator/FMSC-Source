@@ -145,7 +145,7 @@ internal static class AdministrativeAccessChecks
             var result=AdministrativeSaveCoordinator.Execute(transaction,writeIntent with { Values=writeIntent.Values with { Id=2 } },()=>3);
             Check(result.Outcome==AccessSaveOutcome.Unconfirmed&&result.Intent?.Values.Id==2&&transaction.Commits==0,"A wrong returned ID cannot redirect an existing-record recovery");
         }
-        Check(PermissionCatalog.All.Count==28&&PermissionCatalog.All.Values.All(p=>p.Code.Length<=100&&p.Name.Length<=100&&p.Description.Length<=250),"Supported permission definitions fit SQL column bounds");
+        Check(PermissionCatalog.All.Count==31&&PermissionCatalog.All.Values.All(p=>p.Code.Length<=100&&p.Name.Length<=100&&p.Description.Length<=250),"Supported permission definitions fit SQL column bounds");
         Check(!PermissionCatalog.Contains("Students.Edit")&&!PermissionCatalog.Contains("System.Roles.Deactivate")&&!PermissionCatalog.Contains("Students.Siblings"),"Dormant and superseded permission options are removed");
         Check(PermissionCatalog.All["Reports.View"].Name.Contains("student and finance")&&PermissionCatalog.All["System.Roles"].Name.StartsWith("View"),"Permission labels describe actual access rather than claiming management");
         Check(AdministrativeAccess.Validate(AccessEditorKind.Roles,new(2,"Renamed","",false,Array.Empty<int>()),roleCatalog) is not null,"Accountant cannot be renamed into another role");
