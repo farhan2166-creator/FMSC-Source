@@ -47,7 +47,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private readonly List<HumanCard> cards = new();
     private readonly Panel campusField, classField, studentField, staffField;
     private readonly ModernButton previous, next, confirm, historyButton, settingsButton,
-        newMessageButton, pauseSmsButton, pauseWhatsAppButton, enableFreeWhatsAppButton;
+        newMessageButton, pauseSmsButton, pauseWhatsAppButton;
+    // Built by SettingsCard during the page constructor; cannot be readonly.
+    private ModernButton enableFreeWhatsAppButton = null!;
     private CommunicationPreview? preview;
     private CommunicationTarget? previewTarget;
     private string? previewMessage;
