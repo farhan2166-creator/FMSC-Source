@@ -46,6 +46,20 @@ internal static partial class Program
             "Invalid phones, channel opt-outs and repeated sibling destinations are excluded");
         Check(Get("Excluded") == 5, "Preview explains all excluded school records");
 
+        var vault = assembly.GetType("FMSC_SMS.Core.CommunicationProviderCredentialStore")!;
+        var credential = vault.GetNestedType("Credential", BindingFlags.NonPublic)!;
+        var validate = vault.GetMethod("Validate", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var valid = Activator.CreateInstance(credential, 1, "Sms", "Adapter-Test", "account", "sender",
+            "synthetic-token-not-real", "synthetic-callback-signature-key")!;
+        validate.Invoke(null, new[] { valid });
+        var wrongChannel = Activator.CreateInstance(credential, 1, "../Sms", "Adapter-Test", "account", "sender",
+            "synthetic-token-not-real", "synthetic-callback-signature-key")!;
+        bool refusedUnsafeChannel = false;
+        try { validate.Invoke(null, new[] { wrongChannel }); }
+        catch (TargetInvocationException ex) when (ex.InnerException is ArgumentException)
+        { refusedUnsafeChannel = true; }
+        Check(refusedUnsafeChannel, "Protected provider credentials reject unsupported channels and path traversal");
+
         var type = assembly.GetType("FMSC_SMS.Pages.Communication.CommunicationCenterPage")!;
         using var page = (Control)Activator.CreateInstance(type,
             BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { false }, null)!;
