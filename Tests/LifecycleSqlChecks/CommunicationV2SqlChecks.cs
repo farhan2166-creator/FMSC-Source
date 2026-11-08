@@ -123,6 +123,28 @@ internal static class CommunicationV2SqlChecks
         await r.Refused("Reusing a request key for different content must fail closed",
             () => { Sql.Proc("msg.ConfirmBatch", Args(f.Admin, body: "Wrong-content replay")); return Task.CompletedTask; }, 51084);
 
+        // Bulk school selection is ONE group action. A second consenting
+        // student without a mobile must be excluded rather than failing SQL.
+        int siblingId = Sql.Count("""
+            SELECT TOP(1) AdmissionId FROM dbo.Students
+            WHERE AdmissionId<>@Id AND Status=N'Active' ORDER BY AdmissionId;
+            """, Sql.P("@Id", admissionId));
+        r.Check(siblingId > 0, "Synthetic school fixture has a second active student for bulk communication checks.");
+        Sql.Query("UPDATE dbo.Students SET ContactNumber=NULL WHERE AdmissionId=@Id;",
+            Sql.P("@Id", siblingId));
+        Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin),
+            Sql.P("@AdmissionId", siblingId), Sql.P("@Consent", true),
+            Sql.P("@Authority", "Students.Admit"));
+        SqlParameter[] groupArgs = Args(f.Admin, id: Guid.NewGuid());
+        groupArgs.Single(p => p.ParameterName == "@Audience").Value = "School";
+        groupArgs.Single(p => p.ParameterName == "@Purpose").Value = "Announcement";
+        DataTable schoolBatch = Sql.Proc("msg.ConfirmBatch", groupArgs);
+        r.Check(Convert.ToInt64(schoolBatch.Rows[0]["RecipientCount"]) == 1,
+            "One school-wide confirmation automatically includes Yes-consent students with valid phones and excludes missing phones.");
+        Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin),
+            Sql.P("@AdmissionId", siblingId), Sql.P("@Consent", false),
+            Sql.P("@Authority", "Students.Admit"));
+
         Sql.Query("INSERT msg.Suppression(Channel,PhoneE164,Source) VALUES('Sms','+923001234567','Administrator');");
         await r.Refused("A new confirmation cannot send to an opted-out phone",
             () => { Sql.Proc("msg.ConfirmBatch", Args(f.Admin, id: Guid.NewGuid())); return Task.CompletedTask; }, 51086);
