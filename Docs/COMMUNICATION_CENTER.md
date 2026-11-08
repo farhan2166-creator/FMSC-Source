@@ -23,3 +23,25 @@ fail closed with rollback rather than delete unrelated data. Historical migratio
 
 **Release gate:** PR #128 must not merge or publish before the user's restored
 schema-7 test, SQL rollback checks and exact-commit release acceptance.
+
+## Provider-neutral extension — schema 10 (draft)
+
+The existing Twilio adapter is optional. New provider-neutral dispatcher
+interfaces select an explicitly enabled SQL provider, while unknown providers
+fail before claiming recipients. Meta Cloud API for school-owned WhatsApp and
+SMTP for school email are **planned disabled profiles only**, not operational
+integrations. An Email row is visible in administrator settings but cannot be
+configured through the current Twilio-only dialog or used to send.
+
+Migration 10 adds empty optional `dbo.Students.GuardianEmail` and
+`dbo.Staff.CommunicationEmail` and email-only opt-out evidence. Neither field
+is collected or used by the UI yet. No recipient or delivery schema is altered
+for Email, so the existing phone-only confirmation/claim procedures continue to
+reject it. No old guardian email choices are migrated; a future admission UI
+must collect email deliberately under the existing consent authority.
+
+Release blocker: implement/test secure provider-specific credentials, live
+Email and Meta provider adapters, the authoritative email audience and
+transactional claim, callbacks, failure/reconciliation and opt-outs. Keep
+Confirm & Send disabled and demand exact-SHA disposable SQL, Windows and
+private Sandbox acceptance before release.

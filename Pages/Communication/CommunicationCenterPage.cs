@@ -342,6 +342,11 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         }
         string chosenChannel = settingsGrid.CurrentRow?.DataBoundItem is DataRowView row
             ? Convert.ToString(row["Channel"]) ?? "Sms" : "Sms";
+        if (chosenChannel == "Email")
+        {
+            Warn("School email is staged but its secure provider setup and delivery are not enabled.");
+            return;
+        }
         using var dialog = new CommunicationProviderDialog(chosenChannel);
         if (dialog.ShowDialog(FindForm()) != DialogResult.OK)
             return;

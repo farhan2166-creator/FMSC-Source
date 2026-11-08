@@ -6,8 +6,13 @@ internal static class CommunicationV2SqlChecks
 {
     internal static async Task Run(Fixture f, Report r, int admissionId)
     {
-        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel IN ('Sms','WhatsApp') AND Enabled=0;") == 2,
-            "Both communication providers are disabled on schema-9 installation.");
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel IN ('Sms','WhatsApp') AND Enabled=0;") == 2
+            && Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='Email' AND Enabled=0 AND ProviderCode IS NULL;") == 1,
+            "SMS, WhatsApp and newly staged Email channels all start disabled.");
+        r.Check(Sql.Count("SELECT COUNT(*) FROM dbo.Students WHERE AdmissionId=@Id AND GuardianEmail IS NULL;",
+            Sql.P("@Id", admissionId)) == 1
+            && Sql.Count("SELECT COUNT(*) FROM msg.EmailSuppression;") == 0,
+            "Email starts with no inferred guardian address or opt-out evidence.");
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Batch;") == 0
             && Sql.Count("SELECT COUNT(*) FROM msg.Attempt;") == 0
             && Sql.Count("SELECT COUNT(*) FROM msg.Receipt;") == 0,
@@ -349,7 +354,9 @@ internal static class CommunicationV2SqlChecks
         await r.Refused("Ordinary user cannot manage communication configuration",
             () => { Sql.Proc("msg.ReadChannelSettings", Sql.P("@UserId", f.Restricted)); return Task.CompletedTask; }, 50003);
         DataTable setting = Sql.Proc("msg.ReadChannelSettings", Sql.P("@UserId", f.Admin));
-        r.Check(setting.Rows.Count == 2, "Only SMS and WhatsApp settings are visible to the administrator.");
+        r.Check(setting.Rows.Count == 3 && setting.Rows.Cast<DataRow>().Any(row =>
+            Convert.ToString(row["Channel"]) == "Email" && !Convert.ToBoolean(row["Enabled"])),
+            "SMS, WhatsApp and staged Email are visible; Email starts paused.");
         DataTable template = Sql.Proc("msg.SaveTemplate",
             Sql.P("@UserId", f.Admin),Sql.P("@TemplateId", 0),Sql.P("@Name", "Synthetic notice"),
             Sql.P("@Channel", "Sms"),Sql.P("@Purpose", "Announcement"),
@@ -380,6 +387,29 @@ internal static class CommunicationV2SqlChecks
             Sql.P("@ProviderCode","Twilio"));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='Sms' AND ProviderCode='Twilio' AND Enabled=0;")==1,
             "Provider configuration cannot silently activate message delivery.");
+        Sql.Proc("msg.ConfigureChannel",
+            Sql.P("@UserId",f.Admin),Sql.P("@Channel","WhatsApp"),
+            Sql.P("@ProviderCode","MetaCloud"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='WhatsApp' AND ProviderCode='MetaCloud' AND Enabled=0;")==1,
+            "School-owned Meta WhatsApp provider can be staged but not activated.");
+        Sql.Proc("msg.ConfigureChannel",
+            Sql.P("@UserId",f.Admin),Sql.P("@Channel","Email"),
+            Sql.P("@ProviderCode","Smtp"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='Email' AND ProviderCode='Smtp' AND Enabled=0;")==1,
+            "School-controlled SMTP is a disabled provider profile only.");
+        await r.Refused("SMTP cannot be misconfigured as an SMS gateway",
+            () => { Sql.Proc("msg.ConfigureChannel",
+                Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),
+                Sql.P("@ProviderCode","Smtp"));return Task.CompletedTask; },51098);
+        await r.Refused("Email cannot be claimed through the phone-only dispatch procedure",
+            () => { Sql.Proc("msg.ReadDispatchProvider",
+                Sql.P("@UserId",f.Admin),Sql.P("@Channel","Email"));return Task.CompletedTask; },51092);
+        await r.Refused("Unauthorized users cannot select an active dispatch provider",
+            () => { Sql.Proc("msg.ReadDispatchProvider",
+                Sql.P("@UserId",f.Restricted),Sql.P("@Channel","Sms"));return Task.CompletedTask; },50003);
+        Sql.Proc("msg.PauseChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Email"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='Email' AND Enabled=0;")==1,
+            "Email is independently pausable without a delivery implementation.");
         Sql.Query("UPDATE msg.ChannelSettings SET ProviderCode=NULL WHERE Channel='Sms';");
     }
 }

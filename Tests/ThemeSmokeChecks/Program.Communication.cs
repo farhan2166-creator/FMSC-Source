@@ -88,6 +88,24 @@ internal static partial class Program
         fields["MessageStatus"] = "failed";
         Check(!Verified(url, header), "Callback body modification fails signed-payload verification");
 
+        var registry = assembly.GetType("FMSC_SMS.Core.CommunicationTransportRegistry")!;
+        var planned = registry.GetMethod("IsPlannedProfile", BindingFlags.NonPublic | BindingFlags.Static)!;
+        bool Planned(string channel, string provider) => (bool)planned.Invoke(null, new object[] { channel, provider })!;
+        Check(Planned("WhatsApp", "MetaCloud") && Planned("Email", "Smtp")
+            && Planned("WhatsApp", "Twilio") && !Planned("Sms", "Smtp")
+            && !Planned("Email", "Twilio"),
+            "Provider-neutral registry accepts only reviewed channel/provider pairings.");
+        var adapterSelector = registry.GetMethod("ResolveForDispatch", BindingFlags.NonPublic | BindingFlags.Static)!;
+        bool NoLiveAdapter(string channel, string provider)
+        {
+            try { adapterSelector.Invoke(null, new object[] { channel, provider }); return false; }
+            catch (TargetInvocationException ex) when (ex.InnerException is NotSupportedException or InvalidOperationException)
+            { return true; }
+        }
+        Check(NoLiveAdapter("WhatsApp", "MetaCloud") && NoLiveAdapter("Email", "Smtp")
+            && NoLiveAdapter("Sms", "Smtp"),
+            "Unimplemented Meta and Email transports reject dispatch before any provider credential or network request.");
+
         var type = assembly.GetType("FMSC_SMS.Pages.Communication.CommunicationCenterPage")!;
         using var page = (Control)Activator.CreateInstance(type,
             BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { false }, null)!;
