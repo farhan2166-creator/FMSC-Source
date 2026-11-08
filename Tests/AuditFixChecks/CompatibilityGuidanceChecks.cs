@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FMSC_SMS.Core;
 
 internal static class CompatibilityGuidanceChecks
@@ -40,6 +41,43 @@ internal static class CompatibilityGuidanceChecks
         Check(new DatabaseCompatibilityException(identity).Message.Contains("Expected file A; found B"), "Keep expected and actual file diagnostics");
         var definition = new DatabaseCompatibilityFailure(DatabaseCompatibilityIssue.ApplicationDefinition, "2");
         Check(definition.Message.Contains("complete FMSC application package") && !definition.Message.Contains("restore"), "Missing application definition requires application repair");
+
+        // Audit Issue 01: verify essential schema-10 objects stay in the
+        // embedded contract; do not freeze unrelated forms or reports.
+        using var resource = typeof(CompatibilityGuidanceChecks).Assembly.GetManifestResourceStream(
+            "FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json");
+        Check(resource is not null, "Schema-10 compatibility contract must be embedded.");
+        using var doc = JsonDocument.Parse(resource!);
+        var root = doc.RootElement;
+        bool Has(string section, string name, string? parent = null) =>
+            root.GetProperty(section).EnumerateArray().Any(x =>
+                x.GetProperty("name").GetString() == name &&
+                (parent is null || x.GetProperty("objectName").GetString() == parent));
+        foreach (var name in new[] { "ConsentAudit", "ChannelSettings", "Suppression", "Template",
+            "Batch", "Recipient", "Attempt", "Receipt", "EmailSuppression", "ManualBatch", "ManualHandoff",
+            "NormalizeMobile", "RecordAdmissionConsent", "ConfirmBatch", "ClaimRecipient",
+            "RecordProviderResult", "ApplyVerifiedReceipt", "ApproveDefinitiveRetry",
+            "ReadAttemptForReconciliation", "ReadHistory", "ReadChannelSettings",
+            "ConfigureChannel", "PauseChannel", "ReadComposeTemplates", "ReadTemplates",
+            "SaveTemplate", "ReadDispatchProvider", "EnableManualWhatsApp", "ReadManualWhatsAppMode",
+            "ConfirmManualBatch", "ReadManualHandoff", "OpenManualHandoff", "MarkManualHandoff",
+            "TR_Attempt_RejectManualProvider" })
+            Check(Has("objects", name), "Missing mandatory messaging object in compatibility contract: " + name);
+        foreach (var (parent, name) in new[] {
+            ("Students", "SchoolMessageConsent"), ("Students", "SchoolMessageConsentUtc"),
+            ("Students", "SchoolMessageConsentBy"), ("Students", "GuardianEmail"),
+            ("Staff", "CommunicationEmail"), ("ManualHandoff", "OpenCount"),
+            ("ManualHandoff", "ReportedUtc"), ("Recipient", "PhoneE164") })
+            Check(Has("columns", name, parent), "Missing mandatory messaging column: " + parent + "." + name);
+        foreach (var (parent, name) in new[] {
+            ("Students", "CK_Students_SchoolMessageConsentEvidence"),
+            ("ManualHandoff", "CK_MsgManualHandoffReported"),
+            ("Recipient", "CK_MsgRecipientKind"), ("Attempt", "CK_MsgAttemptOutcome") })
+            Check(Has("checkConstraints", name, parent), "Missing messaging safety check: " + name);
+        Check(Has("triggers", "TR_Attempt_RejectManualProvider"), "Manual API-attempt rejection trigger must be verified.");
+        Check(root.GetProperty("foreignKeys").GetArrayLength() == 5, "Messaging foreign keys must be verified.");
+        Check(root.GetProperty("tableTypes").GetArrayLength() == 3, "Recipient-selection TVP must be verified.");
+        Check(root.GetProperty("parameters").GetArrayLength() == 74, "Messaging procedure signatures must be verified.");
         return checks;
     }
 }

@@ -18,3 +18,5 @@ See the [preserved section](../Docs/BUSINESS_DECISIONS.md#owner-decisions-and-in
 ## Maintenance rule
 
 See the [preserved section](../Docs/BUSINESS_DECISIONS.md#owner-decisions-and-invariants-maintenance-rule).
+
+- **2026-11-08 — Audit Issue 01 approved:** Require structural compatibility for schema-10 messaging objects, constraints, and records before operating, without altering school data or migrations. [Decision and verification scope](Reviews/FMSC_SCHEMA10_COMPATIBILITY_AUDIT_2026-11-08.md).

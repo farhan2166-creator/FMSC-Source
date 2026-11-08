@@ -47,6 +47,7 @@
     <Compile Include="../../Core/CsvFileExporter.cs" Link="CsvFileExporter.cs" />
     <Compile Include="../../Core/CsvSafety.cs" Link="CsvSafety.cs" />
     <EmbeddedResource Include="../../Core/PermissionCatalog.json" LogicalName="FMSC_SMS.Core.PermissionCatalog.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema10Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json" />
     <Compile Include="../../Core/PermissionCatalog.cs" Link="PermissionCatalog.cs" />
     <Compile Include="../../Core/AdministrativeAccess.cs" Link="AdministrativeAccess.cs" />
     <Compile Include="../../Pages/Finance/Collection/CollectionRecoveryJournal.cs" Link="CollectionRecoveryJournal.cs" />
