@@ -24,7 +24,7 @@ internal static partial class Program
         candidates.Columns.Add("SchoolMessageConsent", typeof(bool));
         candidates.Columns.Add("Outstanding", typeof(decimal));
         void Add(int id, string name, string number, bool? consent)
-            => candidates.Rows.Add(id, name, "Student", number, consent is null ? DBNull.Value : consent.Value, DBNull.Value);
+            => candidates.Rows.Add(id, name, "Student", number, consent.HasValue ? (object)consent.Value : DBNull.Value, DBNull.Value);
 
         Add(1, "Consenting student", "03001234567", true);
         Add(2, "Consenting sibling", "+923001234567", true);
