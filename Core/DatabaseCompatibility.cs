@@ -7,12 +7,16 @@ namespace FMSC_SMS.Core;
 // Baseline labels never bypass the complete structural compatibility contract.
 internal static class DatabaseCompatibility
 {
-    private static readonly Lazy<string> Requirements = new(LoadRequirements);
+    private static readonly Lazy<string[]> Requirements = new(() => new[]
+    {
+        LoadRequirements("FMSC_SMS.Core.DatabaseCompatibilityRequirements.json"),
+        LoadRequirements("FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json")
+    });
 
-    private static string LoadRequirements()
+    private static string LoadRequirements(string resourceName)
     {
         using var stream = typeof(DatabaseCompatibility).Assembly.GetManifestResourceStream(
-            "FMSC_SMS.Core.DatabaseCompatibilityRequirements.json")
+            resourceName)
             ?? throw new DatabaseCompatibilityException(new(DatabaseCompatibilityIssue.ApplicationDefinition,
                 DatabaseHelper.RequiredDatabaseSchemaVersion, Details: "The application's database compatibility definition is missing."));
         using var reader = new StreamReader(stream);
@@ -153,9 +157,13 @@ internal static class DatabaseCompatibility
             SELECT COUNT(*) AS ProblemCount FROM @Problems;
             SELECT TOP(12) Problem FROM @Problems ORDER BY Problem;
             """, connection) { CommandTimeout = 30 };
-        command.Parameters.Add("@Requirements", SqlDbType.NVarChar, -1).Value = Requirements.Value;
-        using (var reader = command.ExecuteReader())
+        // Preserve the existing dbo contract and also fail closed on schema-10
+        // msg structures. This is read-only; no migration or repair is attempted.
+        command.Parameters.Add("@Requirements", SqlDbType.NVarChar, -1);
+        foreach (string contract in Requirements.Value)
         {
+            command.Parameters["@Requirements"].Value = contract;
+            using var reader = command.ExecuteReader();
             reader.Read();
             int count = reader.GetInt32(0);
             reader.NextResult();

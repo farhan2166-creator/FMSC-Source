@@ -1,0 +1,2344 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "ConsentAudit",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "ChannelSettings",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "Suppression",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "Template",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "Batch",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "Recipient",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "Attempt",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "Receipt",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "EmailSuppression",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "ManualBatch",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "ManualHandoff",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "RecordAdmissionConsent",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ConfirmBatch",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ClaimRecipient",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "RecordProviderResult",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ApplyVerifiedReceipt",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ApproveDefinitiveRetry",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadAttemptForReconciliation",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadHistory",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadChannelSettings",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ConfigureChannel",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "PauseChannel",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadComposeTemplates",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadTemplates",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "SaveTemplate",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadDispatchProvider",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "EnableManualWhatsApp",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadManualWhatsAppMode",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ConfirmManualBatch",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadManualHandoff",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "OpenManualHandoff",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "MarkManualHandoff",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "NormalizeMobile",
+      "type": "FN"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_Attempt_RejectManualProvider",
+      "type": "TR"
+    }
+  ],
+  "columns": [
+    {
+      "schema": "msg",
+      "objectName": "ConsentAudit",
+      "name": "ConsentAuditId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": true,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConsentAudit",
+      "name": "AdmissionId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConsentAudit",
+      "name": "Consent",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConsentAudit",
+      "name": "ActorUserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConsentAudit",
+      "name": "RecordedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ChannelSettings",
+      "name": "Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ChannelSettings",
+      "name": "ProviderCode",
+      "type": "varchar",
+      "maxLength": 40,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ChannelSettings",
+      "name": "Enabled",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ChannelSettings",
+      "name": "UpdatedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ChannelSettings",
+      "name": "UpdatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Suppression",
+      "name": "Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Suppression",
+      "name": "PhoneE164",
+      "type": "varchar",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Suppression",
+      "name": "RecordedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Suppression",
+      "name": "Source",
+      "type": "varchar",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Suppression",
+      "name": "Reason",
+      "type": "nvarchar",
+      "maxLength": 400,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "TemplateId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": true,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "Name",
+      "type": "nvarchar",
+      "maxLength": 200,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "Purpose",
+      "type": "varchar",
+      "maxLength": 20,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "Body",
+      "type": "nvarchar",
+      "maxLength": 3200,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "Active",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "UpdatedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "UpdatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "BatchId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "ClientRequestId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "Purpose",
+      "type": "varchar",
+      "maxLength": 20,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "Body",
+      "type": "nvarchar",
+      "maxLength": 3200,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "Audience",
+      "type": "varchar",
+      "maxLength": 20,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "CampusId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "ClassId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "StudentId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "StaffId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "State",
+      "type": "varchar",
+      "maxLength": 14,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "CreatedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "CreatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "ConfirmedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "ConfirmedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "RecipientId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": true,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "BatchId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "RecipientKind",
+      "type": "varchar",
+      "maxLength": 8,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "AdmissionId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "StaffId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "PhoneE164",
+      "type": "varchar",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "State",
+      "type": "varchar",
+      "maxLength": 12,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "ExclusionCode",
+      "type": "varchar",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "UpdatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "Concurrency",
+      "type": "timestamp",
+      "maxLength": 8,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "AttemptId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": true,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "RecipientId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "AttemptNumber",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "AttemptKey",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "ProviderCode",
+      "type": "varchar",
+      "maxLength": 40,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "Outcome",
+      "type": "varchar",
+      "maxLength": 12,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "RequestUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "ResponseUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "ProviderMessageId",
+      "type": "nvarchar",
+      "maxLength": 300,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "FailureCode",
+      "type": "varchar",
+      "maxLength": 50,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "FailureDetail",
+      "type": "nvarchar",
+      "maxLength": 400,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "RetryApprovedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "RetryApprovedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "RetryReason",
+      "type": "nvarchar",
+      "maxLength": 400,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "name": "ReceiptId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": true,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "name": "ProviderCode",
+      "type": "varchar",
+      "maxLength": 40,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "name": "EventId",
+      "type": "nvarchar",
+      "maxLength": 256,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "name": "ProviderMessageId",
+      "type": "nvarchar",
+      "maxLength": 300,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "name": "Outcome",
+      "type": "varchar",
+      "maxLength": 12,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "name": "ReceivedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "name": "AppliedAttemptId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "EmailSuppression",
+      "name": "EmailAddress",
+      "type": "nvarchar",
+      "maxLength": 508,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "EmailSuppression",
+      "name": "RecordedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "EmailSuppression",
+      "name": "Source",
+      "type": "varchar",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "EmailSuppression",
+      "name": "Reason",
+      "type": "nvarchar",
+      "maxLength": 400,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualBatch",
+      "name": "BatchId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualBatch",
+      "name": "CreatedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualBatch",
+      "name": "CreatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "RecipientId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "State",
+      "type": "varchar",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "OpenCount",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "LastOpenedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "ReportedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "ChangedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "UpdatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "Students",
+      "name": "SchoolMessageConsent",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "Students",
+      "name": "SchoolMessageConsentUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "Students",
+      "name": "SchoolMessageConsentBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "Students",
+      "name": "GuardianEmail",
+      "type": "nvarchar",
+      "maxLength": 508,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "Staff",
+      "name": "CommunicationEmail",
+      "type": "nvarchar",
+      "maxLength": 508,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    }
+  ],
+  "parameters": [
+    {
+      "schema": "msg",
+      "objectName": "RecordAdmissionConsent",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordAdmissionConsent",
+      "name": "@AdmissionId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordAdmissionConsent",
+      "name": "@Consent",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordAdmissionConsent",
+      "name": "@Authority",
+      "type": "nvarchar",
+      "maxLength": 80,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@ClientRequestId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@Purpose",
+      "type": "varchar",
+      "maxLength": 20,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@Body",
+      "type": "nvarchar",
+      "maxLength": 3200,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@Audience",
+      "type": "varchar",
+      "maxLength": 20,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@CampusId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@ClassId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@StudentId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@StaffId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmBatch",
+      "name": "@Recipients",
+      "type": "RecipientSelection",
+      "maxLength": -1,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ClaimRecipient",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ClaimRecipient",
+      "name": "@RecipientId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ClaimRecipient",
+      "name": "@AttemptKey",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ClaimRecipient",
+      "name": "@ExpectedProviderCode",
+      "type": "varchar",
+      "maxLength": 40,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordProviderResult",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordProviderResult",
+      "name": "@AttemptKey",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordProviderResult",
+      "name": "@Outcome",
+      "type": "varchar",
+      "maxLength": 12,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordProviderResult",
+      "name": "@ProviderMessageId",
+      "type": "nvarchar",
+      "maxLength": 300,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordProviderResult",
+      "name": "@FailureCode",
+      "type": "varchar",
+      "maxLength": 50,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApplyVerifiedReceipt",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApplyVerifiedReceipt",
+      "name": "@ProviderCode",
+      "type": "varchar",
+      "maxLength": 40,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApplyVerifiedReceipt",
+      "name": "@EventId",
+      "type": "nvarchar",
+      "maxLength": 256,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApplyVerifiedReceipt",
+      "name": "@ProviderMessageId",
+      "type": "nvarchar",
+      "maxLength": 300,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApplyVerifiedReceipt",
+      "name": "@Outcome",
+      "type": "varchar",
+      "maxLength": 12,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApproveDefinitiveRetry",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApproveDefinitiveRetry",
+      "name": "@RecipientId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApproveDefinitiveRetry",
+      "name": "@Reason",
+      "type": "nvarchar",
+      "maxLength": 400,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadAttemptForReconciliation",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadAttemptForReconciliation",
+      "name": "@AttemptId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadHistory",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadHistory",
+      "name": "@Limit",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadChannelSettings",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfigureChannel",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfigureChannel",
+      "name": "@Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfigureChannel",
+      "name": "@ProviderCode",
+      "type": "varchar",
+      "maxLength": 40,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PauseChannel",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PauseChannel",
+      "name": "@Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadComposeTemplates",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadTemplates",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SaveTemplate",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SaveTemplate",
+      "name": "@TemplateId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SaveTemplate",
+      "name": "@Name",
+      "type": "nvarchar",
+      "maxLength": 200,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SaveTemplate",
+      "name": "@Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SaveTemplate",
+      "name": "@Purpose",
+      "type": "varchar",
+      "maxLength": 20,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SaveTemplate",
+      "name": "@Body",
+      "type": "nvarchar",
+      "maxLength": 3200,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SaveTemplate",
+      "name": "@Active",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadDispatchProvider",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadDispatchProvider",
+      "name": "@Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "EnableManualWhatsApp",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadManualWhatsAppMode",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@ClientRequestId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@Channel",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@Purpose",
+      "type": "varchar",
+      "maxLength": 20,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@Body",
+      "type": "nvarchar",
+      "maxLength": 3200,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@Audience",
+      "type": "varchar",
+      "maxLength": 20,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@CampusId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@ClassId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@StudentId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@StaffId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmManualBatch",
+      "name": "@Recipients",
+      "type": "RecipientSelection",
+      "maxLength": -1,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadManualHandoff",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadManualHandoff",
+      "name": "@BatchId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "OpenManualHandoff",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "OpenManualHandoff",
+      "name": "@RecipientId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "MarkManualHandoff",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "MarkManualHandoff",
+      "name": "@RecipientId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "MarkManualHandoff",
+      "name": "@Outcome",
+      "type": "varchar",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "NormalizeMobile",
+      "name": "@Value",
+      "type": "nvarchar",
+      "maxLength": 200,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    }
+  ],
+  "tableTypes": [
+    {
+      "schema": "msg",
+      "objectName": "RecipientSelection",
+      "name": "RecipientKind",
+      "type": "varchar",
+      "maxLength": 8,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "ordinal": 1
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecipientSelection",
+      "name": "RecordId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "ordinal": 2
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecipientSelection",
+      "name": "PhoneE164",
+      "type": "varchar",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "ordinal": 3
+    }
+  ],
+  "uniqueIndexes": [
+    {
+      "schema": "msg",
+      "objectName": "ConsentAudit",
+      "name": "PK_MsgConsentAudit",
+      "keys": "ConsentAuditId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "ChannelSettings",
+      "name": "PK_MsgChannelSettings",
+      "keys": "Channel"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Suppression",
+      "name": "PK_MsgSuppression",
+      "keys": "Channel,PhoneE164"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "PK_MsgTemplate",
+      "keys": "TemplateId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "UQ_MsgTemplateName",
+      "keys": "Name,Channel"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "PK_MsgBatch",
+      "keys": "BatchId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "UQ_MsgBatchRequest",
+      "keys": "ClientRequestId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "PK_MsgRecipient",
+      "keys": "RecipientId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "PK_MsgAttempt",
+      "keys": "AttemptId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "UQ_MsgAttemptOrdinal",
+      "keys": "RecipientId,AttemptNumber"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "UQ_MsgAttemptKey",
+      "keys": "AttemptKey"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "name": "PK_MsgReceipt",
+      "keys": "ReceiptId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "name": "UQ_MsgReceiptReplay",
+      "keys": "ProviderCode,EventId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "EmailSuppression",
+      "name": "PK_MsgEmailSuppression",
+      "keys": "EmailAddress"
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualBatch",
+      "name": "PK_MsgManualBatch",
+      "keys": "BatchId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "PK_MsgManualHandoff",
+      "keys": "RecipientId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "UX_MsgRecipientStudent",
+      "filter": "([AdmissionId] IS NOT NULL)",
+      "keys": "BatchId,AdmissionId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "UX_MsgRecipientStaff",
+      "filter": "([StaffId] IS NOT NULL)",
+      "keys": "BatchId,StaffId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "UX_MsgAttemptProviderId",
+      "filter": "([ProviderMessageId] IS NOT NULL)",
+      "keys": "ProviderCode,ProviderMessageId"
+    }
+  ],
+  "triggers": [
+    {
+      "schema": "msg",
+      "name": "TR_Attempt_RejectManualProvider",
+      "parentSchema": "msg",
+      "parentName": "Attempt",
+      "events": "INSERT",
+      "insteadOf": false
+    }
+  ],
+  "foreignKeys": [
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "referencedSchema": "msg",
+      "referencedObject": "Batch",
+      "columns": "BatchId",
+      "referencedColumns": "BatchId",
+      "deleteAction": 0,
+      "updateAction": 0
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "referencedSchema": "msg",
+      "referencedObject": "Recipient",
+      "columns": "RecipientId",
+      "referencedColumns": "RecipientId",
+      "deleteAction": 0,
+      "updateAction": 0
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "referencedSchema": "msg",
+      "referencedObject": "Attempt",
+      "columns": "AppliedAttemptId",
+      "referencedColumns": "AttemptId",
+      "deleteAction": 0,
+      "updateAction": 0
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualBatch",
+      "referencedSchema": "msg",
+      "referencedObject": "Batch",
+      "columns": "BatchId",
+      "referencedColumns": "BatchId",
+      "deleteAction": 0,
+      "updateAction": 0
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "referencedSchema": "msg",
+      "referencedObject": "Recipient",
+      "columns": "RecipientId",
+      "referencedColumns": "RecipientId",
+      "deleteAction": 0,
+      "updateAction": 0
+    }
+  ],
+  "checkConstraints": [
+    {
+      "schema": "msg",
+      "objectName": "ChannelSettings",
+      "name": "CK_MsgChannelName"
+    },
+    {
+      "schema": "msg",
+      "objectName": "ChannelSettings",
+      "name": "CK_MsgChannelProvider"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Suppression",
+      "name": "CK_MsgSuppressionChannel"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Suppression",
+      "name": "CK_MsgSuppressionPhone"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Suppression",
+      "name": "CK_MsgSuppressionSource"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "CK_MsgTemplateChannel"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "CK_MsgTemplatePurpose"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "CK_MsgTemplateBody"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "CK_MsgBatchChannel"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "CK_MsgBatchAudience"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "CK_MsgBatchPurpose"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "CK_MsgBatchState"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "CK_MsgBatchBody"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "CK_MsgBatchConfirmEvidence"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "CK_MsgRecipientKind"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "CK_MsgRecipientState"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "CK_MsgRecipientPhone"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Recipient",
+      "name": "CK_MsgRecipientExclusion"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "CK_MsgAttemptOrdinal"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "CK_MsgAttemptChannel"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "CK_MsgAttemptOutcome"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Receipt",
+      "name": "CK_MsgReceiptOutcome"
+    },
+    {
+      "schema": "msg",
+      "objectName": "EmailSuppression",
+      "name": "CK_MsgEmailSuppressionSource"
+    },
+    {
+      "schema": "msg",
+      "objectName": "EmailSuppression",
+      "name": "CK_MsgEmailSuppressionAddress"
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "CK_MsgManualHandoffState"
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "CK_MsgManualHandoffOpenCount"
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualHandoff",
+      "name": "CK_MsgManualHandoffReported"
+    },
+    {
+      "schema": "dbo",
+      "objectName": "Students",
+      "name": "CK_Students_SchoolMessageConsentEvidence"
+    }
+  ]
+}
