@@ -223,9 +223,9 @@ END;';
 INSERT dbo.Permissions(PermissionCode,PermissionName,Description)
 SELECT V.Code,V.Name,V.Description
 FROM (VALUES
- (N'Communication.View',N'View Communication History',N'Read communication history and delivery states.'),
- (N'Communication.Send',N'Confirm School Messages',N'Authorize explicit, reviewed manual communication batches.'),
- (N'Communication.Configure',N'Configure Communication',N'Manage templates, providers and pause settings.')
+ (N'Communication.View',N'View Communication History',N'Read message history and delivery states. No contact export.'),
+ (N'Communication.Send',N'Confirm School Messages',N'Confirm explicit, previewed school communication batches. Requires source record access.'),
+ (N'Communication.Configure',N'Configure Communication',N'Manage school messaging channels and templates; no automatic provider activation.')
 ) V(Code,Name,Description)
 WHERE NOT EXISTS(SELECT 1 FROM dbo.Permissions P WHERE P.PermissionCode=V.Code);
 
