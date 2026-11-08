@@ -756,7 +756,7 @@ function Test-StagedApplication {
         [string]$Source,
         [string]$Staging
     )
-    # "the copy returned" is not the same as "the copy is complete". Returns the file count and total size for the log; throws, listing the first differences, when the two trees disagree.
+    # A completed copy must have the same tree, file sizes and SHA-256 contents as the publication. Throws before activation on any mismatch; retains existing count/size log results.
     if (-not (Test-Path -LiteralPath $Staging)) {
         throw `
             "The staged application folder was not created: $Staging"
@@ -777,6 +777,20 @@ function Test-StagedApplication {
                 "(published $($SourceManifest[$RelativePath]) bytes, " +
                 "staged $($StagingManifest[$RelativePath]) bytes)"
             )
+            continue
+        }
+        # Directories are represented by -1. Even when the lengths match,
+        # compare the actual published and staged file bytes before activation.
+        if ($SourceManifest[$RelativePath] -ne -1) {
+            $PublishedHash = (
+                Get-FileHash -LiteralPath (Join-Path $Source $RelativePath) -Algorithm SHA256 -ErrorAction Stop
+            ).Hash
+            $StagedHash = (
+                Get-FileHash -LiteralPath (Join-Path $Staging $RelativePath) -Algorithm SHA256 -ErrorAction Stop
+            ).Hash
+            if ($StagedHash -ne $PublishedHash) {
+                $Problems += "SHA-256 differs: $RelativePath"
+            }
         }
     }
     foreach ($RelativePath in $StagingManifest.Keys) {
