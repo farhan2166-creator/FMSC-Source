@@ -93,6 +93,41 @@ function Test-FmscSafeZipEntryName([string]$EntryName) {
     if([string]::IsNullOrEmpty($EntryName)){return $false}
     return $EntryName -notmatch '(^[/\\]|:|(^|[/\\])\.\.([/\\]|$))'
 }
+function Invoke-FmscPinnedDownload([string]$Uri,[string]$OutFile,[int]$TimeoutSec=300) {
+    # Retry transient transport/server faults only; callers still validate
+    # pinned archive SHA-256 and Microsoft Authenticode signatures.
+    for($attempt=1; $attempt -le 3; $attempt++) {
+        Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile -MaximumRedirection 5 -TimeoutSec $TimeoutSec
+            if(-not(Test-Path -LiteralPath $OutFile -PathType Leaf) -or
+                (Get-Item -LiteralPath $OutFile).Length -le 0) {
+                throw 'Pinned tooling download was empty.'
+            }
+            return
+        } catch {
+            $exception=$_.Exception
+            $httpCode=0
+            if($exception.Response -and $exception.Response.StatusCode) {
+                $httpCode=[int]$exception.Response.StatusCode
+            }
+            $retryable=$httpCode -in @(429,500,502,503,504)
+            if($httpCode -eq 0 -and $exception -is [Net.WebException]) {
+                $retryable=$exception.Status -in @(
+                    [Net.WebExceptionStatus]::Timeout,
+                    [Net.WebExceptionStatus]::ConnectionClosed,
+                    [Net.WebExceptionStatus]::ConnectFailure,
+                    [Net.WebExceptionStatus]::ReceiveFailure,
+                    [Net.WebExceptionStatus]::SendFailure
+                )
+            }
+            if(-not $retryable -or $attempt -eq 3) { throw }
+            Write-Warning ("Pinned tooling endpoint unavailable (attempt {0}/3); retrying without relaxing integrity checks." -f $attempt)
+            Start-Sleep -Seconds (2 * $attempt)
+        }
+    }
+}
+
 function Receive-FmscTool([string]$Name,[string]$Destination) {
     $spec=Get-FmscToolSpec $Name
     $ProgressPreference='SilentlyContinue'
@@ -102,7 +137,7 @@ function Receive-FmscTool([string]$Name,[string]$Destination) {
     $null=New-Item -ItemType Directory -Path $temporary
     try {
         $archive=Join-Path $temporary $(if($Name -eq 'LocalDb'){'SqlLocalDB.msi'}else{'download'})
-        Invoke-WebRequest -UseBasicParsing -Uri $spec.url -OutFile $archive -MaximumRedirection 5 -TimeoutSec 300
+        Invoke-FmscPinnedDownload -Uri $spec.url -OutFile $archive -TimeoutSec 300
         if($Name -eq 'LocalDb'){
             Assert-FmscMicrosoftMsi $archive
             $null=New-Item -ItemType Directory -Path $Destination
@@ -123,7 +158,7 @@ function Receive-FmscTool([string]$Name,[string]$Destination) {
                 Copy-Item -LiteralPath $exe[0].FullName -Destination (Join-Path $Destination 'sqlcmd.exe')
             } else {
                 Move-Item -LiteralPath $expanded -Destination $Destination
-                Invoke-WebRequest -UseBasicParsing -Uri $spec.licenseUrl -OutFile (Join-Path $Destination 'COPYING-GIT.txt') -MaximumRedirection 5 -TimeoutSec 120
+                Invoke-FmscPinnedDownload -Uri $spec.licenseUrl -OutFile (Join-Path $Destination 'COPYING-GIT.txt') -TimeoutSec 120
                 if(-not(Select-String -LiteralPath (Join-Path $Destination 'COPYING-GIT.txt') -Pattern 'GNU GENERAL PUBLIC LICENSE' -Quiet)){throw 'Git license is missing.'}
                 @("MinGit $($spec.version) x64; upstream archive unchanged.","Distribution: $($spec.url)","Archive SHA256: $($spec.sha256)",'Git GPLv2: COPYING-GIT.txt. OpenSSH and other components retain their upstream licenses.') |
                     Set-Content -LiteralPath (Join-Path $Destination 'THIRD_PARTY_NOTICES.txt') -Encoding UTF8
