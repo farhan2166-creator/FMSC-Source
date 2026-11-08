@@ -9,6 +9,7 @@
     <Compile Include="../../Core/DatabaseCompatibilityFailure.cs" Link="DatabaseCompatibilityFailure.cs" />
     <Compile Include="../../Pages/Reports/Certificates/CertificateIssueRegisterData.cs" Link="CertificateIssueRegisterData.cs" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilityRequirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilityRequirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema10Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json" />
     <Using Include="System.Data" /><Using Include="FMSC_SMS" />
   </ItemGroup>
 </Project>

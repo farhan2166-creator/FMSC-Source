@@ -15,6 +15,7 @@
     <Compile Include="../../Core/DatabaseCompatibility.cs" Link="DatabaseCompatibility.cs" />
     <Compile Include="../../Core/DatabaseCompatibilityFailure.cs" Link="DatabaseCompatibilityFailure.cs" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilityRequirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilityRequirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema10Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json" />
     <Compile Include="../../Pages/Students/Maintenance/AdmissionReviewSql.cs" Link="AdmissionReviewSql.cs" />
     <Using Include="System.Data" />
     <Using Include="FMSC_SMS" />

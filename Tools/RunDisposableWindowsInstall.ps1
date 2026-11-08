@@ -65,7 +65,10 @@ function Assert-EmbeddedDatabaseContract([string]$Db) {
     $source=Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibility.cs') -Raw
     $match=[regex]::Match($source,'(?s)using var command = new SqlCommand\("""\s*(.*?)\s*""", connection\)')
     if (-not $match.Success) { throw 'Cannot locate production structural SQL compatibility query.' }
-    $requirements=Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilityRequirements.json') -Raw
+    $requirements=@(
+        (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilityRequirements.json') -Raw)
+        (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilitySchema10Requirements.json') -Raw)
+    )
     $cn=[System.Data.SqlClient.SqlConnection]::new("Data Source=$script:instance;Initial Catalog=$Db;Integrated Security=True;Encrypt=False")
     try {
         $cn.Open()
@@ -79,15 +82,17 @@ function Assert-EmbeddedDatabaseContract([string]$Db) {
         $cmd.CommandText=$match.Groups[1].Value
         $cmd.CommandTimeout=120
         [void]$cmd.Parameters.Add('@Requirements',[System.Data.SqlDbType]::NVarChar,-1)
-        $cmd.Parameters['@Requirements'].Value=$requirements
-        $result=[System.Data.DataSet]::new()
-        $adapter=[System.Data.SqlClient.SqlDataAdapter]::new($cmd)
-        [void]$adapter.Fill($result)
-        if ($result.Tables.Count -lt 2) { throw 'Structural compatibility SQL returned incomplete results.' }
-        $count=[int]$result.Tables[0].Rows[0][0]
-        if ($count -ne 0) {
-            $sample=@($result.Tables[1].Rows | ForEach-Object { $_[0].ToString() } | Select-Object -First 12)
-            throw "Production SQL compatibility contract rejects $count requirements: $($sample -join '; ')"
+        foreach ($requiredJson in $requirements) {
+            $cmd.Parameters['@Requirements'].Value=$requiredJson
+            $result=[System.Data.DataSet]::new()
+            $adapter=[System.Data.SqlClient.SqlDataAdapter]::new($cmd)
+            [void]$adapter.Fill($result)
+            if ($result.Tables.Count -lt 2) { throw 'Structural compatibility SQL returned incomplete results.' }
+            $count=[int]$result.Tables[0].Rows[0][0]
+            if ($count -ne 0) {
+                $sample=@($result.Tables[1].Rows | ForEach-Object { $_[0].ToString() } | Select-Object -First 12)
+                throw "Production SQL compatibility contract rejects $count requirements: $($sample -join '; ')"
+            }
         }
         $checks.Add("Verified all embedded SQL compatibility requirements after schema-$FixtureSchema installation")
     } finally { $cn.Dispose() }
