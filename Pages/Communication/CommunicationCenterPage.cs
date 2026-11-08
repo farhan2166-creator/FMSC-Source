@@ -15,6 +15,13 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private readonly StudentPicker student = new();
     private readonly StaffPicker staff = new();
     private readonly ModernComboBox channel = HumanUi.Combo();
+    private readonly ModernComboBox templateChoice = HumanUi.Combo();
+    private readonly List<TemplateChoice> composeTemplates = new();
+
+    private sealed record TemplateChoice(int Id,string Name,string Channel,string Purpose,string Body)
+    {
+        public override string ToString() => Name;
+    }
     private readonly ModernTextBox message = HumanUi.TextBox(true, 1600);
     private readonly Label heading = new()
     {
@@ -66,6 +73,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         audience.SelectedIndex = 0;
         channel.Items.AddRange(new object[] { "SMS", "WhatsApp" });
         channel.SelectedIndex = 0;
+        templateChoice.Items.Add("Write your own message");
+        templateChoice.SelectedIndex = 0;
 
         campusField = HumanUi.Field("Campus", campus);
         classField = HumanUi.Field("Class", cls);
@@ -115,14 +124,23 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         GateAction(pauseWhatsAppButton, "Communication.Configure");
         SetContent(root);
 
-        audience.SelectedIndexChanged += (_, _) => { ChangeAudienceFields(); InvalidatePreview(); };
+        audience.SelectedIndexChanged += (_, _) => {
+            ChangeAudienceFields(); RefreshTemplateChoices(); InvalidatePreview();
+        };
         campus.SelectedIndexChanged += (_, _) => InvalidatePreview();
         cls.SelectedIndexChanged += (_, _) => InvalidatePreview();
         student.UserSelectionChanged += (_, _) => InvalidatePreview();
         student.SelectionCleared += (_, _) => InvalidatePreview();
         staff.UserSelectionChanged += (_, _) => InvalidatePreview();
         staff.SelectionCleared += (_, _) => InvalidatePreview();
-        channel.SelectedIndexChanged += (_, _) => InvalidatePreview();
+        channel.SelectedIndexChanged += (_, _) => {
+            RefreshTemplateChoices(); InvalidatePreview();
+        };
+        templateChoice.SelectedIndexChanged += (_, _) =>
+        {
+            if (templateChoice.SelectedItem is TemplateChoice selected)
+                message.Text = selected.Body;
+        };
         message.TextChanged += (_, _) => InvalidatePreview();
 
         ChangeAudienceFields();
@@ -173,14 +191,16 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             "One message for the chosen group. No automated delivery or second guardian consent.");
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Top, Height = AppScale.Scale(265),
-            ColumnCount = 1, RowCount = 2, Padding = new Padding(12)
+            Dock = DockStyle.Fill,
+            ColumnCount = 1, RowCount = 3, Padding = new Padding(12)
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(65)));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(65)));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.Controls.Add(HumanUi.Field("Channel", channel, true), 0, 0);
-        layout.Controls.Add(HumanUi.Field("Message", message, true), 0, 1);
+        layout.Controls.Add(HumanUi.Field("Template (optional)", templateChoice), 0, 1);
+        layout.Controls.Add(HumanUi.Field("Message", message, true), 0, 2);
         card.Content.Controls.Add(layout);
         return card;
     }
@@ -274,7 +294,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             });
         var tables = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4,
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5,
             Padding = new Padding(8), Margin = Padding.Empty
         };
         tables.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -282,12 +302,127 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         tables.RowStyles.Add(new RowStyle(SizeType.Percent, 35));
         tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
         tables.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
+        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(52)));
         tables.Controls.Add(HumanUi.GroupHeading("Provider status — channels cannot be activated yet"), 0, 0);
         tables.Controls.Add(settingsGrid, 0, 1);
         tables.Controls.Add(HumanUi.GroupHeading("Templates (read-only until editor acceptance)"), 0, 2);
         tables.Controls.Add(templateGrid, 0, 3);
+        var configureProvider = new ModernButton
+        {
+            Text = "Configure Provider", ThemeRole = "Secondary",
+            Width = AppScale.Scale(160), Height = AppMetrics.ButtonHeight
+        };
+        configureProvider.Enabled = CurrentUser.HasPermission("Communication.Configure");
+        configureProvider.Click += async (_, _) => await ConfigureProviderAsync();
+        var addTemplate = new ModernButton
+        {
+            Text = "New Template", ThemeRole = "Primary",
+            Width = AppScale.Scale(150), Height = AppMetrics.ButtonHeight
+        };
+        var editTemplate = new ModernButton
+        {
+            Text = "Edit Selected", ThemeRole = "Secondary",
+            Width = AppScale.Scale(150), Height = AppMetrics.ButtonHeight
+        };
+        addTemplate.Enabled = editTemplate.Enabled =
+            CurrentUser.HasPermission("Communication.Configure");
+        addTemplate.Click += async (_, _) => await EditTemplateAsync(false);
+        editTemplate.Click += async (_, _) => await EditTemplateAsync(true);
+        tables.Controls.Add(HumanUi.ButtonRow(configureProvider, addTemplate, editTemplate), 0, 4);
         card.Content.Controls.Add(tables);
         return card;
+    }
+
+    private async Task ConfigureProviderAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+        {
+            Warn("Administrator configuration permission is required.");
+            return;
+        }
+        string chosenChannel = settingsGrid.CurrentRow?.DataBoundItem is DataRowView row
+            ? Convert.ToString(row["Channel"]) ?? "Sms" : "Sms";
+        using var dialog = new CommunicationProviderDialog(chosenChannel);
+        if (dialog.ShowDialog(FindForm()) != DialogResult.OK)
+            return;
+        try
+        {
+            await CommunicationManagementStore.ConfigureProviderAsync(dialog.Profile);
+            if (!IsDisposed) await LoadSettingsAsync();
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+    }
+
+    private async Task EditTemplateAsync(bool existing)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+        {
+            Warn("Administrator configuration permission is required.");
+            return;
+        }
+        DataRowView? selected = existing
+            ? templateGrid.CurrentRow?.DataBoundItem as DataRowView : null;
+        if (existing && selected is null)
+        {
+            Warn("Select an existing template to edit.");
+            return;
+        }
+        int id = selected is null ? 0 : Convert.ToInt32(selected["TemplateId"]);
+        using var dialog = new CommunicationTemplateDialog(
+            selected is null ? "" : Convert.ToString(selected["Name"]) ?? "",
+            selected is null ? "Sms" : Convert.ToString(selected["Channel"]) ?? "Sms",
+            selected is null ? "Announcement" : Convert.ToString(selected["Purpose"]) ?? "Announcement",
+            selected is null ? "" : Convert.ToString(selected["Body"]) ?? "",
+            selected is null || Convert.ToBoolean(selected["Active"]));
+        if (dialog.ShowDialog(FindForm()) != DialogResult.OK)
+            return;
+        try
+        {
+            await CommunicationManagementStore.SaveTemplateAsync(
+                id, dialog.TemplateName, dialog.Channel, dialog.Purpose,
+                dialog.Body, dialog.Active);
+            if (!IsDisposed) await LoadSettingsAsync();
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+    }
+
+    private async Task LoadComposeTemplatesAsync()
+    {
+        composeTemplates.Clear();
+        if (CurrentUser.HasPermission("Communication.Send"))
+        {
+            int actor = CurrentUser.UserId;
+            using DataTable table = await CommunicationManagementStore.ReadComposeTemplatesAsync();
+            if (actor != CurrentUser.UserId)
+                throw new InvalidOperationException("Account changed while loading message templates.");
+            foreach (DataRow row in table.Rows)
+                composeTemplates.Add(new TemplateChoice(
+                    Convert.ToInt32(row["TemplateId"]),
+                    Convert.ToString(row["Name"]) ?? "",
+                    Convert.ToString(row["Channel"]) ?? "",
+                    Convert.ToString(row["Purpose"]) ?? "",
+                    Convert.ToString(row["Body"]) ?? ""));
+        }
+        RefreshTemplateChoices();
+    }
+
+    private void RefreshTemplateChoices()
+    {
+        if (templateChoice is null) return;
+        string purpose = ((CommunicationAudience)Math.Max(audience.SelectedIndex, 0)) switch
+        {
+            CommunicationAudience.OutstandingFees => "FeeReminder",
+            CommunicationAudience.Staff => "Staff",
+            CommunicationAudience.Student or CommunicationAudience.Family => "Individual",
+            _ => "Announcement"
+        };
+        string selectedChannel = channel.SelectedIndex == 1 ? "WhatsApp" : "Sms";
+        templateChoice.Items.Clear();
+        templateChoice.Items.Add("Write your own message");
+        foreach (TemplateChoice item in composeTemplates)
+            if (item.Channel == selectedChannel && item.Purpose == purpose)
+                templateChoice.Items.Add(item);
+        templateChoice.SelectedIndex = 0;
     }
 
     private async Task LoadHistoryAsync()
@@ -409,7 +544,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                     ? "Staff.View" : "Students.View");
                 if (target.Audience == CommunicationAudience.OutstandingFees)
                     RequirePermission("Fees.View");
-                SetStep(1);
+                await LoadComposeTemplatesAsync();
+                if (!IsDisposed) SetStep(1);
             }
             else if (step == 1)
             {

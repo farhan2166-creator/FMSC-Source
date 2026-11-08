@@ -60,6 +60,34 @@ internal static partial class Program
         { refusedUnsafeChannel = true; }
         Check(refusedUnsafeChannel, "Protected provider credentials reject unsupported channels and path traversal");
 
+        var twilio = assembly.GetType("FMSC_SMS.Core.CommunicationTwilioTransport")!;
+        var status = twilio.GetMethod("MapStatus", BindingFlags.NonPublic | BindingFlags.Static)!;
+        string Map(string value) => (string)status.Invoke(null, new object?[] { value })!;
+        Check(Map("queued") == "Accepted" && Map("sent") == "Accepted"
+            && Map("delivered") == "Delivered" && Map("undelivered") == "Failed"
+            && Map("nonsense") == "Unknown",
+            "Provider states distinguish acceptance, verified delivery and definitive failures");
+        var verifySignature = twilio.GetMethod("VerifySignedForm", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var url = new Uri("https://example.invalid/webhooks/twilio?source=school");
+        var fields = new Dictionary<string, string>
+        {
+            ["AccountSid"] = "AC" + new string('a', 32),
+            ["MessageSid"] = "SM" + new string('b', 32),
+            ["MessageStatus"] = "delivered"
+        };
+        string secret = "synthetic-auth-token-not-real";
+        string payload = url.AbsoluteUri + string.Concat(fields.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => kv.Key + kv.Value));
+        using var hmac = new System.Security.Cryptography.HMACSHA1(System.Text.Encoding.UTF8.GetBytes(secret));
+        string header = Convert.ToBase64String(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload)));
+        bool Verified(Uri u, string sign) => (bool)verifySignature.Invoke(null,
+            new object?[] { u, fields, sign, secret })!;
+        Check(Verified(url, header), "Verified provider callback accepts correct HMAC over original HTTPS URL and all form fields");
+        Check(!Verified(url, "wrong") && !Verified(new Uri("http://example.invalid/webhooks/twilio?source=school"), header),
+            "Forged callback signatures or non-HTTPS endpoints are rejected");
+        fields["MessageStatus"] = "failed";
+        Check(!Verified(url, header), "Callback body modification fails signed-payload verification");
+
         var type = assembly.GetType("FMSC_SMS.Pages.Communication.CommunicationCenterPage")!;
         using var page = (Control)Activator.CreateInstance(type,
             BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { false }, null)!;
@@ -68,6 +96,9 @@ internal static partial class Program
             && audience.Items[1]!.ToString() == "Campus" && audience.Items[2]!.ToString() == "Class",
             "Communication target defaults to automatic school-wide audience and offers bulk campus/class");
         var send = (ModernButton)type.GetField("confirm", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        var templates = (ModernComboBox)type.GetField("templateChoice",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        Check(templates.Items.Count == 1, "Composition has one optional template picker without a separate workflow page");
         Check(!send.Enabled, "A preview-only rebuild must never enable delivery before provider acceptance");
     }
 }

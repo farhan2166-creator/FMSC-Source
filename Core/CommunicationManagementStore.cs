@@ -24,11 +24,33 @@ internal static class CommunicationManagementStore
         return await DatabaseHelper.QueryUserAsync("msg.ReadChannelSettings");
     }
 
+    internal static async Task<DataTable> ReadComposeTemplatesAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Send"))
+            throw new UnauthorizedAccessException("A sender permission is required to read message templates.");
+        return await DatabaseHelper.QueryUserAsync("msg.ReadComposeTemplates");
+    }
+
     internal static async Task<DataTable> ReadTemplatesAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Configure"))
             throw new UnauthorizedAccessException("Communication Settings permission is required.");
         return await DatabaseHelper.QueryUserAsync("msg.ReadTemplates");
+    }
+
+    internal static async Task ConfigureProviderAsync(
+        CommunicationProviderCredentialStore.Credential credential)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Administrator settings permission is required.");
+        CommunicationTwilioTransport.ValidateCredentials(credential);
+        // Pause the channel BEFORE changing a provider secret or identity.
+        // A partial failure can never activate messaging.
+        await PauseAsync(credential.Channel);
+        CommunicationProviderCredentialStore.Save(credential);
+        await DatabaseHelper.ExecuteUserAsync("msg.ConfigureChannel",
+            DatabaseHelper.P("@Channel", credential.Channel),
+            DatabaseHelper.P("@ProviderCode", credential.ProviderCode));
     }
 
     internal static async Task PauseAsync(string channel)

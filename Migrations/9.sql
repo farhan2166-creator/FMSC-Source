@@ -165,6 +165,9 @@ CREATE TABLE msg.Attempt
     ProviderMessageId nvarchar(150) NULL,
     FailureCode varchar(50) NULL,
     FailureDetail nvarchar(200) NULL,
+    RetryApprovedBy int NULL,
+    RetryApprovedUtc datetime2(3) NULL,
+    RetryReason nvarchar(200) NULL,
     CONSTRAINT FK_MsgAttemptRecipient FOREIGN KEY(RecipientId) REFERENCES msg.Recipient(RecipientId),
     CONSTRAINT UQ_MsgAttemptOrdinal UNIQUE(RecipientId,AttemptNumber),
     CONSTRAINT UQ_MsgAttemptKey UNIQUE(AttemptKey),
@@ -173,7 +176,7 @@ CREATE TABLE msg.Attempt
     CONSTRAINT CK_MsgAttemptOutcome CHECK
         (Outcome IN ('Pending','Submitted','Accepted','Delivered','Failed','Unknown'))
 );
-CREATE INDEX IX_MsgAttemptProviderId ON msg.Attempt(ProviderCode,ProviderMessageId)
+CREATE UNIQUE INDEX UX_MsgAttemptProviderId ON msg.Attempt(ProviderCode,ProviderMessageId)
     WHERE ProviderMessageId IS NOT NULL;
 
 -- Callback identity deduplicates webhook replays; record only verified, sanitized
@@ -537,13 +540,17 @@ BEGIN
         COMMIT TRANSACTION; RETURN;
     END;
 
-    IF EXISTS(SELECT 1 FROM msg.Attempt WITH(HOLDLOCK) WHERE RecipientId=@RecipientId)
-        THROW 51093,''An existing attempt requires explicit reconciliation, not automatic retry.'',1;
+    DECLARE @Ordinal int;
+    SELECT @Ordinal=COUNT(*)+1 FROM msg.Attempt WITH(HOLDLOCK) WHERE RecipientId=@RecipientId;
+    IF @Ordinal>3 OR EXISTS(
+        SELECT 1 FROM msg.Attempt WITH(HOLDLOCK)
+        WHERE RecipientId=@RecipientId AND (Outcome<>''Failed'' OR RetryApprovedBy IS NULL))
+        THROW 51093,''The prior attempt requires definitive failure and explicit retry approval.'',1;
 
     -- Reserve the attempt BEFORE HTTP. Unknown is deliberately conservative:
     -- a crash/timeout must never make this recipient eligible for blind replay.
     INSERT msg.Attempt(RecipientId,AttemptNumber,AttemptKey,Channel,ProviderCode,Outcome)
-    VALUES(@RecipientId,1,@AttemptKey,@Channel,@ProviderCode,''Unknown'');
+    VALUES(@RecipientId,@Ordinal,@AttemptKey,@Channel,@ProviderCode,''Unknown'');
     SET @AttemptId=CONVERT(bigint,SCOPE_IDENTITY());
     UPDATE msg.Recipient
     SET State=''Unknown'',UpdatedUtc=SYSUTCDATETIME()
@@ -555,6 +562,187 @@ BEGIN
            @Body Body,CONVERT(varchar(32),NULL) ExclusionCode;
     COMMIT TRANSACTION;
 END';
+
+EXEC sys.sp_executesql N'CREATE PROCEDURE msg.RecordProviderResult
+    @UserId int,@AttemptKey uniqueidentifier,@Outcome varchar(12),
+    @ProviderMessageId nvarchar(150)=NULL,@FailureCode varchar(50)=NULL
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+    IF @AttemptKey IS NULL OR @Outcome NOT IN (''Submitted'',''Accepted'',''Failed'',''Unknown'')
+        OR (@Outcome IN (''Submitted'',''Accepted'') AND NULLIF(@ProviderMessageId,N'''') IS NULL)
+        OR LEN(ISNULL(@ProviderMessageId,N''''))>150
+        OR LEN(ISNULL(@FailureCode,''''))>50
+        THROW 51094,''Invalid provider outcome or message correlation.'',1;
+    BEGIN TRANSACTION;
+    DECLARE @AttemptId bigint,@RecipientId bigint,@BatchId uniqueidentifier,
+        @Old varchar(12),@OldSid nvarchar(150),@OldResponse datetime2(3),
+        @ReceiptStatus varchar(12);
+    SELECT @AttemptId=A.AttemptId,@RecipientId=A.RecipientId,
+        @Old=A.Outcome,@OldSid=A.ProviderMessageId,@OldResponse=A.ResponseUtc,
+        @BatchId=R.BatchId
+    FROM msg.Attempt A WITH(UPDLOCK,HOLDLOCK)
+    JOIN msg.Recipient R WITH(UPDLOCK,HOLDLOCK) ON R.RecipientId=A.RecipientId
+    WHERE A.AttemptKey=@AttemptKey;
+    IF @AttemptId IS NULL THROW 51094,''Claimed attempt does not exist.'',1;
+    IF @OldSid IS NOT NULL AND @ProviderMessageId IS NOT NULL AND @OldSid<>@ProviderMessageId
+        THROW 51094,''An attempt cannot be reassigned to a different provider message.'',1;
+    IF @OldResponse IS NOT NULL AND @Old NOT IN (''Unknown'',@Outcome,''Delivered'')
+        THROW 51095,''The attempt has a conflicting final provider result.'',1;
+    UPDATE msg.Attempt SET
+        ProviderMessageId=COALESCE(ProviderMessageId,@ProviderMessageId),
+        Outcome=CASE WHEN Outcome=''Delivered'' THEN ''Delivered''
+                     WHEN ResponseUtc IS NOT NULL AND Outcome=''Failed'' THEN ''Failed''
+                     ELSE @Outcome END,
+        ResponseUtc=COALESCE(ResponseUtc,SYSUTCDATETIME()),
+        FailureCode=CASE WHEN @Outcome=''Failed'' THEN @FailureCode ELSE FailureCode END
+    WHERE AttemptId=@AttemptId;
+    UPDATE msg.Recipient SET State=A.Outcome,UpdatedUtc=SYSUTCDATETIME()
+    FROM msg.Attempt A WHERE A.AttemptId=@AttemptId
+      AND msg.Recipient.RecipientId=A.RecipientId;
+
+    -- A verified status callback might reach the database before the API
+    -- response is persisted. Correlate it as soon as the SID is known.
+    SELECT TOP (1) @ReceiptStatus=V.Outcome
+    FROM msg.Receipt V WITH(UPDLOCK,HOLDLOCK)
+    JOIN msg.Attempt A ON A.ProviderCode=V.ProviderCode
+      AND A.ProviderMessageId=V.ProviderMessageId
+    WHERE A.AttemptId=@AttemptId
+    ORDER BY CASE V.Outcome WHEN ''Delivered'' THEN 4 WHEN ''Failed'' THEN 3
+             WHEN ''Accepted'' THEN 2 ELSE 1 END DESC,V.ReceiptId DESC;
+    IF @ReceiptStatus IS NOT NULL
+    BEGIN
+        UPDATE msg.Attempt SET Outcome=CASE
+            WHEN @ReceiptStatus=''Delivered'' THEN ''Delivered''
+            WHEN Outcome=''Delivered'' THEN ''Delivered''
+            WHEN Outcome=''Failed'' THEN ''Failed''
+            WHEN @ReceiptStatus=''Failed'' THEN ''Failed''
+            WHEN @ReceiptStatus=''Accepted'' THEN ''Accepted''
+            ELSE Outcome END WHERE AttemptId=@AttemptId;
+        UPDATE msg.Recipient SET State=A.Outcome,UpdatedUtc=SYSUTCDATETIME()
+        FROM msg.Attempt A WHERE A.AttemptId=@AttemptId
+          AND msg.Recipient.RecipientId=A.RecipientId;
+        UPDATE msg.Receipt SET AppliedAttemptId=@AttemptId
+        WHERE ProviderCode=(SELECT ProviderCode FROM msg.Attempt WHERE AttemptId=@AttemptId)
+          AND ProviderMessageId=(SELECT ProviderMessageId FROM msg.Attempt WHERE AttemptId=@AttemptId)
+          AND AppliedAttemptId IS NULL;
+    END;
+    UPDATE msg.Batch SET State=CASE
+        WHEN EXISTS(SELECT 1 FROM msg.Recipient WHERE BatchId=@BatchId
+             AND State IN (''Pending'',''Unknown'',''Submitted'',''Accepted'')) THEN ''Sending''
+        WHEN EXISTS(SELECT 1 FROM msg.Recipient WHERE BatchId=@BatchId
+             AND State=''Failed'') THEN ''Partial''
+        ELSE ''Completed'' END
+    WHERE BatchId=@BatchId AND State<>''Cancelled'';
+    SELECT @AttemptId AttemptId,(SELECT Outcome FROM msg.Attempt WHERE AttemptId=@AttemptId) Outcome;
+    COMMIT TRANSACTION;
+END;';
+
+EXEC sys.sp_executesql N'CREATE PROCEDURE msg.ApplyVerifiedReceipt
+    @UserId int,@ProviderCode varchar(40),@EventId nvarchar(128),
+    @ProviderMessageId nvarchar(150),@Outcome varchar(12)
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    -- Call this ONLY after provider signature/authenticated-poll verification.
+    -- Never expose this procedure to arbitrary application inputs.
+    EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+    IF NULLIF(LTRIM(RTRIM(@ProviderCode)),'''') IS NULL
+       OR NULLIF(@EventId,N'''') IS NULL OR LEN(@EventId)>128
+       OR NULLIF(@ProviderMessageId,N'''') IS NULL OR LEN(@ProviderMessageId)>150
+       OR @Outcome NOT IN (''Accepted'',''Delivered'',''Failed'',''Unknown'')
+        THROW 51096,''Invalid verified delivery evidence.'',1;
+    BEGIN TRANSACTION;
+    DECLARE @Existing bigint,@OldSid nvarchar(150),@OldOutcome varchar(12),
+        @AttemptId bigint,@RecipientId bigint,@BatchId uniqueidentifier;
+    SELECT @Existing=ReceiptId,@OldSid=ProviderMessageId,@OldOutcome=Outcome
+    FROM msg.Receipt WITH(UPDLOCK,HOLDLOCK)
+    WHERE ProviderCode=@ProviderCode AND EventId=@EventId;
+    IF @Existing IS NOT NULL
+    BEGIN
+        IF @OldSid<>@ProviderMessageId OR @OldOutcome<>@Outcome
+            THROW 51096,''Receipt event key was replayed with conflicting data.'',1;
+        SELECT @Existing ReceiptId,CONVERT(bit,1) AlreadyRecorded;
+        COMMIT TRANSACTION; RETURN;
+    END;
+    INSERT msg.Receipt(ProviderCode,EventId,ProviderMessageId,Outcome)
+    VALUES(@ProviderCode,@EventId,@ProviderMessageId,@Outcome);
+    SET @Existing=CONVERT(bigint,SCOPE_IDENTITY());
+    SELECT @AttemptId=A.AttemptId,@RecipientId=A.RecipientId,@BatchId=R.BatchId
+    FROM msg.Attempt A WITH(UPDLOCK,HOLDLOCK)
+    JOIN msg.Recipient R WITH(UPDLOCK,HOLDLOCK) ON R.RecipientId=A.RecipientId
+    WHERE A.ProviderCode=@ProviderCode AND A.ProviderMessageId=@ProviderMessageId;
+    IF @AttemptId IS NOT NULL
+    BEGIN
+        UPDATE msg.Attempt SET Outcome=CASE
+           WHEN @Outcome=''Delivered'' THEN ''Delivered''
+           WHEN Outcome IN (''Delivered'',''Failed'') THEN Outcome
+           WHEN @Outcome=''Failed'' THEN ''Failed''
+           WHEN @Outcome=''Accepted'' THEN ''Accepted''
+           ELSE Outcome END
+        WHERE AttemptId=@AttemptId;
+        UPDATE msg.Recipient SET State=A.Outcome,UpdatedUtc=SYSUTCDATETIME()
+        FROM msg.Attempt A WHERE A.AttemptId=@AttemptId
+            AND msg.Recipient.RecipientId=A.RecipientId;
+        UPDATE msg.Receipt SET AppliedAttemptId=@AttemptId WHERE ReceiptId=@Existing;
+        UPDATE msg.Batch SET State=CASE
+           WHEN EXISTS(SELECT 1 FROM msg.Recipient WHERE BatchId=@BatchId
+               AND State IN (''Pending'',''Unknown'',''Submitted'',''Accepted'')) THEN ''Sending''
+           WHEN EXISTS(SELECT 1 FROM msg.Recipient WHERE BatchId=@BatchId
+               AND State=''Failed'') THEN ''Partial''
+           ELSE ''Completed'' END
+        WHERE BatchId=@BatchId AND State<>''Cancelled'';
+    END;
+    SELECT @Existing ReceiptId,CONVERT(bit,0) AlreadyRecorded;
+    COMMIT TRANSACTION;
+END;';
+
+EXEC sys.sp_executesql N'CREATE PROCEDURE msg.ApproveDefinitiveRetry
+    @UserId int,@RecipientId bigint,@Reason nvarchar(200)
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+    IF @RecipientId IS NULL OR @RecipientId<=0
+       OR LEN(LTRIM(RTRIM(ISNULL(@Reason,N''''))))<6 OR LEN(@Reason)>200
+        THROW 51097,''Explicit retry justification is required.'',1;
+    BEGIN TRANSACTION;
+    DECLARE @State varchar(12),@BatchId uniqueidentifier,@AttemptId bigint,
+        @Outcome varchar(12),@Ordinal int,@Approved int;
+    SELECT @State=R.State,@BatchId=R.BatchId
+    FROM msg.Recipient R WITH(UPDLOCK,HOLDLOCK)
+    WHERE R.RecipientId=@RecipientId;
+    SELECT TOP (1) @AttemptId=A.AttemptId,@Outcome=A.Outcome,
+       @Ordinal=A.AttemptNumber,@Approved=A.RetryApprovedBy
+    FROM msg.Attempt A WITH(UPDLOCK,HOLDLOCK)
+    WHERE A.RecipientId=@RecipientId ORDER BY A.AttemptNumber DESC;
+    IF @State<>''Failed'' OR @Outcome<>''Failed'' OR @Ordinal IS NULL
+       OR @Ordinal>=3 OR @Approved IS NOT NULL
+       OR EXISTS(SELECT 1 FROM msg.Attempt
+          WHERE RecipientId=@RecipientId AND (Outcome IN (''Unknown'',''Submitted'',''Accepted'',''Delivered'')))
+        THROW 51097,''Only a definitive failed attempt may be explicitly retried (maximum three).'',1;
+    UPDATE msg.Attempt SET RetryApprovedBy=@UserId,
+        RetryApprovedUtc=SYSUTCDATETIME(),RetryReason=@Reason
+    WHERE AttemptId=@AttemptId;
+    UPDATE msg.Recipient SET State=''Pending'',UpdatedUtc=SYSUTCDATETIME()
+    WHERE RecipientId=@RecipientId;
+    UPDATE msg.Batch SET State=''Sending'' WHERE BatchId=@BatchId AND State<>''Cancelled'';
+    COMMIT TRANSACTION;
+END;';
+
+EXEC sys.sp_executesql N'CREATE PROCEDURE msg.ReadAttemptForReconciliation
+    @UserId int,@AttemptId bigint
+AS
+BEGIN
+    SET NOCOUNT ON;
+    EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+    SELECT A.AttemptId,A.AttemptKey,A.Channel,A.ProviderCode,
+           A.ProviderMessageId,A.Outcome
+    FROM msg.Attempt A JOIN msg.Recipient R ON R.RecipientId=A.RecipientId
+    WHERE A.AttemptId=@AttemptId AND A.ProviderMessageId IS NOT NULL
+       AND A.Outcome IN (''Unknown'',''Submitted'',''Accepted'',''Failed'');
+END;';
 
 EXEC sys.sp_executesql N'CREATE PROCEDURE msg.ReadHistory @UserId int,@Limit int=100
 AS
@@ -585,6 +773,23 @@ BEGIN
   FROM msg.ChannelSettings ORDER BY Channel;
 END;';
 
+EXEC sys.sp_executesql N'CREATE PROCEDURE msg.ConfigureChannel
+    @UserId int,@Channel varchar(10),@ProviderCode varchar(40)
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+    IF @Channel NOT IN (''Sms'',''WhatsApp'') OR @ProviderCode<>''Twilio''
+       THROW 51098,''Unsupported approved messaging provider profile.'',1;
+    -- Configuration never turns on messaging. Explicit activation remains
+    -- unavailable until end-to-end provider/release acceptance.
+    UPDATE msg.ChannelSettings
+    SET ProviderCode=@ProviderCode,Enabled=0,
+        UpdatedBy=@UserId,UpdatedUtc=SYSUTCDATETIME()
+    WHERE Channel=@Channel;
+    IF @@ROWCOUNT<>1 THROW 51098,''Channel configuration was not found.'',1;
+END;';
+
 EXEC sys.sp_executesql N'CREATE PROCEDURE msg.PauseChannel @UserId int,@Channel varchar(10)
 AS
 BEGIN
@@ -596,6 +801,15 @@ BEGIN
     SET Enabled=0,UpdatedBy=@UserId,UpdatedUtc=SYSUTCDATETIME()
   WHERE Channel=@Channel;
   IF @@ROWCOUNT<>1 THROW 51088,''Channel setting was not found.'',1;
+END;';
+
+EXEC sys.sp_executesql N'CREATE PROCEDURE msg.ReadComposeTemplates @UserId int
+AS
+BEGIN
+    SET NOCOUNT ON;
+    EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+    SELECT TemplateId,Name,Channel,Purpose,Body
+    FROM msg.Template WHERE Active=1 ORDER BY Name,Channel;
 END;';
 
 EXEC sys.sp_executesql N'CREATE PROCEDURE msg.ReadTemplates @UserId int

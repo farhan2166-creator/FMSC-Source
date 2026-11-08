@@ -200,11 +200,152 @@ internal static class CommunicationV2SqlChecks
         await r.Refused("A changed guardian phone invalidates an old preview",
             () => { Sql.Proc("msg.ConfirmBatch", Args(f.Admin, id: Guid.NewGuid())); return Task.CompletedTask; }, 51086);
 
+
+        // The first claim is Unknown after reservation; a timeout cannot
+        // authorize another network request. Definitive outcomes and verified
+        // receipts are separate, serializable transitions.
+        DataTable unknown = Sql.Proc("msg.RecordProviderResult",
+            Sql.P("@UserId", f.Admin),Sql.P("@AttemptKey", attemptKey),
+            Sql.P("@Outcome", "Unknown"),Sql.P("@ProviderMessageId", null),
+            Sql.P("@FailureCode", null));
+        r.Check(Convert.ToString(unknown.Rows[0]["Outcome"]) == "Unknown",
+            "An uncertain provider response remains Unknown, with no implicit retry.");
+        await r.Refused("Unknown cannot be explicitly requeued as a definite failure",
+            () => { Sql.Proc("msg.ApproveDefinitiveRetry",
+                Sql.P("@UserId", f.Admin), Sql.P("@RecipientId", recipientId),
+                Sql.P("@Reason", "Operator reviewed")); return Task.CompletedTask; }, 51097);
+        string sid = "SM" + new string('a', 32);
+        DataTable acknowledged = Sql.Proc("msg.RecordProviderResult",
+            Sql.P("@UserId", f.Admin),Sql.P("@AttemptKey", attemptKey),
+            Sql.P("@Outcome", "Accepted"),Sql.P("@ProviderMessageId", sid),
+            Sql.P("@FailureCode", null));
+        r.Check(Convert.ToString(acknowledged.Rows[0]["Outcome"]) == "Accepted",
+            "Provider acceptance is stored separately from delivered evidence.");
+        DataTable delivered = Sql.Proc("msg.ApplyVerifiedReceipt",
+            Sql.P("@UserId", f.Admin), Sql.P("@ProviderCode", "FMSC-Synthetic-NoNetwork"),
+            Sql.P("@EventId", "test-delivered-one"),Sql.P("@ProviderMessageId", sid),
+            Sql.P("@Outcome", "Delivered"));
+        r.Check(!Convert.ToBoolean(delivered.Rows[0]["AlreadyRecorded"])
+            && Sql.Count("SELECT COUNT(*) FROM msg.Recipient WHERE RecipientId=@Id AND State='Delivered';",
+                Sql.P("@Id", recipientId))==1,
+            "A verified delivery event advances an accepted recipient to Delivered.");
+        DataTable replayedDelivery=Sql.Proc("msg.ApplyVerifiedReceipt",
+            Sql.P("@UserId", f.Admin), Sql.P("@ProviderCode", "FMSC-Synthetic-NoNetwork"),
+            Sql.P("@EventId", "test-delivered-one"),Sql.P("@ProviderMessageId", sid),
+            Sql.P("@Outcome", "Delivered"));
+        r.Check(Convert.ToBoolean(replayedDelivery.Rows[0]["AlreadyRecorded"]),
+            "Signed receipt replay is idempotent.");
+        Sql.Proc("msg.ApplyVerifiedReceipt",
+            Sql.P("@UserId", f.Admin), Sql.P("@ProviderCode", "FMSC-Synthetic-NoNetwork"),
+            Sql.P("@EventId", "test-delayed-accepted"), Sql.P("@ProviderMessageId", sid),
+            Sql.P("@Outcome", "Accepted"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Recipient WHERE RecipientId=@Id AND State='Delivered';",
+            Sql.P("@Id", recipientId))==1,"Late acceptance must never regress a verified delivery.");
+        await r.Refused("A replay key cannot be reassigned to a different delivery result",
+            () => { Sql.Proc("msg.ApplyVerifiedReceipt",
+                Sql.P("@UserId", f.Admin), Sql.P("@ProviderCode", "FMSC-Synthetic-NoNetwork"),
+                Sql.P("@EventId", "test-delivered-one"),Sql.P("@ProviderMessageId", sid),
+                Sql.P("@Outcome", "Failed"));return Task.CompletedTask; },51096);
+        await r.Refused("A delivered attempt cannot be approved for retransmission",
+            () => { Sql.Proc("msg.ApproveDefinitiveRetry",
+                Sql.P("@UserId", f.Admin),Sql.P("@RecipientId", recipientId),
+                Sql.P("@Reason", "Incorrect manual retry"));return Task.CompletedTask; },51097);
+
+        // Another disposable batch exercises explicit, bounded retries.
+        Sql.Query("UPDATE dbo.Students SET ContactNumber=N'03001234567' WHERE AdmissionId=@Id;",
+            Sql.P("@Id", admissionId));
+        DataTable retryConfirmed = Sql.Proc("msg.ConfirmBatch", Args(f.Admin, id: Guid.NewGuid()));
+        Guid retryBatch=(Guid)retryConfirmed.Rows[0]["BatchId"];
+        long retryRecipient=Convert.ToInt64(Sql.Scalar(
+            "SELECT TOP(1) RecipientId FROM msg.Recipient WHERE BatchId=@Batch;",
+            Sql.P("@Batch",retryBatch)));
+        var retryClaimArgs = new[] { Sql.P("@UserId",f.Admin),
+            Sql.P("@RecipientId",retryRecipient),
+            Sql.P("@AttemptKey",Guid.NewGuid()),
+            Sql.P("@ExpectedProviderCode","FMSC-Synthetic-NoNetwork") };
+        DataTable firstRetryClaim=Sql.Proc("msg.ClaimRecipient",retryClaimArgs);
+        r.Check(Convert.ToBoolean(firstRetryClaim.Rows[0]["Claimed"]),
+            "A second independent recipient can be reserved for a failed-send case.");
+        Guid failureKey=(Guid)firstRetryClaim.Rows[0]["AttemptKey"];
+        Sql.Proc("msg.RecordProviderResult",Sql.P("@UserId",f.Admin),
+            Sql.P("@AttemptKey",failureKey),Sql.P("@Outcome","Failed"),
+            Sql.P("@ProviderMessageId",null),Sql.P("@FailureCode","HTTP400"));
+        Sql.Proc("msg.ApproveDefinitiveRetry",Sql.P("@UserId",f.Admin),
+            Sql.P("@RecipientId",retryRecipient),
+            Sql.P("@Reason","Definitive failure reviewed"));
+        var secondKey=Guid.NewGuid();
+        DataTable secondClaim=Sql.Proc("msg.ClaimRecipient",
+            Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",retryRecipient),
+            Sql.P("@AttemptKey",secondKey),
+            Sql.P("@ExpectedProviderCode","FMSC-Synthetic-NoNetwork"));
+        r.Check(Convert.ToBoolean(secondClaim.Rows[0]["Claimed"])
+            && Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Id AND AttemptNumber=2;",
+                Sql.P("@Id",retryRecipient))==1,
+            "An explicitly approved definite failure may be reclaimed using ordinal two.");
+        await r.Refused("An unapproved uncertain second attempt cannot be retried",
+            () => { Sql.Proc("msg.ApproveDefinitiveRetry",
+                Sql.P("@UserId", f.Admin),Sql.P("@RecipientId",retryRecipient),
+                Sql.P("@Reason","Avoid unknown replay"));return Task.CompletedTask; },51097);
+        Sql.Proc("msg.RecordProviderResult",Sql.P("@UserId",f.Admin),
+            Sql.P("@AttemptKey",secondKey),Sql.P("@Outcome","Failed"),
+            Sql.P("@ProviderMessageId",null),Sql.P("@FailureCode","HTTP400"));
+        Sql.Proc("msg.ApproveDefinitiveRetry",
+            Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",retryRecipient),
+            Sql.P("@Reason","Second confirmed failure reviewed"));
+        Guid thirdKey=Guid.NewGuid();
+        DataTable thirdClaim=Sql.Proc("msg.ClaimRecipient",
+            Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",retryRecipient),
+            Sql.P("@AttemptKey",thirdKey),
+            Sql.P("@ExpectedProviderCode","FMSC-Synthetic-NoNetwork"));
+        r.Check(Convert.ToBoolean(thirdClaim.Rows[0]["Claimed"]) &&
+            Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Id;",
+                Sql.P("@Id",retryRecipient))==3,
+            "A third attempt is the strict upper bound for manual retries.");
+        Sql.Proc("msg.RecordProviderResult",Sql.P("@UserId",f.Admin),
+            Sql.P("@AttemptKey",thirdKey),Sql.P("@Outcome","Failed"),
+            Sql.P("@ProviderMessageId",null),Sql.P("@FailureCode","HTTP400"));
+        await r.Refused("Even confirmed failures are not retried beyond three attempts",
+            () => { Sql.Proc("msg.ApproveDefinitiveRetry",
+                Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",retryRecipient),
+                Sql.P("@Reason","Attempt four must be blocked"));return Task.CompletedTask; },51097);
+
+
+        // A signed callback may arrive before the HTTP response has been
+        // saved. Preserve it for later SID correlation, never discard it.
+        DataTable earlyBatch=Sql.Proc("msg.ConfirmBatch",Args(f.Admin,id:Guid.NewGuid()));
+        long earlyRecipient=Convert.ToInt64(Sql.Scalar(
+            "SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Batch;",
+            Sql.P("@Batch",(Guid)earlyBatch.Rows[0]["BatchId"])));
+        Guid earlyKey=Guid.NewGuid();
+        DataTable earlyClaim=Sql.Proc("msg.ClaimRecipient",
+            Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",earlyRecipient),
+            Sql.P("@AttemptKey",earlyKey),
+            Sql.P("@ExpectedProviderCode","FMSC-Synthetic-NoNetwork"));
+        r.Check(Convert.ToBoolean(earlyClaim.Rows[0]["Claimed"]),
+            "A separate synthetic batch can reserve an attempt for early callback ordering.");
+        string earlySid="SM"+new string('c',32);
+        Sql.Proc("msg.ApplyVerifiedReceipt",
+            Sql.P("@UserId",f.Admin),Sql.P("@ProviderCode","FMSC-Synthetic-NoNetwork"),
+            Sql.P("@EventId","early-delivered-synthetic"),
+            Sql.P("@ProviderMessageId",earlySid),Sql.P("@Outcome","Delivered"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Receipt WHERE EventId='early-delivered-synthetic' AND AppliedAttemptId IS NULL;")==1,
+            "Verified evidence is durably retained when the API SID has not yet been recorded.");
+        Sql.Proc("msg.RecordProviderResult",Sql.P("@UserId",f.Admin),
+            Sql.P("@AttemptKey",earlyKey),Sql.P("@Outcome","Accepted"),
+            Sql.P("@ProviderMessageId",earlySid),Sql.P("@FailureCode",null));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Recipient WHERE RecipientId=@Id AND State='Delivered';",
+            Sql.P("@Id",earlyRecipient))==1
+            && Sql.Count("SELECT COUNT(*) FROM msg.Receipt WHERE EventId='early-delivered-synthetic' AND AppliedAttemptId IS NOT NULL;")==1,
+            "Early verified delivery is reconciled after the provider SID becomes known.");
+
         await r.Refused("Ordinary student viewer cannot read communication history",
             () => { Sql.Proc("msg.ReadHistory", Sql.P("@UserId", f.Restricted)); return Task.CompletedTask; }, 50003);
         DataTable history = Sql.Proc("msg.ReadHistory", Sql.P("@UserId", f.Admin));
         r.Check(history.Rows.Cast<DataRow>().Any(row => (Guid)row["BatchId"] == batch),
             "Authorized History returns the confirmed batch without exposing a raw contact list.");
+        await r.Refused("A non-sender may not view sender-only active templates",
+            () => { Sql.Proc("msg.ReadComposeTemplates", Sql.P("@UserId", f.Restricted));
+                return Task.CompletedTask; }, 50003);
         await r.Refused("Ordinary user cannot manage communication configuration",
             () => { Sql.Proc("msg.ReadChannelSettings", Sql.P("@UserId", f.Restricted)); return Task.CompletedTask; }, 50003);
         DataTable setting = Sql.Proc("msg.ReadChannelSettings", Sql.P("@UserId", f.Admin));
@@ -216,12 +357,29 @@ internal static class CommunicationV2SqlChecks
         r.Check(Convert.ToInt32(template.Rows[0]["TemplateId"]) > 0
             && Sql.Proc("msg.ReadTemplates", Sql.P("@UserId", f.Admin)).Rows.Count == 1,
             "Template save and read require configuration permission.");
+        r.Check(Sql.Proc("msg.ReadComposeTemplates", Sql.P("@UserId", f.Admin))
+                .Rows.Cast<DataRow>().Any(row => Convert.ToString(row["Name"]) == "Synthetic notice"),
+            "Active administrator templates are offered to senders without a second consent step.");
+
 
         Sql.Proc("msg.PauseChannel", Sql.P("@UserId", f.Admin), Sql.P("@Channel", "Sms"));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='Sms' AND Enabled=0;") == 1,
             "Administrator can pause a configured channel without external sending.");
         await r.Refused("A paused channel blocks new confirmations",
             () => { Sql.Proc("msg.ConfirmBatch", Args(f.Admin, id: Guid.NewGuid())); return Task.CompletedTask; }, 51085);
+        await r.Refused("Only administrators can configure messaging providers",
+            () => { Sql.Proc("msg.ConfigureChannel",
+                Sql.P("@UserId",f.Restricted),Sql.P("@Channel","Sms"),
+                Sql.P("@ProviderCode","Twilio"));return Task.CompletedTask; },50003);
+        await r.Refused("Unknown provider cannot be installed as a sending profile",
+            () => { Sql.Proc("msg.ConfigureChannel",
+                Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),
+                Sql.P("@ProviderCode","Unknown"));return Task.CompletedTask; },51098);
+        Sql.Proc("msg.ConfigureChannel",
+            Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),
+            Sql.P("@ProviderCode","Twilio"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ChannelSettings WHERE Channel='Sms' AND ProviderCode='Twilio' AND Enabled=0;")==1,
+            "Provider configuration cannot silently activate message delivery.");
         Sql.Query("UPDATE msg.ChannelSettings SET ProviderCode=NULL WHERE Channel='Sms';");
     }
 }
