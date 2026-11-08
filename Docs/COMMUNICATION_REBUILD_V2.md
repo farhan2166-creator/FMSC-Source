@@ -41,7 +41,7 @@ The fresh `msg` schema holds only the necessary operational state: `ChannelSetti
 4. Run Windows build, SQL disposable 3→9 and 7→9 upgrade tests, fresh 9 installation, and private Sandbox schema-3/schema-7 MDF/LDF acceptance for **the exact Source commit**. Do not modify the frozen fixture files.
 5. Merge only a reviewed, fully accepted replacement. Workflow 04 must remain manual and require fresh exact-commit private Sandbox attestation. Never publish a schema-8 retirement-only build.
 
-**Known incomplete pieces while this is a draft:** recipient query engine, send/claim SQL procedures, encrypted provider configuration, real adapters, verified webhooks, user-facing Communication Center, and end-to-end acceptance. The database tables alone do not authorize sending.
+**Known incomplete pieces while this is a draft:** provider-specific credential storage, live SMS/WhatsApp adapters, safe attempt-claim/dispatch and callback verification, administrator-controlled retry/reconciliation, editable template UI, direct integration of confirmation with a validated provider, and end-to-end private Sandbox acceptance. Confirmed SQL batches are not delivered until an approved dispatcher explicitly claims and transmits them.
 
 ## Implementation checkpoint — automatic selection and preview
 
@@ -49,3 +49,11 @@ The fresh `msg` schema holds only the necessary operational state: `ChannelSetti
 - `Pages/Communication/CommunicationCenterPage.cs` implements the four visible steps, including a live SQL-backed read-only preview and exclusion counts. **Confirm & Send is deliberately disabled**, and the page is not yet in production navigation; it is not a working delivery feature.
 - `Tests/ThemeSmokeChecks/Program.Communication.cs` checks phone normalization, automatic Yes eligibility, exclusion/deduplication and the disabled send action; desktop CI invokes the focused suite.
 - **Still required before exposure:** transactionally authorized, idempotent send confirmation and live revalidation; provider adapters and secret storage, verified callbacks, retries/unknown recovery; History/Settings; real installer and private exact-commit acceptance. No messages have been sent by the rebuild.
+
+## Checkpoint — protected confirmation, History and Settings
+
+- Migration 9 now installs **three distinct permissions** (\`Communication.View\`, \`Communication.Send\`, \`Communication.Configure\`) without granting them to any ordinary role. It also installs \`msg.RecipientSelection\`, a mobile-normalization function and \`msg.ConfirmBatch\`. The stored procedure rejects stale previews by independently selecting the **complete** current school/campus/class/fee/family/staff audience, validating Admission Yes, destinations and channel opt-outs. It serializes identical requests and rejects changed content or recipients. It never performs network I/O.
+- \`Core/CommunicationBatchStore.cs\` prepares an exact preview snapshot for SQL and requires the calling UI to preserve a stable client request GUID. The production **Confirm & Send** action remains disabled and does not call this store until a verified transport exists.
+- \`msg.ReadHistory\` returns batch-level status counts without a contact export; \`msg.ReadChannelSettings\`, \`msg.ReadTemplates\`, \`msg.SaveTemplate\` and \`msg.PauseChannel\` are permission-gated. The Communication page can navigate to **History** and **Settings**, display stored templates, and pause either channel. It has no enable-provider button and stores no credentials in SQL.
+- The synthetic lifecycle suite checks unauthorized confirmation/history/settings, default channel refusal, exact consent matching, duplicate clicks, stale/withdrawn consent, changed numbers, opt-out, template persistence and pausing. It enables a **synthetic** no-network provider only in its disposable SQL fixture.
+- **No live provider, callback receiver, dispatcher or actual delivery is implemented yet.** No message has been sent as part of this work. Both PRs remain draft/unmerged until the complete release acceptance.
