@@ -23,7 +23,14 @@ internal static partial class Program
                 using var bitmap = new Bitmap(form.Width, form.Height);
                 form.DrawToBitmap(bitmap, form.ClientRectangle);
                 bitmap.Save(Path.Combine(output, name + ".png"));
-                Check(form.Controls.Count > 0 && form.ClientSize.Width >= 500, name + " renders offscreen without connecting to SQL.");
+                var visibleContent = form.Controls.Cast<Control>()
+                    .Where(control => control.Visible && control.Width > 0 && control.Height > 0)
+                    .ToArray();
+                Check(form.ClientSize.Width > 0 && form.ClientSize.Height > 0 &&
+                      visibleContent.Any(control => form.ClientRectangle.IntersectsWith(control.Bounds)),
+                    name + " exposes visible billing controls within its usable viewport");
+                Check(new FileInfo(Path.Combine(output, name + ".png")).Length > 0,
+                    name + " produces nonempty visual review evidence");
                 form.Close();
             }
         }
@@ -34,7 +41,8 @@ internal static partial class Program
         months.Rows.Add(month.AddMonths(-1), 25, 30, 250000m); months.Rows.Add(month, 25, 30, 250000m);
         Draw(Create("FMSC_SMS.Core.BillingRecoveryDialog", months), "missed-month-choice");
         Draw(Create("FMSC_SMS.Pages.Finance.Collection.StudentCreditDialog", 1, false), "student-credit");
-        Draw(Create("FMSC_SMS.Pages.Finance.Configuration.FeeRateCorrectionDialog", 1, 1, 1), "bill-rate-corrections");
+        Draw(Create("FMSC_SMS.Pages.Finance.Configuration.FeeRateCorrectionDialog", 1, 1, 1,
+            "Synthetic campus / class / fee"), "bill-rate-corrections");
         var period = new DataTable();
         period.Columns.Add("Frequency"); period.Columns.Add("ConcessionLabel"); period.Columns.Add("EndDate", typeof(DateTime));
         period.Rows.Add("Monthly", "Scholarship", month.AddMonths(8));

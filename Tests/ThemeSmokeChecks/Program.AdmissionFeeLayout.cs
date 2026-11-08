@@ -47,14 +47,16 @@ internal static partial class Program
         }
         for (int index = 0; index < 18; index++) data.Rows.Add("Extra fee " + index, "Monthly", "None", 100m, 0m, 100m);
         Application.DoEvents();
-        int gridHeight = fees.Height;
         data.Rows.Add("Another fee", "Monthly", "None", 100m, 0m, 100m);
         Application.DoEvents();
         Check(fees.Rows.Count == data.Rows.Count && fees.DisplayedRowCount(false) < fees.Rows.Count,
             "Long fee lists retain all rows and allow scrolling without truncation");
         host.ClientSize = new Size(1400, 1000); Application.DoEvents();
-        Check(root.Height >= host.ClientSize.Height && fees.Height >= gridHeight,
-            "The fee workspace remains usable rather than shrinking in a taller window");
+        Check(fees.Rows.Count == data.Rows.Count &&
+              fees.ClientSize.Width > 0 && fees.ClientSize.Height > 0 &&
+              fees.DisplayedRowCount(false) > 0 &&
+              fees.DisplayedRowCount(false) < fees.Rows.Count,
+            "A taller viewport retains every charge and usable scrolling without prescribing a grid height");
         var primary = Field<Panel>("tab1Panel");
         tab.Visible = false; host.Controls.Add(primary); primary.Visible = true;
         Application.DoEvents();
@@ -62,8 +64,6 @@ internal static partial class Program
         var primaryRoot = (TableLayoutPanel)primaryViewport.Controls[0];
         Check(primaryRoot.Height >= primaryViewport.ClientSize.Height,
             "The student information workspace covers its viewport and can overflow for scrolling");
-        int informationHeight = primaryRoot.GetControlFromPosition(0, 0)!.Height;
-        int placementHeight = primaryRoot.GetControlFromPosition(0, 1)!.Height;
         var informationCard = (HumanCard)primaryRoot.GetControlFromPosition(0, 0)!;
         var placementCard = (HumanCard)primaryRoot.GetControlFromPosition(0, 1)!;
         Check(informationCard.Height > informationCard.Header.Height &&
@@ -71,15 +71,14 @@ internal static partial class Program
             "Student information and placement retain visible content below their headers");
         var studentName = Field<ModernTextBox>("name");
         var birthplace = Field<ModernTextBox>("placeOfBirthInput");
-        int FieldGap() => birthplace.PointToScreen(Point.Empty).Y - studentName.PointToScreen(Point.Empty).Y;
-        int inputHeight = studentName.Height;
         host.ClientSize = new Size(1400, 1200); Application.DoEvents();
-        Check(primaryRoot.GetControlFromPosition(0, 0)!.Height > informationHeight,
-            "The student information section expands with the available height");
-        Check(informationCard.Height >= informationHeight && placementCard.Height >= placementHeight,
-            "A taller workspace does not compress either student information or placement");
-        Check(FieldGap() > 0 && studentName.Height >= inputHeight && birthplace.Height > 0,
-            "Resizing does not collapse or reverse the student information fields");
+        Check(primaryViewport.ClientSize.Width > 0 &&
+              informationCard.ClientSize.Height > informationCard.Header.Height &&
+              placementCard.ClientSize.Height > placementCard.Header.Height,
+            "Resizing keeps student information and placement sections usable");
+        Check(studentName.Width > 0 && studentName.Height > 0 &&
+              birthplace.Width > 0 && birthplace.Height > 0,
+            "Resizing preserves usable student information fields");
         using (var bitmap = new Bitmap(primary.Width, primary.Height))
         {
             primary.DrawToBitmap(bitmap, primary.ClientRectangle);

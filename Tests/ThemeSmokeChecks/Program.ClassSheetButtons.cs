@@ -13,7 +13,8 @@ internal static partial class Program
                 AppTheme.SetTheme(theme);
                 using var page = new ClassSheetsPage();
                 var captions=Descendants(page).OfType<Label>()
-                    .Select(label=>label.Text).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    .Select(label=>label.Text.Trim().TrimEnd('*').Trim())
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 Check(new[]{"Campus","Academic Year","Class","Section","Sheet"}.All(captions.Contains),
                     "Class sheets retain the required school, placement and sheet-selection inputs regardless of layout");
                 var load = Descendants(page).OfType<ModernButton>().Single(b => b.Text == "Load Students");

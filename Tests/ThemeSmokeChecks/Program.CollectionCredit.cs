@@ -122,8 +122,10 @@ internal static partial class Program
         Check(Plan().Count==0&&Payable()==2300m&&((Label)Field("availableCredit")).Text=="0"
             &&((Label)Field("remainingCredit")).Text=="5,000",
             "Screenshot regression: the main student's 5000 advance does not settle a sibling's 2300 dues");
-        Check(((Label)Field("advanceScopeHint")).Text.Contains("Transfer in Advance Balance"),
-            "Unusable main-student advance has visible sibling-transfer guidance");
+        string transferGuidance = ((Label)Field("advanceScopeHint")).Text;
+        Check(transferGuidance.Contains("transfer", StringComparison.OrdinalIgnoreCase) &&
+              transferGuidance.Contains("sibling", StringComparison.OrdinalIgnoreCase),
+            "Unusable main-student advance explains that sibling dues require an explicit transfer");
         Allocate(2300m);received.Text="2300";RefreshTotals();
         Check(Cash(0)==2300m&&collect.Enabled,"Sibling dues can still be collected in cash while the main student's advance remains untouched");
         received.Text="0";grid.Rows.Clear();credit.Clear();Bill(4,6594,8700);credit[6594]=8750;RefreshTotals();

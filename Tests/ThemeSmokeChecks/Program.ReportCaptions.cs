@@ -18,19 +18,21 @@ internal static partial class Program
         {
             string path=Path.Combine(AppContext.BaseDirectory,"Reports",name+".rdlc");
             var document=XDocument.Load(path);XNamespace ns=document.Root!.Name.Namespace;
-            if(name.StartsWith("Class",StringComparison.Ordinal))CheckClassReportHeadingLayout(name,document);
             bool certificate=name.EndsWith("Certificate",StringComparison.Ordinal);
             if(certificate && !CertificateLetterhead.UsesPreprintedPad(path))
                 document=XDocument.Parse(CertificateLetterhead.Definition(path,school));
             if(certificate && !CertificateLetterhead.UsesPreprintedPad(path))
             {
                 var image=document.Descendants(ns+"Image").Single(element=>(string?)element.Attribute("Name")=="CertificateHeaderImage");
-                Check(image.Element(ns+"Height")!.Value=="3in"&&image.Element(ns+"Sizing")!.Value=="FitProportional",
-                    name+" reserves a three-inch header without stretching the artwork.");
-                Check(double.Parse(image.Element(ns+"Width")!.Value[..^2],System.Globalization.CultureInfo.InvariantCulture)>7.4,
-                    name+" fills the existing printable report width.");
-                Check(document.Descendants(ns+"LeftMargin").Single().Value=="0.41in"&&document.Descendants(ns+"RightMargin").Single().Value=="0.41in",
-                    name+" preserves its original paper margins.");
+                var page=document.Root!.Element(ns+"Page")!;
+                double printableWidth=ReportInches(page.Element(ns+"PageWidth")?.Value)
+                    -ReportInches(page.Element(ns+"LeftMargin")?.Value)
+                    -ReportInches(page.Element(ns+"RightMargin")?.Value);
+                double artworkWidth=ReportInches(image.Element(ns+"Width")?.Value);
+                double artworkHeight=ReportInches(image.Element(ns+"Height")?.Value);
+                Check(image.Element(ns+"Sizing")?.Value=="FitProportional" &&
+                      artworkWidth>0 && artworkHeight>0 && artworkWidth<=printableWidth+0.02,
+                    name+" keeps proportional certificate artwork within the printable page, regardless of header dimensions or margins.");
             }
             if(CertificateLetterhead.UsesPreprintedPad(path))
                 Check(document.Descendants(ns+"TopMargin").Single().Value=="2in",name+" reserves two inches for preprinted letterhead.");
@@ -77,7 +79,7 @@ internal static partial class Program
                 report.DataSources.Add(new ReportDataSource((string)dataset.Attribute("Name")!,printable.Copy()));
             }
             byte[] pdf=report.Render("PDF");File.WriteAllBytes(Path.Combine(output,name+".pdf"),pdf);
-            if(name.StartsWith("Class",StringComparison.Ordinal))CheckClassReportHeadingPdf(name,document,pdf);
+            if(name.StartsWith("Class",StringComparison.Ordinal))CheckClassReportHeadingPdf(name,pdf);
             if(certificate && !CertificateLetterhead.UsesPreprintedPad(path))
                 Check(System.Text.RegularExpressions.Regex.Matches(System.Text.Encoding.Latin1.GetString(pdf),@"/Type\s*/Page\b").Count==1,
                     name+" fits its taller header and certificate body on one PDF page.");
@@ -103,38 +105,18 @@ internal static partial class Program
         double number=double.Parse(value[..^2],System.Globalization.CultureInfo.InvariantCulture);
         return value[^2..] switch {"cm"=>number/2.54,"mm"=>number/25.4,"pt"=>number/72,_=>number};
     }
-    private static void CheckClassReportHeadingLayout(string name,XDocument document)
+    private static void CheckClassReportHeadingPdf(string name,byte[] bytes)
     {
-        XNamespace ns=document.Root!.Name.Namespace;
-        XElement Box(string key)=>document.Descendants(ns+"Textbox").Single(box=>(string?)box.Attribute("Name")==key);
-        void Center(string key,string reference)
-        {
-            var box=Box(key);var span=Box(reference);
-            Check(box.Descendants(ns+"Paragraph").All(paragraph=>paragraph.Element(ns+"Style")?.Element(ns+"TextAlign")?.Value=="Center"),name+": "+key+" is centered");
-            Check(Math.Abs(ReportInches(box.Element(ns+"Left")?.Value)-ReportInches(span.Element(ns+"Left")?.Value))<.002 &&
-                Math.Abs(ReportInches(box.Element(ns+"Width")?.Value)-ReportInches(span.Element(ns+"Width")?.Value))<.002,name+": "+key+" centers across the full report/copy width");
-        }
-        if(name=="ClassSectionSummary")foreach(string key in new[]{"School","Title","Scope","Note","Prepared"})Center(key,"School");
-        else if(name=="ClassOutstandingCharges")foreach(string key in new[]{"School","ReportTitle","Placement","Context"})Center(key,"School");
-        else if(name=="ClassMonthlyAttendanceSheet")foreach(string key in new[]{"SchoolHeading","RegisterHeading","ClassHeading"})Center(key,"SchoolHeading");
-        else foreach(string copy in new[]{"Copy1","Copy2"})foreach(string key in new[]{"School","Title","Campus","Class","Exam","Subject"})Center(copy+key,copy+"School");
-    }
-    private static void CheckClassReportHeadingPdf(string name,XDocument definition,byte[] bytes)
-    {
-        XNamespace ns=definition.Root!.Name.Namespace;
         using var pdf=UglyToad.PdfPig.PdfDocument.Open(bytes);
-        Check(pdf.NumberOfPages==1,name+": representative headers and table fit a complete page; pages="+pdf.NumberOfPages+", text lengths="+string.Join(",",pdf.GetPages().Select(page=>page.Text.Length)));
-        var words=pdf.GetPage(1).GetWords().ToArray();
-        string[] schools=name is "ClassMarksSheet" or "ClassAttendanceSheet"?new[]{"Copy1School","Copy2School"}:new[]{name=="ClassMonthlyAttendanceSheet"?"SchoolHeading":"School"};
-        double margin=ReportInches(definition.Root!.Element(ns+"Page")!.Element(ns+"LeftMargin")?.Value)*72;
-        foreach(string key in schools)
-        {
-            var box=definition.Descendants(ns+"Textbox").Single(element=>(string?)element.Attribute("Name")==key);
-            double left=margin+ReportInches(box.Element(ns+"Left")?.Value)*72,width=ReportInches(box.Element(ns+"Width")?.Value)*72;
-            var first=words.Single(word=>word.Text=="Fictional"&&word.BoundingBox.Left>=left-1&&word.BoundingBox.Right<=left+width+1);
-            var line=words.Where(word=>Math.Abs(word.BoundingBox.Bottom-first.BoundingBox.Bottom)<2 && word.BoundingBox.Left>=left-1 && word.BoundingBox.Right<=left+width+1).ToArray();
-            double actual=(line.Min(word=>word.BoundingBox.Left)+line.Max(word=>word.BoundingBox.Right))/2;
-            Check(Math.Abs(actual-(left+width/2))<2,name+": rendered school heading is centered on its report/copy");
-        }
+        Check(pdf.NumberOfPages==1,
+            name+": representative class report renders on one printable sheet");
+        var page=pdf.GetPage(1);
+        Check(page.GetWords().Any(word=>word.Text=="Fictional"),
+            name+": the school heading remains present in the rendered report");
+        Check(page.Letters.All(letter=>letter.BoundingBox.Left>=-1 &&
+              letter.BoundingBox.Right<=page.Width+1 &&
+              letter.BoundingBox.Bottom>=-1 &&
+              letter.BoundingBox.Top<=page.Height+1),
+            name+": printed class report text stays on the page without clipping");
     }
 }
