@@ -187,7 +187,7 @@ foreach ($mustHave in @('4c5b5201851b202e2b7ff33c26cabc20bcd00b9c4486be5e99df22d
     'Get-FileHash','--verify-installation','SELECT TOP(1)','dbo.DatabaseVersion','Source/main at audit')) {
     if (-not $probeSource.Contains($mustHave)) { throw "Audit 04 verifier missing review safeguard $mustHave." }
 }
-if ($probeSource -match '(?i)\\b(INSERT\\s+INTO|UPDATE\\s+dbo[.]|DELETE\\s+FROM|DROP\\s+TABLE|ALTER\\s+TABLE)\\b') {
+if ($probeSource -match '(?i)\b(INSERT\s+INTO|UPDATE\s+dbo[.]|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE)\b') {
     throw 'Audit 04 verifier must never edit school SQL records.'
 }
 Write-Output 'PASS: read-only installed-release helper parses and retains pinned provenance, SQL read and verified executable guard.'

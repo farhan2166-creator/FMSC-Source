@@ -62,7 +62,7 @@ try {
     $builder.IntegratedSecurity = $true
     $builder.ConnectTimeout = 15
     $builder.Encrypt = $false
-    $connection = New-Object System.Data.SqlClient.SqlConnection($builder.ConnectionString)
+    $connection = [System.Data.SqlClient.SqlConnection]::new($builder.ConnectionString)
     try {
         $connection.Open()
         $command = $connection.CreateCommand()
