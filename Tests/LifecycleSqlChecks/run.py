@@ -249,7 +249,7 @@ def main():
         # can fail with SQL 1934 even if the caller sets its own session options.
         return execute(docker_command() + ["exec", "--env", "SQLCMDPASSWORD", container, "/opt/mssql-tools18/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-C", "-b", "-I", "-d", catalog, "-i", "/tmp/level1.sql"])
 
-    def provision(suffix, current_schema=False):
+    def provision(suffix, current_schema=False, legacy_nonempty=False):
         def checked(label, action):
             try:
                 return action()
@@ -257,15 +257,64 @@ def main():
                 raise RuntimeError("Disposable provisioning " + label + ": " + str(ex)) from ex
         catalog = "FMSC_AuditChecks_" + suffix + "_" + token.hex
         env["FMSC_AUDIT_CONNECTION"] = f"Server=127.0.0.1,{port};Database={catalog};User ID=sa;Password={secret};Encrypt=False;TrustServerCertificate=True;Connect Timeout=20;Pooling=True"
-        # Both owned catalogs use the data-free test baseline plus numbered migrations.
+        # Every owned catalog starts from the data-free baseline, never imported school data.
         # The root fmsc.dacpac is a reference artifact, never a deployment/test source.
         package = str(Path(private.name) / "schema-only.dacpac")
         prefix = [str(args.sqlpackage)] if args.sqlpackage else [args.dotnet, "tool", "run", "sqlpackage", "--"]
         checked("schema-only publish", lambda: execute(prefix + ["/Action:Publish", "/SourceFile:" + package, "/TargetConnectionString:" + env["FMSC_AUDIT_CONNECTION"], "/p:CreateNewDatabase=True"], timeout=240, cwd=PROJECT))
         checked("owner registration", lambda: sql(catalog, "DECLARE @Owner uniqueidentifier='" + str(token) + "'; EXEC sys.sp_addextendedproperty @name=N'FMSC_Level1Owner',@value=@Owner;"))
         checked("baseline 1 initialization", lambda: sql(catalog, (PROJECT / "Baseline/Initialize.sql").read_text(encoding="utf-8-sig")))
+        def wrapped(migration):
+            return "SET XACT_ABORT ON; BEGIN TRANSACTION;\n" + migration.read_text(encoding="utf-8-sig") + "\nCOMMIT TRANSACTION;"
+
+        def verify_version7_rollback():
+            return sql(catalog, """
+                IF (SELECT TOP(1) TRY_CONVERT(int,VersionNumber)
+                    FROM dbo.DatabaseVersion ORDER BY VersionId DESC)<>7
+                    THROW 51000,'Expected failed Migration 8 to retain schema 7.',1;
+                IF SCHEMA_ID(N'comm') IS NULL
+                   OR (SELECT COUNT_BIG(*) FROM comm.Contact)<>1
+                   OR (SELECT COUNT_BIG(*) FROM comm.Message)<>1
+                   OR OBJECT_ID(N'dbo.StudentGuardianCommunication',N'U') IS NULL
+                   OR (SELECT COUNT_BIG(*) FROM dbo.FMSC_Test_Migration8SchoolSentinel)<>1
+                    THROW 51000,'Failed migration did not preserve legacy and school records.',1;
+                """)
+
+        def expect_migration8_refusal(migration, expected_reason):
+            try:
+                sql(catalog, wrapped(migration))
+            except RuntimeError as ex:
+                if expected_reason not in str(ex):
+                    raise RuntimeError("Migration 8 failed for an unexpected reason: " + str(ex)) from ex
+            else:
+                raise RuntimeError("Migration 8 incorrectly accepted unsupported legacy schema state.")
+            checked("migration-8 refusal rollback", verify_version7_rollback)
+
         for migration in sorted((ROOT / "Migrations").glob("*.sql"), key=lambda p: int(p.stem)):
-            checked("migration " + migration.stem, lambda: sql(catalog, "SET XACT_ABORT ON; BEGIN TRANSACTION;\n" + migration.read_text(encoding="utf-8-sig") + "\nCOMMIT TRANSACTION;"))
+            if legacy_nonempty and migration.stem == "8":
+                checked("seed nonempty legacy communication tables",
+                    lambda: sql(catalog, (PROJECT / "LegacyCommunicationV7Seed.sql").read_text(encoding="utf-8")))
+                # An unexpected column must fail without retiring anything.
+                checked("create unsupported guardian extension",
+                    lambda: sql(catalog, "ALTER TABLE dbo.StudentGuardianCommunication ADD FMSC_Test_UnsupportedExtension int NULL;"))
+                expect_migration8_refusal(migration, "Unexpected guardian communication columns")
+                checked("remove unsupported guardian extension",
+                    lambda: sql(catalog, "ALTER TABLE dbo.StudentGuardianCommunication DROP COLUMN FMSC_Test_UnsupportedExtension;"))
+                # An external FK must also fail safely instead of being dropped.
+                checked("create external legacy dependency",
+                    lambda: sql(catalog, """
+                        CREATE TABLE dbo.FMSC_Test_Migration8UnknownDependency(
+                            ContactId uniqueidentifier NOT NULL REFERENCES comm.Contact(ContactId));
+                        INSERT dbo.FMSC_Test_Migration8UnknownDependency(ContactId)
+                            SELECT ContactId FROM comm.Contact;
+                        """))
+                expect_migration8_refusal(migration, "External table depends on communication")
+                checked("remove external legacy dependency",
+                    lambda: sql(catalog, "DROP TABLE dbo.FMSC_Test_Migration8UnknownDependency;"))
+            checked("migration " + migration.stem, lambda m=migration: sql(catalog, wrapped(m)))
+        if legacy_nonempty:
+            checked("discard nonempty legacy records without archive and keep dbo data",
+                lambda: sql(catalog, (PROJECT / "LegacyCommunicationV9Verify.sql").read_text(encoding="utf-8")))
         return catalog
 
     def run_lifecycle(mode, report_name):
@@ -344,6 +393,9 @@ def main():
         stage("Lifecycle SQL", lambda: run_lifecycle([], "lifecycle.json"))
         stage("Current release schema provisioning", lambda: provision("Current", current_schema=True))
         stage("Current release school scenarios", lambda: run_lifecycle(["--school-scenarios"], "school-scenarios.json"))
+        stage("Nonempty legacy communication migration, refusal and rollback",
+              lambda: provision("LegacyCommunication", legacy_nonempty=True))
+        report["scenarios"][-1]["assertions"] = 16
         for label, project, suffix, mode in [
             ("Quick Registration SQL", "QuickRegistrationSqlChecks", "Quick", None),
             ("Mutation SQL", "MutationSqlChecks", "Mutation", ["--mutation-fixture"]),

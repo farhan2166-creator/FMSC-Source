@@ -46,9 +46,9 @@ The fresh `msg` schema holds only the necessary operational state: `ChannelSetti
 ## Implementation checkpoint — automatic selection and preview
 
 - `Core/CommunicationRecipientResolver.cs` now resolves **all active students, one campus, one campus/class, unpaid balances, one student, a family, or one staff member** directly from live school records. It never requires a picker for bulk campus/class/school selections. An Admission Yes qualifies automatically; No and Not Recorded are counted as excluded. Only current valid Pakistan mobile destinations can be considered, channel opt-outs override Yes, and shared guardian numbers deduplicate in the same preview.
-- `Pages/Communication/CommunicationCenterPage.cs` implements the four visible steps, including a live SQL-backed read-only preview and exclusion counts. **Confirm & Send is deliberately disabled**, and the page is not yet in production navigation; it is not a working delivery feature.
+- `Pages/Communication/CommunicationCenterPage.cs` implements the four visible steps, including a live SQL-backed read-only preview and exclusion counts. **Confirm & Send is deliberately disabled**, and the page is reachable by users with the Communication.View permission; it is not a working delivery feature.
 - `Tests/ThemeSmokeChecks/Program.Communication.cs` checks phone normalization, automatic Yes eligibility, exclusion/deduplication and the disabled send action; desktop CI invokes the focused suite.
-- **Still required before exposure:** transactionally authorized, idempotent send confirmation and live revalidation; provider adapters and secret storage, verified callbacks, retries/unknown recovery; History/Settings; real installer and private exact-commit acceptance. No messages have been sent by the rebuild.
+- **Still required before delivery:** transactionally authorized, idempotent send confirmation and live revalidation; provider adapters and secret storage, verified callbacks, retries/unknown recovery; History/Settings; real installer and private exact-commit acceptance. No messages have been sent by the rebuild.
 
 ## Checkpoint — protected confirmation, History and Settings
 
@@ -75,3 +75,16 @@ The fresh `msg` schema holds only the necessary operational state: `ChannelSetti
 - SQL lifecycle tests cover forbidden sends, provider mismatch, verified receipt replay and monotonic delivery, early/late state transitions, manual-only failure retries capped at three, and paused provider configuration. Synthetic Windows checks cover Twilio status mapping, trusted callback HMAC validation and a disabled send action.
 
 **Still blocked:** There is intentionally no automatic worker, publicly hosted trusted webhook, verified real Twilio SMS/WhatsApp end-to-end credential acceptance, safe callback ingress deployment, or production confirmation/navigation activation. The client cannot receive a public Twilio webhook behind arbitrary school NAT networks without an approved HTTPS service. Schema 9 remains a draft, both PRs must stay unmerged, and Workflow 04/publication remains blocked until real provider, installer and private exact-commit Sandbox acceptance have passed. The existing workflows have not been weakened.
+
+## Explicit legacy-data retirement decision (PR #128)
+
+Historical `comm` rows and `dbo.StudentGuardianCommunication` values are not needed
+for the replacement. Migration 8 deliberately discards them even if nonempty;
+there is no `legacy_comm_v7` archive. This includes old contact records,
+campaigns, messages, attempts and the old module's audit evidence, **not** any
+application-wide audit restoration. The verified pre-migration backup is the
+only retained recovery copy. A fresh schema-9 Admission Yes/No is never inferred
+from historical WhatsApp or guardian preferences. Unknown dependencies or
+schema extensions fail closed. Before deployment, verify this behavior on
+a **disposable restored schema-7 school backup** without altering the working
+1.0.14/schema-9 installation.

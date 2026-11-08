@@ -1,6 +1,7 @@
 -- Schema 8: retire the unused Communication Center and its Admission consent add-on.
 -- Do not modify migrations 2-7. The installer owns the enclosing SQL transaction.
--- This migration intentionally refuses deletion when communication records exist.
+-- The retired Communication Center (including old guardian preferences) is intentionally disposable.
+-- The verified installer backup and outer transaction protect recovery. Never touch school records.
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
@@ -8,9 +9,31 @@ IF ISNULL((SELECT TOP (1) TRY_CONVERT(int,VersionNumber)
            FROM dbo.DatabaseVersion ORDER BY VersionId DESC),0)<>7
     THROW 51000,'Communication retirement requires schema 7.',1;
 
+-- The former admission add-on is not the new consent authority. Check its
+-- expected schema before removing even nonempty rows; never infer new consent.
 IF OBJECT_ID(N'dbo.StudentGuardianCommunication',N'U') IS NOT NULL
-   AND EXISTS (SELECT 1 FROM dbo.StudentGuardianCommunication)
-    THROW 51000,'Guardian communication records exist; review before retirement.',1;
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM sys.columns C
+        WHERE C.object_id=OBJECT_ID(N'dbo.StudentGuardianCommunication')
+          AND C.name NOT IN (N'AdmissionId',N'Email',N'Phone',N'WhatsAppConsent',
+                             N'RecordedUtc',N'RecordedBy',N'SchoolCommunicationConsent'))
+        THROW 51000,'Unexpected guardian communication columns; review before retirement.',1;
+    IF EXISTS (
+        SELECT 1 FROM (VALUES (N'AdmissionId'),(N'Email'),(N'Phone'),
+                            (N'WhatsAppConsent'),(N'RecordedUtc'),(N'RecordedBy'),
+                            (N'SchoolCommunicationConsent')) AS Expected(Name)
+        WHERE COL_LENGTH(N'dbo.StudentGuardianCommunication',Expected.Name) IS NULL)
+        THROW 51000,'Guardian communication table differs from schema 7; review before retirement.',1;
+    IF EXISTS (SELECT 1 FROM sys.triggers
+               WHERE parent_id=OBJECT_ID(N'dbo.StudentGuardianCommunication'))
+        THROW 51000,'Unknown guardian communication trigger; review before retirement.',1;
+    IF EXISTS (SELECT 1 FROM sys.sql_expression_dependencies D
+               JOIN sys.objects R ON R.object_id=D.referencing_id
+               WHERE D.referenced_id=OBJECT_ID(N'dbo.StudentGuardianCommunication')
+                 AND R.schema_id<>ISNULL(SCHEMA_ID(N'comm'),-1))
+        THROW 51000,'External SQL code depends on guardian communication; review before retirement.',1;
+END;
 
 IF SCHEMA_ID(N'comm') IS NOT NULL
 BEGIN
@@ -33,13 +56,8 @@ BEGIN
                WHERE D.referenced_schema_name=N'comm' AND R.schema_id<>@SchemaId)
         THROW 51000,'External SQL code depends on communication; review before retirement.',1;
 
-    -- Discard only stock templates/settings. Do not drop contacts or operational evidence.
-    SELECT @Sql=@Sql+N'IF EXISTS (SELECT 1 FROM comm.'+QUOTENAME(T.name)+N')
-        THROW 51000,''Communication operational records exist; review before retirement.'',1;'+CHAR(10)
-    FROM sys.tables T WHERE T.schema_id=@SchemaId AND T.name IN
-       (N'Contact',N'Campaign',N'Message',N'Attempt',N'PendingReceipt',
-        N'WebhookInbox',N'Audit',N'Rule',N'RuleBaseline');
-    IF LEN(@Sql)>0 EXEC sys.sp_executesql @Sql;
+    -- All legacy communication records may be discarded by explicit owner decision.
+    -- Fail-closed dependency and object-scope checks above must pass first.
 
     -- Drop all internal foreign keys first; never remove external FKs.
     SET @Sql=N'';
@@ -112,4 +130,4 @@ END;
 
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'8',SYSDATETIME(),SUSER_SNAME(),
-    N'Retire unused Communication Center and Admission communication add-on');
+    N'Retire obsolete Communication Center data and legacy guardian preferences');

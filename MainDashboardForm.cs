@@ -2,6 +2,7 @@ using FMSC_SMS.Core;
 using FMSC_SMS.Core.Updates;
 using FMSC_SMS.Pages.Administration;
 using FMSC_SMS.Pages.Dashboard;
+using FMSC_SMS.Pages.Communication;
 using FMSC_SMS.Pages.Finance.Billing;
 using FMSC_SMS.Pages.Help;
 using FMSC_SMS.Pages.Finance.Collection;
@@ -787,6 +788,11 @@ public sealed class MainDashboardForm : ApplicationWindowForm
             "Reports",
             "Reports",
             "Reports.View");
+        // The new center is available for safe recipient previews and history.
+        // Sending stays disabled until provider acceptance is complete.
+        AddMainNav(flow, "reports.png", "Communication Center", AppTheme.Primary,
+            () => new CommunicationCenterPage(),
+            "Communication", "Communication Center", "Communication.View");
         // User and role administration lives in the permission-controlled Account menu.
         AddModule(
             flow,
