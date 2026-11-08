@@ -271,7 +271,7 @@ try {
     Stage 'Real Microsoft SQL Server LocalDB prerequisite'
     $existing=LocalDbExe
     $downloadedMsi=Join-Path $root 'SqlLocalDB.msi'
-    Invoke-WebRequest -Uri (Get-FmscToolSpec 'LocalDb').url -OutFile $downloadedMsi -MaximumRedirection 5
+    Invoke-FmscPinnedDownload -Uri (Get-FmscToolSpec 'LocalDb').url -OutFile $downloadedMsi -TimeoutSec 300
     if ((Get-Item -LiteralPath $downloadedMsi).Length -lt 1000000) { throw 'LocalDB MSI is incomplete.' }
     Assert-FmscMicrosoftMsi $downloadedMsi
     Copy-Item -LiteralPath $downloadedMsi -Destination $localMsi
@@ -295,12 +295,25 @@ try {
         & $localExe create MSSQLLocalDB 16.0
         NativeOk 'Create isolated-runner SQL Server 2022 LocalDB instance'
     }
-    & $localExe start MSSQLLocalDB
-    NativeOk 'Start LocalDB instance'
-    $info=@(& $localExe info MSSQLLocalDB 2>&1)
-    NativeOk 'Read owned-runner LocalDB endpoint'
-    $pipe=[regex]::Match(($info -join "`n"), '(?:np:)?(\\\\\.\\pipe\\LOCALDB#[A-Za-z0-9]+\\tsql\\query)')
-    if (-not $pipe.Success) { throw 'Cannot resolve the local LocalDB named pipe; no database operations permitted.' }
+    # Hosted Windows may transiently fail automatic LocalDB startup. Retry
+    # only on this disposable runner; never delete/reset an existing instance.
+    $healthyLocalDb=$false
+    for ($attempt=1; $attempt -le 3; $attempt++) {
+        $startOutput=@(& $localExe start MSSQLLocalDB 2>&1)
+        $startCode=$LASTEXITCODE
+        $info=@(& $localExe info MSSQLLocalDB 2>&1)
+        $infoCode=$LASTEXITCODE
+        $pipe=[regex]::Match(($info -join [Environment]::NewLine), '(?:np:)?(\\\\\.\\pipe\\LOCALDB#[A-Za-z0-9]+\\tsql\\query)')
+        if ($startCode -eq 0 -and $infoCode -eq 0 -and $pipe.Success) {
+            $healthyLocalDb=$true
+            break
+        }
+        Write-Warning ("Disposable runner LocalDB not ready (attempt {0}/3; startExit={1}; infoExit={2}; namedPipe={3})." -f $attempt,$startCode,$infoCode,$pipe.Success)
+        if ($attempt -lt 3) { Start-Sleep -Seconds (5 * $attempt) }
+    }
+    if (-not $healthyLocalDb) {
+        throw 'Disposable runner LocalDB did not start with a healthy SQL endpoint after three attempts; no database operations permitted.'
+    }
     $instance='np:'+$pipe.Groups[1].Value
     $checks.Add('Actual LocalDB instance started using Microsoft-signed prerequisites')
 
