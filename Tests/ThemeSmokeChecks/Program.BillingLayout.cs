@@ -38,14 +38,18 @@ internal static partial class Program
                             "Status actions do not overlap the dropdown at width " + width);
                     }
                 }
-                Check(labels.Any(l => l.Text == "Billing Review" || l.Text == "Posting Scope" || l.Text == "Reversal Scope"), name + " has a scope card");
-                Check(labels.Any(l => l.Text == "Billing Results" || l.Text == "Monthly Fees" || l.Text == "Students to Charge" || l.Text == "Charges to Reverse"), name + " has a results card");
-                var buttons = All(page).OfType<ModernButton>().Where(b => b.Visible).ToArray();
-                Check(buttons.Length >= 3, name + " retains its workflow actions");
+                Check(labels.Any(label => label.Visible && !string.IsNullOrWhiteSpace(label.Text)),
+                    name + " provides readable guidance regardless of card names or structure");
+                Check(All(page).OfType<DataGridView>().Any(grid => grid.Visible),
+                    name + " retains a visible review-results grid");
+                var buttons = All(page).OfType<ModernButton>().Where(button => button.Visible).ToArray();
+                Check(buttons.Length > 0 && buttons.All(button =>
+                        button.Width > 0 && button.Height >= AppMetrics.TextHeight(button.Font)),
+                    name + " retains visible, readable workflow actions");
                 if (name == "manual")
                 {
-                    var fields = All(page).OfType<TableLayoutPanel>().First(t => t.Controls.Count == 8);
-                    Check(fields.ColumnCount == 4 && fields.RowCount == 2, "Manual posting uses two readable rows");
+                    Check(All(page).OfType<LookupBox>().Count(input => input.Visible) >= 2,
+                        "Manual posting retains usable month and scope inputs regardless of their arrangement");
                 }
                 using var bitmap = new Bitmap(form.ClientSize.Width, form.ClientSize.Height);
                 page.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));

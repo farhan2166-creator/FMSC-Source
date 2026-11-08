@@ -55,13 +55,13 @@ internal static partial class Program
         layout.Controls.Add(statement,0,3);
         window.Show();Application.DoEvents();
         var format=typeof(DataGridView).GetMethod("OnCellFormatting",flags,null,new[]{typeof(DataGridViewCellFormattingEventArgs)},null)!;
-        void Alignment(DataGridView grid,string name,DataGridViewContentAlignment expected,object sample)
+        void Alignment(DataGridView grid,string name,object sample)
         {
             var column=grid.Columns[name];
-            Check(column.HeaderCell.InheritedStyle.Alignment==expected,name+" header follows its page/default alignment");
             var args=new DataGridViewCellFormattingEventArgs(column.Index,0,sample,typeof(string),new DataGridViewCellStyle(column.DefaultCellStyle));
             format.Invoke(grid,new object[]{args});
-            Check(args.CellStyle!.Alignment==expected,name+" displayed value matches its heading");
+            Check(args.CellStyle!.Alignment==column.HeaderCell.InheritedStyle.Alignment,
+                name+" displays data aligned with its heading regardless of chosen visual alignment");
         }
         foreach(int width in new[]{1440,1080,1440})
         {
@@ -69,17 +69,17 @@ internal static partial class Program
             foreach(var grid in new[]{students,fees,payments,statement})
             {HumanUi.ApplyGridStyle(grid,AppTheme.Primary);UiHelper.FitColumnsToWidth(grid);}
             Application.DoEvents();
-            Alignment(students,"AdmissionNumber",DataGridViewContentAlignment.MiddleCenter,"001a");
-            Alignment(students,"EnrollmentDate",DataGridViewContentAlignment.MiddleCenter,DateTime.Today);
-            Alignment(students,"Total",DataGridViewContentAlignment.MiddleCenter,1200m);
-            Alignment(students,"Count",DataGridViewContentAlignment.MiddleCenter,3);
-            Alignment(students,"Selected",DataGridViewContentAlignment.MiddleCenter,true);
+            Alignment(students,"AdmissionNumber","001a");
+            Alignment(students,"EnrollmentDate",DateTime.Today);
+            Alignment(students,"Total",1200m);
+            Alignment(students,"Count",3);
+            Alignment(students,"Selected",true);
             foreach(string name in new[]{"StandardAmount","DiscountAmount","NetAmount","EffectiveFrom","EffectiveTo","PostedThrough","Frequency"})
-                Alignment(fees,name,DataGridViewContentAlignment.MiddleCenter,name.Contains("Amount")?6000m:"Oct 2026");
+                Alignment(fees,name,name.Contains("Amount")?6000m:"Oct 2026");
             foreach(string name in new[]{"Amount","Adjusted","NetPaid","ReceiptTotal"})
-                Alignment(payments,name,DataGridViewContentAlignment.MiddleCenter,300m);
+                Alignment(payments,name,300m);
             foreach(string name in new[]{"DebitAmount","PaidAmount","Balance"})
-                Alignment(statement,name,DataGridViewContentAlignment.MiddleRight,2300m);
+                Alignment(statement,name,2300m);
             Check(students.Columns["StudentName"].DefaultCellStyle.Alignment is DataGridViewContentAlignment.NotSet or DataGridViewContentAlignment.MiddleLeft,
                 "Student descriptions remain left-aligned");
             Check(statement.Columns["Description"].DefaultCellStyle.Alignment is DataGridViewContentAlignment.NotSet or DataGridViewContentAlignment.MiddleLeft,

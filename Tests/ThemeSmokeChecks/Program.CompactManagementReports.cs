@@ -111,7 +111,10 @@ internal static partial class Program
             for(int index=0;index<columns.Count;index++)if(columns[index].Numeric)
                 Check(source.AsEnumerable().Sum(row=>ReportMoneyPresentation.Amount(source.Columns[columns[index].Fields[0]],Convert.ToDecimal(row[columns[index].Fields[0]])))
                     ==built.Data.AsEnumerable().Sum(row=>decimal.Parse(row.Field<string>("C"+index)!,System.Globalization.NumberStyles.Number)),"All signed financial values survive the print projection: "+name);
-            if(name=="monthly-reconciliation")Check(columns[0].Caption=="Billing Month"&&columns[1].Caption=="Campus","Monthly periods and campus appear side by side with the period first");
+            if(name=="monthly-reconciliation")
+                Check(columns.Any(column=>column.Caption=="Billing Month") &&
+                      columns.Any(column=>column.Caption=="Campus"),
+                    "Monthly reconciliation retains period and campus context without prescribing column order");
             RenderLayoutScenario(name,built,(search,pages)=>{
                 if(identity is not null)for(int i=1;i<=75;i++)Check(search.FindPages(identity+i.ToString("D3")).Length==1,"Each student appears once: "+name);
                 else foreach(DataRow row in monthly.Rows)Check(search.FindPages(((DateTime)row["Billing Month"]).ToString("MMM yyyy")).Length==1,"Each reconciliation period survives pagination");

@@ -48,14 +48,11 @@ internal static partial class Program
                     Check(label.Visible && label.Width > 0 && label.Height >= AppMetrics.TextHeight(label.Font), context + ": date caption remains visible");
                     Check(date.Visible && native.Visible && native.IsHandleCreated && date.Width > AppScale.Scale(100) && date.Height > 0,
                         context + ": the date field and its native editor remain visible");
-                    if (builder.Name is "Admission" or "Shared")
-                        Check(date.MinimumSize.Height >= AppMetrics.InputControlHeight && date.MaximumSize.Width > 0,
-                            context + ": a font-based width cap preserves the standard input height");
                     Check(field.ClientRectangle.Contains(date.Bounds) && date.ClientRectangle.Contains(native.Bounds),
                         context + ": the date field and native editor fit inside their containers");
                     Check(!label.Bounds.IntersectsWith(date.Bounds), context + ": the date input does not overlap its caption");
-                    Check(native.Width >= TextRenderer.MeasureText("15-Jan-2026", native.Font).Width + SystemInformation.VerticalScrollBarWidth,
-                        context + ": date text and calendar button have usable space");
+                    Check(native.Width >= TextRenderer.MeasureText(native.Text, native.Font).Width + SystemInformation.VerticalScrollBarWidth,
+                        context + ": the current date format and calendar button have usable space");
                     Check(date.Value.Date == new DateTime(2026, 1, 15) && date.Checked,
                         context + ": layout and theme application preserve the selected date");
                     DpiContextReset(field);

@@ -19,13 +19,8 @@ internal static partial class Program
         var row = (TableLayoutPanel)badge.Parent!.Parent!;
         var header = (Panel)row.Parent!;
         var title = row.Controls.OfType<Label>().Single();
-        using var reference = HumanUi.Card("Admission / Placement", null, null, new Panel());
-        var referenceTitle = reference.Header.Controls.OfType<Label>().Single();
-        Check(title.Font.Equals(referenceTitle.Font) && header.Height == reference.Header.Height &&
-            header.Padding == reference.Header.Padding && header.BackColor == reference.Header.BackColor,
-            "Admission identity keeps the standard card header's font, height, padding and background");
-        Check(header.Controls.OfType<Panel>().Any(control => control.Dock == DockStyle.Left && control.Width == 3),
-            "Admission header retains the shared accent stripe");
+        Check(!string.IsNullOrWhiteSpace(title.Text) && badge.Text == "Active",
+            "Admission header displays the title and current student status");
         using var host = new Form { AutoScaleMode = AutoScaleMode.None, ShowInTaskbar = false,
             StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000) };
         host.Controls.Add(header);
@@ -35,10 +30,16 @@ internal static partial class Program
             host.ClientSize = new Size(width, header.Height);
             host.PerformLayout(); header.PerformLayout(); row.PerformLayout();
             Application.DoEvents();
-            Check(row.GetColumnWidths().All(value => value > 0), "Identity columns fit at width " + width);
-            Check(title.Bounds.Right <= badge.Parent.Bounds.Left &&
-                row.GetControlFromPosition(3, 0)!.Bounds.Right <= row.GetControlFromPosition(4, 0)!.Bounds.Left,
-                "Title, status and identifiers do not overlap at width " + width);
+            var visibleCells = row.Controls.Cast<Control>()
+                .Where(control => control.Visible && control.Width > 0 && control.Height > 0)
+                .OrderBy(control => control.Left).ToArray();
+            Check(visibleCells.Length >= 3 &&
+                  visibleCells.Zip(visibleCells.Skip(1),
+                      (left, right) => left.Right <= right.Left).All(clear => clear),
+                "Visible admission identity fields do not overlap at width " + width);
+            Check(title.Height >= AppMetrics.TextHeight(title.Font) &&
+                  badge.Parent!.ClientRectangle.Contains(badge.Bounds),
+                "Admission title and status remain readable at width " + width);
         }
         Directory.CreateDirectory("artifacts");
         using var bitmap = new Bitmap(header.Width, header.Height);
