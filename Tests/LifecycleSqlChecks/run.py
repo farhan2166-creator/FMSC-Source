@@ -280,12 +280,14 @@ def main():
                     THROW 51000,'Failed migration did not preserve legacy and school records.',1;
                 """)
 
-        def expect_migration8_refusal(migration, expected_reason):
+        def expect_migration8_refusal(migration, expected_code):
+            # The shared SQL harness intentionally sanitizes messages to numeric
+            # SQL codes; never inspect or export raw SQL text or school records.
             try:
                 sql(catalog, wrapped(migration))
             except RuntimeError as ex:
-                if expected_reason not in str(ex):
-                    raise RuntimeError("Migration 8 failed for an unexpected reason: " + str(ex)) from ex
+                if ("SQL Msg " + str(expected_code) + " level 16 state 1") not in str(ex):
+                    raise RuntimeError("Migration 8 rejected with the wrong safe diagnostic: " + str(ex)) from ex
             else:
                 raise RuntimeError("Migration 8 incorrectly accepted unsupported legacy schema state.")
             checked("migration-8 refusal rollback", verify_version7_rollback)
@@ -297,7 +299,7 @@ def main():
                 # An unexpected column must fail without retiring anything.
                 checked("create unsupported guardian extension",
                     lambda: sql(catalog, "ALTER TABLE dbo.StudentGuardianCommunication ADD FMSC_Test_UnsupportedExtension int NULL;"))
-                expect_migration8_refusal(migration, "Unexpected guardian communication columns")
+                expect_migration8_refusal(migration, 51042)
                 checked("remove unsupported guardian extension",
                     lambda: sql(catalog, "ALTER TABLE dbo.StudentGuardianCommunication DROP COLUMN FMSC_Test_UnsupportedExtension;"))
                 # An external FK must also fail safely instead of being dropped.
@@ -308,7 +310,7 @@ def main():
                         INSERT dbo.FMSC_Test_Migration8UnknownDependency(ContactId)
                             SELECT ContactId FROM comm.Contact;
                         """))
-                expect_migration8_refusal(migration, "External table depends on communication")
+                expect_migration8_refusal(migration, 51047)
                 checked("remove external legacy dependency",
                     lambda: sql(catalog, "DROP TABLE dbo.FMSC_Test_Migration8UnknownDependency;"))
             checked("migration " + migration.stem, lambda m=migration: sql(catalog, wrapped(m)))

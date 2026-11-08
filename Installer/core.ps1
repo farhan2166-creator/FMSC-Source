@@ -145,20 +145,25 @@ function Open-UpdateWindow {
     # FMSC's own icon. Prefer the packaged GUI setup binary, then the working
     # installation, then the candidate payload (first-time setup).
     # Icon loading is cosmetic and must never interfere with recovery.
-    foreach ($iconExe in @(
-        (Join-Path $PSScriptRoot 'FMSC.Setup.exe'),
-        (Join-Path $AppDir 'FMSC_SMS.exe'),
-        (Join-Path $AppSource 'FMSC_SMS.exe')
+    foreach ($candidate in @(
+        @{ Root = $PSScriptRoot; File = 'FMSC.Setup.exe' },
+        @{ Root = $AppDir; File = 'FMSC_SMS.exe' },
+        @{ Root = $AppSource; File = 'FMSC_SMS.exe' }
     )) {
-        if (-not (Test-Path -LiteralPath $iconExe -PathType Leaf)) { continue }
+        # The same UI is exercised as a standalone function by offline tests,
+        # where the script root or installation path may legitimately be empty.
+        # Only resolve paths inside the cosmetic, best-effort guard.
+        if ([string]::IsNullOrWhiteSpace([string]$candidate.Root)) { continue }
         try {
+            $iconExe = Join-Path -Path $candidate.Root -ChildPath $candidate.File
+            if (-not (Test-Path -LiteralPath $iconExe -PathType Leaf)) { continue }
             $icon = [Drawing.Icon]::ExtractAssociatedIcon($iconExe)
             if ($icon) {
                 $script:UpdateWindow.Icon = $icon
                 break
             }
         } catch {
-            # Fall back to the next icon; never fail the installation for branding.
+            # Missing or invalid branding must never stop setup or safe recovery.
         }
     }
     $script:UpdateWindow.AutoScaleMode = 'None' # Avoid a second WinForms font-based size pass.
