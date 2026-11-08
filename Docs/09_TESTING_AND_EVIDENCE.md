@@ -48,3 +48,22 @@ decorative colors, control order, or previously generated screenshots.
 Consolidate related edits on a review branch and run relevant checks once for the
 finished candidate. Workflow 04 remains fail-closed on exact-commit private
 Sandbox acceptance; test modernization does not authorize publishing.
+
+
+### Focused Windows execution
+
+After revising a UI test, compiling the WinForms test project is not enough to
+prove that its assertions execute successfully. On a disposable Windows test
+profile, run the opt-in focused suite without triggering the release workflow:
+
+```powershell
+.\Tools\RunDurableUiContracts.ps1
+.\Tools\RunDurableUiContracts.ps1 -IncludePdfReports
+```
+
+The first command exercises core Admission, billing, report-filter, sorting,
+dialog, and permission-related UI cases. The optional PDF batch renders extra
+financial and class/certificate evidence. The script builds the test project
+once, invokes each focused mode explicitly, and stops at the first failure.
+It does not replace the existing mandatory CI, SQL migrations, private Sandbox
+acceptance, or installer/Workflow 04 checks.
