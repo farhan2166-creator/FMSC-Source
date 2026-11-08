@@ -4,9 +4,9 @@ using FMSC_SMS.Core;
 namespace FMSC_SMS.Pages.Communication;
 
 /// <summary>
-/// Read-only Communication Center workflow under construction.
-/// It remains out of navigation until the SQL send gate, provider and
-/// end-to-end acceptance are complete. Confirm & Send is fail-closed.
+/// Preview-only Communication Center with protected History and Settings.
+/// Production navigation is available to permitted users, but Confirm & Send
+/// remains fail-closed until trusted provider end-to-end acceptance passes.
 /// </summary>
 public sealed class CommunicationCenterPage : V2Page, IBusyPage
 {

@@ -1,5 +1,6 @@
 using FMSC_SMS.Core;
 using FMSC_SMS.Pages.Finance.Collection;
+using FMSC_SMS.Pages.Communication;
 using FMSC_SMS.Pages.Finance.Billing;
 using FMSC_SMS.Pages.Reports;
 using FMSC_SMS.Pages.Reports.Finance;
@@ -320,7 +321,9 @@ public sealed class WelcomePage : UserControl
         ("Student Profile", "Students", () => new StudentProfilePage(Navigate), () => CurrentUser.HasPermission("Students.View")),
         ("Student Reports", "Students", () => new StudentReportsPage(), () => CurrentUser.HasPermission("Students.View") && CurrentUser.HasPermission("Reports.View")),
         (PageTitles.StudentCertificates, "Certificates", () => StudentCertificatesPage.CreateDashboardView(Navigate), () => CertificateWorkspaceAccess.CanOpenHub(CurrentUser.HasPermission)),
-        ("Reports", "Reports", () => new ReportsHomePage(Navigate), () => CurrentUser.HasPermission("Reports.View"))
+        ("Reports", "Reports", () => new ReportsHomePage(Navigate), () => CurrentUser.HasPermission("Reports.View")),
+        ("Communication Center", "Communication", () => new CommunicationCenterPage(),
+            () => CurrentUser.HasPermission("Communication.View"))
         };
         var visibleActions = actions
             .Where(action => action.Allowed())
@@ -365,6 +368,7 @@ public sealed class WelcomePage : UserControl
             "Student Reports" => "\uE9D5",
             PageTitles.StudentCertificates => "\uE8D7",
             "Reports" => "\uE9D9",
+            "Communication Center" => "\uE8F2",
             _ => "\uE80F"
         };
         var button = new DashboardActionButton(glyph) {
