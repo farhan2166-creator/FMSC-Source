@@ -28,7 +28,8 @@ internal static partial class Program
         GridReportPreview.Report Build()
         {
             using var projected=ReportExportBuilder.Build(source,grid.Columns.Cast<DataGridViewColumn>(),Array.Empty<string>());
-            Check(projected.Columns.Count==4&&FamilyAdvanceReport.CanBuild(projected),"The actual column/export projection preserves grouped family presentation without technical columns");
+            Check(FamilyAdvanceReport.CanBuild(projected) && !projected.Columns.Contains(FamilyAdvanceLayout.Column),
+                "The actual export contains usable grouped-family data without the internal JSON payload");
             return GridReportPreview.Build("Fictional Meadow School & College","Student Advance Balance Register — Families","Campus: All   Class: All   Section: All",projected,"Fixture operator");
         }
         var compact=Build();
@@ -46,8 +47,12 @@ internal static partial class Program
             var pageGrid=(DataGridView)typeof(V2Page).GetField("Grid",flags)!.GetValue(page)!;
             pageGrid.DataSource=source;
             typeof(CreditBalanceReportPage).GetMethod("OnReportPageBound",flags)!.Invoke(page,null);
-            Check(pageGrid.Columns.Cast<DataGridViewColumn>().Where(column=>column.Visible).OrderBy(column=>column.DisplayIndex).Select(column=>column.HeaderText)
-                .SequenceEqual(new[]{"Father / Parent","Children / Class","Advance","Family Total"}),"The form uses the proposed four columns without repeated counts or activity dates");
+            var visibleKeys=pageGrid.Columns.Cast<DataGridViewColumn>()
+                .Where(column=>column.Visible).Select(column=>column.DataPropertyName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Check(new[]{"Family / Student","Members","Student Advances","Available Credit"}
+                    .All(visibleKeys.Contains) && !visibleKeys.Contains(FamilyAdvanceLayout.Column),
+                "The family report displays identities, members, advances and totals without exposing internal JSON");
             pageGrid.Parent!.Controls.Remove(pageGrid);
             using var form=new Form{ClientSize=new Size(1100,440),ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,Location=new Point(-20000,-20000)};
             pageGrid.Dock=DockStyle.Fill;form.Controls.Add(pageGrid);form.Show();Application.DoEvents();

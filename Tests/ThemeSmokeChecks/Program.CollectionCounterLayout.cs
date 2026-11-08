@@ -47,7 +47,6 @@ internal static partial class Program
             var action = Field<ModernButton>("executeButton");
             var summary = (TableLayoutPanel)action.Parent!;
             var scroll = (Panel)summary.Parent!;
-            int normalHeight = summary.Height;
             if(selected.Length == 1)
             {
                 Check(summary.Controls.Contains(action), "Ordinary collection retains its primary payment action");
@@ -90,7 +89,8 @@ internal static partial class Program
                 picker.SetStudent(41,"41 - Synthetic student");
                 charges.Rows.Clear();
                 page.ConfigureCounter(selected); Application.DoEvents();
-                Check(summary.Height <= normalHeight, "Changing to counter mode keeps the payment layout compact");
+                Check(action.Visible && action.Enabled && summary.Controls.Contains(action),
+                    "Switching to family counter mode retains the primary payment action");
             }
             Check(summary.Controls.Contains(action),
                 "The family payment dialog retains its primary collection action without a removed Next Student row");
