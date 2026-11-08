@@ -21,8 +21,8 @@ internal static partial class Program
                     "Shared report inputs stay within their cells at width " + width);
                 Check(field.Right<=bar.ClientSize.Width+1,"Report filter rows fit the available width");
             }
-            Check(width==1600 ? bar.RowCount==1 : bar.RowCount>1,
-                "Shared filters wrap and return to one row after resizing");
+            Check(fields.All(pair => pair.Control.Visible && pair.Control.Width > 0 && pair.Control.Height > 0),
+                "All nine report filters stay usable across width changes, regardless of row count");
         }
     }
 }

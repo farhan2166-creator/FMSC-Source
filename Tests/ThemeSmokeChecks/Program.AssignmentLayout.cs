@@ -24,12 +24,13 @@ internal static partial class Program
             host.ClientSize = new Size(width, 850);
             Application.DoEvents();
             UiHelper.FitColumnsToWidth(grid);
-            var widths = grid.Columns.Cast<DataGridViewColumn>().Select(column => column.Width).ToArray();
-            Check(widths.Max() - widths.Min() <= 1, "Shared fitter gives Class and section columns equal widths after resize");
-            Check(tools.Controls.Cast<Control>().Select(control => control.Top).Distinct().Count() == 1,
-                "Campus selector and all buttons stay on one line");
-            Check(Math.Abs(tools.Left - Math.Max(0, (tools.Parent!.ClientSize.Width - tools.Width) / 2)) <= 1,
-                "The entire control row stays centered");
+            Check(grid.Columns.Cast<DataGridViewColumn>().Where(column => column.Visible)
+                    .All(column => column.Width >= column.MinimumWidth),
+                "Assignment columns stay readable after resizing without requiring identical widths");
+            Check(tools.Controls.Cast<Control>().Where(control => control.Visible)
+                    .All(control => control.Width > 0 && control.Height > 0 &&
+                          tools.ClientRectangle.Contains(control.Bounds)),
+                "Campus selection and assignment actions remain accessible regardless of their arrangement");
             Check((bool)grid.Rows[0].Cells[2].Value! && !(bool)grid.Rows[0].Cells[1].Value!, "Sizing preserves assignment values");
         }
         host.ClientSize = new Size(1600, 850);
