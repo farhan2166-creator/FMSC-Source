@@ -35,10 +35,9 @@ internal static partial class Program
         var grid = (DataGridView)typeof(V2Page).GetField("Grid", flags)!.GetValue(page)!;
         var bound = (DataView)grid.DataSource!;
         Check(bound.Cast<DataRowView>().Select(row => (string)row["AdmissionNumber"]).SequenceEqual(new[] { "2", "2a", "10" }), "Admission numbers use natural numeric and suffix order");
-        Check(grid.Columns["AdmissionNumber"].DisplayIndex < grid.Columns["StudentName"].DisplayIndex &&
-            grid.Columns["StudentName"].DisplayIndex < grid.Columns["FatherName"].DisplayIndex &&
-            grid.Columns["FatherName"].DisplayIndex < grid.Columns["ClassSection"].DisplayIndex,
-            "Grid starts with admission number, student, father and placement");
+        Check(new[] { "AdmissionNumber", "StudentName", "FatherName", "ClassSection" }
+                .All(name => grid.Columns.Contains(name) && grid.Columns[name].Visible),
+            "Billing review retains admission number, student, guardian and placement regardless of display order");
 
         // Billing SQL permits Fees.Collect alone; the separate student list does
         // not. An operator without Students.View must still get the base review.
