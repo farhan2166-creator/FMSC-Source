@@ -1,5 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-<PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
-<ItemGroup><Compile Include="../../Services/Communication/CommunicationModels.cs" Link="CommunicationModels.cs"/><Compile Include="../../Services/Communication/MessageProviders.cs" Link="MessageProviders.cs"/><Compile Include="../../Services/Communication/MetaCallbackVerifier.cs" Link="MetaCallbackVerifier.cs"/></ItemGroup>
-<ItemGroup><Compile Include="../../Core/PermissionCatalog.cs" Link="PermissionCatalog.cs"/><EmbeddedResource Include="../../Core/PermissionCatalog.json" LogicalName="FMSC_SMS.Core.PermissionCatalog.json"/></ItemGroup>
-</Project>

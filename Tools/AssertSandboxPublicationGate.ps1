@@ -29,6 +29,7 @@ if (-not $schemaMatch.Success) {
 }
 $targetSchema=[int]$schemaMatch.Groups[1].Value
 if ($targetSchema -lt 7 -or $targetSchema -gt 9999) { throw 'Unsupported private release schema target.' }
+if ($targetSchema -eq 8) { throw 'Schema 8 is retirement-only. No intermediate Communication Center-free release.' }
 $expectedDescription="MDF/LDF v3+v7 -> v$targetSchema SQL+installer PASS (fixture 5a8c5130)"
 $context='fmsc/sandbox-mdf-ldf/v2'
 # GitHub returns newest first. Do not skip a newer failure to find an older

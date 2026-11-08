@@ -1,5 +1,4 @@
 using Microsoft.Data.SqlClient;
-using FMSC_SMS.Services.Communication;
 
 // End-to-end business examples against the complete migrated, data-free SQL fixture.
 // The reference DACPAC is not a deployment or fixture-publishing source.
@@ -43,37 +42,6 @@ internal sealed partial class SchoolScenarios(Fixture f, Report r)
         await r.Stage("School: collection credit, future bills and atomic cash settlement", () => CollectionCreditChecks.Run(f,r));
         await r.Stage("School: pending registration confirmation preserves paid opening bill", PendingConfirmation);
         await r.Stage("School: automatic monthly posting excludes legacy and reversed fees", AutomaticBilling);
-    }
-
-    internal async Task Upgrade()
-    {
-        // The runner has already installed the approved data-free baseline and
-        // replayed every numbered production migration to the current schema.
-        // Do not fake a schema-20 version over that complete schema and rerun
-        // migration 21: migration files must never be reapplied out of order.
-        using var connection = DatabaseHelper.GetConnection(); connection.Open();
-        using var stream = typeof(FMSC_SMS.Core.CommunicationInstallation).Assembly
-            .GetManifestResourceStream("FMSC_SMS.Communication.Schema.sql")!;
-        using var reader = new StreamReader(stream);
-        string script = await reader.ReadToEndAsync();
-        r.Check(await CommunicationFixture.InstallAsync(connection, script) == CommunicationInstallation.Ready,
-            "An optional disabled Communication module installs against the latest schema.");
-        var child = Admit("Upgrade Preservation Example");
-        long charge = Tuition(child.Enrollment);
-        await Pay(child.Student, child.Enrollment, 1000, (charge, 1000));
-        int students = Sql.Count("SELECT COUNT(*) FROM dbo.Students;");
-        decimal received = Sql.Money("SELECT SUM(TotalAmount) FROM dbo.FeePayments;");
-        r.Check(await CommunicationFixture.InstallAsync(connection, script) == CommunicationInstallation.Ready &&
-            await CommunicationSchemaContract.VerifyAsync(connection),
-            "A verified optional module can be checked repeatedly without reinstallation or drift.");
-        r.Check(Sql.Count("SELECT COUNT(*) FROM dbo.Students;") == students &&
-            Sql.Money("SELECT SUM(TotalAmount) FROM dbo.FeePayments;") == received && Due(charge) == 4000,
-            "Optional installation and subsequent verification preserve students, payments, and exact outstanding dues.");
-        r.Check(Convert.ToString(Sql.Scalar("SELECT TOP(1) VersionNumber FROM dbo.DatabaseVersion ORDER BY VersionId DESC;"))
-            == DatabaseHelper.RequiredDatabaseSchemaVersion,
-            "Optional module verification never changes the fully migrated base schema version.");
-        r.Check(Sql.Count("SELECT COUNT(*) FROM sys.procedures WHERE name IN(N'GetRoles',N'GetUserRoles',N'GetRolesAndPermissions',N'GetAdjustableFeePayments');") == 0,
-            "All four retired schema-21 read procedures remain absent after the complete migration chain.");
     }
 
     private async Task LegacyActivation()

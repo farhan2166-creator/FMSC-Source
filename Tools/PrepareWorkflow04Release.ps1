@@ -35,6 +35,7 @@ Require ($appMatch.Success -and $dbMatch.Success) 'Current application/schema ve
 # and upgrades them through the declared production migration target.
 $targetSchema=[int]$dbMatch.Groups[1].Value
 Require ($targetSchema -ge 7 -and $targetSchema -le 9999) 'Schema target is outside the reviewed frozen-fixture migration range.'
+Require ($targetSchema -ne 8) 'Schema 8 is retirement-only. Finish and accept schema 9+ before publishing.'
 $migrationsDir=Join-Path (Get-Location).Path 'Migrations'
 Require (Test-Path -LiteralPath $migrationsDir -PathType Container) 'Source migration directory missing.'
 $scriptVersions=@{}

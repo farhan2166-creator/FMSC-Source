@@ -91,7 +91,7 @@ try {
     $env:GITHUB_TOKEN='synthetic-token-never-used-for-network'
 
     $global:__FmscGateMockStatuses=@((New-MockStatus),(New-MockStatus -State 'failure'))
-    Assert-Outcome 'newest valid trusted status allows build-only gate' $true
+    Assert-Outcome 'latest trusted status observes retirement-only schema guard' ($targetSchema -ne 8)
 } finally {
     foreach ($key in $original.Keys) {
         [Environment]::SetEnvironmentVariable($key,$original[$key])

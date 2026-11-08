@@ -833,13 +833,6 @@ internal static partial class Program
             Console.WriteLine($"PASS: {checks} validation-caption layout checks.");
             return;
         }
-        if(args.Contains("--communication-layout"))
-        {
-            CheckCommunicationWorkspace();
-            CheckCommunicationGuidance();
-            Console.WriteLine($"PASS: {checks} communication layout, focus and workflow checks.");
-            return;
-        }
         if(args.Contains("--setup-readiness"))
         {
             CheckSetupReadinessActions();
@@ -857,8 +850,6 @@ internal static partial class Program
             CheckAdmissionToolbarRows();
             CheckSchoolWorkflow();
             CheckReportCaptionOrder();
-            CheckCommunicationWorkspace();
-            CheckCommunicationGuidance();
             CheckDatePickerVisibility();
             CheckPdfFileDurability();
             CheckDpiResponsiveLayouts();

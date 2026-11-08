@@ -25,7 +25,7 @@ internal static partial class HelpCatalog
     };
 
     internal static IReadOnlyList<HelpEntry> Entries { get; } = Array.AsReadOnly(
-        BasicsEntries().Concat(StudentsEntries()).Concat(FinanceEntries()).Concat(CommunicationEntries())
+        BasicsEntries().Concat(StudentsEntries()).Concat(FinanceEntries())
             .OrderBy(e => e.Id, StringComparer.Ordinal).ToArray());
 
     private sealed record SearchEntry(HelpEntry Entry, HashSet<string> Title, HashSet<string> Keywords,

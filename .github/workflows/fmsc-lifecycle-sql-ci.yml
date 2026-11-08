@@ -6,7 +6,6 @@ on:
   pull_request:
     paths:
       - 'Migrations/**'
-      - 'Services/Communication/**'
       - 'Tests/LifecycleSqlChecks/**'
       - 'Tests/Level3Checks/**'
       - 'Pages/Students/Admissions/**'

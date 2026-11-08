@@ -218,9 +218,7 @@ internal sealed class AdministrationStore(AccessEditorKind kind) : IAdministrati
                 using var role = Procedure(transaction,"dbo.SaveRole",actor,DatabaseHelper.P("@RoleName",draft.Name),
                     DatabaseHelper.P("@Description",draft.Description),DatabaseHelper.Int("@RoleId",draft.Id));
                 int id = SavedId(role,"RoleId");
-                var optionalIds=catalog.Permissions.Where(p=>PermissionCatalog.OptionalCommunication.Contains(p.Code,StringComparer.OrdinalIgnoreCase)).Select(p=>p.Id).ToHashSet();
-                bool optionalRole=draft.Choices.Any(optionalIds.Contains)||catalog.Roles.Any(r=>r.Id==id&&r.Permissions.Any(optionalIds.Contains));
-                using var permissions = Procedure(transaction,optionalRole?"comm.SaveRolePermissions":"dbo.SaveRolePermissions",actor,DatabaseHelper.Int("@RoleId",id),
+                using var permissions = Procedure(transaction,"dbo.SaveRolePermissions",actor,DatabaseHelper.Int("@RoleId",id),
                     DatabaseHelper.P("@PermissionIdsJson",JsonSerializer.Serialize(draft.Choices)));
                 if (SavedId(permissions,"RoleId") != id) throw new InvalidDataException("The permission save returned a different role.");
                 return id;

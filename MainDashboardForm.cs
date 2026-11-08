@@ -787,8 +787,6 @@ public sealed class MainDashboardForm : ApplicationWindowForm
             "Reports",
             "Reports",
             "Reports.View");
-        AddMainNav(flow, "reports.png", "Communication Center", AppTheme.Primary,
-            () => new FMSC_SMS.Pages.Communication.CommunicationCenterPage(), "Communication", "Communication Center", "Communication.View");
         // User and role administration lives in the permission-controlled Account menu.
         AddModule(
             flow,

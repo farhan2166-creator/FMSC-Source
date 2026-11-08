@@ -39,6 +39,7 @@ Check ($dispatch.Contains('fmsc/sandbox-mdf-ldf/v2') -and $dispatch.Contains('pr
 $gate=Get-Content (Join-Path $root 'Tools/AssertSandboxPublicationGate.ps1') -Raw
 Check ($gate.Contains('fmsc/sandbox-mdf-ldf/v2') -and $gate.Contains('expectedDescription') -and
     $gate.Contains('targetSchema')) 'Publication gate is not bound to the declared migration target.'
+Check ($prep.Contains('$targetSchema -ne 8') -and $gate.Contains('$targetSchema -eq 8')) 'Retirement-only schema 8 must be blocked by both release preparation and the final gate.'
 Check ($wait.Contains('$PreviousStatusId') -and $wait.Contains('fmsc/sandbox-mdf-ldf/v2') -and
     $wait.Contains('AssertSandboxPublicationGate.ps1')) 'Wait accepts old or untrusted private status.'
 Check (-not $wait.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and -not $wait.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Sensitive tokens leaked into polling job.'

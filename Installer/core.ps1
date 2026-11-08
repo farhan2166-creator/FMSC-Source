@@ -28,7 +28,7 @@ function Wait-OriginalFmscExit {
 }
 $AppName = 'FMSC School Management System'
 $AppVersion = '1.0.13'
-$DatabaseVersion = '7'
+$DatabaseVersion = '8'
 $ReleaseRoot = $PSScriptRoot
 $AppSource      = Join-Path $ReleaseRoot 'FMSC_SMS'
 $DatabaseSource = Join-Path $ReleaseRoot 'Database'
@@ -1021,7 +1021,7 @@ function Complete-VerifiedApplicationUpdate {
         Test-PreparedUpdate -Root $Prepared -Version $AppVersion -Schema ([int]$DatabaseVersion) -Application $ApplicationDirectory
     }
     $result = Invoke-InstallationDatabaseCheck -Application (Join-Path $ApplicationDirectory 'FMSC_SMS.exe')
-    if ($result -notin @(0,10)) { throw "Activated application verification failed (code $result). Recovery files have been kept." }
+    if ($result -ne 0) { throw "Activated application verification failed (code $result). Recovery files have been kept." }
     if ($script:RecoveryJournal) { Complete-FmscRecoveryTransaction }
     # Prune superseded admin-owned tool bundles only after successful app/SQL
     # verification. Retain the currently integrity-verified copies and all
