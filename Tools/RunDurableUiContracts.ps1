@@ -38,10 +38,17 @@ try {
         & dotnet build $project -c Release
         if ($LASTEXITCODE -ne 0) { throw 'WinForms focused-test compilation failed.' }
     }
+    $failed = @()
     foreach ($mode in $checks) {
         Write-Host "Running focused UI contract: $mode"
         & dotnet run --project $project -c Release --no-build -- $mode
-        if ($LASTEXITCODE -ne 0) { throw "Focused UI contract failed: $mode" }
+        if ($LASTEXITCODE -ne 0) {
+            $failed += "$mode (exit $LASTEXITCODE)"
+            Write-Warning "Standalone contract failed: $mode"
+        }
+    }
+    if ($failed.Count -gt 0) {
+        throw "$($failed.Count) of $($checks.Count) standalone UI modes failed: $($failed -join ', ')"
     }
     Write-Host "PASS: $($checks.Count) focused native UI contract modes."
 }

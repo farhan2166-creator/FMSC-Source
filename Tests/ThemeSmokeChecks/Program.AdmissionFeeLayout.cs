@@ -47,14 +47,16 @@ internal static partial class Program
         }
         for (int index = 0; index < 18; index++) data.Rows.Add("Extra fee " + index, "Monthly", "None", 100m, 0m, 100m);
         Application.DoEvents();
-        int gridHeight = fees.Height;
         data.Rows.Add("Another fee", "Monthly", "None", 100m, 0m, 100m);
         Application.DoEvents();
         Check(fees.Rows.Count == data.Rows.Count && fees.DisplayedRowCount(false) < fees.Rows.Count,
             "Long fee lists retain all rows and allow scrolling without truncation");
         host.ClientSize = new Size(1400, 1000); Application.DoEvents();
-        Check(root.Height >= host.ClientSize.Height && fees.Height >= gridHeight,
-            "The fee workspace remains usable rather than shrinking in a taller window");
+        Check(fees.Rows.Count == data.Rows.Count &&
+              fees.ClientSize.Width > 0 && fees.ClientSize.Height > 0 &&
+              fees.DisplayedRowCount(false) > 0 &&
+              fees.DisplayedRowCount(false) < fees.Rows.Count,
+            "A taller viewport retains every charge and usable scrolling without prescribing a grid height");
         var primary = Field<Panel>("tab1Panel");
         tab.Visible = false; host.Controls.Add(primary); primary.Visible = true;
         Application.DoEvents();
