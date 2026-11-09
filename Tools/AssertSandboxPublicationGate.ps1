@@ -41,14 +41,14 @@ $context='fmsc/sandbox-mdf-ldf/v2'
 $latest=@($contexts | Where-Object { $_.context -ceq $context } | Select-Object -First 1)
 if ($latest.Count -ne 1) { throw 'Missing private Sandbox real-installer acceptance attestation.' }
 $record=$latest[0]
+# A status is trusted only from the permanent account ID and a run URL on
+# its current verified owner namespace; never follow a legacy URL redirect.
+$trustedRunPrefix='https://github.com/' + $sourceRepo.FullName.Split('/')[0] + '/FMSC-Sandbox/actions/runs/'
+$trustedRunPattern='^' + [regex]::Escape($trustedRunPrefix) + '[0-9]+$'
 if ($record.state -cne 'success' -or
     [string]$record.creator.id -cne '316891609' -or
     $record.description -cne $expectedDescription -or
-    $record.target_url -cnotmatch ('^' + [regex]::Escape('https://github.com/' + $env:GITHUB_REPOSITORY_OWNER + '/FMSC-Sandbox/actions/runs/') + '[0-9]+) {
-    throw 'The latest Sandbox acceptance status was unsuccessful, unauthorized or invalid.'
-}
-Write-Host "Verified trusted Sandbox SQL + installer acceptance for exact Source SHA $SourceSha"
-)) {
+    $record.target_url -cnotmatch $trustedRunPattern) {
     throw 'The latest Sandbox acceptance status was unsuccessful, unauthorized or invalid.'
 }
 Write-Host "Verified trusted Sandbox SQL + installer acceptance for exact Source SHA $SourceSha"
