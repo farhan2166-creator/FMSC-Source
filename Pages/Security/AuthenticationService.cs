@@ -123,6 +123,9 @@ public static class AuthenticationService
             ResetFailedAttempts(cleanUsername);
             // (option A): clear the durable count too, so a normal sign-in wipes the record of earlier mistyping on this account.
             ResetFailedLoginInDatabase(userId);
+            // The existing GitHub update key may register the local recovery host
+            // only after normal, successful Administrator sign-in.
+            AdministratorRecoveryService.TryBindAfterAdministratorSignIn();
             return true;
         }
         catch (Exception ex)
