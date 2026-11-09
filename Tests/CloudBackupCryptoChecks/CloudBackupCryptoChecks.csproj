@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Services/Backup/CloudBackupCrypto.cs" Link="CloudBackupCrypto.cs" />
+    <Compile Include="../../Services/Backup/CloudBackupCatalog.cs" Link="CloudBackupCatalog.cs" />
   </ItemGroup>
 </Project>
