@@ -1337,9 +1337,13 @@ function Invoke-FmscSafeUpdateAbort {
         throw 'Close FMSC before verifying and abandoning the failed update.'
     }
     $installedVersion = Get-InstalledApplicationVersion
-    if (-not $installedVersion -or
-        (Compare-ApplicationVersion $installedVersion $script:RecoveryJournal.Version) -ge 0) {
-        throw 'The previous application version cannot be verified. Recovery stopped.'
+    $comparison = if ($installedVersion) { Compare-ApplicationVersion $installedVersion $script:RecoveryJournal.Version } else { 1 }
+    $installedExe = Join-Path $AppDir 'FMSC_SMS.exe'
+    $previousHash = [string]$script:RecoveryJournal.BeforeAppSha256
+    if (-not $installedVersion -or $comparison -gt 0 -or
+        ($comparison -eq 0 -and -not $previousHash) -or
+        ($previousHash -and ((Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash -ne $previousHash))) {
+        throw 'The previous application executable cannot be verified. Recovery stopped.'
     }
     $observedSchema = 0
     if ($script:RecoveryJournal.Phase -eq 'Migrating') {
@@ -1392,14 +1396,14 @@ try {
     if ($ResumeUpdate -and (Get-Process -Name 'FMSC_SMS' -ErrorAction SilentlyContinue)) {
         throw 'Close all FMSC windows before recovering the update.'
     }
-    if ($ResumeUpdate -and $script:RecoveryJournal.Phase -in @('Prepared','Migrating')) {
-        Invoke-FmscSafeUpdateAbort
-        Write-Success 'The failed update was safely abandoned. The previous application was not replaced.'
+    if ($ResumeUpdate -and $script:RecoveryJournal.Phase -in @('Prepared','Migrating','Activating')) {
+        Invoke-FmscRollbackFailedUpdate
+        Write-Success 'The interrupted update was rolled back. The previous application and database are available.'
         [Windows.Forms.MessageBox]::Show(
-            'The interrupted update was safely abandoned. Your existing application and database were preserved.' +
+            'The interrupted update was rolled back after verifying the previous application and database.' +
             [Environment]::NewLine + [Environment]::NewLine +
-            'Open FMSC from its desktop shortcut to check for a newer update.',
-            'FMSC - Previous Installation Preserved', 'OK', 'Information') | Out-Null
+            'Open FMSC from its desktop shortcut. The downloaded update may be retained for inspection.',
+            'FMSC - Previous Installation Restored', 'OK', 'Information') | Out-Null
         Release-FmscInstallerLock
         return
     }
@@ -1873,6 +1877,11 @@ try {
             "Required: $DatabaseVersion"
         )
     }
+    # Even an app-only update must journal its original database version.
+    if ($script:RecoveryJournal -and $script:RecoveryJournal.BeforeSchema -eq 0) {
+        $script:RecoveryJournal.BeforeSchema = [int]$FinalDatabaseVersion
+        Save-FmscRecoveryJournal $script:RecoveryRoot $script:RecoveryJournal
+    }
     Write-Step 'Activating the staged application...'
     if ($script:RecoveryJournal -and (Get-Process -Name 'FMSC_SMS' -ErrorAction SilentlyContinue)) {
         throw 'FMSC was reopened during installation. Close it before recovering application activation.'
@@ -1984,15 +1993,17 @@ catch {
     }
     catch {
     }
-    if ($script:RecoveryJournal -and $script:RecoveryJournal.Phase -in @('Prepared','Migrating')) {
+    if ($script:RecoveryJournal -and $script:RecoveryJournal.Phase -in @('Prepared','Migrating','Activating')) {
         try {
-            Invoke-FmscSafeUpdateAbort
-            $recoveryOutcome = 'Previous application and database baseline verified; failed update was safely abandoned.'
+            Invoke-FmscRollbackFailedUpdate
+            $recoveryOutcome = 'Rollback verified: previous application and original database schema restored.'
         }
         catch {
-            $recoveryOutcome = "Automatic recovery could not be verified: $($_.Exception.Message). Recovery files and backups were retained."
+            $recoveryOutcome = "Automatic rollback stopped for safety: $($_.Exception.Message). Do not retry or open FMSC until recovery is verified; backups and old application files were retained."
         }
         try { Write-Log $recoveryOutcome } catch { }
+    } elseif ($script:RecoveryJournal -and $script:RecoveryJournal.Phase -eq 'Verified') {
+        $recoveryOutcome = 'New application and database were already verified; only post-commit completion remains. Use the FMSC recovery shortcut.'
     }
     Write-Host ''
     Write-Host `
