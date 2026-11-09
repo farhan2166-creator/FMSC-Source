@@ -600,20 +600,51 @@ public static class DatabaseBackupManager
     /// </summary>
     public static DateTime? GetNewestAvailableLocalBackupUtc()
     {
-        var history = GetHistory();
         DateTime? newest = null;
-        foreach (DataRow row in history.Rows)
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // SQL history can omit unattended backups, because they intentionally
+        // do not impersonate a signed-in FMSC user. Inventory real .bak files
+        // in the configured folder as well as history records.
+        try
         {
-            if (Convert.ToString(row["FileAvailable"]) != "Available") continue;
-            if (history.Columns.Contains("Operation") &&
-                !string.Equals(Convert.ToString(row["Operation"]), "BACKUP", StringComparison.OrdinalIgnoreCase))
-                continue;
-            if (history.Columns.Contains("Status") &&
-                !string.Equals(Convert.ToString(row["Status"]), "Success", StringComparison.OrdinalIgnoreCase))
-                continue;
-            string? path = Convert.ToString(row["FilePath"]);
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
-            var info = GetBackupInfo(path);
+            DataTable history = GetHistory();
+            foreach (DataRow row in history.Rows)
+            {
+                if (Convert.ToString(row["FileAvailable"]) != "Available") continue;
+                if (history.Columns.Contains("Operation") &&
+                    !string.Equals(Convert.ToString(row["Operation"]), "BACKUP",
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (history.Columns.Contains("Status") &&
+                    !string.Equals(Convert.ToString(row["Status"]), "Success",
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+                string? path = Convert.ToString(row["FilePath"]);
+                if (!string.IsNullOrWhiteSpace(path)) paths.Add(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppExceptionHandler.LogNonFatal(ex, "Local backup chronology history was not readable; scanning backup folder");
+        }
+        try
+        {
+            string folder = BackupSettings.GetBackupFolder();
+            if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder))
+            {
+                foreach (string path in Directory.EnumerateFiles(folder, "*.bak",
+                             SearchOption.TopDirectoryOnly))
+                    paths.Add(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppExceptionHandler.LogNonFatal(ex, "Local backup chronology folder scan was incomplete");
+        }
+        foreach (string path in paths)
+        {
+            if (!File.Exists(path)) continue;
+            BackupInfo? info = GetBackupInfo(path);
             if (info?.IsForFmscDatabase != true || info.BackupStartDate == default) continue;
             DateTime actual = DateTime.SpecifyKind(info.BackupStartDate, DateTimeKind.Local).ToUniversalTime();
             if (newest is null || newest < actual) newest = actual;
