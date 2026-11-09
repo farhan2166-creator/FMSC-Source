@@ -27,7 +27,7 @@ Require ($LASTEXITCODE -eq 0 -and $checkout -ceq $main) 'Checkout does not match
 Require ((@(& git status --porcelain) | Measure-Object).Count -eq 0) 'Source checkout is not clean.'
 $origin=(& git remote get-url origin).Trim()
 Require ($LASTEXITCODE -eq 0 -and $origin -in @(
-    $sourceRepo.HttpsRemote.TrimEnd('.git'),
+    $sourceRepo.HttpsRemote.Substring(0, $sourceRepo.HttpsRemote.Length - 4),
     $sourceRepo.HttpsRemote)) 'Source origin is not the expected GitHub repository.'
 
 $corePath=Join-Path (Get-Location).Path 'Installer/core.ps1'
