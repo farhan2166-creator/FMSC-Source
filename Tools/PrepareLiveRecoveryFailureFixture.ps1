@@ -46,7 +46,9 @@ if ($links.Count) { throw 'Prepared package contains linked files. Refusing to c
 # the journal is terminal Completed + Outcome Aborted, not a new phase that
 # the old app startup guard would reject.
 $recoveryCommit = 'af7229c91f2634d4c873f4c0c0b4fc48fed5a210'
-$downloadBase = "https://raw.githubusercontent.com/farhan2166-creator/FMSC-Source/$recoveryCommit/Installer"
+. (Join-Path $PSScriptRoot 'ResolveFmscGitHubRepository.ps1')
+$sourceRepo=Resolve-FmscGitHubRepository -Repository Source
+$downloadBase = "https://raw.githubusercontent.com/$($sourceRepo.FullName)/$recoveryCommit/Installer"
 
 $null = New-Item -ItemType Directory -Path $destination
 try {
