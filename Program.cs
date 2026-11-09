@@ -36,6 +36,18 @@ internal static class Program
             Environment.ExitCode = DatabaseInstallationVerification.Failed;
             return;
         }
+        // The enrolled Windows Task Scheduler identity runs this command with
+        // its protected cloud credentials and local SQL permissions. It never
+        // opens the login window or exposes student data to the command line.
+#if !FMSC_LEVEL2
+        if (args.SequenceEqual(new[] { "--cloud-backup-scheduled" }))
+        {
+            AppExceptionHandler.Register();
+            Environment.ExitCode = Services.Backup.CloudBackupCoordinator
+                .RunScheduledAsync().GetAwaiter().GetResult();
+            return;
+        }
+#endif
         ApplicationConfiguration.Initialize();
 #if !FMSC_LEVEL2
         if (!FMSC_SMS.Core.Updates.UpdateStartupGuard.AllowStartup()) return;

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/Backup/CloudBackupCrypto.cs" Link="CloudBackupCrypto.cs" />
+    <Compile Include="../../Services/Backup/CloudBackupCatalog.cs" Link="CloudBackupCatalog.cs" />
+    <Compile Include="../../Services/Backup/CloudBackupSchedulePolicy.cs" Link="CloudBackupSchedulePolicy.cs" />
+    <Compile Include="../../Services/Backup/CloudOAuthLoopback.cs" Link="CloudOAuthLoopback.cs" />
+  </ItemGroup>
+</Project>

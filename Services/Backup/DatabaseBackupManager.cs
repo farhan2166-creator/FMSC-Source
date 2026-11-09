@@ -217,9 +217,13 @@ public static class DatabaseBackupManager
         if (!reader.Read())
             throw new InvalidOperationException(
                 "The selected file has no readable SQL Server backup header. It may not be a backup file.");
+        // Never substitute the current clock if SQL Server fails to return
+        // a genuine backup timestamp: recovery chronology must stay truthful.
+        if (reader["BackupStartDate"] is not DateTime backupStart)
+            throw new InvalidDataException("SQL backup header is missing its original backup creation time.");
         return new BackupInfo {
             DatabaseName = reader["DatabaseName"] as string ?? "(unknown)",
-            BackupStartDate = reader["BackupStartDate"] is DateTime start ? start : DateTime.Now,
+            BackupStartDate = backupStart,
             BackupFinishDate = reader["BackupFinishDate"] is DateTime finish ? finish : null
         };
     }
@@ -242,7 +246,9 @@ public static class DatabaseBackupManager
     public static BackupResult RestoreBackup(
         string backupPath,
         IProgress<string>? progress = null,
-        Action<string>? safetyBackupCreated = null)
+        Action<string>? safetyBackupCreated = null,
+        string? safetyBackupFolderOverride = null,
+        string? historyPathOverride = null)
     {
         if (string.IsNullOrWhiteSpace(backupPath))
             return Failed("Backup file was not specified.");
@@ -266,7 +272,7 @@ public static class DatabaseBackupManager
             progress?.Report("Checking the backup's school identity and compatibility...");
             BackupRestoreIdentity.ValidateCandidate(MasterConnectionString,backupPath,Path.Combine(DatabaseHelper.DatabaseFolder,"RestoreChecks"),expectedScope,DatabaseCompatibility.Validate);
             progress?.Report("Taking a safety backup of the current database...");
-            safetyPath = TryCreatePreRestoreSafetyBackup(backupPath, progress, safetyBackupCreated);
+            safetyPath = TryCreatePreRestoreSafetyBackup(backupPath, progress, safetyBackupCreated, safetyBackupFolderOverride);
             using(var current=new SqlConnection(DatabaseHelper.GetConnectionString("FMSC_DB")))
             {
                 DatabaseHelper.OpenConnection(current);BackupRestoreIdentity.RequireSame(expectedScope,BackupRestoreIdentity.ReadScope(current));
@@ -310,7 +316,7 @@ public static class DatabaseBackupManager
             progress?.Report("Recording restore history...");
             long fileSize = new FileInfo(backupPath).Length;
             /* same reasoning as the backup path: the restore succeeded, so report it, but do not claim the history was recorded when it was not. */
-            bool recorded = RecordHistorySafe("RESTORE", backupPath, fileSize, "Success", null, isSafetyBackup: false);
+            bool recorded = RecordHistorySafe("RESTORE", historyPathOverride ?? backupPath, fileSize, "Success", null, isSafetyBackup: false);
             progress?.Report("Restore completed successfully.");
             return recorded
                 ? Success("Database restore completed successfully.")
@@ -378,7 +384,7 @@ public static class DatabaseBackupManager
                     recoveryMessage = $"\n\nAutomatic recovery failed. Do not use the database until the safety backup is restored manually:\n{safetyPath}\n{DbMessage.UserMessage(recoveryEx)}";
                 }
             }
-            RecordHistorySafe("RESTORE", backupPath, fileSize, "Failed", ex.Message, isSafetyBackup: false);
+            RecordHistorySafe("RESTORE", historyPathOverride ?? backupPath, fileSize, "Failed", ex.Message, isSafetyBackup: false);
             progress?.Report("Restore failed.");
             return Failed($"Restore failed:\n{DbMessage.UserMessage(ex)}{recoveryMessage}");
         }
@@ -394,14 +400,16 @@ public static class DatabaseBackupManager
     private static string TryCreatePreRestoreSafetyBackup(
         string aboutToRestoreFrom,
         IProgress<string>? progress,
-        Action<string>? safetyBackupCreated = null)
+        Action<string>? safetyBackupCreated = null,
+        string? safetyBackupFolderOverride = null)
     {
         string folder;
         string safetyPath;
         try
         {
-            folder =
-                BackupSettings.GetBackupFolder() is { Length: > 0 } configuredFolder
+            folder = !string.IsNullOrWhiteSpace(safetyBackupFolderOverride)
+                ? safetyBackupFolderOverride
+                : BackupSettings.GetBackupFolder() is { Length: > 0 } configuredFolder
                     ? configuredFolder
                     : Path.GetDirectoryName(aboutToRestoreFrom) ?? DatabaseHelper.DatabaseFolder;
             safetyPath = CreateUniqueBackupPath(folder, CreatePreRestoreSafetyBackupFileName());
@@ -579,11 +587,69 @@ public static class DatabaseBackupManager
         {
             string? path = row["FilePath"] as string;
             row["FileAvailable"] =
-                !string.IsNullOrWhiteSpace(path) && File.Exists(path)
-                    ? "Available"
-                    : "Missing";
+                path?.StartsWith("cloud://", StringComparison.OrdinalIgnoreCase) == true
+                    ? "Cloud copy"
+                    : !string.IsNullOrWhiteSpace(path) && File.Exists(path)
+                        ? "Available" : "Missing";
         }
         return history;
+    }
+    /// <summary>
+    /// Read the actual SQL header for local history entries; file timestamps
+    /// and recent-history dates are NOT authoritative recovery-point times.
+    /// </summary>
+    public static DateTime? GetNewestAvailableLocalBackupUtc()
+    {
+        DateTime? newest = null;
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // SQL history can omit unattended backups, because they intentionally
+        // do not impersonate a signed-in FMSC user. Inventory real .bak files
+        // in the configured folder as well as history records.
+        try
+        {
+            DataTable history = GetHistory();
+            foreach (DataRow row in history.Rows)
+            {
+                if (Convert.ToString(row["FileAvailable"]) != "Available") continue;
+                if (history.Columns.Contains("Operation") &&
+                    !string.Equals(Convert.ToString(row["Operation"]), "BACKUP",
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (history.Columns.Contains("Status") &&
+                    !string.Equals(Convert.ToString(row["Status"]), "Success",
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+                string? path = Convert.ToString(row["FilePath"]);
+                if (!string.IsNullOrWhiteSpace(path)) paths.Add(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppExceptionHandler.LogNonFatal(ex, "Local backup chronology history was not readable; scanning backup folder");
+        }
+        try
+        {
+            string folder = BackupSettings.GetBackupFolder();
+            if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder))
+            {
+                foreach (string path in Directory.EnumerateFiles(folder, "*.bak",
+                             SearchOption.TopDirectoryOnly))
+                    paths.Add(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppExceptionHandler.LogNonFatal(ex, "Local backup chronology folder scan was incomplete");
+        }
+        foreach (string path in paths)
+        {
+            if (!File.Exists(path)) continue;
+            BackupInfo? info = GetBackupInfo(path);
+            if (info?.IsForFmscDatabase != true || info.BackupStartDate == default) continue;
+            DateTime actual = DateTime.SpecifyKind(info.BackupStartDate, DateTimeKind.Local).ToUniversalTime();
+            if (newest is null || newest < actual) newest = actual;
+        }
+        return newest;
     }
     /// <summary>How many history entries are kept. The newest entries are the ones that matter, so the oldest beyond this are the ones dropped.</summary>
     public const int HistoryLimit = 50;
@@ -638,6 +704,10 @@ public static class DatabaseBackupManager
     {
         if (string.IsNullOrWhiteSpace(path))
             return true;
+        // Retain audit records of cloud recoveries after downloaded temp files
+        // are cleared. Upload/remote retention is handled independently.
+        if (path.StartsWith("cloud://", StringComparison.OrdinalIgnoreCase))
+            return false;
         try
         {
             if (File.Exists(path))
