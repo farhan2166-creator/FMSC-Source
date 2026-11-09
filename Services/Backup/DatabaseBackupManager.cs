@@ -590,6 +590,32 @@ public static class DatabaseBackupManager
         }
         return history;
     }
+    /// <summary>
+    /// Read the actual SQL header for local history entries; file timestamps
+    /// and recent-history dates are NOT authoritative recovery-point times.
+    /// </summary>
+    public static DateTime? GetNewestAvailableLocalBackupUtc()
+    {
+        var history = GetHistory();
+        DateTime? newest = null;
+        foreach (DataRow row in history.Rows)
+        {
+            if (Convert.ToString(row["FileAvailable"]) != "Available") continue;
+            if (history.Columns.Contains("Operation") &&
+                !string.Equals(Convert.ToString(row["Operation"]), "BACKUP", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (history.Columns.Contains("Status") &&
+                !string.Equals(Convert.ToString(row["Status"]), "Success", StringComparison.OrdinalIgnoreCase))
+                continue;
+            string? path = Convert.ToString(row["FilePath"]);
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
+            var info = GetBackupInfo(path);
+            if (info?.IsForFmscDatabase != true || info.BackupStartDate == default) continue;
+            DateTime actual = DateTime.SpecifyKind(info.BackupStartDate, DateTimeKind.Local).ToUniversalTime();
+            if (newest is null || newest < actual) newest = actual;
+        }
+        return newest;
+    }
     /// <summary>How many history entries are kept. The newest entries are the ones that matter, so the oldest beyond this are the ones dropped.</summary>
     public const int HistoryLimit = 50;
     /// <summary>Prunes backup history using the configured retention rules.</summary>
