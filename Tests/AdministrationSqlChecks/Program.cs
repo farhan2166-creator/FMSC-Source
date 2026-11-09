@@ -40,6 +40,9 @@ using(var credential=Query("SELECT PasswordHash,PasswordSalt FROM dbo.Users WHER
     byte[] salt=(byte[])credential.Rows[0]["PasswordSalt"],hash=(byte[])credential.Rows[0]["PasswordHash"];
     Check(salt.Length==16&&hash.Length==64&&CryptographicOperations.FixedTimeEquals(hash,Rfc2898DeriveBytes.Pbkdf2(password,salt,100_000,HashAlgorithmName.SHA512,64)),"new-user hashing matches the existing sign-in policy");
 }
+// Execute the actual recovery SQL writer against the owned, migrated disposable
+// database before the later tests deliberately assign a second Administrator.
+AdministratorRecoveryChecks.Run(Check, connectionText, admin, created.Id);
 string credentialBefore=loaded.Record.CredentialProof;
 var changed=await users.SaveAsync(new(created.Id,prefix+"-renamed","",false,new[]{finance}),loaded.Record.Snapshot,loaded.Catalog.Token);
 Check(changed.Outcome==AccessSaveOutcome.Saved&&changed.Id==created.Id,"account fields and assigned roles save together");
