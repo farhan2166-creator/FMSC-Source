@@ -9,7 +9,8 @@ $match=[regex]::Match($installer,'(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
 if (-not $match.Success) { throw 'No schema to test acceptance contract.' }
 $targetSchema=[int]$match.Groups[1].Value
 $expectedDescription="MDF/LDF v3+v7 -> v$targetSchema SQL+installer PASS (fixture 5a8c5130)"
-$owner='future-renamed-owner'
+$global:__FmscMockLogin='future-renamed-owner'
+$owner=$global:__FmscMockLogin
 $original=@{}
 foreach ($key in @('GITHUB_ACTIONS','GITHUB_REPOSITORY','GITHUB_REPOSITORY_ID',
     'GITHUB_REPOSITORY_OWNER','GITHUB_REPOSITORY_OWNER_ID','GITHUB_REF','GITHUB_TOKEN')) {
@@ -22,19 +23,19 @@ $global:__FmscMockStatuses=@()
 function Invoke-RestMethod {
     param([string]$Uri,[hashtable]$Headers,[string]$Method)
     if ($Uri -ceq 'https://api.github.com/user/316891609') {
-        return [pscustomobject]@{id=$global:__FmscMockOwnerId;type='User';login=$script:owner}
+        return [pscustomobject]@{id=$global:__FmscMockOwnerId;type='User';login=$global:__FmscMockLogin}
     }
-    if ($Uri -ceq ('https://api.github.com/repos/'+$script:owner+'/FMSC-Source')) {
+    if ($Uri -ceq ('https://api.github.com/repos/'+$global:__FmscMockLogin+'/FMSC-Source')) {
         return [pscustomobject]@{
             id=$global:__FmscMockRepoId;name='FMSC-Source';
-            full_name=$script:owner+'/FMSC-Source';private=$false;
+            full_name=$global:__FmscMockLogin+'/FMSC-Source';private=$false;
             owner=[pscustomobject]@{id=$global:__FmscMockOwnerId}
         }
     }
-    if ($Uri -ceq ('https://api.github.com/repos/'+$script:owner+'/FMSC-Source/branches/main')) {
+    if ($Uri -ceq ('https://api.github.com/repos/'+$global:__FmscMockLogin+'/FMSC-Source/branches/main')) {
         return [pscustomobject]@{commit=[pscustomobject]@{sha=$global:__FmscMockMain}}
     }
-    if ($Uri -ceq ('https://api.github.com/repos/'+$script:owner+"/FMSC-Source/commits/$sha/statuses?per_page=100")) {
+    if ($Uri -ceq ('https://api.github.com/repos/'+$global:__FmscMockLogin+"/FMSC-Source/commits/$sha/statuses?per_page=100")) {
         return $global:__FmscMockStatuses
     }
     throw "Unexpected or obsolete GitHub URL in gate: $Uri"
@@ -44,11 +45,11 @@ function New-Status {
         [string]$State='success',
         [string]$CreatorId='316891609',
         [string]$Description=$script:expectedDescription,
-        [string]$Url=('https://github.com/'+$script:owner+'/FMSC-Sandbox/actions/runs/42368731562')
+        [string]$Url=('https://github.com/'+$global:__FmscMockLogin+'/FMSC-Sandbox/actions/runs/42368731562')
     )
     return [pscustomobject]@{
         context='fmsc/sandbox-mdf-ldf/v2';state=$State
-        creator=[pscustomobject]@{id=$CreatorId;login=$script:owner}
+        creator=[pscustomobject]@{id=$CreatorId;login=$global:__FmscMockLogin}
         description=$Description;target_url=$Url
     }
 }
@@ -114,5 +115,5 @@ try {
 }
 finally {
     foreach ($key in $original.Keys) { [Environment]::SetEnvironmentVariable($key,$original[$key]) }
-    Remove-Variable -Name __FmscMockMain,__FmscMockOwnerId,__FmscMockRepoId,__FmscMockStatuses -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable -Name __FmscMockLogin,__FmscMockMain,__FmscMockOwnerId,__FmscMockRepoId,__FmscMockStatuses -Scope Global -ErrorAction SilentlyContinue
 }
