@@ -47,6 +47,47 @@ internal static class ReportDocumentNaming
         return stem + "_" + (at ?? DateTime.Now).ToString("yyyy-MM-dd_HH-mm-ss",CultureInfo.InvariantCulture);
     }
 
+    /// <summary>Use a saved person's reference and actual issued document number when unique.</summary>
+    internal static string DocumentExportFileName(string title, string reportPath, DataTable data, DateTime? at = null)
+    {
+        string reference = Unique(data, "CertificateNumber");
+        if (reference.Length == 0) reference = Unique(data, "ReceiptNumber");
+        if (reference.Length == 0) reference = Unique(data, "BillNumber");
+        if (reference.Length == 0) reference = Unique(data, "DocumentNumber");
+        string[] allNumbers = new[] { "CertificateNumber", "ReceiptNumber", "BillNumber", "DocumentNumber" }
+            .SelectMany(column => Values(data, column)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        // A PDF with several distinct issued documents must not claim one child's identity.
+        if (reference.Length > 0 && allNumbers.Length == 1)
+        {
+            string admission = Unique(data, "AdmissionNumber");
+            if (admission.Length == 0) admission = Unique(data, "AdmissionNumberText");
+            string student = Name(data, "StudentName");
+            string staff = Name(data, "StaffName");
+            string owner = string.Join("-", new[] { admission, student.Length > 0 ? student : staff }
+                .Where(value => value.Length > 0));
+            if (owner.Length == 0) owner = title.Split('—')[0].Trim();
+            return SafeStem(owner + " (" + reference + ")");
+        }
+        return ExportFileName(title, at);
+    }
+
+    /// <summary>Use the report's selected scope when available, without inventing identifiers.</summary>
+    internal static string ReportExportFileName(string title, string? scope, DateTime? at = null)
+    {
+        string meaningful = string.IsNullOrWhiteSpace(scope) ? title :
+            title + " (" + scope.Replace("\r", " ").Replace("\n", " ").Trim() + ")";
+        return ExportFileName(meaningful, at);
+    }
+
+    private static string SafeStem(string title)
+    {
+        string stem = Regex.Replace(title, "[<>:\\"/\\\\\\\\|?*\\x00-\\x1F]", " - ");
+        stem = Regex.Replace(stem, @"\\s+", " ").Trim(' ', '.', '-');
+        if (stem.Length == 0) stem = "Report";
+        if (stem.Length > 160) stem = stem[..160].TrimEnd(' ', '.', '-');
+        return stem;
+    }
+
     private static string[] Values(DataTable data,string column) => !data.Columns.Contains(column) ? Array.Empty<string>() :
         data.AsEnumerable().Select(row=>Convert.ToString(row[column])?.Trim()??"").Where(value=>value.Length>0)
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
