@@ -328,7 +328,7 @@ def main():
         if legacy_nonempty:
             # Compare the completed migration chain to the installer's declared
             # schema, not the last schema at the time this test was written.
-            declared = re.search(r"\\$DatabaseVersion\\s*=\\s*'(\\d+)'",
+            declared = re.search(r"\$DatabaseVersion\s*=\s*'(\d+)'",
                                  (ROOT / "Installer/core.ps1").read_text()).group(1)
             legacy_check = (PROJECT / "LegacyCommunicationV9Verify.sql").read_text(encoding="utf-8")
             if legacy_check.count("__EXPECTED_SCHEMA__") != 1:
