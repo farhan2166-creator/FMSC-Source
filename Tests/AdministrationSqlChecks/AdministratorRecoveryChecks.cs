@@ -85,12 +85,12 @@ internal static class AdministratorRecoveryChecks
         // whichever account happens to be first.
         int adminRole = Count("SELECT RoleId FROM dbo.Roles WHERE RoleName=N'Administrator';");
         Read("INSERT dbo.UserRoles(UserId,RoleId) VALUES(@Id,@Role);",
-            Id(ordinaryUser), new("@Role", SqlDbType.Int) { Value = adminRole });
+            Id(ordinaryUser), new SqlParameter("@Role", SqlDbType.Int) { Value = adminRole });
         try { MustReject(51181, approved, sid); }
         finally
         {
             Read("DELETE dbo.UserRoles WHERE UserId=@Id AND RoleId=@Role;",
-                Id(ordinaryUser), new("@Role", SqlDbType.Int) { Value = adminRole });
+                Id(ordinaryUser), new SqlParameter("@Role", SqlDbType.Int) { Value = adminRole });
         }
 
         // Deliberately fail the SECOND SQL write (audit insert). The preceding
@@ -122,14 +122,14 @@ internal static class AdministratorRecoveryChecks
             "Exactly one credential-free success audit is committed with the reset");
 
         var login = Read("EXEC dbo.GetUserForLogin @Username;",
-            new("@Username", SqlDbType.NVarChar, 100) { Value = replacementName });
+            new SqlParameter("@Username", SqlDbType.NVarChar, 100) { Value = replacementName });
         check(login.Rows.Count == 1 &&
               Convert.ToInt32(login.Rows[0]["UserId"]) == administrator &&
               CryptographicOperations.FixedTimeEquals((byte[])login.Rows[0]["PasswordHash"], hash) &&
               CryptographicOperations.FixedTimeEquals((byte[])login.Rows[0]["PasswordSalt"], salt),
             "Existing production login lookup can authenticate the new Administrator credentials");
         check(Read("EXEC dbo.GetUserForLogin @Username;",
-            new("@Username", SqlDbType.NVarChar, 100) { Value = previousName }).Rows.Count == 0,
+            new SqlParameter("@Username", SqlDbType.NVarChar, 100) { Value = previousName }).Rows.Count == 0,
             "Old Administrator username no longer authenticates after recovery");
     }
 }
