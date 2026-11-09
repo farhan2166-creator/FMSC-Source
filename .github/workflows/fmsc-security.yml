@@ -1,4 +1,4 @@
-name: '08 - CI - Security Checks'
+name: '11 - CI - Security Checks'
 
 on:
   workflow_dispatch:
