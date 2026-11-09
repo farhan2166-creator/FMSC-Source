@@ -119,10 +119,15 @@ internal static class CloudBackupTransport
             throw new InvalidDataException("Unexpected Google Drive upload endpoint.");
         using var input = File.OpenRead(path);
         long offset = 0;
+        int stalledResponses = 0;
         JsonDocument? receipt = null;
         byte[] buffer = new byte[ChunkSize];
         while (offset < length)
         {
+            // A 308 response acknowledges the server's actual committed range,
+            // not necessarily the bytes we sent in the last request. Always
+            // resume from THAT position rather than skipping partial chunks.
+            input.Position = offset;
             int count = (int)Math.Min(buffer.Length, length - offset);
             await input.ReadExactlyAsync(buffer.AsMemory(0, count), token);
             using var put = new HttpRequestMessage(HttpMethod.Put, session);
@@ -134,22 +139,31 @@ internal static class CloudBackupTransport
             using var response = await Http.SendAsync(put, token);
             if ((int)response.StatusCode == 308)
             {
-                // Do not assume success from an upload's HTTP request alone.
-                // If the acknowledged range disagrees with sent bytes, stop
-                // rather than silently creating a truncated recovery copy.
-                long committed = offset + count;
+                long acknowledged = 0; // No Range header means NO bytes committed.
                 if (response.Headers.TryGetValues("Range", out var values))
                 {
                     string range = values.FirstOrDefault() ?? "";
-                    string last = range.Split('-').LastOrDefault() ?? "";
-                    if (!long.TryParse(last, NumberStyles.None, CultureInfo.InvariantCulture, out long end) ||
-                        end + 1 != committed)
-                        throw new IOException("Drive upload acknowledged an unexpected byte range.");
+                    if (!range.StartsWith("bytes=0-", StringComparison.Ordinal) ||
+                        !long.TryParse(range["bytes=0-".Length..],
+                            NumberStyles.None, CultureInfo.InvariantCulture, out long last))
+                        throw new IOException("Google Drive returned an invalid upload range.");
+                    acknowledged = checked(last + 1);
                 }
-                offset = committed;
+                if (acknowledged < offset || acknowledged > offset + count ||
+                    acknowledged > length)
+                    throw new IOException("Google Drive acknowledged bytes outside the requested range.");
+                if (acknowledged == offset)
+                {
+                    if (++stalledResponses >= 3)
+                        throw new IOException("Google Drive upload stopped making progress; the full encrypted copy remains locally queued.");
+                }
+                else stalledResponses = 0;
+                offset = acknowledged;
                 continue;
             }
             RequireSuccess(response, "Google Drive upload");
+            if (offset + count != length)
+                throw new IOException("Google Drive signalled completion before receiving the entire encrypted file.");
             receipt = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
             offset += count;
         }
@@ -244,22 +258,25 @@ internal static class CloudBackupTransport
                 int count = (int)Math.Min(buffer.Length, length - offset);
                 await input.ReadExactlyAsync(buffer.AsMemory(0, count), token);
                 bool final = offset + count == length;
-                object arg = final
-                    ? new { cursor = new { session_id = session, offset },
-                        commit = new { path = destination, mode = "add", autorename = false, mute = true } }
-                    : new { cursor = new { session_id = session, offset }, close = false };
+                // Dropbox requires the final bytes in append_v2 (close=true).
+                // upload_session/finish is the COMMIT and has an empty body.
+                // Its documented API must not receive file bytes.
                 using var request = DropboxContentRequest(
-                    final ? "files/upload_session/finish" : "files/upload_session/append_v2",
-                    access, arg, new ByteArrayContent(buffer, 0, count));
+                    "files/upload_session/append_v2", access,
+                    new { cursor = new { session_id = session, offset }, close = final },
+                    new ByteArrayContent(buffer, 0, count));
                 using var response = await Http.SendAsync(request, token);
                 RequireSuccess(response, "Dropbox chunk upload");
-                if (final) metadata = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
                 offset += count;
             }
-            // Every non-final chunk is exactly 8 MiB (a multiple of 4 MiB).
-            // The final chunk is accepted at any smaller length by Dropbox.
             if (offset != length) throw new IOException("Dropbox upload did not transmit the complete package.");
-            // Compiler flow: metadata is definitely assigned in the final iteration.
+            using var finish = DropboxContentRequest("files/upload_session/finish", access,
+                new { cursor = new { session_id = session, offset = length },
+                    commit = new { path = destination, mode = "add", autorename = false, mute = true } },
+                new ByteArrayContent(Array.Empty<byte>()));
+            using var completed = await Http.SendAsync(finish, token);
+            RequireSuccess(completed, "Dropbox upload commit");
+            metadata = JsonDocument.Parse(await completed.Content.ReadAsStringAsync(token));
         }
         if (metadata is null) throw new IOException("Dropbox upload did not finish.");
         using (metadata)
