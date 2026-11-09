@@ -45,3 +45,49 @@ Existing .bak restore remains governed by the current backup ID / compatibility 
 - Dropbox upload sessions: https://docs.dropboxapi.com/dropbox-api/api-reference/user-endpoints/files/upload-session-start
 
 No live database credentials, student records, or backup files belong in GitHub workflows or test artifacts.
+
+## OAuth publisher configuration (required before any school can connect)
+
+`CloudBackupProviders.json` ships with **empty public identifiers** until
+the owner registers the two applications. Neither provider account passwords
+nor OAuth client secrets are ever embedded in the release, repository, or SQL.
+
+**Google Drive:** In a Google Cloud project, enable the Drive API, configure
+the consent screen with the limited `drive.file` scope, then register an
+**installed/desktop OAuth client**. Put its public client ID into
+`GoogleClientId`. The desktop login uses a localhost loopback callback,
+authorization-code PKCE, and refresh tokens protected by Windows DPAPI.
+
+**Dropbox:** Create a **Scoped App** restricted to the app's own folder.
+Enable `files.metadata.read`, `files.content.read`, and
+`files.content.write`. Under OAuth settings register the exact callback
+`http://127.0.0.1:41847/fmsc-backup/`. Put its public app key in
+`DropboxAppKey`. The app uses PKCE, offline refresh, and app-folder isolation.
+
+Once both public IDs are supplied, the owner must validate browser login,
+refresh, logout/revoke, large encrypted upload, provider listing, manual
+download, daily scheduled operation and SQL restoration using disposable
+test credentials/databases **before shipping**. Blank IDs fail closed and
+do not allow a school to connect an unregistered service.
+
+## Operational constraints requiring final Windows acceptance
+
+- The scheduled task uses the SAME enrolled Windows account and SQL LocalDB
+  identity. It can run with the FMSC window closed while that user is logged in;
+  do not claim fully logged-out unattended operation until separately tested.
+- The SQL backup runs only when the local database path, identity and schema
+  are compatible; an active installer or pending update recovery prevents it.
+- A configured backup time is the earliest eligible time. The periodic task
+  polls approximately every 30 minutes, so completion may follow the selected
+  time rather than occurring at the exact minute.
+- The staging folder and pre-restore safety backup folder MUST be distinct.
+  Cloud restore history uses a `cloud://` record rather than the deleted
+  temporary .bak path. Temporary cleanup errors produce a warning but never
+  invalidate a successfully verified restore.
+- The existing regular Restore workflow intentionally rejects a foreign
+  school identity. Recovery on an entirely new PC or fresh unrelated database
+  requires a separately validated identity/bootstrap path; the current cloud
+  restore integration must not bypass that protection.
+
+This draft cannot be certified as production ready without real provider
+registrations and Windows SQL restore tests, even if all source CI is green.
