@@ -7,6 +7,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     readonly ModernTextBox restoreFile = HumanUi.TextBox(false, 500);
     readonly bool canRestore = CurrentUser.HasPermission("Backup.Restore");
     ModernButton backupNowButton = null!;
+    ModernButton? cloudBackupButton;
+    ModernButton? cloudSettingsButton;
+    ModernButton? cloudChooseRestoreButton;
+    CloudBackupCoordinator.CloudSelection? selectedCloud;
+    string cloudRecoveryPassphrase = string.Empty;
     ModernButton? restoreButton;
     ModernButton? locateFileButton;
     bool isBusy;
@@ -54,11 +59,16 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             AddBusyAction("Choose Backup Folder…", ChooseBackupFolderAsync);
         backupNowButton =
             AddBusyAction("Back Up Data", BackupNowAsync, "Success");
+        cloudBackupButton = AddBusyAction("Cloud Backup Now", CloudBackupNowAsync, "Secondary");
+        if (canRestore)
+            cloudSettingsButton = AddAction("Cloud Settings…", (_, _) => OpenCloudSettings());
         ModernButton? chooseRestoreButton = null;
         if (canRestore)
         {
             chooseRestoreButton =
                 AddAction("Choose Backup File…", (_, _) => ChooseRestoreFile());
+            cloudChooseRestoreButton =
+                AddBusyAction("Choose Cloud Backup…", ChooseCloudRestoreAsync);
             /* Prevent duplicate restore submissions. */
             restoreButton =
                 AddBusyAction("Restore Data", RestoreNowAsync, "Danger");
@@ -75,6 +85,12 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         RelocateFromActions(
             chooseBackupButton,
             backupNowButton);
+        if (cloudSettingsButton is not null)
+            RelocateFromActions(cloudSettingsButton);
+        if (cloudBackupButton is not null)
+            RelocateFromActions(cloudBackupButton);
+        if (cloudChooseRestoreButton is not null)
+            RelocateFromActions(cloudChooseRestoreButton);
         if (chooseRestoreButton is not null && restoreButton is not null)
             RelocateFromActions(
                 chooseRestoreButton,
@@ -98,11 +114,13 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         var backupFields = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             Padding = new Padding(2, 4, 2, 0)
         };
         backupFields.RowStyles.Add(
             new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
+        backupFields.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
         backupFields.RowStyles.Add(
             new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
         backupFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -114,6 +132,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             CreateActionRow(chooseBackupButton, backupNowButton),
             0,
             1);
+        backupFields.Controls.Add(
+            canRestore ? CreateActionRow(cloudSettingsButton!, cloudBackupButton!)
+                       : CreateActionRow(cloudBackupButton!),
+            0, 2);
         backupCard.Content.Controls.Add(backupFields);
         backupCard.Content.Controls.Add(localOnlyNotice);
         var root = new TableLayoutPanel {
@@ -121,7 +143,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             ColumnCount = 1,
             RowCount = canRestore ? 3 : 2
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1) + AppMetrics.ButtonRowHeight + localOnlyNotice.Height));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute,
+            AppMetrics.FieldCardHeight(1) + 2 * AppMetrics.ButtonRowHeight + localOnlyNotice.Height));
         root.Controls.Add(backupCard, 0, 0);
         if (canRestore)
         {
@@ -131,7 +154,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             var restoreFields = new TableLayoutPanel {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 4,
                 Padding = new Padding(2, 4, 2, 0)
             };
             restoreFields.RowStyles.Add(
@@ -143,6 +166,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 2 * AppMetrics.SpacingSm;
             restoreFields.RowStyles.Add(
                 new RowStyle(SizeType.Absolute, restoreStatusHeight));
+            restoreFields.RowStyles.Add(
+                new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
             restoreFields.RowStyles.Add(
                 new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
             restoreFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -185,12 +210,14 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 CreateActionRow(chooseRestoreButton!, restoreButton!),
                 0,
                 2);
+            restoreFields.Controls.Add(
+                CreateActionRow(cloudChooseRestoreButton!), 0, 3);
             restoreCard.Content.Controls.Add(restoreFields);
             root.RowStyles.Add(
                 new RowStyle(
                     SizeType.Absolute,
                     AppMetrics.FieldCardHeight(1) +
-                    AppMetrics.ButtonRowHeight +
+                    2 * AppMetrics.ButtonRowHeight +
                     restoreStatusHeight));
             root.Controls.Add(restoreCard, 0, 1);
             /* No selected file means unverified, not valid. */
@@ -381,10 +408,139 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             SetBusyState(false);
         }
     }
+
+    private void OpenCloudSettings()
+    {
+        if (isBusy) return;
+        try
+        {
+            RequirePermission("Backup.Restore");
+            using var dialog = new CloudBackupSettingsDialog();
+            if (dialog.ShowDialog(FindForm()) == DialogResult.OK)
+                SetStatus("Cloud provider, schedule and retention settings saved.");
+        }
+        catch (Exception ex) { Fail(ex); }
+    }
+
+    private async Task CloudBackupNowAsync()
+    {
+        if (isBusy) return;
+        isBusy = true;
+        busyMessage = "Creating a verified, encrypted school backup and uploading enabled destinations.";
+        SetBusyState(true);
+        try
+        {
+            SetStatus("Creating encrypted cloud backup…");
+            var result = await CloudBackupCoordinator.CreateAndUploadAsync();
+            await LoadHistoryAsync();
+            SetStatus(result.Message, !result.GoogleSucceeded && !result.DropboxSucceeded);
+            if (result.LocalSucceeded)
+                ModernMessageDialog.ShowInfo(FindForm(), result.Message);
+        }
+        catch (Exception ex) { Fail(ex); }
+        finally
+        {
+            isBusy = false; busyMessage = string.Empty;
+            if (!IsDisposed) SetBusyState(false);
+        }
+    }
+
+    private async Task ChooseCloudRestoreAsync()
+    {
+        if (isBusy) return;
+        try
+        {
+            RequirePermission("Backup.Restore");
+            SetStatus("Checking available cloud recovery points…");
+            var options = await CloudBackupCoordinator.BrowseCloudAsync();
+            if (IsDisposed) return;
+            if (options.Count == 0)
+            {
+                Warn("No cloud backups are available. Check the connected Google Drive and Dropbox accounts.");
+                return;
+            }
+            using var dialog = new CloudRestoreSelectionDialog(options);
+            if (dialog.ShowDialog(FindForm()) != DialogResult.OK ||
+                dialog.SelectedCopy is not { } selected)
+                return;
+            selectedCloud = selected;
+            cloudRecoveryPassphrase = dialog.RecoveryPassphrase;
+            selectedRestoreBackupInfo = null;
+            restoreFile.Tag = null;
+            restoreFile.Text = selected.Remote.Provider + " — " +
+                selected.Remote.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt");
+            ShowRestoreFileStatus(RestoreFileState.Valid, null);
+            if (restoreStatusHeadline != null)
+                restoreStatusHeadline.Text = "Cloud Recovery Point Selected";
+            if (restoreStatusDetail != null)
+                restoreStatusDetail.Text =
+                    "Creation time is provisional until the encrypted download and SQL header are verified.";
+            SetStatus("Cloud backup selected. Restore Data will download it to a protected local temporary folder.");
+        }
+        catch (Exception ex) { Fail(ex); }
+    }
+
+    private async Task RestoreCloudNowAsync()
+    {
+        if (isBusy || selectedCloud is null) return;
+        try { RequirePermission("Backup.Restore"); }
+        catch (Exception ex) { Fail(ex); return; }
+        var selection = selectedCloud;
+        var confirmation = ModernMessageDialog.Show(FindForm(),
+            new MessageDialogContent("Restore this cloud backup?",
+                "The encrypted cloud backup will be downloaded to a private local staging directory, verified, and only then used for SQL restoration.",
+                Facts: new (string, string)[] {
+                    ("Source", selection.Remote.Provider.ToString()),
+                    ("SQL backup created", selection.Remote.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt")),
+                    ("Uploaded", selection.Remote.UploadedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt"))
+                },
+                Notice: "The database may lose admissions, payments and other records newer than the selected backup. " +
+                        "The SQL header and school identity will be checked and a mandatory verified safety backup of current data created before replacement."),
+            "Confirm Cloud Restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+        if (confirmation != DialogResult.Yes) return;
+        isBusy = true;
+        busyMessage = "Downloading, verifying and restoring cloud backup. Do not close FMSC.";
+        SetBusyState(true);
+        try
+        {
+            SetStatus("Downloading and verifying encrypted cloud backup…");
+            var result = await CloudBackupCoordinator.RestoreFromCloudAsync(
+                selection.Remote, cloudRecoveryPassphrase);
+            if (result.Success)
+            {
+                // CloudRestoreStaging has already removed the temporary
+                // download after RestoreBackup verified successful recovery.
+                cloudRecoveryPassphrase = string.Empty;
+                selectedCloud = null;
+                ModernMessageDialog.Show(FindForm(),
+                    result.Message + "\n\nThe temporary cloud download has been removed. FMSC will restart.",
+                    "Restore Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                isBusy = false; busyMessage = string.Empty;
+                RestartApplication(FindForm());
+                return;
+            }
+            await LoadHistoryAsync();
+            Warn(result.Message);
+        }
+        catch (Exception ex)
+        {
+            await LoadHistoryAsync();
+            Fail(ex);
+        }
+        finally
+        {
+            cloudRecoveryPassphrase = string.Empty;
+            isBusy = false; busyMessage = string.Empty;
+            if (!IsDisposed) SetBusyState(false);
+        }
+    }
+
     void ChooseRestoreFile()
     {
         if (isBusy)
             return;
+        selectedCloud = null;
+        cloudRecoveryPassphrase = string.Empty;
         using var dialog = new OpenFileDialog {
             Title = "Select FMSC Database Backup",
             Filter = "SQL Server Backup Files (*.bak)|*.bak|All Files (*.*)|*.*",
@@ -532,6 +688,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     {
         if (isBusy)
             return;
+        if (selectedCloud is not null)
+        {
+            await RestoreCloudNowAsync();
+            return;
+        }
         try
         {
             RequirePermission("Backup.Restore");
@@ -755,6 +916,9 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     void SetBusyState(bool busy)
     {
         backupNowButton.Enabled = !busy;
+        if (cloudBackupButton != null) cloudBackupButton.Enabled = !busy;
+        if (cloudSettingsButton != null) cloudSettingsButton.Enabled = !busy;
+        if (cloudChooseRestoreButton != null) cloudChooseRestoreButton.Enabled = !busy;
         /* Keep Refresh History available for retrying a failed read. */
         if (refreshHistoryButton is not null)
             refreshHistoryButton.Enabled = !busy;
