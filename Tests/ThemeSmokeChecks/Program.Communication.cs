@@ -178,31 +178,41 @@ internal static partial class Program
         host.Controls.Add(page);
         host.Show();
         Application.DoEvents();
-        var builtIns = CommunicationPreparedMessages.BuiltIns;
-        Check(builtIns.Any(t => t.Purpose == "FeeReminder")
-            && builtIns.Any(t => t.Name == "New admission welcome"),
-            "Prebuilt fee reminder and student-admission message formats are available");
-        var details = new CommunicationPreparedMessages.Values(23, "Sample Student", "F-0023",
-            new DateTime(2026, 11, 9), 1250.50m);
-        string feeText = CommunicationPreparedMessages.Render(
-            builtIns.First(t => t.Purpose == "FeeReminder").Body, details);
-        string admissionText = CommunicationPreparedMessages.Render(
-            builtIns.First(t => t.Name == "New admission welcome").Body, details);
+        // The production formatter is internal: exercise it through reflection
+        // without weakening accessibility or exposing student data to tests.
+        var prepared = assembly.GetType("FMSC_SMS.Core.CommunicationPreparedMessages")!;
+        var builtinArray = ((System.Collections.IEnumerable)prepared.GetProperty(
+            "BuiltIns", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!)
+            .Cast<object>().ToArray();
+        string TemplateProperty(object obj, string property) =>
+            Convert.ToString(obj.GetType().GetProperty(property)!.GetValue(obj)) ?? "";
+        object FeeTemplate() => builtinArray.First(t => TemplateProperty(t, "Purpose") == "FeeReminder");
+        object AdmissionTemplate() => builtinArray.First(t => TemplateProperty(t, "Name") == "New admission welcome");
+        Check(builtinArray.Any(t => TemplateProperty(t, "Purpose") == "FeeReminder")
+            && builtinArray.Any(t => TemplateProperty(t, "Name") == "New admission welcome"),
+            "Prebuilt fee reminder and student-admission formats are available");
+        var valuesType = prepared.GetNestedType("Values", BindingFlags.NonPublic)!;
+        object Details(decimal? amount) => Activator.CreateInstance(valuesType,
+            23, "Sample Student", "F-0023", new DateTime(2026, 11, 9), amount)!;
+        var render = prepared.GetMethod("Render", BindingFlags.Static | BindingFlags.NonPublic)!;
+        string RenderFormat(string format, object data) =>
+            (string)render.Invoke(null, new[] { format, data })!;
+        string feeText = RenderFormat(TemplateProperty(FeeTemplate(), "Body"), Details(1250.50m));
+        string admissionText = RenderFormat(TemplateProperty(AdmissionTemplate(), "Body"), Details(1250.50m));
         Check(feeText.Contains("Sample Student") && feeText.Contains("1,250.50")
             && feeText.Contains("F-0023") && !feeText.Contains("[OutstandingAmount]"),
             "Fee reminders use real per-recipient balance and admission identifiers");
         Check(admissionText.Contains("09 Nov 2026") && admissionText.Contains("F-0023"),
             "Admission welcomes use the saved student admission date and number");
         bool rejectedMissingBalance = false;
-        try {
-            CommunicationPreparedMessages.Render(builtIns.First(t => t.Purpose == "FeeReminder").Body,
-                details with { Outstanding = null });
-        } catch (InvalidOperationException) { rejectedMissingBalance = true; }
+        try { RenderFormat(TemplateProperty(FeeTemplate(), "Body"), Details(null)); }
+        catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
+        { rejectedMissingBalance = true; }
         Check(rejectedMissingBalance, "Fee reminder refuses missing or settled balance rather than displaying a fake amount");
         bool unknownFieldRejected = false;
-        try {
-            CommunicationPreparedMessages.Render("Hello [PrivateSqlField]", details);
-        } catch (ArgumentException) { unknownFieldRejected = true; }
+        try { RenderFormat("Hello [PrivateSqlField]", Details(1250.50m)); }
+        catch (TargetInvocationException ex) when (ex.InnerException is ArgumentException)
+        { unknownFieldRejected = true; }
         Check(unknownFieldRejected, "Prepared messages reject unknown record fields");
         var targetCard = cards[0];
         var audienceField = audience.Parent!;
