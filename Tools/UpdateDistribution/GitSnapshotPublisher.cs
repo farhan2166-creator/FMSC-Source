@@ -5,10 +5,12 @@ using FMSC_SMS.Core.Updates;
 // Owner-only tool. Uses the owner's Git credentials, never a school deploy key.
 internal static class GitSnapshotPublisher
 {
-    internal const string Remote = "https://github.com/farhan2166-creator/FMSC-Updates.git";
+    private static string ResolveRemote() => GitHubRepositoryIdentity.ResolveUpdatesHttpsRemoteAsync(
+        Environment.GetEnvironmentVariable("FMSC_UPDATES_PUBLISH_TOKEN") ?? "").GetAwaiter().GetResult();
 
-    internal static string Prepare(string snapshot, string workspace, string remote = Remote)
+    internal static string Prepare(string snapshot, string workspace, string? remote = null)
     {
+        remote ??= ResolveRemote();
         DistributionSnapshot.ValidateSnapshot(snapshot);
         if (Directory.Exists(workspace) || File.Exists(workspace))
             throw new IOException("Publication workspace must be new.");
@@ -52,8 +54,9 @@ internal static class GitSnapshotPublisher
             "\nStored Git objects: " + bytes + " bytes. No push performed.";
     }
 
-    internal static void Publish(string workspace, string expectedParent, string remote = Remote)
+    internal static void Publish(string workspace, string expectedParent, string? remote = null)
     {
+        remote ??= ResolveRemote();
         if (Git(workspace, "remote", "get-url", "origin").Trim() != remote ||
             File.ReadAllText(Path.Combine(workspace, ".git", "fmsc-expected-parent")) != expectedParent ||
             Git(workspace, "rev-parse", "HEAD").Trim() != expectedParent)
