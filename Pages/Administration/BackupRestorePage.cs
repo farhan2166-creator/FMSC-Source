@@ -513,7 +513,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 cloudRecoveryPassphrase = string.Empty;
                 selectedCloud = null;
                 ModernMessageDialog.Show(FindForm(),
-                    result.Message + "\n\nThe temporary cloud download has been removed. FMSC will restart.",
+                    result.Message + "\n\nFMSC will restart.",
                     "Restore Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 isBusy = false; busyMessage = string.Empty;
                 RestartApplication(FindForm());
