@@ -5,7 +5,7 @@ namespace FMSC_SMS.Services.Backup;
 
 /// <summary>
 /// Uses Windows Task Scheduler rather than an in-app timer: closing the FMSC
-/// window does not cancel backups. Runs ONLY under the enrolled Windows user
+/// window does not cancel backups while the enrolled user remains logged on. Runs ONLY under the enrolled Windows user
 /// (same DPAPI token vault and same LocalDB instance). The 30-minute trigger
 /// invokes CloudBackupOptions.IsDue before any SQL backup occurs.
 /// </summary>
@@ -20,7 +20,7 @@ internal static class CloudBackupTaskSchedule
         var arguments = enabled
             ? new List<string> {
                 "/Create", "/F", "/TN", TaskName, "/SC", "MINUTE", "/MO", "30",
-                "/RL", "LIMITED", "/TR",
+                "/RL", "LIMITED", "/IT", "/TR",
                 "\"" + Path.Combine(AppContext.BaseDirectory, "FMSC_SMS.exe") + "\" --cloud-backup-scheduled"
               }
             : new List<string> { "/Delete", "/F", "/TN", TaskName };
