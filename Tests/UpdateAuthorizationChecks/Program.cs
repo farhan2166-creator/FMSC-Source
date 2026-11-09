@@ -17,6 +17,7 @@ if (UpdateGitSession.ParseNetworkBytes("Receiving objects: 50% (1/2), 1.50 MiB |
     !UpdateGitSession.ClassifyFailure("Connection reset by peer").IsRetryable)
     throw new Exception("Git network-progress parsing or retry classification failed.");
 UpdateHandoffTests.Run();
+GitHubIdentityRegressionChecks.Run();
 
 int checks = 0;
 void Require(bool valid, string reason)
