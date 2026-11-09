@@ -1525,7 +1525,7 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
         using var dialog = new SaveFileDialog {
             Filter = $"PDF file (*.pdf)|*.pdf|{CsvExportLabel}|*.csv|Excel workbook (*.xlsx)|*.xlsx",
             FilterIndex = 1,
-            FileName = ReportDocumentNaming.ExportFileName(ReportExportTitle()),
+            FileName = ReportDocumentNaming.ReportExportFileName(ReportExportTitle(), ReportExportSubtitle()),
             DefaultExt = "pdf",
             AddExtension = true,
             OverwritePrompt = true
