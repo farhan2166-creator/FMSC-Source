@@ -40,10 +40,12 @@ internal static class CloudRestoreStaging
             var info = DatabaseBackupManager.GetBackupInfo(bak);
             if (info is null || !info.IsForFmscDatabase)
                 throw new InvalidDataException("The downloaded file is not a readable FMSC SQL backup.");
-            DateTime packagedAt = CloudBackupCrypto.ReadUnverifiedCreationUtc(cloudPackage);
-            DateTime headerAt = DateTime.SpecifyKind(info.BackupStartDate, DateTimeKind.Local).ToUniversalTime();
-            if ((packagedAt - headerAt).Duration() > TimeSpan.FromMinutes(2))
-                throw new InvalidDataException("The encrypted package timestamp does not match its SQL backup header.");
+            // GCM decryption above authenticated the entire package header.
+            // Compare SQL Server's raw local header timestamp, NOT its value
+            // reinterpreted in a possibly different replacement PC timezone.
+            DateTime packagedSqlTime = CloudBackupCrypto.ReadSqlHeaderLocalAfterVerification(cloudPackage);
+            if ((packagedSqlTime - info.BackupStartDate).Duration() > TimeSpan.FromSeconds(1))
+                throw new InvalidDataException("The authenticated package timestamp does not match the actual SQL backup header.");
 
             // Cancellation is permitted before this point only: do not abandon
             // an in-progress SQL restore or its rollback in a cancellation path.
