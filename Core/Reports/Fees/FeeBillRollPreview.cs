@@ -9,10 +9,10 @@ internal static class FeeBillRollPreview
     {
         title=ReportDocumentNaming.PreviewTitle(title,path,display);
         using var document=FeeBillRollDocument.Render(path,dataSetName,display);
-        Show(owner,title,document);
+        Show(owner,title,document,ReportDocumentNaming.DocumentExportFileName(title,path,display));
     }
 
-    internal static void Show(Form? owner,string title,FeeBillRollDocument document)
+    internal static void Show(Form? owner,string title,FeeBillRollDocument document,string? suggestedExportName=null)
     {
         if(document.Pages.Count==0)return;
         var area=owner is null?Screen.PrimaryScreen!.WorkingArea:Screen.FromControl(owner).WorkingArea;
@@ -58,7 +58,7 @@ internal static class FeeBillRollPreview
             if(dialog.ShowDialog(form)==DialogResult.OK)printer=(PrinterSettings)job.PrinterSettings.Clone();
         });
         var export=Button("Export PDF",()=>{
-            using var dialog=new SaveFileDialog {Filter="PDF document (*.pdf)|*.pdf",DefaultExt="pdf",AddExtension=true,FileName=ReportDocumentNaming.ExportFileName(title),Title="Export report"};
+            using var dialog=new SaveFileDialog {Filter="PDF document (*.pdf)|*.pdf",DefaultExt="pdf",AddExtension=true,FileName=suggestedExportName??ReportDocumentNaming.ExportFileName(title),Title="Export report"};
             if(dialog.ShowDialog(form)==DialogResult.OK)AtomicExportFile.Publish(dialog.FileName,
                 file=>File.WriteAllBytes(file,document.ExportPdf(title)),PdfTableExporter.ValidatePdf);
         });
