@@ -175,6 +175,8 @@ jobs:
           & .\Tools\TestUpdateCleanup.ps1
           & .\Tools\TestUpdateRecovery.ps1
           & .\Tools\TestPublishPrivateUpdate.ps1
+          & .\Tools\TestGitHubRepositoryIdentity.ps1
+          & .\Tools\TestSandboxPublicationGate.ps1
 
       - name: Prepare verified maintenance tools
         shell: pwsh
