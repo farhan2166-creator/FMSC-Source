@@ -14,6 +14,7 @@ internal static class CloudRestoreStaging
     internal static async Task<DatabaseBackupManager.BackupResult> RestoreAsync(
         Func<string, CancellationToken, Task> downloadPackage,
         string recoveryPassphrase,
+        string cloudHistoryPath,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(downloadPackage);
@@ -47,7 +48,18 @@ internal static class CloudRestoreStaging
             // Cancellation is permitted before this point only: do not abandon
             // an in-progress SQL restore or its rollback in a cancellation path.
             cancellationToken.ThrowIfCancellationRequested();
-            var result = await Task.Run(() => DatabaseBackupManager.RestoreBackup(bak))
+            // Cloud staging is temporary. Even when no regular backup folder
+            // is configured, the mandatory pre-restore safety copy must live
+            // in a distinct persistent directory and survive staging cleanup.
+            string permanentSafetyFolder = BackupSettings.GetBackupFolder();
+            if (permanentSafetyFolder.Length == 0)
+                permanentSafetyFolder = Path.Combine(DatabaseHelper.DatabaseFolder, "Backups");
+            string stagePath = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string safetyPath = Path.GetFullPath(permanentSafetyFolder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (safetyPath.StartsWith(stagePath, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The recovery safety-backup folder cannot be inside the temporary cloud download folder.");
+            var result = await Task.Run(() => DatabaseBackupManager.RestoreBackup(
+                bak, safetyBackupFolderOverride: permanentSafetyFolder, historyPathOverride: cloudHistoryPath))
                 .ConfigureAwait(false);
             databaseRestored = result.Success;
             if (databaseRestored)
@@ -60,7 +72,7 @@ internal static class CloudRestoreStaging
                     return new DatabaseBackupManager.BackupResult {
                         Success = true,
                         Message = result.Message +
-                            "\\n\\nWarning: temporary cloud download cleanup failed. The protected staging files require administrator cleanup."
+                            "\n\nWarning: temporary cloud download cleanup failed. The protected staging files require administrator cleanup."
                     };
                 }
             }
