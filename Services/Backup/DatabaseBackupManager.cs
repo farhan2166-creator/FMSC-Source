@@ -242,7 +242,9 @@ public static class DatabaseBackupManager
     public static BackupResult RestoreBackup(
         string backupPath,
         IProgress<string>? progress = null,
-        Action<string>? safetyBackupCreated = null)
+        Action<string>? safetyBackupCreated = null,
+        string? safetyBackupFolderOverride = null,
+        string? historyPathOverride = null)
     {
         if (string.IsNullOrWhiteSpace(backupPath))
             return Failed("Backup file was not specified.");
@@ -266,7 +268,7 @@ public static class DatabaseBackupManager
             progress?.Report("Checking the backup's school identity and compatibility...");
             BackupRestoreIdentity.ValidateCandidate(MasterConnectionString,backupPath,Path.Combine(DatabaseHelper.DatabaseFolder,"RestoreChecks"),expectedScope,DatabaseCompatibility.Validate);
             progress?.Report("Taking a safety backup of the current database...");
-            safetyPath = TryCreatePreRestoreSafetyBackup(backupPath, progress, safetyBackupCreated);
+            safetyPath = TryCreatePreRestoreSafetyBackup(backupPath, progress, safetyBackupCreated, safetyBackupFolderOverride);
             using(var current=new SqlConnection(DatabaseHelper.GetConnectionString("FMSC_DB")))
             {
                 DatabaseHelper.OpenConnection(current);BackupRestoreIdentity.RequireSame(expectedScope,BackupRestoreIdentity.ReadScope(current));
@@ -310,7 +312,7 @@ public static class DatabaseBackupManager
             progress?.Report("Recording restore history...");
             long fileSize = new FileInfo(backupPath).Length;
             /* same reasoning as the backup path: the restore succeeded, so report it, but do not claim the history was recorded when it was not. */
-            bool recorded = RecordHistorySafe("RESTORE", backupPath, fileSize, "Success", null, isSafetyBackup: false);
+            bool recorded = RecordHistorySafe("RESTORE", historyPathOverride ?? backupPath, fileSize, "Success", null, isSafetyBackup: false);
             progress?.Report("Restore completed successfully.");
             return recorded
                 ? Success("Database restore completed successfully.")
@@ -378,7 +380,7 @@ public static class DatabaseBackupManager
                     recoveryMessage = $"\n\nAutomatic recovery failed. Do not use the database until the safety backup is restored manually:\n{safetyPath}\n{DbMessage.UserMessage(recoveryEx)}";
                 }
             }
-            RecordHistorySafe("RESTORE", backupPath, fileSize, "Failed", ex.Message, isSafetyBackup: false);
+            RecordHistorySafe("RESTORE", historyPathOverride ?? backupPath, fileSize, "Failed", ex.Message, isSafetyBackup: false);
             progress?.Report("Restore failed.");
             return Failed($"Restore failed:\n{DbMessage.UserMessage(ex)}{recoveryMessage}");
         }
@@ -394,14 +396,16 @@ public static class DatabaseBackupManager
     private static string TryCreatePreRestoreSafetyBackup(
         string aboutToRestoreFrom,
         IProgress<string>? progress,
-        Action<string>? safetyBackupCreated = null)
+        Action<string>? safetyBackupCreated = null,
+        string? safetyBackupFolderOverride = null)
     {
         string folder;
         string safetyPath;
         try
         {
-            folder =
-                BackupSettings.GetBackupFolder() is { Length: > 0 } configuredFolder
+            folder = !string.IsNullOrWhiteSpace(safetyBackupFolderOverride)
+                ? safetyBackupFolderOverride
+                : BackupSettings.GetBackupFolder() is { Length: > 0 } configuredFolder
                     ? configuredFolder
                     : Path.GetDirectoryName(aboutToRestoreFrom) ?? DatabaseHelper.DatabaseFolder;
             safetyPath = CreateUniqueBackupPath(folder, CreatePreRestoreSafetyBackupFileName());
@@ -579,9 +583,10 @@ public static class DatabaseBackupManager
         {
             string? path = row["FilePath"] as string;
             row["FileAvailable"] =
-                !string.IsNullOrWhiteSpace(path) && File.Exists(path)
-                    ? "Available"
-                    : "Missing";
+                path?.StartsWith("cloud://", StringComparison.OrdinalIgnoreCase) == true
+                    ? "Cloud copy"
+                    : !string.IsNullOrWhiteSpace(path) && File.Exists(path)
+                        ? "Available" : "Missing";
         }
         return history;
     }
@@ -638,6 +643,10 @@ public static class DatabaseBackupManager
     {
         if (string.IsNullOrWhiteSpace(path))
             return true;
+        // Retain audit records of cloud recoveries after downloaded temp files
+        // are cleared. Upload/remote retention is handled independently.
+        if (path.StartsWith("cloud://", StringComparison.OrdinalIgnoreCase))
+            return false;
         try
         {
             if (File.Exists(path))
