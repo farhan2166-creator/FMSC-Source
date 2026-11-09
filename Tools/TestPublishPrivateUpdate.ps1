@@ -20,7 +20,8 @@ for ($line = 0; $line -lt $workflowLines.Count; $line++) {
     $blocks++
 }
 if ($blocks -lt 5) { throw 'Expected publication workflow PowerShell contracts are missing.' }
-$keys = @('GITHUB_ACTIONS','GITHUB_EVENT_NAME','GITHUB_REF','GITHUB_REPOSITORY','FMSC_UPDATES_PUBLISH_TOKEN')
+$keys = @('GITHUB_ACTIONS','GITHUB_EVENT_NAME','GITHUB_REF','GITHUB_REPOSITORY','GITHUB_REPOSITORY_ID','GITHUB_REPOSITORY_OWNER',
+    'GITHUB_REPOSITORY_OWNER_ID','GITHUB_ACTOR_ID','FMSC_UPDATES_PUBLISH_TOKEN')
 $saved = @{}
 foreach ($key in $keys) { $saved[$key] = [Environment]::GetEnvironmentVariable($key) }
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('fmsc-publication-guard-' + [Guid]::NewGuid().ToString('N'))
@@ -28,17 +29,24 @@ try {
     $env:FMSC_UPDATES_PUBLISH_TOKEN = $null
     foreach ($scenario in @('local','push','branch','fork','missing-token')) {
         $env:GITHUB_ACTIONS = 'true'; $env:GITHUB_EVENT_NAME = 'workflow_dispatch'
-        $env:GITHUB_REF = 'refs/heads/main'; $env:GITHUB_REPOSITORY = 'farhan2166-creator/FMSC-Source'
+        $env:GITHUB_REF = 'refs/heads/main'; $env:GITHUB_REPOSITORY = 'future-renamed-owner/FMSC-Source'
+        $env:GITHUB_REPOSITORY_ID = '1412760928'; $env:GITHUB_REPOSITORY_OWNER = 'future-renamed-owner'
+        $env:GITHUB_REPOSITORY_OWNER_ID = '316891609'; $env:GITHUB_ACTOR_ID = '316891609'
         switch ($scenario) {
             local { $env:GITHUB_ACTIONS = 'false' }
             push { $env:GITHUB_EVENT_NAME = 'push' }
             branch { $env:GITHUB_REF = 'refs/heads/feature/test' }
-            fork { $env:GITHUB_REPOSITORY = 'fixture/fork' }
+            fork { $env:GITHUB_REPOSITORY_ID = '1' }
         }
         $refused = $false
         try { & $scriptPath -ApplicationDirectory 'unused' -WorkDirectory $scratch }
         catch {
-            $expected = if ($scenario -eq 'missing-token') { 'FMSC_UPDATES_PUBLISH_TOKEN' } else { 'owner-triggered' }
+            $expected = switch ($scenario) {
+                'missing-token' { 'FMSC_UPDATES_PUBLISH_TOKEN' }
+                'local' { 'Untrusted GitHub' }
+                'fork' { 'Untrusted GitHub' }
+                default { 'owner-triggered' }
+            }
             if (-not $_.Exception.Message.Contains($expected)) { throw }
             $refused = $true
         }
