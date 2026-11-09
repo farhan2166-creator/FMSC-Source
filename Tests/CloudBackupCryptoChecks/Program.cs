@@ -37,7 +37,24 @@ try
     string invalid = Path.Combine(root, "invalid.fmscbackup");
     File.WriteAllBytes(invalid, Array.Empty<byte>());
     MustReject(() => CloudBackupCrypto.Decrypt(invalid, restored, passphrase), "empty package");
-    Console.WriteLine("PASS: encrypted cloud backups round-trip, detect tampering/truncation/wrong keys, and leave no committed .bak on failure.");
+    var h1 = new string('a', 64);
+    var h2 = new string('b', 64);
+    var earliestCreated = new DateTime(2026, 11, 9, 10, 0, 0, DateTimeKind.Utc);
+    var latestCreated = earliestCreated.AddHours(4);
+    var laterUploaded = earliestCreated.AddHours(10);
+    var copies = new[] {
+        new CloudBackupCopy("GoogleDrive", "old", h1, earliestCreated, laterUploaded, 123, true),
+        new CloudBackupCopy("Dropbox", "old-copy", h1, earliestCreated, laterUploaded.AddHours(1), 123, true),
+        new CloudBackupCopy("Local", "new", h2, latestCreated, latestCreated.AddMinutes(1), 125, true)
+    };
+    var recovery = CloudBackupCatalog.GroupRecoveryPoints(copies);
+    if (recovery.Count != 2 || recovery[0].PackageSha256 != h2 || recovery[1].Copies.Count != 2)
+        throw new Exception("Recovery comparison used upload time or did not group matching copies.");
+    if (CloudBackupCatalog.CopiesEligibleForDeletion(copies, "GoogleDrive", 1, h2).Count != 0)
+        throw new Exception("Retention deleted data before upload confirmation.");
+    if (CloudBackupCatalog.CopiesEligibleForDeletion(copies, "Dropbox", 1, h1).Count != 0)
+        throw new Exception("Retention should not delete the only verified copy.");
+    Console.WriteLine("PASS: encrypted backup corruption checks and recovery-point creation-time ordering.");
 }
 finally
 {
