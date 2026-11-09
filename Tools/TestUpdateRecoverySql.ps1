@@ -173,8 +173,9 @@ EXEC sys.sp_addextendedproperty @name=N'FMSC_RecoveryFixture',@value=N'$Database
     Set-Content (Join-Path $AppRollbackDir 'FMSC_SMS.exe') 'synthetic original application'
     Set-Content (Join-Path $AppStagingDir 'FMSC_SMS.exe') 'synthetic staged files'
     $originalExeHash=(Get-FileHash (Join-Path $AppRollbackDir 'FMSC_SMS.exe') -Algorithm SHA256).Hash
-    $fileRows=@(Sql master "SET NOCOUNT ON; SELECT physical_name FROM sys.master_files WHERE database_id=DB_ID(N'$DatabaseName') ORDER BY type;")
-    if ($fileRows.Count -ne 2) { throw 'Synthetic database file identity is incomplete.' }
+    $fileRows=@(Sql master "SET NOCOUNT ON; SELECT physical_name FROM sys.master_files WHERE database_id=DB_ID(N'$DatabaseName') ORDER BY type;" |
+        ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ -match '\.(mdf|ldf)$' })
+    if ($fileRows.Count -ne 2) { throw "Synthetic database file identity is incomplete ($($fileRows.Count) paths found)." }
     $LiveMdf=[string]$fileRows[0];$LiveLdf=[string]$fileRows[1]
     $script:RecoveryJournal.Phase='Activating'
     $script:RecoveryJournal.LastSchema=3
