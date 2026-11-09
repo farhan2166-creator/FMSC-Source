@@ -54,6 +54,35 @@ try
         throw new Exception("Retention deleted data before upload confirmation.");
     if (CloudBackupCatalog.CopiesEligibleForDeletion(copies, "Dropbox", 1, h1).Count != 0)
         throw new Exception("Retention should not delete the only verified copy.");
+    // Daily: a powered-off PC must retry yesterday's missed 6 PM backup
+    // when it comes back online at 9 AM, not wait until tonight.
+    var daily9Am = new DateTime(2026, 11, 10, 9, 0, 0);
+    var dailyLast = new DateTime(2026, 11, 8, 18, 4, 0);
+    var at6Pm = new TimeOnly(18, 0);
+    if (!CloudBackupSchedulePolicy.IsDue(true, CloudBackupFrequency.Daily, at6Pm,
+            DayOfWeek.Friday, daily9Am, dailyLast))
+        throw new Exception("Missed daily backup was not retried on the next PC startup.");
+    if (CloudBackupSchedulePolicy.IsDue(true, CloudBackupFrequency.Daily, at6Pm,
+            DayOfWeek.Friday, daily9Am, new DateTime(2026, 11, 9, 18, 2, 0)))
+        throw new Exception("Daily backup reran without a missed scheduled recovery point.");
+    // Weekly: selecting Friday 6 PM must catch up on Saturday after shutdown.
+    var saturday = new DateTime(2026, 11, 14, 11, 0, 0);
+    if (!CloudBackupSchedulePolicy.IsDue(true, CloudBackupFrequency.Weekly, at6Pm,
+            DayOfWeek.Friday, saturday, new DateTime(2026, 11, 6, 18, 5, 0)))
+        throw new Exception("Missed Friday weekly backup was not retried Saturday.");
+    if (CloudBackupSchedulePolicy.IsDue(true, CloudBackupFrequency.Weekly, at6Pm,
+            DayOfWeek.Friday, saturday, new DateTime(2026, 11, 13, 18, 2, 0)))
+        throw new Exception("Weekly backup repeated despite successful Friday run.");
+    if (!CloudBackupSchedulePolicy.IsDue(true, CloudBackupFrequency.Every12Hours, at6Pm,
+            DayOfWeek.Friday, new DateTime(2026, 11, 10, 10, 0, 0),
+            new DateTime(2026, 11, 9, 18, 5, 0)))
+        throw new Exception("12-hour schedule skipped the morning run.");
+    if (!CloudBackupSchedulePolicy.IsDue(true, CloudBackupFrequency.Daily, at6Pm,
+            DayOfWeek.Friday, daily9Am, null))
+        throw new Exception("First enrolled school backup must run without waiting a week.");
+    if (CloudBackupSchedulePolicy.IsDue(false, CloudBackupFrequency.Daily, at6Pm,
+            DayOfWeek.Friday, daily9Am, null))
+        throw new Exception("Disabled backup schedule ran without operator enrollment.");
     Console.WriteLine("PASS: encrypted backup corruption checks and recovery-point creation-time ordering.");
 }
 finally
