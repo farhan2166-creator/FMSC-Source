@@ -81,10 +81,10 @@ internal static class ReportDocumentNaming
 
     private static string SafeStem(string title)
     {
-        string stem = Regex.Replace(title, "[<>:\\"/\\\\\\\\|?*\\x00-\\x1F]", " - ");
-        stem = Regex.Replace(stem, @"\\s+", " ").Trim(' ', '.', '-');
+        string stem = Regex.Replace(title, "[<>:\"/\\\\|?*\\x00-\\x1F]", " - ");
+        stem = Regex.Replace(stem,@"\s+"," ").Trim(' ','.','-');
         if (stem.Length == 0) stem = "Report";
-        if (stem.Length > 160) stem = stem[..160].TrimEnd(' ', '.', '-');
+        if (stem.Length > 160) stem = stem[..160].TrimEnd(' ','.','-');
         return stem;
     }
 
