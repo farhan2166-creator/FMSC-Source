@@ -307,16 +307,25 @@ internal static class CloudBackupCoordinator
 
     private static void PruneLocalAutomaticBackups(string folder, int limit)
     {
-        var files = new DirectoryInfo(folder).EnumerateFiles("FMSC_CloudAuto_*.bak")
-            .OrderByDescending(file => file.CreationTimeUtc).ToArray();
-        // A configured limit never permits deletion of the newest verified
-        // backup, and cannot touch pre-restore/migration safety backups or
-        // operator-made local backup files.
-        foreach (var older in files.Skip(Math.Max(1, limit)))
+        if (limit < 1) throw new ArgumentOutOfRangeException(nameof(limit));
+        // Local file creation/modified times can change when a .bak is copied.
+        // Retention chronology, like Restore, is based on the actual SQL
+        // backup header. Files with unreadable headers are retained for review.
+        var valid = new List<(FileInfo File, DateTime SqlCreated)>();
+        foreach (FileInfo file in new DirectoryInfo(folder).EnumerateFiles("FMSC_CloudAuto_*.bak"))
         {
-            try { older.Delete(); }
+            var info = DatabaseBackupManager.GetBackupInfo(file.FullName);
+            if (info?.IsForFmscDatabase == true && info.BackupStartDate != default)
+                valid.Add((file, info.BackupStartDate));
+        }
+        foreach (var old in valid.OrderByDescending(x => x.SqlCreated)
+                     .Skip(Math.Max(1, limit)))
+        {
+            try { old.File.Delete(); }
             catch (Exception ex) { AppExceptionHandler.LogNonFatal(ex, "Old automatic local backup cleanup failed"); }
         }
+        // No pre-restore, updater migration, or manually named backup matches
+        // the FMSC_CloudAuto prefix; those recovery files remain untouched.
     }
 
     private static void CreateValidatedSqlBackupHeadless(string backupPath)
