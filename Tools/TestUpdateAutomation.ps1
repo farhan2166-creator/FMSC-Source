@@ -22,6 +22,23 @@ $desktop | Add-Member ScriptMethod ShellExecute {
 }
 function Get-FmscDesktopShell { return $desktop }
 $AppVersion = '1.0.0'; $DatabaseVersion = '1'
+# Disposable paths exercise the installer header without touching installed
+# applications or school MDF/LDF files.
+$setupFixture = Join-Path ([IO.Path]::GetTempPath()) ('fmsc-setup-display-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($setupFixture)
+$AppDir = Join-Path $setupFixture 'application'
+$LiveMdf = Join-Path $setupFixture 'FMSC_DB.mdf'
+$AppSource = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+function Assert-SetupHeader([string]$ExpectedText) {
+    $items = @($script:UpdateWindow.Controls | ForEach-Object { $_.Controls })
+    $mode = @($items | Where-Object { $_ -is [Windows.Forms.Label] -and $_.Text -eq $ExpectedText })
+    $pictures = @($items | Where-Object { $_ -is [Windows.Forms.PictureBox] })
+    if ($mode.Count -ne 1 -or $pictures.Count -ne 1 -or
+        -not $pictures[0].Image -or
+        $pictures[0].SizeMode -ne [Windows.Forms.PictureBoxSizeMode]::Zoom) {
+        throw "Installer header must show $ExpectedText and the existing circular FMSC logo."
+    }
+}
 $script:TestDecision = $null
 $script:launches = 0
 # The production selector waits for a real button click. These isolated tests
@@ -36,6 +53,7 @@ $PreparedRoot = 'fixture'; $ShowInstallerWindow = $false
 Pause-Step; Pause-Long
 try {
     Open-UpdateWindow
+    Assert-SetupHeader 'SECURE APPLICATION UPDATE'
     if (-not $script:UpdateWindow.Visible -or $script:UpdateWindow.ControlBox -or
         $script:UpdateWindow.ClientSize.Height -lt 400 -or
         $script:UpdateWindow.BackColor.ToArgb() -ne [Drawing.Color]::FromArgb(246,248,251).ToArgb() -or
@@ -63,6 +81,7 @@ $PreparedRoot = ''; $ShowInstallerWindow = $true
 Pause-Step; Pause-Long
 try {
     Open-UpdateWindow
+    Assert-SetupHeader 'FIRST-TIME INSTALLATION'
     Set-UpdateWindowStage 'STEP 4 OF 8  -  DATABASE ENGINE AND TOOLS'
     Set-UpdateWindowStatus 'Checking SQL Server LocalDB...'
     if (-not $script:UpdateWindow.Visible -or $script:UpdateWindow.ControlBox -or
@@ -79,6 +98,26 @@ try {
     }
 } finally {
     if ($script:UpdateWindow) { $script:UpdateWindow.Dispose(); $script:UpdateWindow = $null }
+}
+# An ordinary full setup must not claim to be the first installation if an
+# application or school database already exists. This is display-only:
+# synthetic files are never opened as a database or installed.
+try {
+    [void][IO.Directory]::CreateDirectory($AppDir)
+    Set-Content -LiteralPath (Join-Path $AppDir 'FMSC_SMS.exe') -Value 'synthetic executable'
+    Open-UpdateWindow
+    Assert-SetupHeader 'EXISTING FMSC INSTALLATION'
+    if ($script:UpdateWindow.Text -notlike '*Existing installation*') {
+        throw 'Existing application must be identified in installer window title.'
+    }
+    $script:UpdateWindow.Dispose(); $script:UpdateWindow = $null
+    Remove-Item -LiteralPath (Join-Path $AppDir 'FMSC_SMS.exe') -Force
+    Set-Content -LiteralPath $LiveMdf -Value 'synthetic MDF marker, no SQL'
+    Open-UpdateWindow
+    Assert-SetupHeader 'EXISTING FMSC INSTALLATION'
+} finally {
+    if ($script:UpdateWindow) { $script:UpdateWindow.Dispose(); $script:UpdateWindow = $null }
+    Remove-Item -LiteralPath $setupFixture -Recurse -Force
 }
 $ShowInstallerWindow = $false
 # The real selector must pump UI events; never auto-launch a prepared update.
@@ -110,4 +149,4 @@ if (-not $handoff.Contains('FMSC.Setup.exe') -or -not $handoff.Contains('--updat
     -not $handoff.Contains('UseShellExecute = true, Verb = "runas"')) {
     throw 'Prepared updates must request UAC through the verified shared GUI executable.'
 }
-Write-Output 'PASS: taller OceanBlue setup UI for install/update; finish buttons disabled until verified, Yes launches, No leaves FMSC closed; shared native launcher and UAC retained.'
+Write-Output 'PASS: FMSC circular logo and accurate fresh/existing/update headers; eight-stage install/update finish gating, user choice, shared native launcher and UAC retained.'

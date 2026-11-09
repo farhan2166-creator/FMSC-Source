@@ -141,10 +141,18 @@ function Open-UpdateWindow {
     Add-Type -AssemblyName System.Drawing
     [Windows.Forms.Application]::EnableVisualStyles()
     $script:UpdateWindow = New-Object Windows.Forms.Form
+    # A complete installer can also be run over an existing application or
+    # school database. Only an empty destination is a first-time installation.
+    $installedExeExists = -not [string]::IsNullOrWhiteSpace([string]$AppDir) -and
+        (Test-Path -LiteralPath (Join-Path $AppDir 'FMSC_SMS.exe') -PathType Leaf)
+    $existingDataExists = -not [string]::IsNullOrWhiteSpace([string]$LiveMdf) -and
+        (Test-Path -LiteralPath $LiveMdf -PathType Leaf)
+    $existingInstallation = $installedExeExists -or $existingDataExists
     # The installer UI runs in PowerShell, but its window/taskbar should carry
     # FMSC's own icon. Prefer the packaged GUI setup binary, then the working
     # installation, then the candidate payload (first-time setup).
     # Icon loading is cosmetic and must never interfere with recovery.
+    $brandIcon = $null
     foreach ($candidate in @(
         @{ Root = $PSScriptRoot; File = 'FMSC.Setup.exe' },
         @{ Root = $AppDir; File = 'FMSC_SMS.exe' },
@@ -160,6 +168,7 @@ function Open-UpdateWindow {
             $icon = [Drawing.Icon]::ExtractAssociatedIcon($iconExe)
             if ($icon) {
                 $script:UpdateWindow.Icon = $icon
+                $brandIcon = $icon
                 break
             }
         } catch {
@@ -167,7 +176,9 @@ function Open-UpdateWindow {
         }
     }
     $script:UpdateWindow.AutoScaleMode = 'None' # Avoid a second WinForms font-based size pass.
-    $script:UpdateWindow.Text = if ($PreparedRoot) { 'FMSC - Installing update' } else { 'FMSC - First-time setup' }
+    $script:UpdateWindow.Text = if ($PreparedRoot) { 'FMSC - Installing update' }
+        elseif ($existingInstallation) { 'FMSC - Existing installation' }
+        else { 'FMSC - First-time setup' }
     # Shared first-install and prepared-update window: match the FMSC login dialog
     # baseline at 100% DPI. Both installer modes use this same UI and geometry.
     $clientWidth = 760
@@ -184,13 +195,28 @@ function Open-UpdateWindow {
     $header = New-Object Windows.Forms.Panel
     $header.SetBounds(0,0,$clientWidth,138)
     $header.BackColor = [Drawing.Color]::White
-    $mark = New-Object Windows.Forms.Label
+    # The circular FMSC icon is already embedded in FMSC.Setup.exe. Use it
+    # directly rather than a separate asset or placeholder letter.
+    $mark = New-Object Windows.Forms.PictureBox
     $mark.SetBounds(30,38,54,54)
-    $mark.Text = 'F'
-    $mark.TextAlign = 'MiddleCenter'
-    $mark.BackColor = [Drawing.Color]::FromArgb(37,99,235)
-    $mark.ForeColor = [Drawing.Color]::White
-    $mark.Font = New-Object Drawing.Font('Segoe UI',21,[Drawing.FontStyle]::Bold)
+    $mark.SizeMode = [Windows.Forms.PictureBoxSizeMode]::Zoom
+    $mark.BackColor = [Drawing.Color]::White
+    # The packaged circular ICO has higher-resolution sizes than some EXE
+    # icon extractors return. Fall back to the verified launcher's icon.
+    foreach ($logoRoot in @($AppSource, $AppDir)) {
+        if ([string]::IsNullOrWhiteSpace([string]$logoRoot)) { continue }
+        try {
+            $logoPath = Join-Path $logoRoot 'Assets\FMSC_Logo_Circular.ico'
+            if (-not (Test-Path -LiteralPath $logoPath -PathType Leaf)) { continue }
+            $logoIcon = [Drawing.Icon]::new($logoPath, [Drawing.Size]::new(64,64))
+            try { $mark.Image = $logoIcon.ToBitmap() }
+            finally { $logoIcon.Dispose() }
+            break
+        } catch {
+            # Branding is optional during recovery; never block installation.
+        }
+    }
+    if (-not $mark.Image -and $brandIcon) { $mark.Image = $brandIcon.ToBitmap() }
     $name = New-Object Windows.Forms.Label
     $name.SetBounds(98,36,600,36)
     $name.Text = 'FMSC School Management'
@@ -198,7 +224,9 @@ function Open-UpdateWindow {
     $name.Font = New-Object Drawing.Font('Segoe UI',16,[Drawing.FontStyle]::Bold)
     $mode = New-Object Windows.Forms.Label
     $mode.SetBounds(100,77,480,20)
-    $mode.Text = if ($PreparedRoot) { 'SECURE APPLICATION UPDATE' } else { 'FIRST-TIME INSTALLATION' }
+    $mode.Text = if ($PreparedRoot) { 'SECURE APPLICATION UPDATE' }
+        elseif ($existingInstallation) { 'EXISTING FMSC INSTALLATION' }
+        else { 'FIRST-TIME INSTALLATION' }
     $mode.ForeColor = [Drawing.Color]::FromArgb(37,99,235)
     $mode.Font = New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold)
     $version = New-Object Windows.Forms.Label
