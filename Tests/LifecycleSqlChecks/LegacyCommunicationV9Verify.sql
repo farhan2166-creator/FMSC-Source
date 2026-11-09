@@ -1,6 +1,7 @@
 -- All claims are against a disposable data-free SQL fixture, never school data.
-IF (SELECT TOP (1) TRY_CONVERT(int,VersionNumber) FROM dbo.DatabaseVersion ORDER BY VersionId DESC)<>10
-    THROW 51101,'Legacy upgrade did not reach required schema 10.',1;
+-- The harness replaces this numeric marker with the declared installer schema.
+IF (SELECT TOP (1) TRY_CONVERT(int,VersionNumber) FROM dbo.DatabaseVersion ORDER BY VersionId DESC)<>__EXPECTED_SCHEMA__
+    THROW 51101,'Legacy upgrade did not reach the declared current schema.',1;
 IF SCHEMA_ID(N'comm') IS NOT NULL
  OR OBJECT_ID(N'dbo.StudentGuardianCommunication',N'U') IS NOT NULL
  OR SCHEMA_ID(N'legacy_comm_v7') IS NOT NULL
