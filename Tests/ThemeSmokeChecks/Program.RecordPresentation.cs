@@ -52,6 +52,29 @@ internal static partial class Program
             && printed.Rows[0].Field<string>("Remarks")=="a sentence stays unchanged.",
             "Printing preserves stored snapshots, identifiers and prose");
 
+        using (var image=new Bitmap(220,60))
+        using (var bytes=new MemoryStream())
+        {
+            image.Save(bytes,System.Drawing.Imaging.ImageFormat.Png);
+            foreach(string template in new[]{"BankAccountOpeningCertificate","CharacterCertificate",
+                "CollegeLeaveCertificate","DateOfBirthCertificate","LeaveCertificate","NoObjectionCertificate",
+                "ProvisionalCertificate","RegularLecturerCertificate","RegularStudentCertificate","SportsCertificate"})
+            {
+                string path=Path.Combine(AppContext.BaseDirectory,"Reports",template+".rdlc");
+                string original=File.ReadAllText(path);
+                Check(CertificateSignature.Apply(original,bytes.ToArray(),"image/png",false)==original,
+                    template+": disabled principal signature preserves existing layout");
+                string signed=CertificateSignature.Apply(original,bytes.ToArray(),"image/png",true);
+                var xml=XDocument.Parse(signed);
+                XNamespace ns=xml.Root!.Name.Namespace;
+                Check(xml.Descendants(ns+"Image").Count(item=>(string?)item.Attribute("Name")==
+                    "PrincipalSignaturePrintImage")==1 &&
+                    xml.Descendants(ns+"EmbeddedImage").Any(item=>(string?)item.Attribute("Name")==
+                    "PrincipalSignaturePrintAsset"),
+                    template+": enabled principal signature is embedded over the existing signing line");
+            }
+        }
+
         string folder=Path.GetFullPath("artifacts/gender-certificates");Directory.CreateDirectory(folder);
         using var profile=new DataTable();profile.Columns.Add("SchoolName");var school=profile.Rows.Add("fictional school");
         foreach(string name in new[]{"BankAccountOpeningCertificate","CharacterCertificate","CollegeLeaveCertificate",
@@ -87,6 +110,20 @@ internal static partial class Program
                 string html=System.Net.WebUtility.HtmlDecode(Encoding.UTF8.GetString(report.Render("HTML4.0")));
                 Check(html.Contains("Ali Ahmad",StringComparison.Ordinal)&&html.Contains("Muhammad Khan",StringComparison.Ordinal),
                     name+" renders older lowercase names in title case");
+                if (sample.Gender == " male " && name is "LeaveCertificate" or "CharacterCertificate")
+                {
+                    using var signatureBitmap = new Bitmap(180,55);
+                    using var signatureBytes = new MemoryStream();
+                    signatureBitmap.Save(signatureBytes,System.Drawing.Imaging.ImageFormat.Png);
+                    string withSignature = CertificateSignature.Apply(document.ToString(),
+                        signatureBytes.ToArray(),"image/png",true);
+                    using var signedReport=new LocalReport();
+                    signedReport.EnableExternalImages=true;
+                    signedReport.LoadReportDefinition(new StringReader(withSignature));
+                    signedReport.DataSources.Add(new ReportDataSource((string)dataset.Attribute("Name")!,data));
+                    Check(signedReport.Render("PDF").Length>1000,
+                        name+" renders an actual signed certificate PDF");
+                }
                 if(name is "LeaveCertificate" or "CollegeLeaveCertificate")
                     Check(html.Contains("Class in which "+sample.Pronoun+" was studying",StringComparison.Ordinal),name+" uses the recorded gender in its class labels");
                 else if(name!="ProvisionalCertificate")

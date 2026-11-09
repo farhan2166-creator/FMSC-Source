@@ -18,6 +18,7 @@ internal static class RdlcReportPreview
         bool allowMultiplePages = true)
     {
         title = ReportDocumentNaming.PreviewTitle(title, reportPath, data);
+        string suggestedExportName = ReportDocumentNaming.DocumentExportFileName(title, reportPath, data);
         using var printData=RecordTextPolicy.PrintCopy(data);
         Rectangle workingArea = owner is Control ownerControl
             ? Screen.FromControl(ownerControl).WorkingArea
@@ -59,7 +60,7 @@ internal static class RdlcReportPreview
         using var overview = new ReportPageOverview { Visible = false };
         surface.Controls.Add(viewer); surface.Controls.Add(overview);
         Control toolbar = CreateToolbar(form, viewer, fitPageWidth, out var interactions,
-            surface, overview, allowMultiplePages);
+            surface, overview, allowMultiplePages, suggestedExportName);
         using var interactionLifetime = interactions;
         form.Controls.Add(surface);
         form.Controls.Add(toolbar);
@@ -94,7 +95,7 @@ internal static class RdlcReportPreview
         Microsoft.Reporting.WinForms.ReportViewer viewer,
         bool fitPageWidth,
         out ReportPreviewInteractionFilter interactions,
-        Control surface, ReportPageOverview overview, bool allowMultiplePages)
+        Control surface, ReportPageOverview overview, bool allowMultiplePages, string suggestedExportName)
     {
         var toolbar = new FlowLayoutPanel {
             Dock = DockStyle.Top,
@@ -293,7 +294,7 @@ internal static class RdlcReportPreview
             Execute("export", () => {
                 using var dialog = new SaveFileDialog {
                     Filter = "PDF document (*.pdf)|*.pdf", DefaultExt = "pdf", AddExtension = true,
-                    FileName = ReportDocumentNaming.ExportFileName(form.Text),
+                    FileName = suggestedExportName,
                     Title = "Export report"
                 };
                 if (dialog.ShowDialog(form) != DialogResult.OK) return;

@@ -20,6 +20,27 @@ internal static partial class Program
         Check(ReportDocumentNaming.PreviewTitle("Student Fee Bill","StudentBill.rdlc",bills)==batch,"Fee lines do not inflate the document count");
         string filename=ReportDocumentNaming.ExportFileName("Collections / Receipts: Summary",new DateTime(2026,11,3,11,6,22));
         Check(filename.EndsWith("_2026-11-03_11-06-22")&&!filename.Any(c=>"<>:\"/\\|?*".Contains(c)),"Export names contain a readable title and safe date/time to seconds");
+        using var certificate=new DataTable();
+        foreach(string field in new[]{"AdmissionNumber","StudentName","CertificateNumber"})
+            certificate.Columns.Add(field);
+        certificate.Rows.Add("6578","Eman Do Shafaqat","SLC-2026-00057");
+        Check(ReportDocumentNaming.DocumentExportFileName("School Leaving Certificate","LeaveCertificate.rdlc",certificate)
+            == "6578-Eman Do Shafaqat (SLC-2026-00057)",
+            "Single certificate PDF suggests admission, name and real certificate number");
+        certificate.Rows.Add("6579","Another Student","SLC-2026-00058");
+        Check(ReportDocumentNaming.DocumentExportFileName("School Leaving Certificates","LeaveCertificate.rdlc",
+            certificate,new DateTime(2026,11,9,12,0,0)).StartsWith("School Leaving Certificates_"),
+            "Batch PDF does not falsely identify a single child");
+        using var receipt=new DataTable();
+        foreach(string field in new[]{"AdmissionNumberText","StudentName","ReceiptNumber"})
+            receipt.Columns.Add(field);
+        receipt.Rows.Add("6578","Eman Do Shafaqat","R-2026-00057");
+        Check(ReportDocumentNaming.DocumentExportFileName("Student Payment Receipt","StudentReceipt.rdlc",receipt)
+            == "6578-Eman Do Shafaqat (R-2026-00057)",
+            "Single receipt PDF uses the saved receipt reference");
+        Check(ReportDocumentNaming.ReportExportFileName("Outstanding","Class 10-A",
+            new DateTime(2026,11,9,12,0,0)).StartsWith("Outstanding (Class 10-A)_"),
+            "Report PDFs include their selected scope");
         bills.Rows.Clear();bills.Rows.Add("FR-2026-00001","1","1916","Hadia","STUDENT COPY OF FAMILY RECEIPT");
         Check(ReportDocumentNaming.PreviewTitle("Student Payment Receipt","StudentReceipt.rdlc",bills).StartsWith("Student Copy of Family Receipt"),"Child-copy preview agrees with the saved document's purpose");
 

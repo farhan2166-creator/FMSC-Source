@@ -326,8 +326,15 @@ def main():
                     lambda: sql(catalog, "DROP TABLE dbo.FMSC_Test_Migration8UnknownDependency;"))
             checked("migration " + migration.stem, lambda m=migration: sql(catalog, wrapped(m)))
         if legacy_nonempty:
+            # Compare the completed migration chain to the installer's declared
+            # schema, not the last schema at the time this test was written.
+            declared = re.search(r"\$DatabaseVersion\s*=\s*'(\d+)'",
+                                 (ROOT / "Installer/core.ps1").read_text()).group(1)
+            legacy_check = (PROJECT / "LegacyCommunicationV9Verify.sql").read_text(encoding="utf-8")
+            if legacy_check.count("__EXPECTED_SCHEMA__") != 1:
+                raise ValueError("Legacy migration test schema placeholder is missing.")
             checked("discard nonempty legacy records without archive and keep dbo data",
-                lambda: sql(catalog, (PROJECT / "LegacyCommunicationV9Verify.sql").read_text(encoding="utf-8")))
+                lambda: sql(catalog, legacy_check.replace("__EXPECTED_SCHEMA__", declared)))
         return catalog
 
     def run_lifecycle(mode, report_name):
