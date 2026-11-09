@@ -167,29 +167,29 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     {
         var card = HumanUi.Card("1. Select Recipients",
             "Whole school, campus, class and fee targets are automatic. Individual pickers are only for specific records.");
-        var flow = new FlowLayoutPanel
+        // HumanUi.Field returns a Dock=Fill table. FlowLayoutPanel cannot
+        // reliably measure/dock those tables in a TopDown, non-wrapping layout;
+        // on a real dashboard the recipient controls can become blank.
+        // Top-docked rows retain their actual height and reflow when scope
+        // choices hide/show the optional fields.
+        var fieldsHost = new Panel
         {
-            Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown,
-            WrapContents = false, AutoScroll = true, Padding = new Padding(12)
+            Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(12)
         };
         var fields = new Control[]
         {
             HumanUi.Field("Send to", audience, true),
             campusField, classField, studentField, staffField
         };
-        foreach (Control field in fields)
+        // Dock.Top renders the last added row first, so add in reverse order.
+        foreach (Control field in fields.Reverse())
         {
-            field.Height = AppScale.Scale(65);
-            field.Margin = new Padding(0, 0, 0, AppScale.Scale(8));
-            flow.Controls.Add(field);
+            field.Dock = DockStyle.Top;
+            field.Height = AppScale.Scale(72);
+            field.Margin = Padding.Empty;
+            fieldsHost.Controls.Add(field);
         }
-        void FitFields()
-        {
-            foreach (Control field in fields)
-                field.Width = Math.Max(AppScale.Scale(250), flow.ClientSize.Width - AppScale.Scale(44));
-        }
-        flow.SizeChanged += (_, _) => FitFields();
-        card.Content.Controls.Add(flow);
+        card.Content.Controls.Add(fieldsHost);
         return card;
     }
 
