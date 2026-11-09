@@ -122,6 +122,13 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
 
     private void SetRecoveryPassphrase()
     {
+        if (CloudBackupSettings.HasLocalRecoveryPassphrase &&
+            MessageBox.Show(this,
+                "Changing the recovery passphrase does not change encryption on existing backups. " +
+                "Existing cloud copies still require the old passphrase. Confirm you have safely retained it.",
+                "Existing backups keep their original passphrase",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            return;
         using var dialog = new Form {
             Text = "Cloud recovery passphrase", StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog, MinimizeBox = false, MaximizeBox = false,
@@ -178,6 +185,8 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                 throw new InvalidOperationException("Connect Dropbox before enabling it.");
             if (automatic.Checked && (!google.Checked && !dropbox.Checked))
                 throw new InvalidOperationException("Choose at least one cloud destination for automatic backup.");
+            if (automatic.Checked && frequency.SelectedIndex == 0)
+                throw new InvalidOperationException("Select a scheduled frequency or disable automatic backup.");
             if ((automatic.Checked || google.Checked || dropbox.Checked) &&
                 !CloudBackupSettings.HasLocalRecoveryPassphrase)
                 throw new InvalidOperationException("Set and independently retain a recovery passphrase first.");
