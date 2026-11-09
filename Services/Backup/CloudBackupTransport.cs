@@ -216,7 +216,7 @@ internal static class CloudBackupTransport
         string access, CancellationToken token)
     {
         string destination = "/" + name;
-        JsonDocument metadata;
+        JsonDocument? metadata = null;
         if (length <= 140 * 1024 * 1024)
         {
             using var input = File.OpenRead(path);
@@ -261,6 +261,7 @@ internal static class CloudBackupTransport
             if (offset != length) throw new IOException("Dropbox upload did not transmit the complete package.");
             // Compiler flow: metadata is definitely assigned in the final iteration.
         }
+        if (metadata is null) throw new IOException("Dropbox upload did not finish.");
         using (metadata)
         {
             string id = GetString(metadata.RootElement, "id");
