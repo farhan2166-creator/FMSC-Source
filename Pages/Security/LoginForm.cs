@@ -33,6 +33,16 @@ public sealed class LoginForm : ApplicationWindowForm
         pass.PlaceholderText = "Enter password";
         login.SetColors(AppTheme.Primary);
         login.Click += Login_Click;
+        var recover = new ModernButton {
+            Text = "Forgot Login Details?", Dock = DockStyle.Fill, ThemeRole = "Secondary"
+        };
+        recover.Click += (_, _) => {
+            using var recovery = new AdministratorRecoveryForm();
+            if (recovery.ShowDialog(this) != DialogResult.OK) return;
+            user.Text = recovery.RecoveredUsername;
+            pass.Text = "";
+            pass.Focus();
+        };
         var shell = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
@@ -129,7 +139,7 @@ public sealed class LoginForm : ApplicationWindowForm
         var root = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 6,
+            RowCount = 7,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
@@ -145,6 +155,8 @@ public sealed class LoginForm : ApplicationWindowForm
             new RowStyle(
                 SizeType.Absolute,
                 AppMetrics.ButtonHeight + AppMetrics.SpacingSm));
+        root.RowStyles.Add(
+            new RowStyle(SizeType.Absolute, AppMetrics.ButtonHeight + AppMetrics.SpacingSm));
         root.RowStyles.Add(
             new RowStyle(SizeType.Percent, 100));
         root.Controls.Add(
@@ -170,6 +182,7 @@ public sealed class LoginForm : ApplicationWindowForm
             login,
             0,
             4);
+        root.Controls.Add(recover, 0, 5);
         root.Controls.Add(
             new JustifiedNote {
                 Text = "Use your credentials to continue.",
@@ -179,7 +192,7 @@ public sealed class LoginForm : ApplicationWindowForm
                 Padding = new Padding(0, AppMetrics.SpacingXs, 0, 0)
             },
             0,
-            5);
+            6);
         card.Controls.Add(root);
         shell.Controls.Add(brand, 0, 0);
         shell.Controls.Add(card, 1, 0);

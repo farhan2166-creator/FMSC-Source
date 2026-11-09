@@ -10,6 +10,7 @@
     <Compile Include="../../Core/PermissionCatalog.cs" Link="PermissionCatalog.cs" />
     <Compile Include="../../Core/AdministrativeAccess.cs" Link="AdministrativeAccess.cs" />
     <Compile Include="../../Core/PasswordPolicy.cs" Link="PasswordPolicy.cs" />
+    <Compile Include="../../Pages/Security/AdministratorRecoverySql.cs" Link="AdministratorRecoverySql.cs" />
     <Compile Include="../../Core/WholeRupees.cs" Link="WholeRupees.cs" />
     <Compile Include="../../Pages/Administration/AdministrationStore.cs" Link="AdministrationStore.cs" />
     <Using Include="System.Data" /><Using Include="FMSC_SMS" /><Using Include="FMSC_SMS.Pages.Security" />

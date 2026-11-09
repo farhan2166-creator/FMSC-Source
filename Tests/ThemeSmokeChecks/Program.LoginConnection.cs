@@ -26,6 +26,25 @@ internal static partial class Program
             return true;
         }
 
+        Check(AdministratorRecoveryService.IsLocalDatabaseEndpoint(@"(localdb)\MSSQLLocalDB") &&
+            AdministratorRecoveryService.IsLocalDatabaseEndpoint(@"np:\\.\pipe\LOCALDB#AB12\tsql\query"),
+            "Administrator recovery recognizes only local SQL LocalDB endpoints");
+        foreach (string remote in new[] { @"school-host\SQLEXPRESS", "localhost,1433", "127.0.0.1,1433", @"np:\\school-host\pipe\LOCALDB#AB12\tsql\query" })
+            Check(!AdministratorRecoveryService.IsLocalDatabaseEndpoint(remote),
+                "Administrator recovery refuses a remote or general SQL Server endpoint");
+        using (var loginReady = new LoginForm((_, _) => (false, "fixture", null)))
+        {
+            loginReady.Show(); Application.DoEvents();
+            var recoveryAction = Descendants(loginReady).OfType<ModernButton>()
+                .Single(b => b.Text == "Forgot Login Details?");
+            Check(Exposed(recoveryAction), "Recovery link is visible at the normal sign-in screen");
+            using var recoveryDialog = new AdministratorRecoveryForm();
+            Check(Descendants(recoveryDialog).OfType<ModernButton>()
+                .Any(b => b.Text == "Reset Administrator Login"),
+                "Recovery dialog collects new credentials without opening SQL or GitHub");
+            loginReady.Close();
+        }
+
         foreach (var (found, title) in new[] { ("1", "Database update required"), ("3", "Application update required") })
         {
             using var release = new ManualResetEventSlim();
