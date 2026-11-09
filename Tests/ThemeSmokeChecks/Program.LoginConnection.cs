@@ -56,6 +56,9 @@ internal static partial class Program
                     "Either schema version mismatch opens the existing updater without an extra check click");
                 Check((int)typeof(UpdateConnectionForm).GetField("_installedSchema", fields)!.GetValue(automaticUpdater)! == int.Parse(found),
                     "The updater receives the actual database schema in both mismatch directions");
+                var updaterStatus = (Label)typeof(UpdateConnectionForm).GetField("_status", fields)!.GetValue(automaticUpdater)!;
+                Check(updaterStatus.Text.Contains("If none is available") && updaterStatus.Text.Contains("administrator"),
+                    "The startup updater explains what to do if no compatible release is published");
                 Descendants(automaticUpdater).OfType<ModernButton>().Single(b => b.Text == "Close").PerformClick();
                 Application.DoEvents();
             }
@@ -69,10 +72,12 @@ internal static partial class Program
                 "Enter follows the appropriate updater recovery action");
             if (older)
                 Check(message.Text.Contains("internet") && message.Text.Contains("Install Update") &&
-                    message.Text.Contains("back up"), "Startup explains internet access and the installer's backup/migration path");
+                    message.Text.Contains("back up") && message.Text.Contains("If no newer release is published"),
+                    "Startup explains the published-release check, the fallback and the backup/migration path");
             else
                 Check(message.Text.Contains("Update Application") && message.Text.Contains("Do not downgrade") &&
-                    message.Text.Contains("compatible release"), "A newer database offers a safe application update, not a database downgrade");
+                    message.Text.Contains("compatible release") && message.Text.Contains("If none is published"),
+                    "A newer database explains the published-release fallback without suggesting a database downgrade");
             Capture(form, older ? "database-update-required" : "application-update-required");
             Check(!((Control)typeof(DatabaseConnectionView).GetField("_restart", fields)!.GetValue(view)!).Enabled &&
                 !((Control)typeof(DatabaseConnectionView).GetField("_repair", fields)!.GetValue(view)!).Visible,
@@ -144,6 +149,18 @@ internal static partial class Program
             !Descendants(offline).OfType<ModernButton>().Single(b => b.Text == "Install Update").Visible,
             "An offline check cannot prepare or install an update");
         offline.Close();
+        int applicationSchema = int.Parse(FMSC_SMS.DatabaseHelper.RequiredDatabaseSchemaVersion);
+        foreach (bool databaseNewer in new[] { false, true })
+        {
+            using var guidance = new UpdateConnectionForm(() => (true, "fixture"),
+                installedSchema: applicationSchema + (databaseNewer ? 1 : -1), networkAvailable: () => false);
+            guidance.Show(); Application.DoEvents();
+            var guidanceStatus = (Label)typeof(UpdateConnectionForm).GetField("_status", fields)!.GetValue(guidance)!;
+            Check(guidanceStatus.Text.Contains(databaseNewer ? "newer schema" : "needs an update") &&
+                guidanceStatus.Text.Contains("If none is available") && guidanceStatus.Text.Contains("administrator"),
+                "The updater explains unavailable published releases for both schema mismatch directions");
+            guidance.Close();
+        }
     }
 
     private static void CheckStartupUpdateHandoff()

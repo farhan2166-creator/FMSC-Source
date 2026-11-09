@@ -33,7 +33,7 @@ internal static partial class Program
                 Check(Math.Abs(center - dialog.PointToScreen(new Point(dialog.ClientSize.Width / 2, 0)).X) <= 2,
                     "Check for Updates action is centered in the window");
                 Check(Descendants(dialog).OfType<Label>().Where(label =>
-                    label.Text is "Installed version" or "Latest version" or "Not checked" or "Check for Updates")
+                    label.Text is "Installed version" or "Latest published version" or "Not checked" or "Check for Updates")
                     .All(label => label.TextAlign == ContentAlignment.MiddleCenter),
                     "Heading and version labels use centered text");
                 Find(dialog, "Computer access").PerformClick(); Application.DoEvents(); CheckScreenCenter();
