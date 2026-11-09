@@ -103,7 +103,7 @@ internal static class CloudBackupCrypto
                 header.AsSpan(28, NoncePrefixBytes).CopyTo(nonce);
                 BinaryPrimitives.WriteInt32LittleEndian(nonce[8..], index);
                 Span<byte> aad = stackalloc byte[HeaderBytes + 8];
-                header.CopyTo(aad);
+                header.AsSpan().CopyTo(aad);
                 BinaryPrimitives.WriteInt32LittleEndian(aad[HeaderBytes..], index);
                 BinaryPrimitives.WriteInt32LittleEndian(aad[(HeaderBytes + 4)..], count);
                 aes.Decrypt(nonce, cipher.AsSpan(0, count), tag, plain.AsSpan(0, count), aad);
