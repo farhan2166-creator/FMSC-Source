@@ -123,6 +123,10 @@ internal static class CloudBackupCoordinator
         var settings = CloudBackupSettings.Load();
         if (!settings.AutomaticEnabled) return 0;
         if (!CloudBackupSettings.HasLocalRecoveryPassphrase) return 2;
+        // Never let a scheduled backup race a pending database migration,
+        // interrupted update, or installer activation. Unlike the interactive
+        // startup guard this probe never opens dialogs or starts recovery.
+        if (!IsUpdaterIdleForBackup()) return 3;
         try
         {
             await CreateAndUploadAsync(scheduled: true, token);
@@ -132,6 +136,35 @@ internal static class CloudBackupCoordinator
         {
             AppExceptionHandler.LogNonFatal(ex, "Unattended encrypted cloud backup failed");
             return 1;
+        }
+    }
+
+    private static bool IsUpdaterIdleForBackup()
+    {
+        try
+        {
+            if (Mutex.TryOpenExisting("Global\\\\FMSCInstallerActivation", out var activation))
+            {
+                using (activation)
+                {
+                    bool acquired;
+                    try { acquired = activation.WaitOne(0); }
+                    catch (AbandonedMutexException) { acquired = true; }
+                    if (!acquired) return false;
+                    activation.ReleaseMutex();
+                }
+            }
+            string journal = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "FMSC_Updater", "recovery.json");
+            if (!File.Exists(journal)) return true;
+            byte[] bytes = File.ReadAllBytes(journal);
+            return bytes.Length <= 32768 && !FMSC_SMS.Core.Updates.UpdateStartupGuard.RequiresRecovery(bytes);
+        }
+        catch (Exception ex)
+        {
+            AppExceptionHandler.LogNonFatal(ex, "Scheduled cloud backup deferred: installer/update recovery state uncertain");
+            return false;
         }
     }
 
