@@ -265,7 +265,7 @@ internal static class RdlcReportPreview
                     catch (Exception ex) {
                         AppExceptionHandler.LogNonFatal(ex, "Saving certificate paper preference");
                         ModernMessageDialog.Show(form,
-                            "The paper mode changed for this preview, but the default could not be saved.\\n\\n"
+                            "The paper mode changed for this preview, but the default could not be saved.\n\n"
                             + ex.GetBaseException().Message,
                             form.Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
