@@ -279,14 +279,15 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             int applicationSchema = int.Parse(DatabaseHelper.RequiredDatabaseSchemaVersion);
             if (_installedSchema < applicationSchema)
                 _status.Text = "Your school database needs an update before sign-in.\r\n\r\n" +
-                    (state.Enrolled ? "Connect to the internet and choose Check for Updates. After downloading, choose Install Update. " +
-                        "FMSC Setup will back up your school data and apply the required updates." :
-                        "Ask the administrator to authorize this computer, then connect to the internet and choose Check for Updates.");
+                    (state.Enrolled ? "Choose Check for Updates to see whether a newer approved release is published. " +
+                        "If an update is available, download it and choose Install Update; FMSC Setup will back up your school data before applying migrations. " +
+                        "If none is available, contact your administrator for the required database update." :
+                        "Ask the administrator to authorize this computer before checking for a published update. No database changes have been made.");
             else if (_installedSchema > applicationSchema)
                 _status.Text = "Your school database uses a newer schema than this application.\r\n\r\n" +
-                    (state.Enrolled ? "Choose Check for Updates to find an application release compatible with your database. " +
-                        "Do not downgrade your school data." :
-                        "Ask the administrator to authorize this computer before checking for a compatible application.");
+                    (state.Enrolled ? "Choose Check for Updates to look for a published application release compatible with your database. " +
+                        "If none is available, contact your administrator. Do not downgrade or replace your school data." :
+                        "Ask the administrator to authorize this computer before checking for a compatible application. Do not downgrade the database.");
         }
         catch (Exception error) when (error is CryptographicException or IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -337,7 +338,8 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             await using var session = await UpdateGitSession.OpenAsync(_lifetime.Token);
             if (!await session.HasStableFeedAsync(_lifetime.Token))
             {
-                _status.Text = "Computer authorized. No approved update has been published yet.";
+                _status.Text = "No approved FMSC release is published on this update channel yet. " +
+                    "Unpublished development changes are not available to install. Ask your administrator for a compatible published release.";
                 _accessStatus.Text = "Computer authorized";
                 _latestVersion.Text = "No release published";
                 return;
@@ -351,9 +353,9 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             {
                 _latestVersion.Text = release.Manifest.Version;
                 _accessStatus.Text = "Computer authorized";
-                _status.Text = $"No compatible update is published. Your database uses schema {_installedSchema}, " +
-                    $"but the latest application release supports schema {release.Manifest.RequiredDatabaseSchema}. " +
-                    "Keep your school database unchanged and request a newer FMSC release.";
+                _status.Text = $"No compatible application update is published. Your database uses schema {_installedSchema}, " +
+                    $"but the latest published application (version {release.Manifest.Version}) supports schema {release.Manifest.RequiredDatabaseSchema}. " +
+                    "Ask your administrator for a release that supports your database. Do not downgrade or replace your school data.";
                 return;
             }
             _method = await Task.Run(() => UpdateReleasePreparer.Choose(release, InstalledVersion,
@@ -366,8 +368,10 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _status.Text = "Latest version: " + release.Manifest.Version + "\n" +
                 (_method == UpdateDownloadChoice.NotNewer
                     ? _installedSchema == int.Parse(DatabaseHelper.RequiredDatabaseSchemaVersion)
-                        ? "FMSC is up to date."
-                        : "No newer application release is available for this database. Keep the database unchanged and install a compatible release when published."
+                        ? "No newer approved application release is available on this update channel. " +
+                          "This checks published releases only; unpublished development changes are not included."
+                        : "No newer approved application release is available, and the database schema does not match this application. " +
+                          "Ask your administrator for a compatible release or the required database migration. Do not replace or downgrade the database."
                     :
                  _method == UpdateDownloadChoice.RequiresDatabaseInstaller ?
                  "Update available — Full package; database migration will run through the installer after FMSC closes. " +
@@ -380,7 +384,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             SetDownloadActionVisible(false);
             _install.Visible = false;
             _downloadDetails.Text = canDownload ? _method + " · approximately " +
-                (archive.Length / 1048576d).ToString("N1") + " MB" : "No download required";
+                (archive.Length / 1048576d).ToString("N1") + " MB" : "No newer published package available";
             if (canDownload)
             {
                 string checkedStatus = _status.Text;
