@@ -139,17 +139,20 @@ internal static partial class Program
         var send = (ModernButton)type.GetField("confirm", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var templates = (ModernComboBox)type.GetField("templateChoice",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        Check(templates.Items.Count == 1, "Composition has one optional template picker without a separate workflow page");
+        Check(templates.Items.Count >= 2
+            && templates.Items.Cast<object>().Any(item => item.ToString() == "School announcement"),
+            "Composition offers a built-in prepared notice without entering Settings");
         var channelChoice = (ModernComboBox)type.GetField("channel", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         Check(channelChoice.SelectedIndex == 1 && channelChoice.Items[1]!.ToString()!.Contains("manual", StringComparison.OrdinalIgnoreCase)
             && channelChoice.Items[0]!.ToString()!.Contains("unavailable", StringComparison.OrdinalIgnoreCase),
             "Communication starts with the only approved manual WhatsApp option, not unavailable SMS");
         var cards = (List<HumanCard>)type.GetField("cards", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        var settingsLayout = cards[5].Content.Controls.OfType<TableLayoutPanel>().Single();
+        Check(cards.Count == 5, "The workflow uses three message steps plus History and Settings");
+        var settingsLayout = cards[4].Content.Controls.OfType<TableLayoutPanel>().Single();
         Check(settingsLayout.RowCount == 6
-            && settingsLayout.GetControlFromPosition(0, 4) is TableLayoutPanel
-            && settingsLayout.GetControlFromPosition(0, 5) is TableLayoutPanel,
-            "Settings places provider controls and template actions on separate visible rows");
+            && settingsLayout.GetControlFromPosition(0, 4) is FlowLayoutPanel
+            && settingsLayout.GetControlFromPosition(0, 5) is FlowLayoutPanel,
+            "Settings has separate unclipped manual-WhatsApp and template actions");
         var manualActivation = (ModernButton)type.GetField("enableFreeWhatsAppButton", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var decorate = type.GetMethod("PrepareSettingsForDisplay", BindingFlags.Instance | BindingFlags.NonPublic)!;
         using var modeRows = new DataTable();
@@ -175,6 +178,42 @@ internal static partial class Program
         host.Controls.Add(page);
         host.Show();
         Application.DoEvents();
+        // The production formatter is internal: exercise it through reflection
+        // without weakening accessibility or exposing student data to tests.
+        var prepared = assembly.GetType("FMSC_SMS.Core.CommunicationPreparedMessages")!;
+        var builtinArray = ((System.Collections.IEnumerable)prepared.GetProperty(
+            "BuiltIns", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!)
+            .Cast<object>().ToArray();
+        string TemplateProperty(object obj, string property) =>
+            Convert.ToString(obj.GetType().GetProperty(property)!.GetValue(obj)) ?? "";
+        object FeeTemplate() => builtinArray.First(t => TemplateProperty(t, "Purpose") == "FeeReminder");
+        object AdmissionTemplate() => builtinArray.First(t => TemplateProperty(t, "Name") == "New admission welcome");
+        Check(builtinArray.Any(t => TemplateProperty(t, "Purpose") == "FeeReminder")
+            && builtinArray.Any(t => TemplateProperty(t, "Name") == "New admission welcome"),
+            "Prebuilt fee reminder and student-admission formats are available");
+        var valuesType = prepared.GetNestedType("Values", BindingFlags.NonPublic)!;
+        object Details(decimal? amount) => Activator.CreateInstance(valuesType,
+            23, "Sample Student", "F-0023", new DateTime(2026, 11, 9), amount)!;
+        var render = prepared.GetMethod("Render", BindingFlags.Static | BindingFlags.NonPublic)!;
+        string RenderFormat(string format, object data) =>
+            (string)render.Invoke(null, new[] { format, data })!;
+        string feeText = RenderFormat(TemplateProperty(FeeTemplate(), "Body"), Details(1250.50m));
+        string admissionText = RenderFormat(TemplateProperty(AdmissionTemplate(), "Body"), Details(1250.50m));
+        Check(feeText.Contains("Sample Student") && feeText.Contains("1,250.50")
+            && feeText.Contains("F-0023") && !feeText.Contains("[OutstandingAmount]"),
+            "Fee reminders use real per-recipient balance and admission identifiers");
+        Check(admissionText.Contains("09 Nov 2026") && admissionText.Contains("F-0023"),
+            "Admission welcomes use the saved student admission date and number");
+        bool rejectedMissingBalance = false;
+        try { RenderFormat(TemplateProperty(FeeTemplate(), "Body"), Details(null)); }
+        catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
+        { rejectedMissingBalance = true; }
+        Check(rejectedMissingBalance, "Fee reminder refuses missing or settled balance rather than displaying a fake amount");
+        bool unknownFieldRejected = false;
+        try { RenderFormat("Hello [PrivateSqlField]", Details(1250.50m)); }
+        catch (TargetInvocationException ex) when (ex.InnerException is ArgumentException)
+        { unknownFieldRejected = true; }
+        Check(unknownFieldRejected, "Prepared messages reject unknown record fields");
         var targetCard = cards[0];
         var audienceField = audience.Parent!;
         Rectangle visibleInput = Rectangle.Intersect(
@@ -207,6 +246,12 @@ internal static partial class Program
         Check(audience.Visible && !campusPanel.Visible && !classPanel.Visible
             && !studentPanel.Visible && !staffPanel.Visible,
             "Switching back to entire school keeps the selector visible and collapses optional fields");
+        var selectRow = (TableLayoutPanel)type.GetField("targetFieldsLayout",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        Check(selectRow.GetControlFromPosition(0, 5) is Panel
+            && selectRow.GetControlFromPosition(0, 6) is Panel
+            && selectRow.GetControlFromPosition(0, 7) is Panel,
+            "Audience, prepared template and message editing share the first step");
         host.Close();
     }
 }

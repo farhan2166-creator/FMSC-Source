@@ -49,6 +49,12 @@ internal static class CommunicationManualHandoffStore
             ?? throw new InvalidOperationException("No validated WhatsApp destination.");
         string body=Convert.ToString(row["Body"])
             ?? throw new InvalidOperationException("No reviewed WhatsApp message.");
+        if (CommunicationPreparedMessages.HasFields(body))
+        {
+            bool feeAmount = body.Contains("[OutstandingAmount]", StringComparison.Ordinal);
+            var fields = await CommunicationPreparedMessages.ReadLiveAsync(recipientId, feeAmount);
+            body = CommunicationPreparedMessages.Render(body, fields);
+        }
         return new CommunicationManualOpen(true,BuildClickToChatLink(phone,body),null);
     }
 

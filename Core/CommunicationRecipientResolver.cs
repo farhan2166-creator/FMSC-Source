@@ -18,7 +18,8 @@ internal sealed record CommunicationTarget(
 
 internal sealed record CommunicationPreviewEntry(
     int RecordId, string RecordName, string Kind, string? PhoneE164,
-    string Reason, decimal? Outstanding)
+    string Reason, decimal? Outstanding,
+    string? AdmissionNumber = null, DateTime? AdmissionDate = null)
 {
     internal bool Included => Reason == "Included";
 }
@@ -50,6 +51,7 @@ internal static class CommunicationRecipientResolver
         IF @Audience=N'OutstandingFees'
             EXEC dbo.RequirePermission @UserId, N'Fees.View';
         SELECT S.AdmissionId RecordId, S.StudentName RecordName,
+               S.AdmissionNumber, S.AdmissionDate,
                S.ContactNumber, S.SchoolMessageConsent,
                CONVERT(varchar(8),'Student') Kind, B.Outstanding
         FROM dbo.Students S
@@ -92,6 +94,8 @@ internal static class CommunicationRecipientResolver
     private const string StaffCandidateSql = """
         EXEC dbo.RequirePermission @UserId, N'Staff.View';
         SELECT StaffId RecordId, StaffName RecordName, ContactNumber,
+               CONVERT(nvarchar(60),NULL) AdmissionNumber,
+               CONVERT(datetime2,NULL) AdmissionDate,
                CONVERT(bit,1) SchoolMessageConsent,
                CONVERT(varchar(8),'Staff') Kind, CONVERT(decimal(19,2),NULL) Outstanding
         FROM dbo.Staff WHERE StaffId=@StaffId AND Status=N'Active'
@@ -161,6 +165,16 @@ internal static class CommunicationRecipientResolver
         {
             int id = Convert.ToInt32(row["RecordId"]);
             string name = Convert.ToString(row["RecordName"]) ?? "";
+            // Historical imports may have an empty name; retain a meaningful
+            // record reference without fabricating a name or destination.
+            if (string.IsNullOrWhiteSpace(name))
+                name = kindName(row) + " #" + id;
+            string? admissionNumber = candidates.Columns.Contains("AdmissionNumber")
+                && !row.IsNull("AdmissionNumber")
+                    ? Convert.ToString(row["AdmissionNumber"]) : null;
+            DateTime? admissionDate = candidates.Columns.Contains("AdmissionDate")
+                && !row.IsNull("AdmissionDate")
+                    ? Convert.ToDateTime(row["AdmissionDate"]) : null;
             string kind = Convert.ToString(row["Kind"]) ?? "Student";
             bool? consent = row.IsNull("SchoolMessageConsent")
                 ? null : Convert.ToBoolean(row["SchoolMessageConsent"]);
@@ -175,10 +189,14 @@ internal static class CommunicationRecipientResolver
                 : "Included";
             // Never show denied-consent phone numbers in the user-facing preview.
             entries.Add(new CommunicationPreviewEntry(id, name, kind,
-                reason == "Included" ? number : null, reason, balance));
+                reason == "Included" ? number : null, reason, balance,
+                admissionNumber, admissionDate));
         }
         return new CommunicationPreview(entries);
     }
+
+    private static string kindName(DataRow row)
+        => Convert.ToString(row["Kind"]) == "Staff" ? "Staff" : "Student";
 
     /// <summary>Only Pakistan mobile numbers are accepted for both SMS and WhatsApp.</summary>
     internal static string? NormalizeMobile(string? input)

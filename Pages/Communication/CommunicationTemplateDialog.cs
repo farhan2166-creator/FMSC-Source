@@ -47,7 +47,7 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
                Body.Contains("}}",StringComparison.Ordinal))
             {
                 ModernMessageDialog.Show(this,
-                    "Provide a name and a complete message. Unexpanded placeholders are not allowed.",
+                    "Provide a name and a complete message. Use supported prepared fields in [FieldName] format, not {{...}}.",
                     "Message Template",MessageBoxButtons.OK,MessageBoxIcon.Warning);
                 return;
             }

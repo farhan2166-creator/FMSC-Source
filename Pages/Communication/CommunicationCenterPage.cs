@@ -28,6 +28,17 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         Dock = DockStyle.Fill, Font = AppTheme.ButtonFont,
         ForeColor = AppTheme.HeadingText, TextAlign = ContentAlignment.MiddleLeft
     };
+    private readonly CheckBox showExcluded = new()
+    {
+        Text = "Show excluded records (not sendable)",
+        Dock = DockStyle.Top, Height = AppScale.Scale(32),
+        ForeColor = AppTheme.MutedText, Padding = new Padding(12, 0, 0, 0)
+    };
+    private readonly Label sampleMessage = new()
+    {
+        Dock = DockStyle.Bottom, Height = AppScale.Scale(78), AutoEllipsis = true,
+        ForeColor = AppTheme.Text, Padding = new Padding(12, 8, 12, 4)
+    };
     private readonly Label summary = new()
     {
         Dock = DockStyle.Top, Height = 94, AutoEllipsis = true,
@@ -68,7 +79,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     // SQL-free construction supports synthetic Windows UI tests.
     internal CommunicationCenterPage(bool initialize)
-        : base("Communication Center", "Free WhatsApp: Settings > Use Free WhatsApp (admin), then preview and open chats.")
+        : base("Communication Center", "Optional school messages. Manual WhatsApp opens prepared chats; you press Send yourself.")
     {
         audience.Items.AddRange(new object[]
         {
@@ -81,6 +92,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         channel.SelectedIndex = 1;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
+        foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
+            composeTemplates.Add(new TemplateChoice(-builtIn.index - 1, builtIn.item.Name,
+                "WhatsApp", builtIn.item.Purpose, builtIn.item.Body));
 
         campusField = HumanUi.Field("Campus", campus);
         classField = HumanUi.Field("Class", cls);
@@ -88,7 +102,6 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         staffField = HumanUi.Field("Staff member", staff);
 
         cards.Add(TargetCard());
-        cards.Add(ComposeCard());
         cards.Add(PreviewCard());
         cards.Add(ConfirmCard());
         cards.Add(HistoryCard());
@@ -115,6 +128,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         }, "Secondary");
         next = AddBusyAction("Continue", ContinueAsync, "Primary");
         confirm = AddBusyAction("Open WhatsApp Chats", StartManualHandoffAsync, "Primary");
+        confirm.MinimumSize = new Size(AppScale.Scale(230), AppMetrics.ButtonHeight);
+        confirm.Width = AppScale.Scale(230);
         // Only the operator-controlled handoff may be activated in this version.
         confirm.Enabled = false;
         historyButton = AddBusyAction("History", LoadHistoryAsync, "Secondary");
@@ -154,7 +169,12 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
         ChangeAudienceFields();
         SetStep(0);
-        if (initialize) Defer(BindLookupsAsync);
+        RefreshTemplateChoices();
+        if (initialize)
+        {
+            Defer(BindLookupsAsync);
+            Defer(LoadComposeTemplatesAsync);
+        }
         Disposed += (_, _) =>
         {
             previewTable?.Dispose();
@@ -166,57 +186,49 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     private HumanCard TargetCard()
     {
-        var card = HumanUi.Card("1. Select Recipients",
-            "Whole school, campus, class and fee targets are automatic. Individual pickers are only for specific records.");
-        // A fixed row for each target input avoids FlowLayoutPanel's
-        // unreliable sizing of HumanUi.Field (a Dock.Fill table), and unlike
-        // top-docked panels guarantees the intended selector order.
+        var card = HumanUi.Card("1. Write Message",
+            "Choose school records, then write or select a prepared message. Sending remains optional.");
+        var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         targetFieldsLayout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5,
-            AutoScroll = true, Padding = new Padding(12),
+            Dock = DockStyle.Top, AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1, RowCount = 9, Padding = new Padding(12),
             Margin = Padding.Empty
         };
         targetFieldsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         var fields = new Control[]
         {
             HumanUi.Field("Send to", audience, true),
-            campusField, classField, studentField, staffField
+            campusField, classField, studentField, staffField,
+            HumanUi.Field("Channel", channel, true),
+            HumanUi.Field("Prepared message (optional)", templateChoice),
+            HumanUi.Field("Message", message, true)
         };
         for (int row = 0; row < fields.Length; row++)
         {
             fields[row].Dock = DockStyle.Fill;
             fields[row].Margin = Padding.Empty;
-            targetFieldsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(72)));
+            targetFieldsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,
+                AppScale.Scale(row == 7 ? 180 : 72)));
             targetFieldsLayout.Controls.Add(fields[row], 0, row);
         }
-        card.Content.Controls.Add(targetFieldsLayout);
-        return card;
-    }
-
-    private HumanCard ComposeCard()
-    {
-        var card = HumanUi.Card("2. Compose Message",
-            "One message for the chosen group. No automated delivery or second guardian consent.");
-        var layout = new TableLayoutPanel
+        targetFieldsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(46)));
+        targetFieldsLayout.Controls.Add(new Label
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1, RowCount = 3, Padding = new Padding(12)
-        };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(65)));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(65)));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.Controls.Add(HumanUi.Field("Channel", channel, true), 0, 0);
-        layout.Controls.Add(HumanUi.Field("Template (optional)", templateChoice), 0, 1);
-        layout.Controls.Add(HumanUi.Field("Message", message, true), 0, 2);
-        card.Content.Controls.Add(layout);
+            Text = "Prepared fields: [StudentName], [AdmissionNumber], [AdmissionDate], [OutstandingAmount]. " +
+                   "Amounts and admission details come from current school records.",
+            Dock = DockStyle.Fill, AutoEllipsis = true,
+            ForeColor = AppTheme.MutedText
+        }, 0, 8);
+        scroll.Controls.Add(targetFieldsLayout);
+        card.Content.Controls.Add(scroll);
         return card;
     }
 
     private HumanCard PreviewCard()
     {
-        var card = HumanUi.Card("3. Preview",
+        var card = HumanUi.Card("2. Preview",
             "Live school records and Admission consent determine eligibility; shared phone numbers appear once.");
         previewGrid.AutoGenerateColumns = false;
         foreach (var (field, name, size) in new[]
@@ -232,14 +244,17 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                 MinimumWidth = size, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
+        showExcluded.CheckedChanged += (_, _) => BindPreviewRows();
         card.Content.Controls.Add(previewGrid);
+        card.Content.Controls.Add(sampleMessage);
+        card.Content.Controls.Add(showExcluded);
         card.Content.Controls.Add(summary);
         return card;
     }
 
     private HumanCard ConfirmCard()
     {
-        var card = HumanUi.Card("4. Confirm",
+        var card = HumanUi.Card("3. Confirm",
             "Free WhatsApp mode opens one prepared chat at a time. You must press Send manually. Direct provider delivery remains disabled.");
         card.Content.Controls.Add(confirmation);
         return card;
@@ -255,15 +270,15 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             ("CreatedUtc", "Created (UTC)", 155),
             ("Channel", "Channel", 75),
             ("Purpose", "Purpose", 115),
-            ("State", "Batch state", 100),
+            ("StateText", "Outcome (not delivery)", 190),
             ("Destinations", "Targets", 70),
             ("InProgress", "Unfinished", 90),
             ("Delivered", "Delivered", 85),
             ("Failed", "Failed", 70),
             ("Unknown", "Unknown", 75),
             ("Method", "Method", 160),
-            ("ManualReported", "Operator reported", 105),
-            ("ManualOpened", "Opened chats", 95),
+            ("ManualReported", "Reported sent (unverified)", 170),
+            ("ManualOpened", "Awaiting report", 115),
             ("ManualSkipped", "Manual skipped", 95)
         })
             historyGrid.Columns.Add(new DataGridViewTextBoxColumn
@@ -289,7 +304,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private HumanCard SettingsCard()
     {
         var card = HumanUi.Card("Settings",
-            "Enable or resume free manual WhatsApp below. Provider API and school email sending are unavailable.");
+            "Review manual WhatsApp and prepared templates. Provider API and school email sending are unavailable.");
         settingsGrid.AutoGenerateColumns = false;
         foreach (var (field, caption, width) in new[]
         {
@@ -322,16 +337,17 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         };
         tables.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
-        tables.RowStyles.Add(new RowStyle(SizeType.Percent, 35));
-        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
-        tables.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
+        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(150)));
+        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(40)));
+        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(190)));
         // Keep administrative and template actions in separate rows so the
         // shared wrapping button layout cannot hide a second line of controls.
         tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(64)));
         tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(64)));
         tables.Controls.Add(HumanUi.GroupHeading("Sending methods — only manual WhatsApp can be activated"), 0, 0);
         tables.Controls.Add(settingsGrid, 0, 1);
-        tables.Controls.Add(HumanUi.GroupHeading("Templates (read-only until editor acceptance)"), 0, 2);
+        tables.Controls.Add(HumanUi.GroupHeading(
+            "Message templates — use [StudentName], [AdmissionNumber], [AdmissionDate] or [OutstandingAmount]"), 0, 2);
         tables.Controls.Add(templateGrid, 0, 3);
         var configureProvider = new ModernButton
         {
@@ -343,7 +359,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         enableFreeWhatsAppButton = new ModernButton
         {
             Text = "Use Free WhatsApp", ThemeRole = "Primary",
-            Width = AppScale.Scale(185), Height = AppMetrics.ButtonHeight,
+            Width = AppScale.Scale(245), MinimumSize = new Size(AppScale.Scale(245), AppMetrics.ButtonHeight),
+            Height = AppMetrics.ButtonHeight,
             Enabled = CurrentUser.HasPermission("Communication.Configure")
         };
         enableFreeWhatsAppButton.Click += async (_, _) => await EnableFreeWhatsAppAsync();
@@ -361,8 +378,23 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             CurrentUser.HasPermission("Communication.Configure");
         addTemplate.Click += async (_, _) => await EditTemplateAsync(false);
         editTemplate.Click += async (_, _) => await EditTemplateAsync(true);
-        tables.Controls.Add(HumanUi.ButtonRow(enableFreeWhatsAppButton, configureProvider), 0, 4);
-        tables.Controls.Add(HumanUi.ButtonRow(addTemplate, editTemplate), 0, 5);
+        // Fixed-width, left-aligned actions avoid the shared three-column
+        // button row shrinking/ellipsizing their actual status text.
+        var modeActions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false, AutoScroll = true, Margin = Padding.Empty
+        };
+        modeActions.Controls.Add(enableFreeWhatsAppButton);
+        tables.Controls.Add(modeActions, 0, 4);
+        var templateActions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false, AutoScroll = true, Margin = Padding.Empty
+        };
+        templateActions.Controls.Add(addTemplate);
+        templateActions.Controls.Add(editTemplate);
+        tables.Controls.Add(templateActions, 0, 5);
         card.Content.Controls.Add(tables);
         return card;
     }
@@ -426,9 +458,13 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             return;
         }
         int id = selected is null ? 0 : Convert.ToInt32(selected["TemplateId"]);
+        bool customizeBuiltIn = id < 0;
+        if (customizeBuiltIn) id = 0; // never alter the shipped examples
         using var dialog = new CommunicationTemplateDialog(
-            selected is null ? "" : Convert.ToString(selected["Name"]) ?? "",
-            selected is null ? "Sms" : Convert.ToString(selected["Channel"]) ?? "Sms",
+            selected is null ? "" : customizeBuiltIn
+                ? "Custom " + (Convert.ToString(selected["Name"]) ?? "").Replace(" (built-in)", "")
+                : Convert.ToString(selected["Name"]) ?? "",
+            selected is null ? "WhatsApp" : Convert.ToString(selected["Channel"]) ?? "WhatsApp",
             selected is null ? "Announcement" : Convert.ToString(selected["Purpose"]) ?? "Announcement",
             selected is null ? "" : Convert.ToString(selected["Body"]) ?? "",
             selected is null || Convert.ToBoolean(selected["Active"]));
@@ -447,6 +483,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private async Task LoadComposeTemplatesAsync()
     {
         composeTemplates.Clear();
+        foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
+            composeTemplates.Add(new TemplateChoice(-builtIn.index - 1, builtIn.item.Name,
+                "WhatsApp", builtIn.item.Purpose, builtIn.item.Body));
         if (CurrentUser.HasPermission("Communication.Send"))
         {
             int actor = CurrentUser.UserId;
@@ -494,12 +533,22 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             {
                 table.Dispose(); return;
             }
+            if (!table.Columns.Contains("StateText"))
+                table.Columns.Add("StateText", typeof(string));
+            foreach (DataRow row in table.Rows)
+            {
+                bool manual = Convert.ToString(row["Method"]) == "WhatsApp Business (manual)";
+                string state = Convert.ToString(row["State"]) ?? "";
+                row["StateText"] = manual && state == "Completed"
+                    ? "Operator finished (unverified)"
+                    : manual && state == "Confirmed" ? "Manual session pending" : state;
+            }
             var old = historyGrid.DataSource as DataTable;
             historyGrid.DataSource = null;
             historyGrid.DataSource = table;
             old?.Dispose();
-            SetStep(4);
-            SetStatus($"{table.Rows.Count} historical batches loaded. Provider submission does not imply delivery.");
+            SetStep(3);
+            SetStatus($"{table.Rows.Count} historical batches loaded. Operator-reported sent is not verified delivery.");
         }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
@@ -519,6 +568,19 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                 channels.Dispose(); templates.Dispose(); return;
             }
             PrepareSettingsForDisplay(channels);
+            // Built-in formats are always available; choosing Edit Selected
+            // creates a custom copy instead of changing shipped examples.
+            foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
+            {
+                DataRow row = templates.NewRow();
+                row["TemplateId"] = -builtIn.index - 1;
+                row["Name"] = builtIn.item.Name + " (built-in)";
+                row["Channel"] = "WhatsApp";
+                row["Purpose"] = builtIn.item.Purpose;
+                row["Body"] = builtIn.item.Body;
+                row["Active"] = true;
+                templates.Rows.InsertAt(row, builtIn.index);
+            }
             var oldChannels = settingsGrid.DataSource as DataTable;
             var oldTemplates = templateGrid.DataSource as DataTable;
             settingsGrid.DataSource = null;
@@ -526,8 +588,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             settingsGrid.DataSource = channels;
             templateGrid.DataSource = templates;
             oldChannels?.Dispose(); oldTemplates?.Dispose();
-            SetStep(5);
-            SetStatus("Manual WhatsApp requires the operator to press Send in WhatsApp. School email and API delivery are unavailable.");
+            SetStep(4);
+            SetStatus("Manual WhatsApp requires you to press Send in WhatsApp. School email and API delivery are unavailable.");
         }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
@@ -572,6 +634,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         enableFreeWhatsAppButton.Text = whatsappActive && whatsappManual
             ? "Free WhatsApp Active"
             : whatsappManual ? "Resume Free WhatsApp" : "Use Free WhatsApp";
+        enableFreeWhatsAppButton.Width = AppScale.Scale(245);
         enableFreeWhatsAppButton.Enabled = CurrentUser.HasPermission("Communication.Configure")
             && !(whatsappActive && whatsappManual);
         pauseWhatsAppButton.Enabled = CurrentUser.HasPermission("Communication.Configure")
@@ -634,24 +697,24 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     private void SetStep(int number)
     {
-        step = Math.Clamp(number, 0, 5);
-        string[] stages = { "1 / 4   Select Recipients", "2 / 4   Compose Message",
-            "3 / 4   Preview", "4 / 4   Confirm & Send",
+        step = Math.Clamp(number, 0, 4);
+        string[] stages = { "1 / 3   Write Message", "2 / 3   Preview", "3 / 3   Confirm",
             "Communication History", "Communication Settings" };
         heading.Text = stages[step];
         for (int i = 0; i < cards.Count; i++) cards[i].Visible = i == step;
         cards[step].BringToFront();
-        previous.Visible = step < 4;
-        previous.Enabled = step is > 0 and < 4;
-        next.Visible = step < 3;
-        confirm.Visible = step == 3;
-        confirm.Text = manualModeAvailable ? "Open WhatsApp Chats" : "Confirm & Send";
-        confirm.Enabled = step == 3 && manualModeAvailable
+        previous.Visible = step < 3;
+        previous.Enabled = step is > 0 and < 3;
+        next.Visible = step < 2;
+        confirm.Visible = step == 2;
+        confirm.Text = manualModeAvailable ? "Open WhatsApp Chats" : "Sending Unavailable";
+        confirm.Enabled = step == 2 && manualModeAvailable
             && CurrentUser.HasPermission("Communication.Send");
-        newMessageButton.Visible = step >= 4;
-        pauseSmsButton.Visible = step == 5 && CurrentUser.HasPermission("Communication.Configure");
-        pauseWhatsAppButton.Visible = step == 5 && CurrentUser.HasPermission("Communication.Configure");
-        if (step == 3)
+        newMessageButton.Visible = step >= 3;
+        // SMS cannot be activated in this release, so do not display a dead action.
+        pauseSmsButton.Visible = false;
+        pauseWhatsAppButton.Visible = step == 4 && CurrentUser.HasPermission("Communication.Configure");
+        if (step == 2)
             SetStatus(manualModeAvailable
                 ? "Free/manual WhatsApp: open each chat and press Send yourself. Not verified delivery."
                 : "Direct sending remains disabled until provider acceptance.",
@@ -728,33 +791,26 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                     ? "Staff.View" : "Students.View");
                 if (target.Audience == CommunicationAudience.OutstandingFees)
                     RequirePermission("Fees.View");
-                await LoadComposeTemplatesAsync();
-                if (!IsDisposed) SetStep(1);
-            }
-            else if (step == 1)
-            {
                 if (string.IsNullOrWhiteSpace(message.Text))
                 {
-                    Warn("Write a message before previewing the recipients.");
+                    Warn("Write or choose a prepared message before previewing.");
                     return;
                 }
                 await LoadPreviewAsync();
             }
-            else if (step == 2)
+            else if (step == 1)
             {
-                // Preview does not confer sending authority. SQL independently
-                // checks this permission when confirmation is eventually enabled.
                 RequirePermission("Communication.Send");
                 if (preview is null || previewTarget != CurrentTarget()
                     || previewMessage != message.Text)
                 {
                     Warn("The message or target changed. Refresh the preview.");
-                    SetStep(1);
+                    SetStep(0);
                     return;
                 }
                 if (preview.Included == 0)
                 {
-                    Warn("No eligible destinations. Review the Admission consent and phone numbers.");
+                    Warn("No eligible destinations. Review Admission consent and phone numbers.");
                     return;
                 }
                 manualModeAvailable = previewTarget.Channel == "WhatsApp"
@@ -763,18 +819,22 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                     || previewMessage != message.Text) return;
                 if (manualModeAvailable && manualRequestId == Guid.Empty)
                     manualRequestId = Guid.NewGuid();
+                string example = CommunicationPreparedMessages.Render(previewMessage!,
+                    CommunicationPreparedMessages.FromPreview(preview.Entries.First(e => e.Included)));
                 confirmation.Text = "Channel: " + previewTarget.Channel
-                    + Environment.NewLine + "Selected school records: " + preview.Entries.Count
-                    + Environment.NewLine + "Unique eligible destinations: " + preview.Included
-                    + Environment.NewLine + "Excluded: " + preview.Excluded
-                    + Environment.NewLine + Environment.NewLine + "Message:"
-                    + Environment.NewLine + (previewMessage ?? "")
+                    + Environment.NewLine + "WhatsApp chats eligible to open: " + preview.Included
+                    + Environment.NewLine + "School records reviewed: " + preview.Entries.Count
+                    + Environment.NewLine + "Excluded (never sent): " + preview.Excluded
+                    + Environment.NewLine + Environment.NewLine + "Reviewed message format:"
+                    + Environment.NewLine + previewMessage
+                    + Environment.NewLine + Environment.NewLine + "Example for an eligible recipient:"
+                    + Environment.NewLine + example
                     + Environment.NewLine + Environment.NewLine
                     + (manualModeAvailable
-                        ? "Free WhatsApp mode: you will open one chat at a time, press Send in WhatsApp, "
-                          + "then report your action. FMSC cannot verify delivery."
-                        : "Direct sending is currently DISABLED. No message has been queued or delivered.");
-                SetStep(3);
+                        ? "Press Send yourself in WhatsApp. Prepared fields are refreshed from live school records when each chat opens. " +
+                          "You must report the action; FMSC cannot verify delivery."
+                        : "Direct sending is DISABLED. No messages have been queued or delivered.");
+                SetStep(2);
             }
         }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
@@ -790,16 +850,48 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         if (IsDisposed || version != previewReadVersion
             || target != CurrentTarget() || capturedText != message.Text)
             return;
+        // Refuse a prepared format if even one eligible recipient lacks a
+        // requested field. Do not create a partial or misleading bulk batch.
+        foreach (var entry in result.Entries.Where(item => item.Included))
+            _ = CommunicationPreparedMessages.Render(capturedText,
+                CommunicationPreparedMessages.FromPreview(entry));
         preview = result;
         previewTarget = target;
         previewMessage = capturedText;
+        showExcluded.Checked = false;
+        BindPreviewRows();
+        summary.Text = "Eligible destinations: " + result.Included
+            + "   |   Excluded: " + result.Excluded
+            + Environment.NewLine + "No consent recorded: " + result.NotRecorded
+            + "   |   Declined: " + result.Declined
+            + "   |   Invalid mobile: " + result.InvalidNumber
+            + Environment.NewLine + "Opted out: " + result.Suppressed
+            + "   |   Duplicate phone: " + result.Duplicates;
+        var first = result.Entries.FirstOrDefault(entry => entry.Included);
+        sampleMessage.Text = first is null
+            ? "No eligible recipient. No chat can be opened."
+            : "Message example (" + first.RecordName + "): "
+                + CommunicationPreparedMessages.Render(capturedText,
+                    CommunicationPreparedMessages.FromPreview(first))
+                + Environment.NewLine
+                + "Prepared values are read again when the chat opens; nothing is sent automatically.";
+        SetStep(1);
+        SetStatus("Eligible recipients shown first. No message has been sent.");
+    }
+
+    private void BindPreviewRows()
+    {
+        if (preview is null) return;
         var table = new DataTable();
         table.Columns.Add("RecordName", typeof(string));
         table.Columns.Add("Kind", typeof(string));
         table.Columns.Add("Mobile", typeof(string));
         table.Columns.Add("Reason", typeof(string));
-        foreach (var entry in result.Entries)
+        foreach (var entry in preview.Entries
+            .OrderByDescending(item => item.Included)
+            .ThenBy(item => item.RecordName, StringComparer.CurrentCultureIgnoreCase))
         {
+            if (!entry.Included && !showExcluded.Checked) continue;
             string maskedNumber = entry.PhoneE164 is { Length: >= 4 } number
                 ? "•••• " + number[^4..] : "";
             table.Rows.Add(entry.RecordName, entry.Kind, maskedNumber, entry.Reason);
@@ -808,15 +900,6 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         previewTable?.Dispose();
         previewTable = table;
         previewGrid.DataSource = table;
-        summary.Text = "Eligible destinations: " + result.Included
-            + "   |   Excluded: " + result.Excluded
-            + Environment.NewLine + "No consent recorded: " + result.NotRecorded
-            + "   |   Declined: " + result.Declined
-            + "   |   Invalid mobile: " + result.InvalidNumber
-            + Environment.NewLine + "Opted out: " + result.Suppressed
-            + "   |   Duplicate phone: " + result.Duplicates;
-        SetStep(2);
-        SetStatus("Preview loaded from current school records. Nothing has been sent.");
     }
 
     private async Task BindLookupsAsync()
