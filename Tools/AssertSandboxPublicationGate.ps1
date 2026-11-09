@@ -3,13 +3,16 @@
 # by Sandbox only after BOTH real SQL / Windows installer matrices succeed.
 param([string]$SourceSha=$env:GITHUB_SHA)
 $ErrorActionPreference='Stop'
-if ($env:GITHUB_REPOSITORY -cne 'farhan2166-creator/FMSC-Source' -or
+. (Join-Path $PSScriptRoot 'ResolveFmscGitHubRepository.ps1')
+Assert-FmscWorkflowIdentity -Repository Source
+if ($env:GITHUB_REPOSITORY_ID -cne '1412760928' -or
     $env:GITHUB_REF -cne 'refs/heads/main' -or
     $SourceSha -cnotmatch '^[a-f0-9]{40}$') {
     throw 'Sandbox publication attestation is only valid for an exact FMSC-Source main revision.'
 }
 if (-not $env:GITHUB_TOKEN) { throw 'Required GitHub commit-status read credential is missing.' }
-$api='https://api.github.com/repos/farhan2166-creator/FMSC-Source'
+$sourceRepo=Resolve-FmscGitHubRepository -Repository Source -Token $env:GITHUB_TOKEN
+$api=$sourceRepo.Api
 $headers=@{
   Authorization="Bearer $env:GITHUB_TOKEN"
   Accept='application/vnd.github+json'
@@ -39,9 +42,13 @@ $latest=@($contexts | Where-Object { $_.context -ceq $context } | Select-Object 
 if ($latest.Count -ne 1) { throw 'Missing private Sandbox real-installer acceptance attestation.' }
 $record=$latest[0]
 if ($record.state -cne 'success' -or
-    $record.creator.login -cne 'farhan2166-creator' -or
+    [string]$record.creator.id -cne '316891609' -or
     $record.description -cne $expectedDescription -or
-    $record.target_url -cnotmatch '^https://github[.]com/farhan2166-creator/FMSC-Sandbox/actions/runs/[0-9]+$') {
+    $record.target_url -cnotmatch ('^' + [regex]::Escape('https://github.com/' + $env:GITHUB_REPOSITORY_OWNER + '/FMSC-Sandbox/actions/runs/') + '[0-9]+) {
+    throw 'The latest Sandbox acceptance status was unsuccessful, unauthorized or invalid.'
+}
+Write-Host "Verified trusted Sandbox SQL + installer acceptance for exact Source SHA $SourceSha"
+)) {
     throw 'The latest Sandbox acceptance status was unsuccessful, unauthorized or invalid.'
 }
 Write-Host "Verified trusted Sandbox SQL + installer acceptance for exact Source SHA $SourceSha"
