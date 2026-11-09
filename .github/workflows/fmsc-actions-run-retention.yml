@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   prune-runs:
-    if: github.repository == 'farhan2166-creator/FMSC-Source' && github.ref == 'refs/heads/main'
+    if: github.repository_id == '1412760928' && github.repository_owner_id == '316891609' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
