@@ -60,11 +60,9 @@ internal static class CloudBackupOAuth
         string verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
         string challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
         string state = Base64Url(RandomNumberGenerator.GetBytes(24));
-        int port = provider == CloudProvider.Dropbox ? 41847 : FreeLoopbackPort();
-        string callback = $"http://127.0.0.1:{port}/fmsc-backup/";
-        using var listener = new HttpListener();
-        listener.Prefixes.Add(callback);
-        listener.Start();
+        using var listener = new CloudOAuthLoopback(
+            provider == CloudProvider.Dropbox ? 41847 : 0);
+        string callback = listener.CallbackUrl;
         string authorization = provider == CloudProvider.GoogleDrive
             ? "https://accounts.google.com/o/oauth2/v2/auth?" + Query(new Dictionary<string,string> {
                 ["client_id"] = clientId, ["redirect_uri"] = callback, ["response_type"] = "code",
@@ -78,28 +76,12 @@ internal static class CloudBackupOAuth
                 ["state"] = state, ["code_challenge"] = challenge, ["code_challenge_method"] = "S256"
               });
         Process.Start(new ProcessStartInfo(authorization) { UseShellExecute = true });
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(5));
-        HttpListenerContext context;
-        try { context = await listener.GetContextAsync().WaitAsync(timeout.Token); }
+        string code;
+        try { code = await listener.ReceiveCodeAsync(state, cancellationToken); }
         catch (OperationCanceledException)
         {
             throw new TimeoutException("Cloud sign-in was cancelled or timed out.");
         }
-        string suppliedState = context.Request.QueryString["state"] ?? "";
-        string code = context.Request.QueryString["code"] ?? "";
-        bool accepted = CryptographicOperations.FixedTimeEquals(
-            SHA256.HashData(Encoding.UTF8.GetBytes(suppliedState)),
-            SHA256.HashData(Encoding.UTF8.GetBytes(state))) && code.Length > 8;
-        byte[] reply = Encoding.UTF8.GetBytes(accepted
-            ? "<html><body><h2>FMSC authorization received</h2><p>Return to FMSC to finish connecting your account.</p></body></html>"
-            : "<html><body><h2>FMSC authorization rejected</h2><p>Return to FMSC and retry.</p></body></html>");
-        context.Response.StatusCode = accepted ? 200 : 400;
-        context.Response.ContentType = "text/html; charset=utf-8";
-        context.Response.ContentLength64 = reply.Length;
-        try { await context.Response.OutputStream.WriteAsync(reply, cancellationToken); }
-        finally { context.Response.Close(); }
-        if (!accepted) throw new UnauthorizedAccessException("Cloud authorization state did not match or no code was supplied.");
         string tokenUri = provider == CloudProvider.GoogleDrive
             ? "https://oauth2.googleapis.com/token" : "https://api.dropboxapi.com/oauth2/token";
         using var payload = new FormUrlEncodedContent(new Dictionary<string,string> {
@@ -231,14 +213,6 @@ internal static class CloudBackupOAuth
     {
         if (!CurrentUser.HasPermission("Backup.Restore"))
             throw new UnauthorizedAccessException("Only an authorized recovery administrator may connect a cloud backup account.");
-    }
-    private static int FreeLoopbackPort()
-    {
-        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     private static string Query(Dictionary<string,string> pairs) =>
