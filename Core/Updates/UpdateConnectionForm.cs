@@ -276,11 +276,17 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _accessStatus.Text = state.Enrolled ? "Computer key ready" : "Authorization required";
             _status.Text = state.Enrolled ? "Select Check for Updates to contact the private update repository." :
                 "Authorize this computer before checking for updates.";
-            if (_installedSchema < int.Parse(DatabaseHelper.RequiredDatabaseSchemaVersion))
+            int applicationSchema = int.Parse(DatabaseHelper.RequiredDatabaseSchemaVersion);
+            if (_installedSchema < applicationSchema)
                 _status.Text = "Your school database needs an update before sign-in.\r\n\r\n" +
                     (state.Enrolled ? "Connect to the internet and choose Check for Updates. After downloading, choose Install Update. " +
                         "FMSC Setup will back up your school data and apply the required updates." :
                         "Ask the administrator to authorize this computer, then connect to the internet and choose Check for Updates.");
+            else if (_installedSchema > applicationSchema)
+                _status.Text = "Your school database uses a newer schema than this application.\r\n\r\n" +
+                    (state.Enrolled ? "Choose Check for Updates to find an application release compatible with your database. " +
+                        "Do not downgrade your school data." :
+                        "Ask the administrator to authorize this computer before checking for a compatible application.");
         }
         catch (Exception error) when (error is CryptographicException or IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -339,6 +345,17 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             var release = await UpdateReleasePreparer.ReadLatestAsync(session, _lifetime.Token);
             if (IsDisposed || Disposing) return;
             if (release is null) return;
+            // A newer database can only be opened by a release supporting at least
+            // its schema. Do not offer a package that would imply downgrading SQL.
+            if (release.Manifest.RequiredDatabaseSchema < _installedSchema)
+            {
+                _latestVersion.Text = release.Manifest.Version;
+                _accessStatus.Text = "Computer authorized";
+                _status.Text = $"No compatible update is published. Your database uses schema {_installedSchema}, " +
+                    $"but the latest application release supports schema {release.Manifest.RequiredDatabaseSchema}. " +
+                    "Keep your school database unchanged and request a newer FMSC release.";
+                return;
+            }
             _method = await Task.Run(() => UpdateReleasePreparer.Choose(release, InstalledVersion,
                 _installedSchema, AppContext.BaseDirectory), _lifetime.Token);
             if (IsDisposed || Disposing) return;
@@ -347,7 +364,11 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _accessStatus.Text = "Computer authorized";
             var archive = _method == UpdateDownloadChoice.Incremental ? release.Manifest.Incremental! : release.Manifest.Full;
             _status.Text = "Latest version: " + release.Manifest.Version + "\n" +
-                (_method == UpdateDownloadChoice.NotNewer ? "FMSC is up to date." :
+                (_method == UpdateDownloadChoice.NotNewer
+                    ? _installedSchema == int.Parse(DatabaseHelper.RequiredDatabaseSchemaVersion)
+                        ? "FMSC is up to date."
+                        : "No newer application release is available for this database. Keep the database unchanged and install a compatible release when published."
+                    :
                  _method == UpdateDownloadChoice.RequiresDatabaseInstaller ?
                  "Update available — Full package; database migration will run through the installer after FMSC closes. " +
                     (archive.Length / 1048576d).ToString("N1") + " MB." :
