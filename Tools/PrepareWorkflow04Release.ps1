@@ -3,18 +3,22 @@
 # change, database asset, migration or private feed is modified here.
 $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$false
+. (Join-Path $PSScriptRoot 'ResolveFmscGitHubRepository.ps1')
+Assert-FmscWorkflowIdentity -Repository Source -RequireOwnerActor
 function Require([bool]$Ok,[string]$Reason) { if (-not $Ok) { throw "Workflow 04 refused: $Reason" } }
 Require ($env:GITHUB_ACTIONS -ceq 'true' -and
     $env:GITHUB_EVENT_NAME -ceq 'workflow_dispatch' -and
     $env:GITHUB_REF -ceq 'refs/heads/main' -and
-    $env:GITHUB_REPOSITORY -ceq 'farhan2166-creator/FMSC-Source' -and
-    $env:GITHUB_ACTOR -ceq 'farhan2166-creator') 'Only the owner may manually run Source/main release publication.'
+    $env:GITHUB_REPOSITORY_ID -ceq '1412760928' -and
+    $env:GITHUB_REPOSITORY_OWNER_ID -ceq '316891609' -and
+    $env:GITHUB_ACTOR_ID -ceq '316891609') 'Only the owner may manually run Source/main release publication.'
 Require ($env:GITHUB_SHA -cmatch '^[0-9a-f]{40}$' -and
     -not [string]::IsNullOrWhiteSpace($env:GITHUB_OUTPUT)) 'Original Source commit or output file is missing.'
 Require ($env:FMSC_WORKFLOW04_PUBLISH -cin @('true','false')) 'Invalid workflow publication input.'
 Require (-not [string]::IsNullOrWhiteSpace($env:GH_SOURCE_TOKEN)) 'Source contents-write token is missing.'
 $publish=$env:FMSC_WORKFLOW04_PUBLISH -ceq 'true'
-$sourceApi='https://api.github.com/repos/farhan2166-creator/FMSC-Source'
+$sourceRepo=Resolve-FmscGitHubRepository -Repository Source -Token $env:GH_SOURCE_TOKEN
+$sourceApi=$sourceRepo.Api
 $headers=@{ Authorization="Bearer $env:GH_SOURCE_TOKEN"; Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28' }
 $main=(Invoke-RestMethod -Uri "$sourceApi/branches/main" -Headers $headers).commit.sha
 Require ($main -ceq $env:GITHUB_SHA) 'Source/main changed after the workflow was launched.'
@@ -23,8 +27,8 @@ Require ($LASTEXITCODE -eq 0 -and $checkout -ceq $main) 'Checkout does not match
 Require ((@(& git status --porcelain) | Measure-Object).Count -eq 0) 'Source checkout is not clean.'
 $origin=(& git remote get-url origin).Trim()
 Require ($LASTEXITCODE -eq 0 -and $origin -in @(
-    'https://github.com/farhan2166-creator/FMSC-Source',
-    'https://github.com/farhan2166-creator/FMSC-Source.git')) 'Source origin is not the expected GitHub repository.'
+    $sourceRepo.HttpsRemote.TrimEnd('.git'),
+    $sourceRepo.HttpsRemote)) 'Source origin is not the expected GitHub repository.'
 
 $corePath=Join-Path (Get-Location).Path 'Installer/core.ps1'
 $core=[IO.File]::ReadAllText($corePath)
@@ -57,10 +61,12 @@ if ($publish) {
     Require (-not [string]::IsNullOrWhiteSpace($env:FMSC_UPDATES_PUBLISH_TOKEN) -and
         -not [string]::IsNullOrWhiteSpace($env:FMSC_SANDBOX_DISPATCH_TOKEN)) 'Configure the separate Updates publication and Sandbox Actions-dispatch secrets before bumping the version.'
     $dispatchHeaders=@{ Authorization="Bearer $env:FMSC_SANDBOX_DISPATCH_TOKEN"; Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28' }
-    $workflow=Invoke-RestMethod -Headers $dispatchHeaders -Uri 'https://api.github.com/repos/farhan2166-creator/FMSC-Sandbox/actions/workflows/private-release-acceptance.yml'
+    $sandboxRepo=Resolve-FmscGitHubRepository -Repository Sandbox -Token $env:FMSC_SANDBOX_DISPATCH_TOKEN
+    $workflow=Invoke-RestMethod -Headers $dispatchHeaders -Uri ($sandboxRepo.Api + '/actions/workflows/private-release-acceptance.yml')
     Require ($workflow.state -ceq 'active') 'Sandbox acceptance workflow is not accessible and active with the configured dispatch credential.'
     $feedHeaders=@{ Authorization="Bearer $env:FMSC_UPDATES_PUBLISH_TOKEN"; Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28' }
-    $stable=Invoke-RestMethod -Uri 'https://api.github.com/repos/farhan2166-creator/FMSC-Updates/contents/channel/stable.json' -Headers $feedHeaders
+    $updatesRepo=Resolve-FmscGitHubRepository -Repository Updates -Token $env:FMSC_UPDATES_PUBLISH_TOKEN
+    $stable=Invoke-RestMethod -Uri ($updatesRepo.Api + '/contents/channel/stable.json') -Headers $feedHeaders
     Require ($stable.encoding -ceq 'base64') 'Unexpected private update-feed encoding.'
     $channel=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($stable.content -replace '\s','')))) | ConvertFrom-Json
     Require ($channel.format -ceq 'fmsc-git-updates/v1' -and
