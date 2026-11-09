@@ -46,6 +46,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private readonly Panel steps = new() { Dock = DockStyle.Fill };
     private readonly List<HumanCard> cards = new();
     private readonly Panel campusField, classField, studentField, staffField;
+    private TableLayoutPanel targetFieldsLayout = null!;
     private readonly ModernButton previous, next, confirm, historyButton, settingsButton,
         newMessageButton, pauseSmsButton, pauseWhatsAppButton;
     // Built by SettingsCard during the page constructor; cannot be readonly.
@@ -167,29 +168,29 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     {
         var card = HumanUi.Card("1. Select Recipients",
             "Whole school, campus, class and fee targets are automatic. Individual pickers are only for specific records.");
-        // HumanUi.Field returns a Dock=Fill table. FlowLayoutPanel cannot
-        // reliably measure/dock those tables in a TopDown, non-wrapping layout;
-        // on a real dashboard the recipient controls can become blank.
-        // Top-docked rows retain their actual height and reflow when scope
-        // choices hide/show the optional fields.
-        var fieldsHost = new Panel
+        // A fixed row for each target input avoids FlowLayoutPanel's
+        // unreliable sizing of HumanUi.Field (a Dock.Fill table), and unlike
+        // top-docked panels guarantees the intended selector order.
+        targetFieldsLayout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(12)
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5,
+            AutoScroll = true, Padding = new Padding(12),
+            Margin = Padding.Empty
         };
+        targetFieldsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         var fields = new Control[]
         {
             HumanUi.Field("Send to", audience, true),
             campusField, classField, studentField, staffField
         };
-        // Dock.Top renders the last added row first, so add in reverse order.
-        foreach (Control field in fields.Reverse())
+        for (int row = 0; row < fields.Length; row++)
         {
-            field.Dock = DockStyle.Top;
-            field.Height = AppScale.Scale(72);
-            field.Margin = Padding.Empty;
-            fieldsHost.Controls.Add(field);
+            fields[row].Dock = DockStyle.Fill;
+            fields[row].Margin = Padding.Empty;
+            targetFieldsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(72)));
+            targetFieldsLayout.Controls.Add(fields[row], 0, row);
         }
-        card.Content.Controls.Add(fieldsHost);
+        card.Content.Controls.Add(targetFieldsLayout);
         return card;
     }
 
@@ -595,12 +596,25 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private void ChangeAudienceFields()
     {
         var target = (CommunicationAudience)Math.Max(audience.SelectedIndex, 0);
-        campusField.Visible = target is CommunicationAudience.Campus
+        bool showCampus = target is CommunicationAudience.Campus
             or CommunicationAudience.Class or CommunicationAudience.OutstandingFees;
-        classField.Visible = target is CommunicationAudience.Class
+        bool showClass = target is CommunicationAudience.Class
             or CommunicationAudience.OutstandingFees;
-        studentField.Visible = target is CommunicationAudience.Student or CommunicationAudience.Family;
-        staffField.Visible = target == CommunicationAudience.Staff;
+        bool showStudent = target is CommunicationAudience.Student or CommunicationAudience.Family;
+        bool showStaff = target == CommunicationAudience.Staff;
+        targetFieldsLayout.SuspendLayout();
+        campusField.Visible = showCampus;
+        classField.Visible = showClass;
+        studentField.Visible = showStudent;
+        staffField.Visible = showStaff;
+        // Hidden rows must not reserve empty vertical space; table row
+        // positioning remains stable even after switching audiences.
+        int rowHeight = AppScale.Scale(72);
+        targetFieldsLayout.RowStyles[1].Height = showCampus ? rowHeight : 0;
+        targetFieldsLayout.RowStyles[2].Height = showClass ? rowHeight : 0;
+        targetFieldsLayout.RowStyles[3].Height = showStudent ? rowHeight : 0;
+        targetFieldsLayout.RowStyles[4].Height = showStaff ? rowHeight : 0;
+        targetFieldsLayout.ResumeLayout(true);
     }
 
     private void InvalidatePreview()
