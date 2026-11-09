@@ -149,7 +149,7 @@ internal static partial class Program
             !Descendants(offline).OfType<ModernButton>().Single(b => b.Text == "Install Update").Visible,
             "An offline check cannot prepare or install an update");
         offline.Close();
-        int applicationSchema = int.Parse(DatabaseHelper.RequiredDatabaseSchemaVersion);
+        int applicationSchema = int.Parse(FMSC_SMS.DatabaseHelper.RequiredDatabaseSchemaVersion);
         foreach (bool databaseNewer in new[] { false, true })
         {
             using var guidance = new UpdateConnectionForm(() => (true, "fixture"),
