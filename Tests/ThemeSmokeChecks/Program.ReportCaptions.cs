@@ -36,6 +36,24 @@ internal static partial class Program
             }
             if(CertificateLetterhead.UsesPreprintedPad(path))
                 Check(document.Descendants(ns+"TopMargin").Single().Value=="2in",name+" reserves two inches for preprinted letterhead.");
+            if(certificate)
+            {
+                foreach(var mode in new[]{ CertificatePaperMode.PlainPaper, CertificatePaperMode.PreprintedLetterhead })
+                {
+                    var layout = XDocument.Parse(CertificateLetterhead.Definition(path,school,mode:mode));
+                    var page = layout.Root!.Element(ns+"Page")!;
+                    bool pad = mode==CertificatePaperMode.PreprintedLetterhead;
+                    Check((page.Element(ns+"PageHeader") is null)==pad &&
+                        (page.Element(ns+"PageFooter") is null)==pad,
+                        name+" "+mode+" shows exactly the requested stationery.");
+                    Check(page.Element(ns+"TopMargin")?.Value==(pad?"2in":"0.4in") &&
+                        page.Element(ns+"BottomMargin")?.Value==(pad?"2.5in":"0.4in"),
+                        name+" "+mode+" reserves the correct printable margins.");
+                    if(pad && CertificateLetterhead.UsesPreprintedPad(path))
+                        Check(XNode.DeepEquals(XDocument.Load(path),layout),
+                            name+" preserves the approved preprinted leaving-certificate layout.");
+                }
+            }
             using var report=new LocalReport();report.LoadReportDefinition(new StringReader(document.ToString()));
             report.EnableExternalImages=true;
             foreach(var dataset in document.Descendants(ns+"DataSet"))
@@ -95,6 +113,19 @@ internal static partial class Program
                 if(name=="RegularStudentCertificate")
                     Check(html.Contains("Fictional School",StringComparison.Ordinal) && !html.Contains("Boys Campus",StringComparison.Ordinal),
                         "Regular student certificate prints the school name without the campus.");
+
+                // Rendering the non-default mode catches RDLC schema and pagination regressions.
+                var alternativeMode = CertificateLetterhead.DefaultMode(path)==CertificatePaperMode.PlainPaper
+                    ? CertificatePaperMode.PreprintedLetterhead : CertificatePaperMode.PlainPaper;
+                using var alternate = new LocalReport();
+                alternate.LoadReportDefinition(new StringReader(CertificateLetterhead.Definition(path,school,mode:alternativeMode)));
+                alternate.EnableExternalImages = true;
+                foreach(ReportDataSource source in report.DataSources)
+                    alternate.DataSources.Add(new ReportDataSource(source.Name,source.Value));
+                byte[] alternatePdf = alternate.Render("PDF");
+                using var alternateDocument = UglyToad.PdfPig.PdfDocument.Open(alternatePdf);
+                Check(alternateDocument.NumberOfPages==1,
+                    name+" "+alternativeMode+" fits its content on one page.");
             }
         }
     }
