@@ -96,6 +96,10 @@ function Read-FmscRecoveryJournal {
     if ($record.Backup -and ($record.BackupSha256 -notmatch '^[a-fA-F0-9]{64}$' -or $record.BeforeSchema -le 0)) {
         throw 'Recorded migration backup information is invalid.'
     }
+    if (($record.BeforeAppSha256 -and $record.BeforeAppSha256 -notmatch '^[a-fA-F0-9]{64}$') -or
+        ($null -ne $record.RollbackRequested -and $record.RollbackRequested -isnot [bool])) {
+        throw 'Recorded application rollback metadata is invalid.'
+    }
     $databaseGuid = [Guid]::Empty
     # A Prepared transaction can safely abort before any SQL connection was
     # made. Keep its terminal Completed/Aborted record readable by the new
@@ -184,9 +188,15 @@ function Initialize-FmscRecoveryTransaction {
         $destination = if ($name -eq 'core.ps1') { 'Recovery.ps1' } else { $name }
         Write-FmscAtomicFile (Join-Path $Root $destination) ([IO.File]::ReadAllBytes((Join-Path $support $name)))
     }
+    # Record the original executable identity before any rename.
+    $previousExe = 'C:\FMSC School Management\FMSC_SMS.exe'
+    $previousHash = if (Test-Path -LiteralPath $previousExe -PathType Leaf) {
+        (Get-FileHash -LiteralPath $previousExe -Algorithm SHA256).Hash
+    } else { '' }
     $record = [pscustomobject]@{
         Format = 'fmsc-recovery/v1'; Transaction = $transaction; Phase = 'Prepared'; Version = $Version; Schema = $Schema
         UserSid = $UserSid; DownloadRoot = [IO.Path]::GetFullPath($Prepared); Backup = ''; BackupSha256 = ''; BeforeSchema = 0; LastSchema = 0; DatabaseIdentity = ''
+        BeforeAppSha256 = $previousHash; RollbackRequested = $false
         ScriptSha256 = (Get-FileHash (Join-Path $Root 'Recovery.ps1') -Algorithm SHA256).Hash
         HelperSha256 = (Get-FileHash (Join-Path $Root 'UpdateRecovery.ps1') -Algorithm SHA256).Hash
     }
@@ -241,17 +251,18 @@ function Initialize-FmscRecoveryConnection {
 function Complete-FmscAbortedTransaction {
     param([int]$ObservedSchema, [string]$ApplicationDirectory, [string]$RollbackDirectory)
     $record = $script:RecoveryJournal
-    if (-not $record -or $record.Phase -notin @('Prepared','Migrating')) {
-        throw 'Only a pre-activation update can be safely abandoned.'
+    if (-not $record -or $record.Phase -notin @('Prepared','Migrating','Activating')) {
+        throw 'Only an unverified update can be safely rolled back.'
     }
     if (-not (Test-Path -LiteralPath (Join-Path $ApplicationDirectory 'FMSC_SMS.exe') -PathType Leaf) -or
         (Test-Path -LiteralPath $RollbackDirectory)) {
         throw 'The previous application baseline cannot be confirmed. Recovery stopped.'
     }
-    if ($record.Phase -eq 'Migrating') {
-        if (-not $record.Backup -or $record.BeforeSchema -le 0 -or
+    if ($record.Phase -in @('Migrating','Activating')) {
+        if ($record.BeforeSchema -le 0 -or
             $record.LastSchema -gt $record.BeforeSchema -or
-            $ObservedSchema -ne $record.BeforeSchema) {
+            $ObservedSchema -ne $record.BeforeSchema -or
+            ($record.Phase -eq 'Migrating' -and -not $record.Backup)) {
             throw 'Database schema is not at the verified pre-update baseline. Manual recovery is required.'
         }
     } elseif ($record.Backup -or $record.BeforeSchema -ne 0 -or $record.LastSchema -ne 0) {

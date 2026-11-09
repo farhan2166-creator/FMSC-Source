@@ -43,6 +43,7 @@ try {
     $main=@($ast.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.TryStatementAst] -and $_.Body.Extent.Text.Contains('Open-UpdateWindow')})[0]
     Require ($moveTry -and $restart -and $main) 'Cannot locate the reviewed installer fault-injection boundaries.'
     $checkpoint=Join-Path $root 'old-moved';$completed=Join-Path $root 'completed'
+    $previousAppHash=(Get-FileHash -LiteralPath (Join-Path $installed 'FMSC_SMS.exe') -Algorithm SHA256).Hash
     $hook="if (`$env:FMSC_RECOVERY_FIXTURE_STOP -eq '1') { [IO.File]::WriteAllText('$($checkpoint.Replace("'","''"))','moved'); while (`$true) { Start-Sleep -Milliseconds 200 } }`r`n"
     $replacement="function Start-FmscAfterInstallation { param([string]`$Application) if ((Read-FmscRecoveryJournal `$script:RecoveryRoot).Phase -ne 'Completed' -or `$script:InstallerLockHeld) { throw 'Restart before completion/lock release' }; [IO.File]::WriteAllText('$($completed.Replace("'","''"))','verified') }"
     $edits=@(
@@ -51,6 +52,22 @@ try {
         @{Start=$main.CatchClauses[0].Extent.StartOffset;Length=$main.CatchClauses[0].Extent.Text.Length;Text='catch { Write-Output (''FIXTURE_FAILED: ''+$_.Exception.Message); exit 1 }'}
     )
     foreach ($edit in $edits | Sort-Object Start -Descending) { $text=$text.Remove($edit.Start,$edit.Length).Insert($edit.Start,$edit.Text) }
+    # Test-only replacement removes the modal completion dialog so a real
+    # elevated launcher recovery can complete unattended on the hosted runner.
+    $resumeStart="    if (`$ResumeUpdate -and `$script:RecoveryJournal.Phase -in @('Prepared','Migrating','Activating')) {"
+    $resumeEnd="    if (`$ResumeUpdate -and `$script:RecoveryJournal.Phase -eq 'Verified') {"
+    $from=$text.IndexOf($resumeStart,[StringComparison]::Ordinal)
+    $to=$text.IndexOf($resumeEnd,$from,[StringComparison]::Ordinal)
+    Require ($from -ge 0 -and $to -gt $from) 'Unable to instrument the reviewed rollback-resume boundary.'
+    $resumeFixture=@"
+    if (`$ResumeUpdate -and `$script:RecoveryJournal.Phase -in @('Prepared','Migrating','Activating')) {
+        Invoke-FmscRollbackFailedUpdate
+        [IO.File]::WriteAllText('$($completed.Replace("'","''"))','rolled-back')
+        Release-FmscInstallerLock
+        return
+    }
+"@
+    $text=$text.Remove($from,$to-$from).Insert($from,$resumeFixture+[Environment]::NewLine)
     [IO.File]::WriteAllText($core,$text,(New-Object Text.UTF8Encoding($false)))
     $files=@(Get-ChildItem $application -Recurse -File | ForEach-Object {
         @{path=$_.FullName.Substring($application.Length+1).Replace('\','/');length=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash}
@@ -85,16 +102,15 @@ try {
         if (-not $launcherProcess.WaitForExit(30000)) { $launcherProcess.Kill($true);throw 'Stable launcher did not return.' }
     } finally { $launcherProcess.Dispose() }
     Wait-File $completed $null 240
-    Require ((Read-FmscRecoveryJournal $recovery).Phase -eq 'Completed') 'Actual resume did not reach Completed.'
-    # The verified latest prepared package must be retained for repeatable
-    # recovery; only the previous application and superseded downloads go.
-    Require (Test-Path (Join-Path $installed 'FMSC_SMS.exe')) 'Recovery completed without an installed application.'
-    Require (-not (Test-Path "$installed.rollback")) 'Verified recovery did not remove the previous application copy.'
-    Require (Test-Path $prepared) 'Recovery deleted the latest verified prepared package.'
-    Require (Test-Path $marker) 'Recovery removed an unrelated enrollment-neighbor marker.'
+    $record=Read-FmscRecoveryJournal $recovery
+    Require ($record.Phase -eq 'Completed' -and $record.Outcome -eq 'Aborted') 'Actual interrupted activation was not rolled back.'
+    Require (Test-Path (Join-Path $installed 'FMSC_SMS.exe')) 'Rollback lost the installed application.'
+    Require (-not (Test-Path "$installed.rollback")) 'Rollback left an unused previous-app directory.'
+    Require (Test-Path $prepared) 'Rollback deleted the retained prepared package.'
+    Require (Test-Path $marker) 'Rollback deleted unrelated user files.'
     Require ((Get-FileHash (Join-Path $installed 'FMSC_SMS.exe') -Algorithm SHA256).Hash -eq
-        (Get-FileHash (Join-Path $SourceApplication 'FMSC_SMS.exe') -Algorithm SHA256).Hash) 'Resumed application executable differs from the source package.'
-    Write-Output 'PASS: actual prepared installer killed after old-app rename; real stable launcher elevated and resumed the existing installer, verified activation, removed rollback and retained the latest verified prepared package while preserving enrollment neighbors. Restart observed, not interactively launched.'
+        $previousAppHash) 'Interrupted activation did not restore the exact original executable.'
+    Write-Output 'PASS: prepared update interrupted after moving original app; stable launcher elevated and rolled back the exact previous executable without resuming activation. Download cache and unrelated files preserved.'
 } finally {
     if ($child) { if (-not $child.HasExited) { $child.Kill($true);$child.WaitForExit() };$child.Dispose() }
     if ($original) { if (-not $original.HasExited) { $original.Kill($true);$original.WaitForExit() };$original.Dispose() }

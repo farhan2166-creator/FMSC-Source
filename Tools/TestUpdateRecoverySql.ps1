@@ -12,7 +12,7 @@ $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput((Get-Content (Join-Path $project 'Installer/core.ps1') -Raw),[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw 'Installer does not parse.' }
 foreach ($name in @('Convert-ToDbVersion','Invoke-SqlMigration','Invoke-PendingMigrations','New-PreMigrationBackup',
-    'Resolve-SqlCmd')) {
+    'Resolve-SqlCmd','Remove-VerifiedUpdateDirectory','Invoke-FmscRestoreMigrationBaseline','Invoke-FmscRollbackFailedUpdate')) {
     $definition=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     Invoke-Expression $definition.Extent.Text
 }
@@ -158,7 +158,45 @@ EXEC sys.sp_addextendedproperty @name=N'FMSC_RecoveryFixture',@value=N'$Database
     $restored=$true
     if (((Sql $restoreName 'SET NOCOUNT ON; SELECT TOP(1) VersionNumber FROM dbo.DatabaseVersion ORDER BY VersionId DESC;') -join '').Trim() -ne '1' -or
         (Get-DatabaseVersion) -ne 3) { throw 'Recovery backup restore did not preserve the original schema-1 state independently of the recovered target.' }
-    Write-Output 'PASS: actual LocalDB commit interrupted before journal update, process-tree termination during an open migration transaction, failed migration rollback, sequential forward resume, unchanged database identity, original verified backup reuse and restoration to a separate disposable database.'
+    # Now exercise a REAL restore to the synthetic database after multiple SQL
+    # migrations committed, and verify the matching original application is
+    # restored. Never target FMSC_DB or another database on the runner.
+    if ($DatabaseName -notmatch '^FMSC_Recovery_[a-f0-9]{32}$' -or
+        $script:RecoveryJournal.Backup -ne $originalBackup) {
+        throw 'Unsafe synthetic rollback target.'
+    }
+    $AppDir=Join-Path $root 'synthetic-installed'
+    $AppRollbackDir="$AppDir.rollback"
+    $AppStagingDir="$AppDir.staging"
+    $null=New-Item -ItemType Directory -Path $AppDir,$AppRollbackDir,$AppStagingDir -Force
+    Set-Content (Join-Path $AppDir 'FMSC_SMS.exe') 'synthetic incoming application'
+    Set-Content (Join-Path $AppRollbackDir 'FMSC_SMS.exe') 'synthetic original application'
+    Set-Content (Join-Path $AppStagingDir 'FMSC_SMS.exe') 'synthetic staged files'
+    $originalExeHash=(Get-FileHash (Join-Path $AppRollbackDir 'FMSC_SMS.exe') -Algorithm SHA256).Hash
+    $fileRows=@(Sql master "SET NOCOUNT ON; SELECT physical_name FROM sys.master_files WHERE database_id=DB_ID(N'$DatabaseName') ORDER BY type;" |
+        ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ -match '\.(mdf|ldf)$' })
+    if ($fileRows.Count -ne 2) { throw "Synthetic database file identity is incomplete ($($fileRows.Count) paths found)." }
+    $LiveMdf=[string]$fileRows[0];$LiveLdf=[string]$fileRows[1]
+    $script:RecoveryJournal.Phase='Activating'
+    $script:RecoveryJournal.LastSchema=3
+    $script:RecoveryJournal | Add-Member -NotePropertyName BeforeAppSha256 -NotePropertyValue $originalExeHash -Force
+    $script:RecoveryJournal | Add-Member -NotePropertyName RollbackRequested -NotePropertyValue $false -Force
+    Save-FmscRecoveryJournal $script:RecoveryRoot $script:RecoveryJournal
+    function Initialize-FmscRecoveryConnection { }
+    Invoke-FmscRollbackFailedUpdate
+    $rollbackRecord=Read-FmscRecoveryJournal $script:RecoveryRoot
+    if ($rollbackRecord.Phase -ne 'Completed' -or $rollbackRecord.Outcome -ne 'Aborted' -or
+        (Get-DatabaseVersion) -ne 1 -or
+        ((Sql $DatabaseName 'SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.MigrationProbe;') -join '').Trim() -ne '0' -or
+        (Get-FileHash (Join-Path $AppDir 'FMSC_SMS.exe') -Algorithm SHA256).Hash -ne $originalExeHash -or
+        (Test-Path $AppRollbackDir) -or (Test-Path $AppStagingDir) -or
+        $rollbackRecord.DatabaseIdentity -ne $identity -or
+        (Get-FileHash $originalBackup -Algorithm SHA256).Hash -ne $originalHash) {
+        throw 'Real synthetic SQL/app rollback did not restore the original verified state.'
+    }
+    $failedCopies=@(Get-ChildItem (Join-Path $root 'Backups') -Filter 'FMSC_DB_FailedUpdateBeforeRollback_*.bak' -File)
+    if ($failedCopies.Count -ne 1) { throw 'Partial-state database safety copy was not retained.' }
+    Write-Output 'PASS: real SQL committed migration interruption, failed SQL transaction, forward recovery and complete precommit rollback to schema 1 plus exact original executable on a disposable database; original and partial-state backups retained. No live FMSC_DB touched.'
 } finally {
     foreach ($item in @(@($DatabaseName,$created),@($restoreName,$restored))) {
         if ($item[1]) {

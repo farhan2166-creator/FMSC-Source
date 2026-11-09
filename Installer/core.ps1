@@ -1329,6 +1329,146 @@ function Test-PreparedUpdate {
 # Abort only when nothing from the attempted update has been activated and
 # the live SQL schema still matches the journal's recorded pre-migration state.
 # A partial migration or missing proof must remain pending for supervised recovery.
+# A prepared update is not committed until the new application and database
+# pass final verification. Existing per-file SQL transactions remain unchanged.
+# Restore a verified pre-migration snapshot if an earlier file committed, then
+# return the protected original application directory to its original name.
+function Invoke-FmscRestoreMigrationBaseline {
+    param([int]$ObservedSchema)
+    $record = $script:RecoveryJournal
+    if (-not $record.Backup -or $record.BeforeSchema -le 0 -or
+        $ObservedSchema -lt $record.BeforeSchema -or $ObservedSchema -gt $record.Schema) {
+        throw 'Database version is outside the recorded update transaction. Manual recovery is required.'
+    }
+    Confirm-FmscRecoveryBackup -CurrentSchema $ObservedSchema
+    # A journal showing a committed migration must restore the exact backup,
+    # even if someone independently reset the schema marker to the old number.
+    if ($ObservedSchema -eq $record.BeforeSchema -and $record.LastSchema -le $record.BeforeSchema) { return }
+    # Refuse concurrent SQL clients rather than forcibly disconnecting them.
+    $active = @((Invoke-SqlMaster -Query "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE database_id=DB_ID(N'$DatabaseName');") |
+        ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ -match '^[0-9]+$' })
+    if ($active.Count -ne 1 -or [int]$active[0] -ne 0) {
+        throw 'Another SQL session is connected. Close it before retrying recovery; no restore was performed.'
+    }
+    $registered = (Invoke-SqlMaster -Query "SET NOCOUNT ON; SELECT physical_name FROM sys.master_files WHERE database_id=DB_ID(N'$DatabaseName') ORDER BY type;") -join [Environment]::NewLine
+    if ($registered -notmatch [regex]::Escape($LiveMdf) -or
+        $registered -notmatch [regex]::Escape($LiveLdf)) {
+        throw 'The active school database files differ from the recorded installation. No restore was performed.'
+    }
+    # Preserve the failed partial state as an independent SQL backup before
+    # replacing it. If that backup cannot be verified, refuse to roll back.
+    $safetyFile = Join-Path (Join-Path $DatabaseDir 'Backups') (
+        'FMSC_DB_FailedUpdateBeforeRollback_' + (Get-Date -Format 'yyyyMMdd_HHmmss') +
+        '_' + [Guid]::NewGuid().ToString('N') + '.bak')
+    $escapedSafety = $safetyFile.Replace("'","''")
+    Write-Step 'Preserving failed database state before safe rollback...'
+    Invoke-SqlMaster -Query "BACKUP DATABASE [$DatabaseName] TO DISK=N'$escapedSafety' WITH INIT,CHECKSUM;" | Out-Null
+    Invoke-SqlMaster -Query "RESTORE VERIFYONLY FROM DISK=N'$escapedSafety' WITH CHECKSUM;" | Out-Null
+    if (-not (Test-Path -LiteralPath $safetyFile -PathType Leaf) -or
+        (Get-Item -LiteralPath $safetyFile).Length -le 0) {
+        throw 'The partial-state recovery backup was not verified. Original database was not restored.'
+    }
+    Write-Log "Failed-update SQL safety backup retained: $safetyFile"
+    $escapedOriginal = $record.Backup.Replace("'","''")
+    # NO_WAIT refuses other connections. Restore and change back to MULTI_USER
+    # from the same master sqlcmd session. Interrupted SQL restores are NOT
+    # considered successful; the journal remains pending for recovery.
+    Write-Step "Restoring database schema $($record.BeforeSchema) from verified backup..."
+    Invoke-SqlMaster -Query (
+        "ALTER DATABASE [$DatabaseName] SET SINGLE_USER WITH NO_WAIT;" +
+        "RESTORE DATABASE [$DatabaseName] FROM DISK=N'$escapedOriginal' WITH REPLACE,CHECKSUM,RECOVERY;" +
+        "ALTER DATABASE [$DatabaseName] SET MULTI_USER;"
+    ) | Out-Null
+    $restored = Convert-ToDbVersion (Get-DatabaseVersion)
+    if ($restored -ne $record.BeforeSchema) {
+        throw "Restoration finished at unexpected schema $restored. Recovery remains pending."
+    }
+    Assert-FmscRecoveryDatabaseIdentity
+    Write-Log "Database restored to original schema $restored from recorded recovery backup."
+}
+function Invoke-FmscRollbackFailedUpdate {
+    $record = $script:RecoveryJournal
+    if (-not $record -or $record.Phase -notin @('Prepared','Migrating','Activating')) {
+        throw 'Only an unverified update can be automatically rolled back.'
+    }
+    if (Get-Process -Name 'FMSC_SMS' -ErrorAction SilentlyContinue) {
+        throw 'FMSC was reopened. Close all application windows before recovery.'
+    }
+    if ($record.Phase -eq 'Prepared') {
+        Invoke-FmscSafeUpdateAbort
+        if (Test-Path -LiteralPath $AppStagingDir) {
+            try { Remove-VerifiedUpdateDirectory $AppStagingDir $AppStagingDir }
+            catch { Write-WarningMessage "Rollback complete; staging cleanup pending: $($_.Exception.Message)" }
+        }
+        return
+    }
+    # The original application must be recoverable before modifying SQL.
+    # The digest is recorded at transaction creation, before any folder swap.
+    $baselineExe = Join-Path $AppDir 'FMSC_SMS.exe'
+    $rollbackExe = Join-Path $AppRollbackDir 'FMSC_SMS.exe'
+    $hasRollback = Test-Path -LiteralPath $AppRollbackDir -PathType Container
+    $candidate = if ($hasRollback) { $rollbackExe } else { $baselineExe }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        throw 'The previous application is missing. Database restore was not attempted.'
+    }
+    $baselineHash = [string]$record.BeforeAppSha256
+    if ($baselineHash) {
+        if ((Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash -ne $baselineHash) {
+            throw 'The previous application digest does not match the recorded baseline. Recovery stopped.'
+        }
+    } elseif ($hasRollback -or $record.Phase -eq 'Activating') {
+        throw 'Original application digest is missing. Supervised recovery is required.'
+    } else {
+        # Legacy recovery journals have no baseline digest, and may only
+        # abandon pre-activation updates with a proven older app version.
+        $installedVersion = Get-InstalledApplicationVersion
+        if (-not $installedVersion -or
+            (Compare-ApplicationVersion $installedVersion $record.Version) -ge 0) {
+            throw 'Cannot verify the previous executable version. Recovery stopped.'
+        }
+    }
+    if ($record.BeforeSchema -le 0 -or -not $record.DatabaseIdentity) {
+        throw 'Original database schema or identity was not recorded. Recovery stopped.'
+    }
+    $record | Add-Member -NotePropertyName RollbackRequested -NotePropertyValue $true -Force
+    Save-FmscRecoveryJournal $script:RecoveryRoot $record
+    Initialize-FmscRecoveryConnection
+    Assert-FmscRecoveryDatabaseIdentity
+    $observed = Convert-ToDbVersion (Get-DatabaseVersion)
+    if ($record.Backup) {
+        Invoke-FmscRestoreMigrationBaseline -ObservedSchema $observed
+    } elseif ($record.Phase -ne 'Activating' -or $observed -ne $record.BeforeSchema) {
+        throw 'An advanced database has no verified restore point. Recovery stopped.'
+    }
+    if ((Convert-ToDbVersion (Get-DatabaseVersion)) -ne $record.BeforeSchema) {
+        throw 'Original database schema not verified; previous application will not be activated.'
+    }
+    # A SQL restore can finish but leave SINGLE_USER enabled if the final
+    # ALTER fails. Never declare the old app usable in that state.
+    $dbState = (Invoke-SqlMaster -Query "SET NOCOUNT ON; SELECT state_desc + '/' + user_access_desc FROM sys.databases WHERE name=N'$DatabaseName';") -join ' '
+    if ($dbState -notmatch 'ONLINE/MULTI_USER') {
+        throw "Database is not ONLINE/MULTI_USER after rollback ($dbState). Recovery remains pending."
+    }
+    $record.LastSchema = [int]$record.BeforeSchema
+    Save-FmscRecoveryJournal $script:RecoveryRoot $record
+    if ($hasRollback) {
+        if (Test-Path -LiteralPath $AppDir) {
+            Remove-VerifiedUpdateDirectory $AppDir $AppDir
+        }
+        Move-Item -LiteralPath $AppRollbackDir -Destination $AppDir
+    }
+    $verifiedHash = (Get-FileHash -LiteralPath $baselineExe -Algorithm SHA256).Hash
+    if ($baselineHash -and $verifiedHash -ne $baselineHash) {
+        throw 'Restored application digest does not match the original. Recovery remains pending.'
+    }
+    Complete-FmscAbortedTransaction -ObservedSchema $record.BeforeSchema -ApplicationDirectory $AppDir -RollbackDirectory $AppRollbackDir
+    if (Test-Path -LiteralPath $AppStagingDir) {
+        try { Remove-VerifiedUpdateDirectory $AppStagingDir $AppStagingDir }
+        catch { Write-WarningMessage "Rollback complete; staged application cleanup pending: $($_.Exception.Message)" }
+    }
+    Write-Log "Update rollback verified: original application and database schema $($record.BeforeSchema)."
+}
+
 function Invoke-FmscSafeUpdateAbort {
     if (-not $script:RecoveryJournal -or $script:RecoveryJournal.Phase -notin @('Prepared','Migrating')) {
         throw 'This recovery phase cannot be automatically abandoned.'
@@ -1337,9 +1477,13 @@ function Invoke-FmscSafeUpdateAbort {
         throw 'Close FMSC before verifying and abandoning the failed update.'
     }
     $installedVersion = Get-InstalledApplicationVersion
-    if (-not $installedVersion -or
-        (Compare-ApplicationVersion $installedVersion $script:RecoveryJournal.Version) -ge 0) {
-        throw 'The previous application version cannot be verified. Recovery stopped.'
+    $comparison = if ($installedVersion) { Compare-ApplicationVersion $installedVersion $script:RecoveryJournal.Version } else { 1 }
+    $installedExe = Join-Path $AppDir 'FMSC_SMS.exe'
+    $previousHash = [string]$script:RecoveryJournal.BeforeAppSha256
+    if (-not $installedVersion -or $comparison -gt 0 -or
+        ($comparison -eq 0 -and -not $previousHash) -or
+        ($previousHash -and ((Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash -ne $previousHash))) {
+        throw 'The previous application executable cannot be verified. Recovery stopped.'
     }
     $observedSchema = 0
     if ($script:RecoveryJournal.Phase -eq 'Migrating') {
@@ -1392,14 +1536,14 @@ try {
     if ($ResumeUpdate -and (Get-Process -Name 'FMSC_SMS' -ErrorAction SilentlyContinue)) {
         throw 'Close all FMSC windows before recovering the update.'
     }
-    if ($ResumeUpdate -and $script:RecoveryJournal.Phase -in @('Prepared','Migrating')) {
-        Invoke-FmscSafeUpdateAbort
-        Write-Success 'The failed update was safely abandoned. The previous application was not replaced.'
+    if ($ResumeUpdate -and $script:RecoveryJournal.Phase -in @('Prepared','Migrating','Activating')) {
+        Invoke-FmscRollbackFailedUpdate
+        Write-Success 'The interrupted update was rolled back. The previous application and database are available.'
         [Windows.Forms.MessageBox]::Show(
-            'The interrupted update was safely abandoned. Your existing application and database were preserved.' +
+            'The interrupted update was rolled back after verifying the previous application and database.' +
             [Environment]::NewLine + [Environment]::NewLine +
-            'Open FMSC from its desktop shortcut to check for a newer update.',
-            'FMSC - Previous Installation Preserved', 'OK', 'Information') | Out-Null
+            'Open FMSC from its desktop shortcut. The downloaded update may be retained for inspection.',
+            'FMSC - Previous Installation Restored', 'OK', 'Information') | Out-Null
         Release-FmscInstallerLock
         return
     }
@@ -1873,6 +2017,11 @@ try {
             "Required: $DatabaseVersion"
         )
     }
+    # Even an app-only update must journal its original database version.
+    if ($script:RecoveryJournal -and $script:RecoveryJournal.BeforeSchema -eq 0) {
+        $script:RecoveryJournal.BeforeSchema = [int]$FinalDatabaseVersion
+        Save-FmscRecoveryJournal $script:RecoveryRoot $script:RecoveryJournal
+    }
     Write-Step 'Activating the staged application...'
     if ($script:RecoveryJournal -and (Get-Process -Name 'FMSC_SMS' -ErrorAction SilentlyContinue)) {
         throw 'FMSC was reopened during installation. Close it before recovering application activation.'
@@ -1984,15 +2133,17 @@ catch {
     }
     catch {
     }
-    if ($script:RecoveryJournal -and $script:RecoveryJournal.Phase -in @('Prepared','Migrating')) {
+    if ($script:RecoveryJournal -and $script:RecoveryJournal.Phase -in @('Prepared','Migrating','Activating')) {
         try {
-            Invoke-FmscSafeUpdateAbort
-            $recoveryOutcome = 'Previous application and database baseline verified; failed update was safely abandoned.'
+            Invoke-FmscRollbackFailedUpdate
+            $recoveryOutcome = 'Rollback verified: previous application and original database schema restored.'
         }
         catch {
-            $recoveryOutcome = "Automatic recovery could not be verified: $($_.Exception.Message). Recovery files and backups were retained."
+            $recoveryOutcome = "Automatic rollback stopped for safety: $($_.Exception.Message). Do not retry or open FMSC until recovery is verified; backups and old application files were retained."
         }
         try { Write-Log $recoveryOutcome } catch { }
+    } elseif ($script:RecoveryJournal -and $script:RecoveryJournal.Phase -eq 'Verified') {
+        $recoveryOutcome = 'New application and database were already verified; only post-commit completion remains. Use the FMSC recovery shortcut.'
     }
     Write-Host ''
     Write-Host `
@@ -2050,13 +2201,18 @@ catch {
         $script:UpdateBar.Value = 0
         [Windows.Forms.Application]::DoEvents()
     }
+    $previousApplicationLocation = if (Test-Path -LiteralPath (Join-Path $AppDir 'FMSC_SMS.exe') -PathType Leaf) {
+        $AppDir
+    } elseif (Test-Path -LiteralPath (Join-Path $AppRollbackDir 'FMSC_SMS.exe') -PathType Leaf) {
+        $AppRollbackDir
+    } else { 'Not verified - recovery required' }
     if ($PreparedRoot) {
         [Windows.Forms.MessageBox]::Show(
             "Update could not be completed. FMSC has not been restarted." + [Environment]::NewLine +
             [Environment]::NewLine + $_.Exception.Message + [Environment]::NewLine +
             [Environment]::NewLine + $recoveryOutcome + [Environment]::NewLine +
             [Environment]::NewLine + "Log: $LogFile" + [Environment]::NewLine +
-            "Previous application: $AppRollbackDir" + [Environment]::NewLine +
+            "Previous application location: $previousApplicationLocation" + [Environment]::NewLine +
             "Database backup: $RecoveryBackupPath",
             'FMSC - Update Needs Attention', 'OK', 'Error') | Out-Null
     } elseif ($ShowInstallerWindow) {
@@ -2065,7 +2221,7 @@ catch {
             [Environment]::NewLine + $_.Exception.Message + [Environment]::NewLine +
             [Environment]::NewLine + $recoveryOutcome + [Environment]::NewLine +
             [Environment]::NewLine + "Installer log: $LogFile" + [Environment]::NewLine +
-            "Previous application: $AppRollbackDir" + [Environment]::NewLine +
+            "Previous application location: $previousApplicationLocation" + [Environment]::NewLine +
             "Database backup: $RecoveryBackupPath",
             'FMSC - Setup Needs Attention', 'OK', 'Error') | Out-Null
     } else { Read-Host '  Press ENTER to close' }

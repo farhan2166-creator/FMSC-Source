@@ -446,13 +446,16 @@ introduced. Recovery uses no network or additional database.
 
 The atomically replaced, flushed `recovery.json` records Prepared, Migrating,
 Activating, Verified and Completed. Activation intent is committed before either
-directory rename. Recovery preserves the transaction's original rollback copy,
-rebuilds staging from the protected snapshot, verifies it and rechecks database
-compatibility before activation. A separate durable verified manifest survives
-partial cleanup. Verified is committed before deleting rollback or recovery
-payloads; interrupted cleanup can therefore be retried without requiring those
-payloads. Completed permits normal startup. The next update removes leftover
-completed/orphaned protected snapshots, keeping recovery storage bounded.
+directory rename. The previous executable's SHA-256 is recorded before migration.
+**Prepared, Migrating and Activating are uncommitted**: a failed or interrupted
+update restores the previous executable from the protected rollback folder and,
+when committed migrations advanced the schema, restores the original verified
+database backup. The staged application is discarded; the downloaded package
+may remain for later inspection. No migration is wrapped in a new cross-script
+SQL transaction. A separate durable verified manifest survives partial cleanup.
+**Verified is the commit point**: recovery completes the successfully verified
+new application rather than downgrading it. Completed permits normal startup.
+The next update removes old completed/orphaned protected snapshots.
 
 The desktop launcher requests elevation to resume an unfinished update. Direct
 application startup also checks local pending state before accessing the school
@@ -461,32 +464,39 @@ the original Windows user is required for the same LocalDB identity. Invalid sta
 modified recovery scripts, missing payloads or failed compatibility checks stop
 with recovery instructions instead of opening an uncertain application.
 
-Migrations read the actual database schema rather than trusting the journal's last
-recorded migration. Earlier committed migrations are skipped; the remaining numbered
-scripts still run sequentially under the existing transactional/version guards.
-The original pre-migration backup path/hash and database GUID are retained and
-checked on recovery. Recovery never overwrites that backup or automatically
-restores/downgrades the database. A damaged backup, changed database identity or
-failing migration requires support; existing data and recovery files are preserved.
+Each numbered migration remains an independent SQL transaction. The original
+pre-migration backup path/hash, database identity, application executable SHA-256
+and expected schema are journaled for rollback. Before an automatic SQL restore,
+recovery checks the verified backup, matching database identity and file paths,
+unverified transaction phase, installed app digest and concurrent SQL sessions.
+It also retains an independently verified backup of the partially migrated
+database before replacing it. An uncertain baseline, damaged backup, busy SQL
+database, inaccessible files or failed restore **blocks startup and requires
+supervised recovery** instead of silently discarding potentially newer school
+records. Power loss during a SQL restore or disk/controller failure may still
+require manual intervention; do not mistake all-or-nothing *intent* for an
+unconditional guarantee. Full first-time/manual complete setup is a separate
+installation path and is not included in this prepared-update rollback contract.
 
 `TestUpdateRecovery.ps1` actually kills child processes around directory renames
 and during cleanup using disposable folders. Restricted local runs substitute a
 fixture owner; elevated Windows CI checks production Administrators ownership.
 `TestUpdateRecoverySql.ps1` is guarded to approved hosted disposable runners and
-tests interrupted committed migrations, transactional failure, forward resume and
-backup restoration into a second newly named fixture database. Physical power-loss,
-disk/controller failure and complete-machine-loss recovery are separate limits;
-local journaling cannot replace an independent school-data backup.
+tests interrupted committed migrations, transactional failure, forward resume,
+backup restoration into a second fixture **and** in-place pre-commit rollback on
+an explicitly owned disposable SQL database (never FMSC_DB), with the original
+application digest verified. Disk/controller failure and complete-machine-loss
+recovery are separate limits; journaling cannot replace external backups.
 
 The complete Windows installation acceptance also invokes
 `TestPreparedUpdateRecovery.ps1` against its already owned synthetic FMSC install.
 Only the private fixture copy is instrumented: it pauses after the old-directory
-rename, is forcibly terminated, and then the real stable launcher elevates and
-resumes the existing installer. Installed files, unchanged fictional SQL records,
-database GUID, user settings and cleanup are checked. Interactive restart is
-observed at its verified-completion boundary rather than launching a login window
-on the hosted runner. The activation mutex must be released before restart so
-the application's startup guard permits the completed application to open.
+rename, is forcibly terminated, and then the real stable launcher elevates the
+recovery script. The test verifies the original executable hash, terminal
+Completed/Aborted journal, removal of the rollback/staging directories and
+retention of unrelated user files. The application is **not restarted after a
+failed update**. The activation mutex is released before normal subsequent
+startup, so the older application can open only after the baseline is verified.
 
 Workflow 02 defaults to complete acceptance. Its optional `sql` test scope restores
 the pinned test tooling and runs the billing and uniquely named disposable
