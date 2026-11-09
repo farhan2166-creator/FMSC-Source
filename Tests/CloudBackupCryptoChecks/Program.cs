@@ -12,10 +12,16 @@ try
     var random = RandomNumberGenerator.GetBytes(2 * 1024 * 1024 + 137);
     File.WriteAllBytes(source, random);
     var originalTime = new DateTime(2026, 11, 9, 13, 0, 0, DateTimeKind.Utc);
-    CloudBackupCrypto.Encrypt(source, package, passphrase, originalTime);
+    // Simulate a school in UTC+5: SQL backup header contains a local
+    // timestamp distinct from the cloud catalog's absolute UTC time.
+    var originalSqlHeaderTime = new DateTime(2026, 11, 9, 18, 0, 0);
+    CloudBackupCrypto.Encrypt(source, package, passphrase, originalTime, originalSqlHeaderTime);
     if (CloudBackupCrypto.ReadUnverifiedCreationUtc(package) != originalTime)
         throw new Exception("Package recovery point timestamp changed.");
     CloudBackupCrypto.Decrypt(package, restored, passphrase);
+    if (CloudBackupCrypto.ReadSqlHeaderLocalAfterVerification(package).Ticks
+        != originalSqlHeaderTime.Ticks)
+        throw new Exception("Authenticated original SQL backup time was altered by local time zone.");
     if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(File.ReadAllBytes(restored)), SHA256.HashData(random)))
         throw new Exception("Cloud backup did not survive round trip.");
     File.Delete(restored);
