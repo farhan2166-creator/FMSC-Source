@@ -462,6 +462,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private async Task LoadComposeTemplatesAsync()
     {
         composeTemplates.Clear();
+        foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
+            composeTemplates.Add(new TemplateChoice(-builtIn.index - 1, builtIn.item.Name,
+                "WhatsApp", builtIn.item.Purpose, builtIn.item.Body));
         if (CurrentUser.HasPermission("Communication.Send"))
         {
             int actor = CurrentUser.UserId;
@@ -509,12 +512,22 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             {
                 table.Dispose(); return;
             }
+            if (!table.Columns.Contains("StateText"))
+                table.Columns.Add("StateText", typeof(string));
+            foreach (DataRow row in table.Rows)
+            {
+                bool manual = Convert.ToString(row["Method"]) == "WhatsApp Business (manual)";
+                string state = Convert.ToString(row["State"]) ?? "";
+                row["StateText"] = manual && state == "Completed"
+                    ? "Operator finished (unverified)"
+                    : manual && state == "Confirmed" ? "Manual session pending" : state;
+            }
             var old = historyGrid.DataSource as DataTable;
             historyGrid.DataSource = null;
             historyGrid.DataSource = table;
             old?.Dispose();
-            SetStep(4);
-            SetStatus($"{table.Rows.Count} historical batches loaded. Provider submission does not imply delivery.");
+            SetStep(3);
+            SetStatus($"{table.Rows.Count} historical batches loaded. Operator-reported sent is not verified delivery.");
         }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
@@ -541,8 +554,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             settingsGrid.DataSource = channels;
             templateGrid.DataSource = templates;
             oldChannels?.Dispose(); oldTemplates?.Dispose();
-            SetStep(5);
-            SetStatus("Manual WhatsApp requires the operator to press Send in WhatsApp. School email and API delivery are unavailable.");
+            SetStep(4);
+            SetStatus("Manual WhatsApp requires you to press Send in WhatsApp. School email and API delivery are unavailable.");
         }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
@@ -649,24 +662,24 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     private void SetStep(int number)
     {
-        step = Math.Clamp(number, 0, 5);
-        string[] stages = { "1 / 4   Select Recipients", "2 / 4   Compose Message",
-            "3 / 4   Preview", "4 / 4   Confirm & Send",
+        step = Math.Clamp(number, 0, 4);
+        string[] stages = { "1 / 3   Write Message", "2 / 3   Preview", "3 / 3   Confirm",
             "Communication History", "Communication Settings" };
         heading.Text = stages[step];
         for (int i = 0; i < cards.Count; i++) cards[i].Visible = i == step;
         cards[step].BringToFront();
-        previous.Visible = step < 4;
-        previous.Enabled = step is > 0 and < 4;
-        next.Visible = step < 3;
-        confirm.Visible = step == 3;
-        confirm.Text = manualModeAvailable ? "Open WhatsApp Chats" : "Confirm & Send";
-        confirm.Enabled = step == 3 && manualModeAvailable
+        previous.Visible = step < 3;
+        previous.Enabled = step is > 0 and < 3;
+        next.Visible = step < 2;
+        confirm.Visible = step == 2;
+        confirm.Text = manualModeAvailable ? "Open WhatsApp Chats" : "Sending Unavailable";
+        confirm.Enabled = step == 2 && manualModeAvailable
             && CurrentUser.HasPermission("Communication.Send");
-        newMessageButton.Visible = step >= 4;
-        pauseSmsButton.Visible = step == 5 && CurrentUser.HasPermission("Communication.Configure");
-        pauseWhatsAppButton.Visible = step == 5 && CurrentUser.HasPermission("Communication.Configure");
-        if (step == 3)
+        newMessageButton.Visible = step >= 3;
+        // SMS cannot be activated in this release, so do not display a dead action.
+        pauseSmsButton.Visible = false;
+        pauseWhatsAppButton.Visible = step == 4 && CurrentUser.HasPermission("Communication.Configure");
+        if (step == 2)
             SetStatus(manualModeAvailable
                 ? "Free/manual WhatsApp: open each chat and press Send yourself. Not verified delivery."
                 : "Direct sending remains disabled until provider acceptance.",
@@ -743,33 +756,26 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                     ? "Staff.View" : "Students.View");
                 if (target.Audience == CommunicationAudience.OutstandingFees)
                     RequirePermission("Fees.View");
-                await LoadComposeTemplatesAsync();
-                if (!IsDisposed) SetStep(1);
-            }
-            else if (step == 1)
-            {
                 if (string.IsNullOrWhiteSpace(message.Text))
                 {
-                    Warn("Write a message before previewing the recipients.");
+                    Warn("Write or choose a prepared message before previewing.");
                     return;
                 }
                 await LoadPreviewAsync();
             }
-            else if (step == 2)
+            else if (step == 1)
             {
-                // Preview does not confer sending authority. SQL independently
-                // checks this permission when confirmation is eventually enabled.
                 RequirePermission("Communication.Send");
                 if (preview is null || previewTarget != CurrentTarget()
                     || previewMessage != message.Text)
                 {
                     Warn("The message or target changed. Refresh the preview.");
-                    SetStep(1);
+                    SetStep(0);
                     return;
                 }
                 if (preview.Included == 0)
                 {
-                    Warn("No eligible destinations. Review the Admission consent and phone numbers.");
+                    Warn("No eligible destinations. Review Admission consent and phone numbers.");
                     return;
                 }
                 manualModeAvailable = previewTarget.Channel == "WhatsApp"
@@ -778,18 +784,22 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                     || previewMessage != message.Text) return;
                 if (manualModeAvailable && manualRequestId == Guid.Empty)
                     manualRequestId = Guid.NewGuid();
+                string example = CommunicationPreparedMessages.Render(previewMessage!,
+                    CommunicationPreparedMessages.FromPreview(preview.Entries.First(e => e.Included)));
                 confirmation.Text = "Channel: " + previewTarget.Channel
-                    + Environment.NewLine + "Selected school records: " + preview.Entries.Count
-                    + Environment.NewLine + "Unique eligible destinations: " + preview.Included
-                    + Environment.NewLine + "Excluded: " + preview.Excluded
-                    + Environment.NewLine + Environment.NewLine + "Message:"
-                    + Environment.NewLine + (previewMessage ?? "")
+                    + Environment.NewLine + "WhatsApp chats eligible to open: " + preview.Included
+                    + Environment.NewLine + "School records reviewed: " + preview.Entries.Count
+                    + Environment.NewLine + "Excluded (never sent): " + preview.Excluded
+                    + Environment.NewLine + Environment.NewLine + "Reviewed message format:"
+                    + Environment.NewLine + previewMessage
+                    + Environment.NewLine + Environment.NewLine + "Example for an eligible recipient:"
+                    + Environment.NewLine + example
                     + Environment.NewLine + Environment.NewLine
                     + (manualModeAvailable
-                        ? "Free WhatsApp mode: you will open one chat at a time, press Send in WhatsApp, "
-                          + "then report your action. FMSC cannot verify delivery."
-                        : "Direct sending is currently DISABLED. No message has been queued or delivered.");
-                SetStep(3);
+                        ? "Press Send yourself in WhatsApp. Prepared fields are refreshed from live school records when each chat opens. " +
+                          "You must report the action; FMSC cannot verify delivery."
+                        : "Direct sending is DISABLED. No messages have been queued or delivered.");
+                SetStep(2);
             }
         }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
