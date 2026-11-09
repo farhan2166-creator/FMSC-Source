@@ -304,7 +304,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private HumanCard SettingsCard()
     {
         var card = HumanUi.Card("Settings",
-            "Enable or resume free manual WhatsApp below. Provider API and school email sending are unavailable.");
+            "Review manual WhatsApp and prepared templates. Provider API and school email sending are unavailable.");
         settingsGrid.AutoGenerateColumns = false;
         foreach (var (field, caption, width) in new[]
         {
@@ -458,9 +458,13 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             return;
         }
         int id = selected is null ? 0 : Convert.ToInt32(selected["TemplateId"]);
+        bool customizeBuiltIn = id < 0;
+        if (customizeBuiltIn) id = 0; // never alter the shipped examples
         using var dialog = new CommunicationTemplateDialog(
-            selected is null ? "" : Convert.ToString(selected["Name"]) ?? "",
-            selected is null ? "Sms" : Convert.ToString(selected["Channel"]) ?? "Sms",
+            selected is null ? "" : customizeBuiltIn
+                ? "Custom " + (Convert.ToString(selected["Name"]) ?? "").Replace(" (built-in)", "")
+                : Convert.ToString(selected["Name"]) ?? "",
+            selected is null ? "WhatsApp" : Convert.ToString(selected["Channel"]) ?? "WhatsApp",
             selected is null ? "Announcement" : Convert.ToString(selected["Purpose"]) ?? "Announcement",
             selected is null ? "" : Convert.ToString(selected["Body"]) ?? "",
             selected is null || Convert.ToBoolean(selected["Active"]));
@@ -564,6 +568,19 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                 channels.Dispose(); templates.Dispose(); return;
             }
             PrepareSettingsForDisplay(channels);
+            // Built-in formats are always available; choosing Edit Selected
+            // creates a custom copy instead of changing shipped examples.
+            foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
+            {
+                DataRow row = templates.NewRow();
+                row["TemplateId"] = -builtIn.index - 1;
+                row["Name"] = builtIn.item.Name + " (built-in)";
+                row["Channel"] = "WhatsApp";
+                row["Purpose"] = builtIn.item.Purpose;
+                row["Body"] = builtIn.item.Body;
+                row["Active"] = true;
+                templates.Rows.InsertAt(row, builtIn.index);
+            }
             var oldChannels = settingsGrid.DataSource as DataTable;
             var oldTemplates = templateGrid.DataSource as DataTable;
             settingsGrid.DataSource = null;
