@@ -190,7 +190,9 @@ try {
         Copy-Item -LiteralPath $source -Destination (Join-Path $migrationRoot ($number.ToString() + '.sql'))
     }
     $script:applyScript = Join-Path $migrationRoot 'Apply-Migrations.ps1'
-    Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/farhan2166-creator/FMSC-Source/287b16e606f99aa139f6c98cc6021753f7f476a0/Migrations/Apply-Migrations.ps1' -OutFile $script:applyScript
+    . (Join-Path $PSScriptRoot 'ResolveFmscGitHubRepository.ps1')
+    $sourceRepo=Resolve-FmscGitHubRepository -Repository Source
+    Invoke-WebRequest -UseBasicParsing -Uri ("https://raw.githubusercontent.com/" + $sourceRepo.FullName + "/287b16e606f99aa139f6c98cc6021753f7f476a0/Migrations/Apply-Migrations.ps1") -OutFile $script:applyScript
     . (Join-Path $app 'UpdateSupport\UpdateRecovery.ps1')
     . (Join-Path $app 'UpdateSupport\MaintenanceTools.ps1') -Action Library
     $valid = Find-FmscMaintenanceTool 'SqlCmd'
