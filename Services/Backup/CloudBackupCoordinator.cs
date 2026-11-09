@@ -152,14 +152,23 @@ internal static class CloudBackupCoordinator
             if (!CloudBackupOAuth.IsConnected(provider)) continue;
             var known = ReadPending().Where(x =>
                 (provider == CloudProvider.GoogleDrive ? x.GoogleDriveId : x.DropboxId).Length > 0).ToArray();
-            var remote = await CloudBackupTransport.ListAsync(provider, token);
-            foreach (var item in remote)
+            try
             {
-                bool isKnown = known.Any(x =>
-                    (provider == CloudProvider.GoogleDrive ? x.GoogleDriveId : x.DropboxId) == item.RemoteId &&
-                    string.Equals(x.Sha256, item.PackageSha256, StringComparison.OrdinalIgnoreCase) &&
-                    (x.SqlCreatedUtc - item.SqlBackupCreatedUtc).Duration() < TimeSpan.FromSeconds(1));
-                list.Add(new CloudSelection(item, isKnown));
+                var remote = await CloudBackupTransport.ListAsync(provider, token);
+                foreach (var item in remote)
+                {
+                    bool isKnown = known.Any(x =>
+                        (provider == CloudProvider.GoogleDrive ? x.GoogleDriveId : x.DropboxId) == item.RemoteId &&
+                        string.Equals(x.Sha256, item.PackageSha256, StringComparison.OrdinalIgnoreCase) &&
+                        (x.SqlCreatedUtc - item.SqlBackupCreatedUtc).Duration() < TimeSpan.FromSeconds(1));
+                    list.Add(new CloudSelection(item, isKnown));
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or IOException)
+            {
+                // One provider's outage cannot conceal the other provider's
+                // available recovery points.
+                AppExceptionHandler.LogNonFatal(ex, provider + " cloud recovery listing failed");
             }
         }
         return list.OrderByDescending(x => x.Remote.SqlBackupCreatedUtc).ToArray();
