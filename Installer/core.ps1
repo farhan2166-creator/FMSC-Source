@@ -1341,7 +1341,9 @@ function Invoke-FmscRestoreMigrationBaseline {
         throw 'Database version is outside the recorded update transaction. Manual recovery is required.'
     }
     Confirm-FmscRecoveryBackup -CurrentSchema $ObservedSchema
-    if ($ObservedSchema -eq $record.BeforeSchema) { return }
+    # A journal showing a committed migration must restore the exact backup,
+    # even if someone independently reset the schema marker to the old number.
+    if ($ObservedSchema -eq $record.BeforeSchema -and $record.LastSchema -le $record.BeforeSchema) { return }
     # Refuse concurrent SQL clients rather than forcibly disconnecting them.
     $active = @((Invoke-SqlMaster -Query "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE database_id=DB_ID(N'$DatabaseName');") |
         ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ -match '^[0-9]+$' })
