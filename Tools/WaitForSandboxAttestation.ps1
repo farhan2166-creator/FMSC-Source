@@ -6,8 +6,10 @@ param(
     [int]$MaxMinutes=105
 )
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'ResolveFmscGitHubRepository.ps1')
+Assert-FmscWorkflowIdentity -Repository Source
 if ($env:GITHUB_ACTIONS -cne 'true' -or
-    $env:GITHUB_REPOSITORY -cne 'farhan2166-creator/FMSC-Source' -or
+    $env:GITHUB_REPOSITORY_ID -cne '1412760928' -or
     $env:GITHUB_REF -cne 'refs/heads/main' -or
     $SourceSha -cnotmatch '^[a-f0-9]{40}$' -or
     $PreviousStatusId -notmatch '^[0-9]+$' -or
@@ -16,7 +18,7 @@ if ($env:GITHUB_ACTIONS -cne 'true' -or
     throw 'Private Sandbox acceptance wait requires exact trusted Source main, token and bounded timeout.'
 }
 $headers=@{Authorization="Bearer $env:GITHUB_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
-$api='https://api.github.com/repos/farhan2166-creator/FMSC-Source'
+$api=(Resolve-FmscGitHubRepository -Repository Source -Token $env:GITHUB_TOKEN).Api
 $deadline=(Get-Date).AddMinutes($MaxMinutes)
 $attempt=0
 do {
