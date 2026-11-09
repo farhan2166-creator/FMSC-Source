@@ -50,6 +50,20 @@ internal static class CloudRestoreStaging
             var result = await Task.Run(() => DatabaseBackupManager.RestoreBackup(bak))
                 .ConfigureAwait(false);
             databaseRestored = result.Success;
+            if (databaseRestored)
+            {
+                try { Directory.Delete(folder, recursive: true); }
+                catch (Exception cleanupError)
+                {
+                    AppExceptionHandler.LogNonFatal(cleanupError,
+                        "Verified cloud restore succeeded but temporary download cleanup failed");
+                    return new DatabaseBackupManager.BackupResult {
+                        Success = true,
+                        Message = result.Message +
+                            "\\n\\nWarning: temporary cloud download cleanup failed. The protected staging files require administrator cleanup."
+                    };
+                }
+            }
             return result;
         }
         catch (Exception ex)
@@ -65,18 +79,9 @@ internal static class CloudRestoreStaging
         }
         finally
         {
-            // The staged cloud package and .bak MUST be removed after a
-            // successfully VERIFIED restore. Preserve a failed attempt for
-            // supervised diagnosis; never delete an independent safety backup.
-            if (databaseRestored)
-            {
-                try { Directory.Delete(folder, recursive: true); }
-                catch (Exception cleanupError)
-                {
-                    AppExceptionHandler.LogNonFatal(cleanupError,
-                        "Verified cloud restore succeeded but temporary download cleanup failed");
-                }
-            }
+            // No deletion on failed restore; preserve evidence for supervised
+            // recovery. On successful restore, deletion runs above so a
+            // cleanup warning is visible to the administrator.
         }
     }
 
