@@ -29,7 +29,8 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
     internal CloudBackupCoordinator.CloudSelection? SelectedCopy { get; private set; }
     internal string RecoveryPassphrase { get; private set; } = "";
 
-    internal CloudRestoreSelectionDialog(IReadOnlyList<CloudBackupCoordinator.CloudSelection> all)
+    internal CloudRestoreSelectionDialog(IReadOnlyList<CloudBackupCoordinator.CloudSelection> all,
+        DateTime? latestLocalBackupUtc)
     {
         Text = "Select a cloud recovery point";
         StartPosition = FormStartPosition.CenterParent;
@@ -82,7 +83,10 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(66)));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(44)));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(48)));
-        panel.Controls.Add(new Label { Text = "Available cloud backups (newest SQL backup first)",
+        string newestCloud = groups.Length > 0 ? groups[0].SqlCreatedUtc.ToLocalTime().ToString("dd-MMM HH:mm") : "None";
+        string newestLocal = latestLocalBackupUtc?.ToLocalTime().ToString("dd-MMM HH:mm") ?? "None";
+        panel.Controls.Add(new Label { Text = "Latest local: " + newestLocal +
+            "    |    Latest cloud: " + newestCloud + "    (by SQL backup time)",
             Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
         panel.Controls.Add(points, 0, 1);
         panel.Controls.Add(new Label { Text = "Download from", Dock = DockStyle.Fill }, 0, 2);
