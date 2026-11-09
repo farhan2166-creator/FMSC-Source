@@ -12,7 +12,7 @@ $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput((Get-Content (Join-Path $project 'Installer/core.ps1') -Raw),[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw 'Installer does not parse.' }
 foreach ($name in @('Convert-ToDbVersion','Invoke-SqlMigration','Invoke-PendingMigrations','New-PreMigrationBackup',
-    'Resolve-SqlCmd','Invoke-FmscRestoreMigrationBaseline','Invoke-FmscRollbackFailedUpdate')) {
+    'Resolve-SqlCmd','Remove-VerifiedUpdateDirectory','Invoke-FmscRestoreMigrationBaseline','Invoke-FmscRollbackFailedUpdate')) {
     $definition=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     Invoke-Expression $definition.Extent.Text
 }
