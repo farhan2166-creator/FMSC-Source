@@ -106,10 +106,9 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             Font = AppTheme.NormalFont,
             ForeColor = AppTheme.MutedText,
             TextAlign = ContentAlignment.TopLeft,
-            Text = "School records are saved on this computer. They are not shared over a " +
-                   "network. Records entered on " +
-                   "one computer will not appear on another. Back up regularly; " +
-                   "this is the only copy of your data."
+            Text = "The live school database stays on this computer. Cloud backups are encrypted " +
+                   "recovery copies, not a second live database or a shared school connection. " +
+                   "Keep verified backups both locally and off this computer."
         };
         var backupFields = new TableLayoutPanel {
             Dock = DockStyle.Fill,
