@@ -58,7 +58,7 @@ internal static partial class Program
                     "The updater receives the actual database schema in both mismatch directions");
                 var updaterStatus = (Label)typeof(UpdateConnectionForm).GetField("_status", fields)!.GetValue(automaticUpdater)!;
                 Check(updaterStatus.Text.Contains("If none is available") && updaterStatus.Text.Contains("administrator"),
-                    "Both updater mismatch screens explain what to do if no compatible release is published");
+                    "The startup updater explains what to do if no compatible release is published");
                 Descendants(automaticUpdater).OfType<ModernButton>().Single(b => b.Text == "Close").PerformClick();
                 Application.DoEvents();
             }
@@ -149,6 +149,18 @@ internal static partial class Program
             !Descendants(offline).OfType<ModernButton>().Single(b => b.Text == "Install Update").Visible,
             "An offline check cannot prepare or install an update");
         offline.Close();
+        int applicationSchema = int.Parse(DatabaseHelper.RequiredDatabaseSchemaVersion);
+        foreach (bool databaseNewer in new[] { false, true })
+        {
+            using var guidance = new UpdateConnectionForm(() => (true, "fixture"),
+                installedSchema: applicationSchema + (databaseNewer ? 1 : -1), networkAvailable: () => false);
+            guidance.Show(); Application.DoEvents();
+            var guidanceStatus = (Label)typeof(UpdateConnectionForm).GetField("_status", fields)!.GetValue(guidance)!;
+            Check(guidanceStatus.Text.Contains(databaseNewer ? "newer schema" : "needs an update") &&
+                guidanceStatus.Text.Contains("If none is available") && guidanceStatus.Text.Contains("administrator"),
+                "The updater explains unavailable published releases for both schema mismatch directions");
+            guidance.Close();
+        }
     }
 
     private static void CheckStartupUpdateHandoff()
