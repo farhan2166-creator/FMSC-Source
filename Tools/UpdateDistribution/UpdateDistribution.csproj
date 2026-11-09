@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Core/Updates/UpdateManifest.cs" Link="UpdateManifest.cs" />
+    <Compile Include="../../Core/Updates/GitHubRepositoryIdentity.cs" Link="GitHubRepositoryIdentity.cs" />
     <Compile Include="../../Core/Updates/UpdateChunks.cs" Link="UpdateChunks.cs" />
   </ItemGroup>
 </Project>
