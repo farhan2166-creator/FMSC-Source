@@ -38,32 +38,11 @@ internal sealed class CloudBackupOptions
     public bool IsDue(DateTimeOffset now, DateTimeOffset? lastSuccessfulBackup)
     {
         Validate();
-        if (!AutomaticEnabled || Frequency == CloudBackupFrequency.Manual)
-            return false;
-        if (lastSuccessfulBackup is null)
-            return now.TimeOfDay >= LocalScheduledTime.ToTimeSpan() &&
-                (Frequency != CloudBackupFrequency.Weekly || now.DayOfWeek == WeeklyDay);
-        DateTimeOffset last = lastSuccessfulBackup.Value.ToLocalTime();
-        DateTimeOffset current = now.ToLocalTime();
-        if (Frequency == CloudBackupFrequency.Every12Hours)
-            return current - last >= TimeSpan.FromHours(12);
-        if (Frequency == CloudBackupFrequency.Daily)
-            return current.Date > last.Date &&
-                current.TimeOfDay >= LocalScheduledTime.ToTimeSpan();
-        // At most one scheduled weekly backup per day; a missed backup runs at
-        // the first eligible check after the configured weekly day/time.
-        DateTime scheduled = current.Date.AddDays(-((7 + (int)current.DayOfWeek - (int)WeeklyDay) % 7))
-            .Add(LocalScheduledTime.ToTimeSpan());
-        return current.DateTime >= scheduled && last.DateTime < scheduled;
+        return CloudBackupSchedulePolicy.IsDue(
+            AutomaticEnabled, Frequency, LocalScheduledTime, WeeklyDay,
+            now.ToLocalTime().DateTime,
+            lastSuccessfulBackup?.ToLocalTime().DateTime);
     }
-}
-
-internal enum CloudBackupFrequency
-{
-    Manual = 0,
-    Every12Hours = 1,
-    Daily = 2,
-    Weekly = 3
 }
 
 internal static class CloudBackupSettings
