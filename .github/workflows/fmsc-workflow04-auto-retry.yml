@@ -22,7 +22,10 @@ jobs:
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.event == 'workflow_dispatch' &&
       github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.actor.login == 'farhan2166-creator' &&
+      github.repository_id == '1412760928' &&
+      github.repository_owner_id == '316891609' &&
+      github.event.workflow_run.repository.id == 1412760928 &&
+      github.event.workflow_run.actor.id == 316891609 &&
       github.event.workflow_run.run_attempt < 3
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -38,17 +41,19 @@ jobs:
           EVENT_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         run: |
           set -euo pipefail
-          repo='farhan2166-creator/FMSC-Source'
+          repo="$GITHUB_REPOSITORY"
+          [[ "$GITHUB_REPOSITORY_ID" == '1412760928' && "$GITHUB_REPOSITORY_OWNER_ID" == '316891609' ]] || exit 1
           api="repos/$repo"
 
           # Use the authenticated current run, not untrusted webhook text.
           run="$(gh api "$api/actions/runs/$RUN_ID")"
           if ! jq -e --argjson attempt "$EVENT_ATTEMPT" '
-              .repository.full_name == "farhan2166-creator/FMSC-Source" and
+              .repository.id == 1412760928 and
+              .repository.owner.id == 316891609 and
               .path == ".github/workflows/fmsc-windows-download.yml" and
               .event == "workflow_dispatch" and
               .head_branch == "main" and
-              .actor.login == "farhan2166-creator" and
+              .actor.id == 316891609 and
               .status == "completed" and
               .conclusion == "failure" and
               .run_attempt == $attempt and
