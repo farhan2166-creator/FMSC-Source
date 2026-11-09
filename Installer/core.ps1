@@ -1441,6 +1441,12 @@ function Invoke-FmscRollbackFailedUpdate {
     if ((Convert-ToDbVersion (Get-DatabaseVersion)) -ne $record.BeforeSchema) {
         throw 'Original database schema not verified; previous application will not be activated.'
     }
+    # A SQL restore can finish but leave SINGLE_USER enabled if the final
+    # ALTER fails. Never declare the old app usable in that state.
+    $dbState = (Invoke-SqlMaster -Query "SET NOCOUNT ON; SELECT state_desc + '/' + user_access_desc FROM sys.databases WHERE name=N'$DatabaseName';") -join ' '
+    if ($dbState -notmatch 'ONLINE/MULTI_USER') {
+        throw "Database is not ONLINE/MULTI_USER after rollback ($dbState). Recovery remains pending."
+    }
     $record.LastSchema = [int]$record.BeforeSchema
     Save-FmscRecoveryJournal $script:RecoveryRoot $record
     if ($hasRollback) {
@@ -2193,13 +2199,18 @@ catch {
         $script:UpdateBar.Value = 0
         [Windows.Forms.Application]::DoEvents()
     }
+    $previousApplicationLocation = if (Test-Path -LiteralPath (Join-Path $AppDir 'FMSC_SMS.exe') -PathType Leaf) {
+        $AppDir
+    } elseif (Test-Path -LiteralPath (Join-Path $AppRollbackDir 'FMSC_SMS.exe') -PathType Leaf) {
+        $AppRollbackDir
+    } else { 'Not verified - recovery required' }
     if ($PreparedRoot) {
         [Windows.Forms.MessageBox]::Show(
             "Update could not be completed. FMSC has not been restarted." + [Environment]::NewLine +
             [Environment]::NewLine + $_.Exception.Message + [Environment]::NewLine +
             [Environment]::NewLine + $recoveryOutcome + [Environment]::NewLine +
             [Environment]::NewLine + "Log: $LogFile" + [Environment]::NewLine +
-            "Previous application: $AppRollbackDir" + [Environment]::NewLine +
+            "Previous application location: $previousApplicationLocation" + [Environment]::NewLine +
             "Database backup: $RecoveryBackupPath",
             'FMSC - Update Needs Attention', 'OK', 'Error') | Out-Null
     } elseif ($ShowInstallerWindow) {
@@ -2208,7 +2219,7 @@ catch {
             [Environment]::NewLine + $_.Exception.Message + [Environment]::NewLine +
             [Environment]::NewLine + $recoveryOutcome + [Environment]::NewLine +
             [Environment]::NewLine + "Installer log: $LogFile" + [Environment]::NewLine +
-            "Previous application: $AppRollbackDir" + [Environment]::NewLine +
+            "Previous application location: $previousApplicationLocation" + [Environment]::NewLine +
             "Database backup: $RecoveryBackupPath",
             'FMSC - Setup Needs Attention', 'OK', 'Error') | Out-Null
     } else { Read-Host '  Press ENTER to close' }
