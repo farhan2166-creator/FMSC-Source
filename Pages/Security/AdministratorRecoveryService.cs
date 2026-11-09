@@ -96,15 +96,7 @@ internal static class AdministratorRecoveryService
         {
             byte[] fingerprint = DeviceFingerprint();
             using var cn = OpenApprovedLocalDatabase();
-            using var command = new SqlCommand(
-                """
-                IF NOT EXISTS(SELECT 1 FROM dbo.AdministratorRecoveryHost WITH(UPDLOCK,HOLDLOCK) WHERE HostId=1)
-                    INSERT dbo.AdministratorRecoveryHost(HostId,DevicePublicKeySha256,WindowsSid)
-                    VALUES(1,@Fingerprint,@Sid);
-                """, cn);
-            command.Parameters.Add("@Fingerprint", SqlDbType.Binary, 32).Value = fingerprint;
-            command.Parameters.Add("@Sid", SqlDbType.NVarChar, 184).Value = WindowsSid();
-            command.ExecuteNonQuery();
+            AdministratorRecoverySql.RegisterHost(cn, fingerprint, WindowsSid());
             CryptographicOperations.ZeroMemory(fingerprint);
         }
         catch (Exception ex)
@@ -154,76 +146,8 @@ internal static class AdministratorRecoveryService
         byte[] fingerprint, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        string sid = WindowsSid();
-        byte[] salt = RandomNumberGenerator.GetBytes(32);
-        byte[] hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100_000, HashAlgorithmName.SHA512, 64);
-        try
-        {
-            using var cn = OpenApprovedLocalDatabase();
-            using var transaction = cn.BeginTransaction(IsolationLevel.Serializable);
-            try
-            {
-                using var command = new SqlCommand(
-                    """
-                    SET NOCOUNT ON;
-                    IF NOT EXISTS
-                       (SELECT 1 FROM dbo.AdministratorRecoveryHost WITH(UPDLOCK,HOLDLOCK)
-                        WHERE HostId=1 AND DevicePublicKeySha256=@Fingerprint AND WindowsSid=@Sid)
-                        THROW 51180,'This database has no matching Administrator recovery host registration. Sign in as an Administrator on the original database host to register it.',1;
-
-                    DECLARE @AdminCount int, @AdminId int, @PreviousUsername nvarchar(100);
-                    SELECT @AdminCount=COUNT(*)
-                    FROM dbo.Users U WITH(UPDLOCK,HOLDLOCK)
-                    WHERE EXISTS(SELECT 1 FROM dbo.Roles R
-                                 WHERE R.RoleId=U.RoleId AND R.RoleName=N'Administrator')
-                       OR EXISTS(SELECT 1 FROM dbo.UserRoles UR JOIN dbo.Roles R ON R.RoleId=UR.RoleId
-                                 WHERE UR.UserId=U.UserId AND R.RoleName=N'Administrator');
-                    IF @AdminCount<>1
-                        THROW 51181,'Recovery requires exactly one protected Administrator account. No changes were made.',1;
-
-                    SELECT @AdminId=U.UserId,@PreviousUsername=U.Username
-                    FROM dbo.Users U WITH(UPDLOCK,HOLDLOCK)
-                    WHERE EXISTS(SELECT 1 FROM dbo.Roles R
-                                 WHERE R.RoleId=U.RoleId AND R.RoleName=N'Administrator')
-                       OR EXISTS(SELECT 1 FROM dbo.UserRoles UR JOIN dbo.Roles R ON R.RoleId=UR.RoleId
-                                 WHERE UR.UserId=U.UserId AND R.RoleName=N'Administrator');
-                    IF EXISTS(SELECT 1 FROM dbo.Users WITH(UPDLOCK,HOLDLOCK)
-                              WHERE Username=@Username AND UserId<>@AdminId)
-                        THROW 51182,'That username is already used by another account. Choose a different name.',1;
-
-                    UPDATE dbo.Users
-                       SET Username=@Username,PasswordHash=@Hash,PasswordSalt=@Salt,
-                           MustChangePassword=0,FailedLoginCount=0,LockedUntil=NULL,
-                           UpdatedAt=SYSDATETIME()
-                     WHERE UserId=@AdminId;
-                    IF @@ROWCOUNT<>1 THROW 51183,'Administrator identity changed during recovery. No changes were made.',1;
-
-                    INSERT dbo.AdministratorRecoveryEvents
-                        (TargetUserId,PreviousUsername,NewUsername,DevicePublicKeySha256,
-                         WindowsSid,WindowsComputer)
-                    VALUES(@AdminId,@PreviousUsername,@Username,@Fingerprint,@Sid,@Computer);
-                    """, cn, transaction);
-                command.CommandTimeout = 45;
-                command.Parameters.Add("@Username", SqlDbType.NVarChar, 100).Value = username;
-                command.Parameters.Add("@Hash", SqlDbType.VarBinary, 64).Value = hash;
-                command.Parameters.Add("@Salt", SqlDbType.VarBinary, 32).Value = salt;
-                command.Parameters.Add("@Fingerprint", SqlDbType.Binary, 32).Value = fingerprint;
-                command.Parameters.Add("@Sid", SqlDbType.NVarChar, 184).Value = sid;
-                command.Parameters.Add("@Computer", SqlDbType.NVarChar, 128).Value = Environment.MachineName;
-                command.ExecuteNonQuery();
-                token.ThrowIfCancellationRequested();
-                transaction.Commit();
-            }
-            catch
-            {
-                try { transaction.Rollback(); } catch (InvalidOperationException) { }
-                throw;
-            }
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(hash);
-            CryptographicOperations.ZeroMemory(salt);
-        }
+        using var cn = OpenApprovedLocalDatabase();
+        AdministratorRecoverySql.ResetOnVerifiedHost(cn, username, password,
+            fingerprint, WindowsSid(), Environment.MachineName, token);
     }
 }
