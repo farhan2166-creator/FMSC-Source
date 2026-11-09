@@ -52,6 +52,29 @@ internal static partial class Program
             && printed.Rows[0].Field<string>("Remarks")=="a sentence stays unchanged.",
             "Printing preserves stored snapshots, identifiers and prose");
 
+        using (var image=new Bitmap(220,60))
+        using (var bytes=new MemoryStream())
+        {
+            image.Save(bytes,System.Drawing.Imaging.ImageFormat.Png);
+            foreach(string template in new[]{"BankAccountOpeningCertificate","CharacterCertificate",
+                "CollegeLeaveCertificate","DateOfBirthCertificate","LeaveCertificate","NoObjectionCertificate",
+                "ProvisionalCertificate","RegularLecturerCertificate","RegularStudentCertificate","SportsCertificate"})
+            {
+                string path=Path.Combine(AppContext.BaseDirectory,"Reports",template+".rdlc");
+                string original=File.ReadAllText(path);
+                Check(CertificateSignature.Apply(original,bytes.ToArray(),"image/png",false)==original,
+                    template+": disabled principal signature preserves existing layout");
+                string signed=CertificateSignature.Apply(original,bytes.ToArray(),"image/png",true);
+                var xml=XDocument.Parse(signed);
+                XNamespace ns=xml.Root!.Name.Namespace;
+                Check(xml.Descendants(ns+"Image").Count(item=>(string?)item.Attribute("Name")==
+                    "PrincipalSignaturePrintImage")==1 &&
+                    xml.Descendants(ns+"EmbeddedImage").Any(item=>(string?)item.Attribute("Name")==
+                    "PrincipalSignaturePrintAsset"),
+                    template+": enabled principal signature is embedded over the existing signing line");
+            }
+        }
+
         string folder=Path.GetFullPath("artifacts/gender-certificates");Directory.CreateDirectory(folder);
         using var profile=new DataTable();profile.Columns.Add("SchoolName");var school=profile.Rows.Add("fictional school");
         foreach(string name in new[]{"BankAccountOpeningCertificate","CharacterCertificate","CollegeLeaveCertificate",
