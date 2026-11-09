@@ -1,5 +1,10 @@
 namespace FMSC_SMS.Core;
 
+internal sealed record CertificatePaperOptions(
+    CertificatePaperMode SelectedMode,
+    Func<CertificatePaperMode, string> BuildDefinition,
+    Action<CertificatePaperMode> SaveDefault);
+
 /// <summary>
 /// Provides one consistent, user-friendly preview window for every RDLC report.
 /// Reports open fitted to the page; users can still resize or maximize the window.
@@ -15,7 +20,8 @@ internal static class RdlcReportPreview
         bool fitPageWidth = false,
         string? reportDefinition = null,
         bool enableExternalImages = false,
-        bool allowMultiplePages = true)
+        bool allowMultiplePages = true,
+        CertificatePaperOptions? certificatePaper = null)
     {
         title = ReportDocumentNaming.PreviewTitle(title, reportPath, data);
         string suggestedExportName = ReportDocumentNaming.DocumentExportFileName(title, reportPath, data);
@@ -60,7 +66,16 @@ internal static class RdlcReportPreview
         using var overview = new ReportPageOverview { Visible = false };
         surface.Controls.Add(viewer); surface.Controls.Add(overview);
         Control toolbar = CreateToolbar(form, viewer, fitPageWidth, out var interactions,
-            surface, overview, allowMultiplePages, suggestedExportName);
+            surface, overview, allowMultiplePages, suggestedExportName, certificatePaper,
+            revisedDefinition => {
+                viewer.LocalReport.LoadReportDefinition(new StringReader(revisedDefinition));
+                viewer.LocalReport.DataSources.Clear();
+                viewer.LocalReport.DataSources.Add(
+                    new Microsoft.Reporting.WinForms.ReportDataSource(dataSourceName, printData));
+                viewer.LocalReport.EnableExternalImages = true;
+                viewer.LocalReport.DisplayName = title;
+                viewer.RefreshReport();
+            });
         using var interactionLifetime = interactions;
         form.Controls.Add(surface);
         form.Controls.Add(toolbar);
@@ -95,7 +110,8 @@ internal static class RdlcReportPreview
         Microsoft.Reporting.WinForms.ReportViewer viewer,
         bool fitPageWidth,
         out ReportPreviewInteractionFilter interactions,
-        Control surface, ReportPageOverview overview, bool allowMultiplePages, string suggestedExportName)
+        Control surface, ReportPageOverview overview, bool allowMultiplePages, string suggestedExportName,
+        CertificatePaperOptions? certificatePaper, Action<string> reloadCertificateDefinition)
     {
         var toolbar = new FlowLayoutPanel {
             Dock = DockStyle.Top,
@@ -218,6 +234,47 @@ internal static class RdlcReportPreview
             return Task.Run(() => ReportPageSearchIndex.FromPdf(pdf));
         }, NavigateTo);
         toolbar.Controls.Add(search);
+        ModernComboBox? certificatePaperChoice = null;
+        CertificatePaperMode displayedPaperMode = certificatePaper?.SelectedMode ?? CertificatePaperMode.PlainPaper;
+        if (certificatePaper is not null)
+        {
+            certificatePaperChoice = new ModernComboBox {
+                Width = AppScale.Scale(286),
+                Height = AppMetrics.InputControlHeight,
+                Margin = new Padding(0, 0, AppScale.Scale(8), 0),
+                AccessibleName = "Certificate paper"
+            };
+            certificatePaperChoice.Items.AddRange(new object[] {
+                "Plain paper — print header and footer",
+                "Preprinted letterhead — content only"
+            });
+            certificatePaperChoice.SelectedIndex = displayedPaperMode == CertificatePaperMode.PlainPaper ? 0 : 1;
+            certificatePaperChoice.SelectionChangeCommitted += (_, _) => {
+                var requested = certificatePaperChoice.SelectedIndex == 0
+                    ? CertificatePaperMode.PlainPaper : CertificatePaperMode.PreprintedLetterhead;
+                if (requested == displayedPaperMode) return;
+                bool changed = false;
+                Execute("change certificate paper", () => {
+                    string nextDefinition = certificatePaper.BuildDefinition(requested);
+                    reloadCertificateDefinition(nextDefinition);
+                    displayedPaperMode = requested;
+                    changed = true;
+                    overview.ClearPages();
+                    search.ResetIndex();
+                    try { certificatePaper.SaveDefault(requested); }
+                    catch (Exception ex) {
+                        AppExceptionHandler.LogNonFatal(ex, "Saving certificate paper preference");
+                        ModernMessageDialog.Show(form,
+                            "The paper mode changed for this preview, but the default could not be saved.\\n\\n"
+                            + ex.GetBaseException().Message,
+                            form.Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                });
+                if (!changed)
+                    certificatePaperChoice.SelectedIndex = displayedPaperMode == CertificatePaperMode.PlainPaper ? 0 : 1;
+            };
+            toolbar.Controls.Add(certificatePaperChoice);
+        }
         void ApplyPageView()
         {
             bool multiple = pageView?.SelectedIndex == 1;
@@ -391,6 +448,7 @@ internal static class RdlcReportPreview
             print.Enabled = printCurrent.Enabled = pageSetup.Enabled = exportPdf.Enabled = zoom.Enabled = pageNumber.Enabled = go.Enabled = ready;
             printPageMenu.Enabled = ready;
             if (pageView is not null) pageView.Enabled = ready;
+            if (certificatePaperChoice is not null) certificatePaperChoice.Enabled = ready;
             if (!ready) { previous.Enabled = next.Enabled = false; page.Text = "Loading..."; }
         }
         SetReady(false);

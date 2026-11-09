@@ -193,31 +193,48 @@ internal static class CertificateUi
         IReadOnlyList<string>? provisionalSubjects = null)
     {
         using var printable=PrintData(reportPath,data);
-        string? definition = null;
-        if (!CertificateLetterhead.UsesPreprintedPad(reportPath))
+        // Defaults are per certificate. SLC and CLC start in their existing pad mode.
+        var selectedMode = CertificateLetterhead.PreferredMode(reportPath);
+        DataRow? school = null;
+        bool schoolLoaded = false;
+        using var signatureSettings = DatabaseHelper.QueryUser("GetPrintedCertificateSignature");
+        var signature = signatureSettings.Rows.Count > 0 ? signatureSettings.Rows[0] : null;
+        bool printSignature = signature is not null
+            && signature["PrintPrincipalSignature"] is not DBNull
+            && Convert.ToBoolean(signature["PrintPrincipalSignature"]);
+        byte[]? signatureImage = printSignature ? signature?["PrincipalSignatureImage"] as byte[] : null;
+        string? signatureContentType = signature is null ? null : Convert.ToString(signature["PrincipalSignatureContentType"]);
+
+        string BuildDefinition(CertificatePaperMode mode)
         {
-            DataTable profile = DatabaseHelper.QueryUser("GetSchoolProfile");
-            definition = CertificateLetterhead.Definition(reportPath, profile.Rows.Count > 0 ? profile.Rows[0] : null,
-                data.Rows.Count > 0 ? data.Rows[0] : null, provisionalSubjects);
+            if (mode == CertificatePaperMode.PlainPaper && !schoolLoaded)
+            {
+                using var profile = DatabaseHelper.QueryUser("GetSchoolProfile");
+                school = profile.Rows.Count > 0 ? profile.Rows[0] : null;
+                schoolLoaded = true;
+            }
+            string definition = CertificateLetterhead.Definition(reportPath, school,
+                data.Rows.Count > 0 ? data.Rows[0] : null, provisionalSubjects, mode);
+            return signatureImage is { Length: > 0 }
+                ? CertificateSignature.Apply(definition, signatureImage, signatureContentType, true)
+                : definition;
         }
-        // School Profile controls one simple on/off principal signature for all certificates.
-        DataTable signatureSettings = DatabaseHelper.QueryUser("GetPrintedCertificateSignature");
-        if (signatureSettings.Rows.Count > 0)
-        {
-            DataRow signature = signatureSettings.Rows[0];
-            bool enabled = signature["PrintPrincipalSignature"] is not DBNull
-                && Convert.ToBoolean(signature["PrintPrincipalSignature"]);
-            if (enabled && signature["PrincipalSignatureImage"] is byte[] bytes)
-                definition = CertificateSignature.Apply(definition ?? File.ReadAllText(reportPath), bytes,
-                    Convert.ToString(signature["PrincipalSignatureContentType"]), true);
-        }
+
         RdlcReportPreview.Show(
             owner,
             title,
             reportPath,
             dataSourceName,
             printable,
-            reportDefinition: definition,
-            enableExternalImages: definition is not null);
+            reportDefinition: BuildDefinition(selectedMode),
+            enableExternalImages: true,
+            certificatePaper: new CertificatePaperOptions(
+                selectedMode,
+                BuildDefinition,
+                mode =>
+                {
+                    var saved = ReportLayoutStore.SetPreference(CertificateLetterhead.PreferenceKey(reportPath), mode.ToString());
+                    if (!saved.Succeeded) throw saved.Error ?? new IOException("Unable to save certificate paper preference.");
+                }));
     }
 }

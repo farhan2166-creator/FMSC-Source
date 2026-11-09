@@ -2,15 +2,53 @@ using System.Xml.Linq;
 
 namespace FMSC_SMS.Core;
 
+internal enum CertificatePaperMode { PlainPaper, PreprintedLetterhead }
+
 internal static class CertificateLetterhead
 {
     internal static bool UsesPreprintedPad(string path) =>
         Path.GetFileName(path) is "LeaveCertificate.rdlc" or "CollegeLeaveCertificate.rdlc";
 
-    internal static string Definition(string path, DataRow? profile, DataRow? certificate = null, IReadOnlyList<string>? provisionalSubjects = null)
+    internal static CertificatePaperMode DefaultMode(string path) =>
+        UsesPreprintedPad(path) ? CertificatePaperMode.PreprintedLetterhead : CertificatePaperMode.PlainPaper;
+
+    internal static string PreferenceKey(string path) =>
+        "CertificatePaper." + Path.GetFileNameWithoutExtension(path);
+
+    internal static CertificatePaperMode PreferredMode(string path) =>
+        ReportLayoutStore.GetPreference(PreferenceKey(path)) switch
+        {
+            "PlainPaper" => CertificatePaperMode.PlainPaper,
+            "PreprintedLetterhead" => CertificatePaperMode.PreprintedLetterhead,
+            _ => DefaultMode(path)
+        };
+
+    internal static string Definition(string path, DataRow? profile, DataRow? certificate = null, IReadOnlyList<string>? provisionalSubjects = null, CertificatePaperMode mode = CertificatePaperMode.PlainPaper)
     {
         var document = XDocument.Load(path);
         XNamespace ns = document.Root!.Name.Namespace;
+        var page = document.Root.Element(ns + "Page")!;
+        if (mode == CertificatePaperMode.PreprintedLetterhead)
+        {
+            // The approved SLC/CLC pad template is passed through byte-for-byte unchanged.
+            if (UsesPreprintedPad(path)) return File.ReadAllText(path);
+            page.Element(ns + "PageHeader")?.Remove();
+            page.Element(ns + "PageFooter")?.Remove();
+            page.SetElementValue(ns + "TopMargin", "2in");
+            page.SetElementValue(ns + "BottomMargin", "2.5in");
+        }
+        else
+        {
+            if (UsesPreprintedPad(path))
+            {
+                // Reuse the existing printed stationery artwork without editing either leave template.
+                var stationery = XDocument.Load(Path.Combine(Path.GetDirectoryName(path)!, "CharacterCertificate.rdlc"));
+                var stationeryPage = stationery.Root!.Element(ns + "Page")!;
+                page.AddFirst(new XElement(stationeryPage.Element(ns + "PageHeader")!));
+                page.Element(ns + "PageHeader")!.AddAfterSelf(new XElement(stationeryPage.Element(ns + "PageFooter")!));
+                page.SetElementValue(ns + "TopMargin", "0.4in");
+                page.SetElementValue(ns + "BottomMargin", "0.4in");
+            }
         string assetDirectory = Path.Combine(AppContext.BaseDirectory, "Assets");
         foreach (var item in new[] { ("CertificateHeaderImage", "header.png") })
         {
@@ -42,6 +80,7 @@ internal static class CertificateLetterhead
         {
             var textbox = document.Descendants(ns + "Textbox").Single(element => (string?)element.Attribute("Name") == item.Item1);
             textbox.Descendants(ns + "Value").Single().Value = item.Item2;
+        }
         }
         if (Path.GetFileName(path) == "ProvisionalCertificate.rdlc" && certificate is not null)
         {
