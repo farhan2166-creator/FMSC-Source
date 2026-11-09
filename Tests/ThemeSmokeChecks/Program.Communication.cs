@@ -181,7 +181,7 @@ internal static partial class Program
             audience.RectangleToScreen(audience.ClientRectangle),
             targetCard.Content.RectangleToScreen(targetCard.Content.ClientRectangle));
         Check(targetCard.Visible && audience.Visible && audienceField.Visible
-            && audienceField.Dock == DockStyle.Top
+            && audienceField.Dock == DockStyle.Fill
             && audience.Width > 100 && audience.Height > 15
             && visibleInput.Width > 100 && visibleInput.Height > 15,
             "Recipients page visibly renders the Send to selector below its header at dashboard size");
