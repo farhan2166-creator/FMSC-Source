@@ -37,7 +37,7 @@ internal sealed class DatabaseConnectionView : UserControl
     private readonly Func<bool, (bool Connected, string Message, Exception? Failure)> _connect;
     private readonly Action<int>? _checkUpdates;
     private readonly ModernButton _updates = new() { Text = "Open Updates", ThemeRole = "Primary", Visible = false };
-    private int? _olderSchema;
+    private int? _updateSchema;
     private readonly Label _message = new() { Dock = DockStyle.Top, AutoSize = true };
     private readonly Label _status = new() { Dock = DockStyle.Fill, AutoSize = false };
     private readonly ProgressBar _progress = new() { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee };
@@ -54,7 +54,7 @@ internal sealed class DatabaseConnectionView : UserControl
     private bool _canRepair;
 
     internal bool Busy => _busy;
-    internal IButtonControl AcceptAction => _olderSchema.HasValue && _checkUpdates is not null ? _updates : _reconnect;
+    internal IButtonControl AcceptAction => _updateSchema.HasValue && _checkUpdates is not null ? _updates : _reconnect;
     internal IButtonControl CancelAction => _close;
 
     internal DatabaseConnectionView(Form host, Action<DatabaseConnectionView>? connected,
@@ -157,7 +157,7 @@ internal sealed class DatabaseConnectionView : UserControl
         _reconnect.Click += async (_, _) => await ConnectAsync(false);
         _restart.Click += async (_, _) => await ConnectAsync(true);
         _updates.Click += (_, _) => {
-            if (!_busy && _olderSchema is int schema) _checkUpdates?.Invoke(schema);
+            if (!_busy && _updateSchema is int schema) _checkUpdates?.Invoke(schema);
         };
 #if FMSC_LEVEL2
         // This fixture may reconnect, but must never launch the school installer.
@@ -205,7 +205,7 @@ internal sealed class DatabaseConnectionView : UserControl
             if (IsDisposed) return;
             if (result.Connected)
             {
-                SetUpdateAction(null);
+                SetUpdateAction(null, false);
                 _canRestart = true;
                 _canRepair = false;
                 _repair.Visible = false;
@@ -224,9 +224,9 @@ internal sealed class DatabaseConnectionView : UserControl
                 ex);
         }
         finally { if (!IsDisposed) SetBusy(false); }
-        // A connected but outdated database needs the existing updater, not
-        // another connection action. Only transition after releasing Busy.
-        if (!IsDisposed && _olderSchema is int schema) _checkUpdates?.Invoke(schema);
+        // Either version mismatch needs the existing updater, not a connection
+        // restart. Open only after releasing Busy; never install automatically.
+        if (!IsDisposed && _updateSchema is int schema) _checkUpdates?.Invoke(schema);
     }
 
     private static (bool Connected, string Message, Exception? Failure) CheckConnection(bool restart)
@@ -238,16 +238,19 @@ internal sealed class DatabaseConnectionView : UserControl
 
     private void ShowFailure(string message, Exception? failure = null)
     {
-        int? olderSchema = null;
+        int? mismatchedSchema = null;
+        bool databaseNewer = false;
         string requiredVersion = DatabaseHelper.RequiredDatabaseSchemaVersion;
         for (Exception? current = failure; current is not null; current = current.InnerException)
-            if (current is DatabaseCompatibilityException compatibility && compatibility.Failure.IsDatabaseOlder &&
+            if (current is DatabaseCompatibilityException compatibility &&
+                (compatibility.Failure.IsDatabaseOlder || compatibility.Failure.IsDatabaseNewer) &&
                 int.TryParse(compatibility.Failure.FoundVersion, out int schema) && schema >= 0)
             {
-                olderSchema = schema;
+                mismatchedSchema = schema;
+                databaseNewer = compatibility.Failure.IsDatabaseNewer;
                 requiredVersion = compatibility.Failure.RequiredVersion;
             }
-        SetUpdateAction(olderSchema);
+        SetUpdateAction(mismatchedSchema, databaseNewer);
         var guidance = DatabaseConnectionGuidance.Create(message, failure,
 #if FMSC_LEVEL2
             File.Exists(Path.Combine(Level2Target.Root,"database","fixture.mdf")));
@@ -265,22 +268,29 @@ internal sealed class DatabaseConnectionView : UserControl
         _status.Text = guidance.Status;
         _message.Text = guidance.Message;
 #if !FMSC_LEVEL2
-        if (_olderSchema.HasValue && _checkUpdates is not null)
-            _message.Text = $"Your database is connected, but it needs an update before you can sign in.\r\n\r\n" +
-                $"Database schema version: {_olderSchema}. Required by this application: {requiredVersion}.\r\n\r\n" +
-                "Choose Open Updates to return to the updater. Connect to the internet, check for updates, then download the approved release and choose Install Update. " +
-                "FMSC Setup will back up your school data and apply the required database updates.";
+        if (_updateSchema.HasValue && _checkUpdates is not null)
+            _message.Text = databaseNewer
+                ? $"Your database is newer than this application.\r\n\r\n" +
+                  $"Database schema version: {_updateSchema}. Required by this application: {requiredVersion}.\r\n\r\n" +
+                  "Choose Update Application to check for an approved compatible release. " +
+                  "Download and install it through the existing FMSC updater. Do not downgrade or replace your school database."
+                : $"Your database is connected, but it needs an update before you can sign in.\r\n\r\n" +
+                  $"Database schema version: {_updateSchema}. Required by this application: {requiredVersion}.\r\n\r\n" +
+                  "Choose Open Updates to return to the updater. Connect to the internet, check for updates, then download the approved release and choose Install Update. " +
+                  "FMSC Setup will back up your school data and apply the required database updates.";
 #endif
         _details.Text = ConnectionDetails(message + (failure is null ? "" : "\r\n\r\n" + failure));
     }
 
-    private void SetUpdateAction(int? olderSchema)
+    private void SetUpdateAction(int? mismatchedSchema, bool databaseNewer)
     {
 #if FMSC_LEVEL2
-        olderSchema = null;
+        mismatchedSchema = null;
 #endif
-        _olderSchema = olderSchema;
-        bool offerUpdates = olderSchema.HasValue && _checkUpdates is not null;
+        _updateSchema = mismatchedSchema;
+        bool offerUpdates = mismatchedSchema.HasValue && _checkUpdates is not null;
+        _updates.Text = databaseNewer ? "Update Application" : "Open Updates";
+        _updates.Width = TextRenderer.MeasureText(_updates.Text, _updates.Font).Width + AppScale.S(36);
         _updates.Visible = offerUpdates;
         _reconnect.Visible = _restart.Visible = !offerUpdates;
         _host.AcceptButton = AcceptAction;

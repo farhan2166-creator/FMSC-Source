@@ -20,6 +20,7 @@ internal sealed record DatabaseCompatibilityFailure(
             ? found.CompareTo(required) : null;
 
     internal bool IsDatabaseOlder => Issue == DatabaseCompatibilityIssue.SchemaVersion && VersionDirection < 0;
+    internal bool IsDatabaseNewer => Issue == DatabaseCompatibilityIssue.SchemaVersion && VersionDirection > 0;
 
     internal string Title => Issue switch {
         DatabaseCompatibilityIssue.SchemaVersion when VersionDirection < 0 => "Database update required",

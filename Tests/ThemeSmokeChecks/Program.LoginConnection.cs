@@ -50,25 +50,30 @@ internal static partial class Program
             release.Set();
             PumpUntil(() => !view.Busy, "Compatibility check finishes");
             bool older = found == "1";
-            if (older)
             {
                 var automaticUpdater = Descendants(form).OfType<UpdateConnectionForm>().Single();
                 Check(!automaticUpdater.TopLevel && automaticUpdater.TopLevelControl == form && !view.Visible,
-                    "An older database transitions directly into the existing updater without an extra check click");
+                    "Either schema version mismatch opens the existing updater without an extra check click");
+                Check((int)typeof(UpdateConnectionForm).GetField("_installedSchema", fields)!.GetValue(automaticUpdater)! == int.Parse(found),
+                    "The updater receives the actual database schema in both mismatch directions");
                 Descendants(automaticUpdater).OfType<ModernButton>().Single(b => b.Text == "Close").PerformClick();
                 Application.DoEvents();
             }
             Check(status.Text == title && Exposed(status) && Exposed(message), "Compatibility guidance remains exposed after startup layout");
             Check(message.Text.Contains($"version: {found}") && message.Text.Contains("application: 2"), "Main guidance identifies found and required versions");
-            var updates = Descendants(view).OfType<ModernButton>().Single(b => b.Text == "Open Updates");
-            Check(older ? Exposed(updates) && !reconnect.Visible : Exposed(reconnect) && !updates.Visible,
-                "An older database offers updates in place of connection restart actions");
-            Check(older ? ReferenceEquals(form.AcceptButton, updates) : ReferenceEquals(form.AcceptButton, reconnect),
-                "Enter follows the appropriate recovery action");
+            var updates = Descendants(view).OfType<ModernButton>().Single(b =>
+                b.Text == (older ? "Open Updates" : "Update Application"));
+            Check(Exposed(updates) && !reconnect.Visible,
+                "Both database/app version mismatches offer the existing updater, not connection restart");
+            Check(ReferenceEquals(form.AcceptButton, updates),
+                "Enter follows the appropriate updater recovery action");
             if (older)
                 Check(message.Text.Contains("internet") && message.Text.Contains("Install Update") &&
                     message.Text.Contains("back up"), "Startup explains internet access and the installer's backup/migration path");
-            if (older) Capture(form, "database-update-required");
+            else
+                Check(message.Text.Contains("Update Application") && message.Text.Contains("Do not downgrade") &&
+                    message.Text.Contains("compatible release"), "A newer database offers a safe application update, not a database downgrade");
+            Capture(form, older ? "database-update-required" : "application-update-required");
             Check(!((Control)typeof(DatabaseConnectionView).GetField("_restart", fields)!.GetValue(view)!).Enabled &&
                 !((Control)typeof(DatabaseConnectionView).GetField("_repair", fields)!.GetValue(view)!).Visible,
                 "Version failures cannot suggest engine restart or repair");
@@ -78,8 +83,7 @@ internal static partial class Program
             typeof(LinkLabel).GetMethod("OnLinkClicked", fields)!.Invoke(details,
                 new object[] { new LinkLabelLinkClickedEventArgs(details.Links[0]) });
             Application.DoEvents();
-            Check(Exposed(status) && Exposed(older ? updates : reconnect), "Expanded details preserve the visible connection stage");
-            if (older)
+            Check(Exposed(status) && Exposed(updates), "Expanded details preserve the visible update action");
             {
                 Size connectionSize = form.ClientSize;
                 updates.PerformClick(); Application.DoEvents();
@@ -88,9 +92,9 @@ internal static partial class Program
                     "The existing updater replaces connection content inside the same window");
                 Check(Exposed(Descendants(embedded).OfType<ModernButton>().Single(b => b.Text == "Check for Updates")),
                     "The embedded updater's check action is exposed");
-                Check((int)typeof(UpdateConnectionForm).GetField("_installedSchema", fields)!.GetValue(embedded)! == 1,
-                    "The updater receives the actual older database version without querying SQL");
-                Capture(form, "embedded-updater");
+                Check((int)typeof(UpdateConnectionForm).GetField("_installedSchema", fields)!.GetValue(embedded)! == int.Parse(found),
+                    "The updater retains the observed database version without querying SQL");
+                Capture(form, older ? "embedded-database-updater" : "embedded-application-updater");
                 Descendants(embedded).OfType<ModernButton>().Single(b => b.Text == "Computer access").PerformClick();
                 Application.DoEvents();
                 Check(embedded.Location == Point.Empty && embedded.Size == embedded.Parent!.ClientSize,
