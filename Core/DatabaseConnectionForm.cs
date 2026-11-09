@@ -272,12 +272,14 @@ internal sealed class DatabaseConnectionView : UserControl
             _message.Text = databaseNewer
                 ? $"Your database is newer than this application.\r\n\r\n" +
                   $"Database schema version: {_updateSchema}. Required by this application: {requiredVersion}.\r\n\r\n" +
-                  "Choose Update Application to check for an approved compatible release. " +
-                  "Download and install it through the existing FMSC updater. Do not downgrade or replace your school database."
+                  "Choose Update Application to check for a published compatible release. " +
+                  "If one is available, download it and choose Install Update. " +
+                  "If none is published, contact your administrator for a compatible application release. Do not downgrade or replace your school database."
                 : $"Your database is connected, but it needs an update before you can sign in.\r\n\r\n" +
                   $"Database schema version: {_updateSchema}. Required by this application: {requiredVersion}.\r\n\r\n" +
-                  "Choose Open Updates to return to the updater. Connect to the internet, check for updates, then download the approved release and choose Install Update. " +
-                  "FMSC Setup will back up your school data and apply the required database updates.";
+                  "Connect to the internet and choose Open Updates to check whether a newer approved release is available. " +
+                  "If one is offered, download it and choose Install Update; FMSC Setup will back up your school data before applying the required migrations. " +
+                  "If no newer release is published, ask your administrator to arrange the database update. Do not replace your school database.";
 #endif
         _details.Text = ConnectionDetails(message + (failure is null ? "" : "\r\n\r\n" + failure));
     }
