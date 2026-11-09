@@ -200,6 +200,17 @@ internal static class CertificateUi
             definition = CertificateLetterhead.Definition(reportPath, profile.Rows.Count > 0 ? profile.Rows[0] : null,
                 data.Rows.Count > 0 ? data.Rows[0] : null, provisionalSubjects);
         }
+        // School Profile controls one simple on/off principal signature for all certificates.
+        DataTable signatureSettings = DatabaseHelper.QueryUser("GetPrintedCertificateSignature");
+        if (signatureSettings.Rows.Count > 0)
+        {
+            DataRow signature = signatureSettings.Rows[0];
+            bool enabled = signature["PrintPrincipalSignature"] is not DBNull
+                && Convert.ToBoolean(signature["PrintPrincipalSignature"]);
+            if (enabled && signature["PrincipalSignatureImage"] is byte[] bytes)
+                definition = CertificateSignature.Apply(definition ?? File.ReadAllText(reportPath), bytes,
+                    Convert.ToString(signature["PrincipalSignatureContentType"]), true);
+        }
         RdlcReportPreview.Show(
             owner,
             title,
