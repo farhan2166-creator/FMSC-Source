@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Principal;
 using FMSC_SMS.Core;
 
 namespace FMSC_SMS.Services.Backup;
@@ -11,7 +12,9 @@ namespace FMSC_SMS.Services.Backup;
 /// </summary>
 internal static class CloudBackupTaskSchedule
 {
-    private const string TaskName = "FMSC Cloud Backup";
+    private static string TaskName => "FMSC Cloud Backup " +
+        (WindowsIdentity.GetCurrent().User?.Value
+         ?? throw new UnauthorizedAccessException("Cannot identify scheduled backup owner."));
 
     internal static async Task ConfigureAsync(bool enabled, CancellationToken token = default)
     {
@@ -27,15 +30,24 @@ internal static class CloudBackupTaskSchedule
         var start = new ProcessStartInfo {
             FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "schtasks.exe"),
             UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true
+            RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true
         };
         foreach (string part in arguments) start.ArgumentList.Add(part);
         using var process = Process.Start(start)
             ?? throw new IOException("Windows Task Scheduler could not start.");
+        // No interactive Windows-password prompts may block FMSC settings.
+        process.StandardInput.Close();
         // Read both outputs so a noisy failure cannot deadlock the child process.
         Task<string> stdout = process.StandardOutput.ReadToEndAsync(token);
         Task<string> stderr = process.StandardError.ReadToEndAsync(token);
-        await process.WaitForExitAsync(token);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        try { await process.WaitForExitAsync(timeout.Token); }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            throw new InvalidOperationException("Windows scheduled-task registration did not finish without prompting for credentials.");
+        }
         string output = await stdout, error = await stderr;
         if (process.ExitCode != 0)
         {
