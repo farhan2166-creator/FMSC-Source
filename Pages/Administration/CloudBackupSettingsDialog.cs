@@ -13,6 +13,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
     private readonly CheckBox google = new() { Text = "Upload encrypted copy to Google Drive", AutoSize = true };
     private readonly CheckBox dropbox = new() { Text = "Upload encrypted copy to Dropbox", AutoSize = true };
     private readonly ComboBox frequency = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 210 };
+    private readonly ComboBox weeklyDay = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 210 };
     private readonly DateTimePicker scheduleTime = new() {
         Format = DateTimePickerFormat.Custom, CustomFormat = "hh:mm tt", ShowUpDown = true, Width = 160
     };
@@ -39,6 +40,8 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         });
         frequency.SelectedIndex = (int)previous.Frequency;
         scheduleTime.Value = DateTime.Today.Add(previous.LocalScheduledTime.ToTimeSpan());
+        weeklyDay.Items.AddRange(Enum.GetNames<DayOfWeek>());
+        weeklyDay.SelectedIndex = (int)previous.WeeklyDay;
         automatic.Checked = previous.AutomaticEnabled;
         google.Checked = previous.GoogleDriveEnabled;
         dropbox.Checked = previous.DropboxEnabled;
@@ -55,6 +58,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         AddRow(body, "Automatic scheduling", automatic);
         AddRow(body, "Frequency", frequency);
         AddRow(body, "Backup time (computer local)", scheduleTime);
+        AddRow(body, "Weekly backup day", weeklyDay);
         AddRow(body, "Maximum automatic local backups", localMax);
         AddRow(body, "Google Drive", google);
         AddRow(body, "Google Drive maximum cloud backups", googleMax);
@@ -182,7 +186,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                 GoogleDriveEnabled = google.Checked, DropboxEnabled = dropbox.Checked,
                 Frequency = (CloudBackupFrequency)frequency.SelectedIndex,
                 LocalScheduledTime = TimeOnly.FromDateTime(scheduleTime.Value),
-                WeeklyDay = previous.WeeklyDay,
+                WeeklyDay = (DayOfWeek)weeklyDay.SelectedIndex,
                 MaximumLocalBackups = (int)localMax.Value,
                 MaximumGoogleDriveBackups = (int)googleMax.Value,
                 MaximumDropboxBackups = (int)dropboxMax.Value
