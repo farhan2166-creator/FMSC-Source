@@ -28,6 +28,17 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         Dock = DockStyle.Fill, Font = AppTheme.ButtonFont,
         ForeColor = AppTheme.HeadingText, TextAlign = ContentAlignment.MiddleLeft
     };
+    private readonly CheckBox showExcluded = new()
+    {
+        Text = "Show excluded records (not sendable)",
+        Dock = DockStyle.Top, Height = AppScale.Scale(32),
+        ForeColor = AppTheme.MutedText, Padding = new Padding(12, 0, 0, 0)
+    };
+    private readonly Label sampleMessage = new()
+    {
+        Dock = DockStyle.Bottom, Height = AppScale.Scale(78), AutoEllipsis = true,
+        ForeColor = AppTheme.Text, Padding = new Padding(12, 8, 12, 4)
+    };
     private readonly Label summary = new()
     {
         Dock = DockStyle.Top, Height = 94, AutoEllipsis = true,
@@ -68,7 +79,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     // SQL-free construction supports synthetic Windows UI tests.
     internal CommunicationCenterPage(bool initialize)
-        : base("Communication Center", "Free WhatsApp: Settings > Use Free WhatsApp (admin), then preview and open chats.")
+        : base("Communication Center", "Optional school messages. Manual WhatsApp opens prepared chats; you press Send yourself.")
     {
         audience.Items.AddRange(new object[]
         {
@@ -81,6 +92,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         channel.SelectedIndex = 1;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
+        foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
+            composeTemplates.Add(new TemplateChoice(-builtIn.index - 1, builtIn.item.Name,
+                "WhatsApp", builtIn.item.Purpose, builtIn.item.Body));
 
         campusField = HumanUi.Field("Campus", campus);
         classField = HumanUi.Field("Class", cls);
@@ -88,7 +102,6 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         staffField = HumanUi.Field("Staff member", staff);
 
         cards.Add(TargetCard());
-        cards.Add(ComposeCard());
         cards.Add(PreviewCard());
         cards.Add(ConfirmCard());
         cards.Add(HistoryCard());
@@ -115,6 +128,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         }, "Secondary");
         next = AddBusyAction("Continue", ContinueAsync, "Primary");
         confirm = AddBusyAction("Open WhatsApp Chats", StartManualHandoffAsync, "Primary");
+        confirm.MinimumSize = new Size(AppScale.Scale(230), AppMetrics.ButtonHeight);
+        confirm.Width = AppScale.Scale(230);
         // Only the operator-controlled handoff may be activated in this version.
         confirm.Enabled = false;
         historyButton = AddBusyAction("History", LoadHistoryAsync, "Secondary");
@@ -154,7 +169,12 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
         ChangeAudienceFields();
         SetStep(0);
-        if (initialize) Defer(BindLookupsAsync);
+        RefreshTemplateChoices();
+        if (initialize)
+        {
+            Defer(BindLookupsAsync);
+            Defer(LoadComposeTemplatesAsync);
+        }
         Disposed += (_, _) =>
         {
             previewTable?.Dispose();
@@ -166,57 +186,49 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     private HumanCard TargetCard()
     {
-        var card = HumanUi.Card("1. Select Recipients",
-            "Whole school, campus, class and fee targets are automatic. Individual pickers are only for specific records.");
-        // A fixed row for each target input avoids FlowLayoutPanel's
-        // unreliable sizing of HumanUi.Field (a Dock.Fill table), and unlike
-        // top-docked panels guarantees the intended selector order.
+        var card = HumanUi.Card("1. Write Message",
+            "Choose school records, then write or select a prepared message. Sending remains optional.");
+        var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         targetFieldsLayout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5,
-            AutoScroll = true, Padding = new Padding(12),
+            Dock = DockStyle.Top, AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1, RowCount = 9, Padding = new Padding(12),
             Margin = Padding.Empty
         };
         targetFieldsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         var fields = new Control[]
         {
             HumanUi.Field("Send to", audience, true),
-            campusField, classField, studentField, staffField
+            campusField, classField, studentField, staffField,
+            HumanUi.Field("Channel", channel, true),
+            HumanUi.Field("Prepared message (optional)", templateChoice),
+            HumanUi.Field("Message", message, true)
         };
         for (int row = 0; row < fields.Length; row++)
         {
             fields[row].Dock = DockStyle.Fill;
             fields[row].Margin = Padding.Empty;
-            targetFieldsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(72)));
+            targetFieldsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,
+                AppScale.Scale(row == 7 ? 180 : 72)));
             targetFieldsLayout.Controls.Add(fields[row], 0, row);
         }
-        card.Content.Controls.Add(targetFieldsLayout);
-        return card;
-    }
-
-    private HumanCard ComposeCard()
-    {
-        var card = HumanUi.Card("2. Compose Message",
-            "One message for the chosen group. No automated delivery or second guardian consent.");
-        var layout = new TableLayoutPanel
+        targetFieldsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(46)));
+        targetFieldsLayout.Controls.Add(new Label
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1, RowCount = 3, Padding = new Padding(12)
-        };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(65)));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(65)));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.Controls.Add(HumanUi.Field("Channel", channel, true), 0, 0);
-        layout.Controls.Add(HumanUi.Field("Template (optional)", templateChoice), 0, 1);
-        layout.Controls.Add(HumanUi.Field("Message", message, true), 0, 2);
-        card.Content.Controls.Add(layout);
+            Text = "Prepared fields: [StudentName], [AdmissionNumber], [AdmissionDate], [OutstandingAmount]. " +
+                   "Amounts and admission details come from current school records.",
+            Dock = DockStyle.Fill, AutoEllipsis = true,
+            ForeColor = AppTheme.MutedText
+        }, 0, 8);
+        scroll.Controls.Add(targetFieldsLayout);
+        card.Content.Controls.Add(scroll);
         return card;
     }
 
     private HumanCard PreviewCard()
     {
-        var card = HumanUi.Card("3. Preview",
+        var card = HumanUi.Card("2. Preview",
             "Live school records and Admission consent determine eligibility; shared phone numbers appear once.");
         previewGrid.AutoGenerateColumns = false;
         foreach (var (field, name, size) in new[]
@@ -232,14 +244,17 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                 MinimumWidth = size, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
+        showExcluded.CheckedChanged += (_, _) => BindPreviewRows();
         card.Content.Controls.Add(previewGrid);
+        card.Content.Controls.Add(sampleMessage);
+        card.Content.Controls.Add(showExcluded);
         card.Content.Controls.Add(summary);
         return card;
     }
 
     private HumanCard ConfirmCard()
     {
-        var card = HumanUi.Card("4. Confirm",
+        var card = HumanUi.Card("3. Confirm",
             "Free WhatsApp mode opens one prepared chat at a time. You must press Send manually. Direct provider delivery remains disabled.");
         card.Content.Controls.Add(confirmation);
         return card;
