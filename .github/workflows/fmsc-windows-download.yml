@@ -20,7 +20,7 @@ permissions:
 jobs:
   prepare:
     name: Preflight, prepare or reuse next patch-version Source commit
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.repository_id == '1412760928' && github.repository_owner_id == '316891609'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     permissions:
@@ -48,7 +48,7 @@ jobs:
   sandbox-release-gate:
     name: Require NEW private SQL, real installer and chaos acceptance
     needs: prepare
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.repository_id == '1412760928' && github.repository_owner_id == '316891609'
     runs-on: ubuntu-24.04
     timeout-minutes: 115
     permissions:
@@ -90,7 +90,7 @@ jobs:
   package:
     name: Verify and package Windows x64
     needs: [prepare, sandbox-release-gate]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.repository_id == '1412760928' && github.repository_owner_id == '316891609'
     runs-on: windows-2022
     timeout-minutes: 90
 
