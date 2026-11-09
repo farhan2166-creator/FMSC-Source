@@ -128,7 +128,10 @@ internal sealed class AdministratorRecoveryForm : ApplicationWindowForm
             if (!IsDisposed)
             {
                 status.Text = "Recovery was not completed. The existing account remains unchanged.";
-                ModernMessageDialog.ShowWarning(this, DbMessage.UserMessage(ex),
+                string guidance = ex is UnauthorizedAccessException or ArgumentException or
+                    InvalidOperationException or InvalidDataException
+                    ? ex.Message : DbMessage.UserMessage(ex);
+                ModernMessageDialog.ShowWarning(this, guidance,
                     "Administrator Recovery");
             }
         }
