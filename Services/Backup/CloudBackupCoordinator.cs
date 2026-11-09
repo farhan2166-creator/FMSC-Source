@@ -82,7 +82,8 @@ internal static class CloudBackupCoordinator
             DateTime sqlCreated = DateTime.SpecifyKind(info.BackupStartDate, DateTimeKind.Local).ToUniversalTime();
             string id = Guid.NewGuid().ToString("N");
             string packaged = Path.Combine(Queue, id + ".fmscbackup");
-            CloudBackupCrypto.Encrypt(bak, packaged, CloudBackupSettings.OpenRecoveryPassphrase(), sqlCreated);
+            CloudBackupCrypto.Encrypt(bak, packaged, CloudBackupSettings.OpenRecoveryPassphrase(),
+                sqlCreated, info.BackupStartDate);
             string digest;
             await using (var content = File.OpenRead(packaged))
                 digest = Convert.ToHexString(await SHA256.HashDataAsync(content, token)).ToLowerInvariant();
