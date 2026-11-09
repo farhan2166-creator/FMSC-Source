@@ -6,6 +6,9 @@ on:
   pull_request:
     paths:
       - 'Core/Updates/**'
+      - 'Services/Backup/**'
+      - 'Tests/CloudBackupCryptoChecks/**'
+      - 'Pages/Administration/BackupRestorePage.cs'
       - 'Tests/ThemeSmokeChecks/**'
       - 'Tests/HelpChecks/**'
       - 'Tests/ReportReadChecks/**'
@@ -85,6 +88,9 @@ jobs:
 
       - name: Validate private Git SSH key enrollment and Windows DPAPI protection
         run: dotnet run --project Tests/UpdateAuthorizationChecks/UpdateAuthorizationChecks.csproj -c Release
+
+      - name: Verify authenticated cloud-backup roundtrip and corruption rejection
+        run: dotnet run --project Tests/CloudBackupCryptoChecks/CloudBackupCryptoChecks.csproj -c Release
 
       - name: Restore application
         run: dotnet restore FMSC_SMS.sln
