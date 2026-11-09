@@ -459,7 +459,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 Warn("No cloud backups are available. Check the connected Google Drive and Dropbox accounts.");
                 return;
             }
-            using var dialog = new CloudRestoreSelectionDialog(options);
+            DateTime? newestLocal = await Task.Run(DatabaseBackupManager.GetNewestAvailableLocalBackupUtc);
+            using var dialog = new CloudRestoreSelectionDialog(options, newestLocal);
             if (dialog.ShowDialog(FindForm()) != DialogResult.OK ||
                 dialog.SelectedCopy is not { } selected)
                 return;
