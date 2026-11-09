@@ -143,7 +143,7 @@ internal static class CloudBackupCoordinator
     {
         try
         {
-            if (Mutex.TryOpenExisting("Global\\\\FMSCInstallerActivation", out var activation))
+            if (Mutex.TryOpenExisting("Global\\FMSCInstallerActivation", out var activation))
             {
                 using (activation)
                 {
