@@ -17,10 +17,14 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
     [ValidateNotNullOrEmpty()]
-    [string]$Repository = 'https://github.com/farhan2166-creator/FMSC-Source.git'
+    [string]$Repository = ''
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if (-not $Repository) {
+    . (Join-Path $PSScriptRoot 'ResolveFmscGitHubRepository.ps1')
+    $Repository=(Resolve-FmscGitHubRepository -Repository Source).HttpsRemote
+}
 $pathToRemove = 'fmsc.dacpac'
 # Reviewed against GitHub on 30 October 2026: main is the only branch;
 # there are no tags. Stop again if that inventory changes.

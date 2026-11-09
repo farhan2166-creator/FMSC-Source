@@ -15,8 +15,6 @@ namespace FMSC_SMS.Core.Updates;
 /// </summary>
 internal sealed class UpdateGitSession : IUpdateArtifactSource, IAsyncDisposable
 {
-    internal const string DistributionRemote =
-        "git@github.com:farhan2166-creator/FMSC-Updates.git";
 
     // Pin the published GitHub ed25519 host key, not a host key acquired from
     // the network at enrollment time.
@@ -48,6 +46,15 @@ internal sealed class UpdateGitSession : IUpdateArtifactSource, IAsyncDisposable
     {
         if (!UpdateDeviceKey.IsEnrolled)
             throw new InvalidOperationException("This computer has not yet generated an update authorization key.");
+        // Resolve the current owner by durable GitHub account ID before using the
+        // existing read-only SSH deploy key; never depend on old URL redirects.
+        string distributionRemote;
+        try { distributionRemote = await GitHubRepositoryIdentity.ResolveUpdatesSshRemoteAsync(
+            cancellationToken: cancellationToken); }
+        catch (HttpRequestException) { throw new UpdateGitCommandException("GitHub identity lookup is unavailable."); }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { throw new UpdateGitCommandException("GitHub identity lookup timed out."); }
+        catch (InvalidDataException) { throw new UpdateGitCommandException("GitHub owner identity could not be verified.", false); }
         // Reclaim abandoned private-Git workspaces from earlier interrupted checks.
         // Only strictly named, >24h-old directories can be pruned; active
         // download sessions and device-key.v1.dpapi remain untouched.
@@ -79,7 +86,7 @@ internal sealed class UpdateGitSession : IUpdateArtifactSource, IAsyncDisposable
             await session.RunGitAsync(
                 new[] { "clone", "--quiet", "--no-checkout", "--depth=1",
                     "--filter=blob:none", "--single-branch", "--branch", "main",
-                    DistributionRemote, "feed" },
+                    distributionRemote, "feed" },
                 isRepoCommand: false, destination: Stream.Null,
                 maxOutputBytes: 65536, cancellationToken,
                 TimeSpan.FromSeconds(60));

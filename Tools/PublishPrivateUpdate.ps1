@@ -4,8 +4,10 @@ param([Parameter(Mandatory=$true)][string]$ApplicationDirectory,
       [Parameter(Mandatory=$true)][string]$WorkDirectory)
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
+. (Join-Path $PSScriptRoot 'ResolveFmscGitHubRepository.ps1')
+Assert-FmscWorkflowIdentity -Repository Source -RequireOwnerActor
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_EVENT_NAME -ne 'workflow_dispatch' -or
-    $env:GITHUB_REF -ne 'refs/heads/main' -or $env:GITHUB_REPOSITORY -ne 'farhan2166-creator/FMSC-Source') {
+    $env:GITHUB_REF -ne 'refs/heads/main' -or $env:GITHUB_REPOSITORY_ID -ne '1412760928') {
     throw 'Publication is permitted only from the owner-triggered source main workflow.'
 }
 if (-not $env:FMSC_UPDATES_PUBLISH_TOKEN) { throw 'Configure the owner-only FMSC_UPDATES_PUBLISH_TOKEN repository secret.' }
@@ -40,7 +42,7 @@ try {
     $env:GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader'
     $env:GIT_CONFIG_VALUE_0 = 'AUTHORIZATION: basic ' + $encoded
     $env:GIT_TERMINAL_PROMPT = '0'
-    $remote = 'https://github.com/farhan2166-creator/FMSC-Updates.git'
+    $remote = (Resolve-FmscGitHubRepository -Repository Updates -Token $env:FMSC_UPDATES_PUBLISH_TOKEN).HttpsRemote
     $previous = Join-Path $work 'previous'
     Invoke-Checked 'git' @('clone','--quiet','--branch','main','--single-branch',$remote,$previous)
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $app 'FMSC_SMS.dll')).ProductVersion.Split('+')[0]
