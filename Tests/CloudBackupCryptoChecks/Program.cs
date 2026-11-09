@@ -83,6 +83,25 @@ try
     if (CloudBackupSchedulePolicy.IsDue(false, CloudBackupFrequency.Daily, at6Pm,
             DayOfWeek.Friday, daily9Am, null))
         throw new Exception("Disabled backup schedule ran without operator enrollment.");
+    // Browser OAuth should require neither an elevated HTTP.sys URLACL nor
+    // a public listener. Unrelated callback requests cannot hijack the flow.
+    using (var oauth = new CloudOAuthLoopback())
+    using (var browser = new HttpClient())
+    {
+        string localState = "unit-test-state-random-1234";
+        var authCodeTask = oauth.ReceiveCodeAsync(localState, CancellationToken.None);
+        using var rejected = await browser.GetAsync(oauth.CallbackUrl +
+            "?state=wrong-state&code=invalid-callback-code");
+        if (rejected.StatusCode != System.Net.HttpStatusCode.BadRequest)
+            throw new Exception("Wrong-state browser callback was not rejected.");
+        if (authCodeTask.IsCompleted)
+            throw new Exception("Unrelated OAuth callback ended the real sign-in session.");
+        using var accepted = await browser.GetAsync(oauth.CallbackUrl +
+            "?state=" + localState + "&code=valid-oauth-code-12345");
+        if (accepted.StatusCode != System.Net.HttpStatusCode.OK ||
+            await authCodeTask != "valid-oauth-code-12345")
+            throw new Exception("Valid localhost OAuth callback was not verified.");
+    }
     Console.WriteLine("PASS: encrypted backup corruption checks and recovery-point creation-time ordering.");
 }
 finally
