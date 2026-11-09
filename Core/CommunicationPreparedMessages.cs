@@ -106,9 +106,14 @@ internal static class CommunicationPreparedMessages
             ) F
             WHERE H.RecipientId=@RecipientId AND H.State='Opened'
               AND R.State='Pending'
+              AND NOT EXISTS (
+                  SELECT 1 FROM msg.Suppression O
+                  WHERE O.Channel='WhatsApp' AND O.PhoneE164=R.PhoneE164)
               AND ((S.AdmissionId IS NOT NULL AND S.Status=N'Active'
-                    AND S.SchoolMessageConsent=1)
-                OR (T.StaffId IS NOT NULL AND T.Status=N'Active'));
+                    AND S.SchoolMessageConsent=1
+                    AND msg.NormalizeMobile(S.ContactNumber)=R.PhoneE164)
+                OR (T.StaffId IS NOT NULL AND T.Status=N'Active'
+                    AND msg.NormalizeMobile(T.ContactNumber)=R.PhoneE164));
             """;
         int actor = CurrentUser.UserId;
         using DataTable table = await DatabaseHelper.QuerySqlAsync(sql,
