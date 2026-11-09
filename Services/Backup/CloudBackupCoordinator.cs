@@ -172,7 +172,8 @@ internal static class CloudBackupCoordinator
             throw new UnauthorizedAccessException("Restoring a cloud backup requires Backup.Restore permission.");
         return await CloudRestoreStaging.RestoreAsync(
             (destination, ct) => DownloadAndCheckAsync(source, destination, ct),
-            recoveryPassphrase, token);
+            recoveryPassphrase,
+            "cloud://" + source.Provider + "/" + Uri.EscapeDataString(source.RemoteId), token);
     }
 
     private static async Task DownloadAndCheckAsync(CloudRemoteBackup source, string destination, CancellationToken token)
