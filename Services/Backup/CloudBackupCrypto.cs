@@ -37,26 +37,31 @@ internal static class CloudBackupCrypto
         string temporary = destination + "." + Guid.NewGuid().ToString("N") + ".partial";
         try
         {
-            using var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
             output.Write(header);
             using var aes = new AesGcm(key, TagBytes);
             int index = 0;
-            int count;
-            while ((count = input.Read(plain, 0, plain.Length)) > 0)
+            long remaining = input.Length;
+            while (remaining > 0)
             {
+                int count = (int)Math.Min(ChunkBytes, remaining);
+                input.ReadExactly(plain.AsSpan(0, count));
                 Span<byte> nonce = stackalloc byte[12];
                 header.AsSpan(28, NoncePrefixBytes).CopyTo(nonce);
                 BinaryPrimitives.WriteInt32LittleEndian(nonce[8..], index);
                 Span<byte> aad = stackalloc byte[HeaderBytes + 8];
-                header.CopyTo(aad);
+                header.AsSpan().CopyTo(aad);
                 BinaryPrimitives.WriteInt32LittleEndian(aad[HeaderBytes..], index);
                 BinaryPrimitives.WriteInt32LittleEndian(aad[(HeaderBytes + 4)..], count);
                 aes.Encrypt(nonce, plain.AsSpan(0, count), cipher.AsSpan(0, count), tag, aad);
                 output.Write(cipher, 0, count);
                 output.Write(tag);
                 index = checked(index + 1);
+                remaining -= count;
             }
             output.Flush(flushToDisk: true);
+            }
             File.Move(temporary, destination, overwrite: false);
         }
         finally
@@ -84,7 +89,8 @@ internal static class CloudBackupCrypto
         string temporary = destinationBak + "." + Guid.NewGuid().ToString("N") + ".partial";
         try
         {
-            using var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
             using var aes = new AesGcm(key, TagBytes);
             int index = 0;
             long remaining = length;
@@ -108,6 +114,7 @@ internal static class CloudBackupCrypto
             if (input.Position != input.Length)
                 throw new InvalidDataException("The encrypted backup has unexpected trailing data.");
             output.Flush(flushToDisk: true);
+            }
             File.Move(temporary, destinationBak, overwrite: false);
         }
         finally
