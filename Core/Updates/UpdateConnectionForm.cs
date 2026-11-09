@@ -75,7 +75,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         summary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         summary.Controls.Add(new Label { Text = "Installed version", AutoSize = true, Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.MutedText }, 0, 0);
-        summary.Controls.Add(new Label { Text = "Latest version", AutoSize = true, Dock = DockStyle.Fill,
+        summary.Controls.Add(new Label { Text = "Latest published version", AutoSize = true, Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.MutedText }, 1, 0);
         summary.Controls.Add(new Label { Text = InstalledVersion, AutoSize = true, Font = AppTheme.BodyBoldFont,
             Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter,
@@ -365,7 +365,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _latestVersion.Text = release.Manifest.Version;
             _accessStatus.Text = "Computer authorized";
             var archive = _method == UpdateDownloadChoice.Incremental ? release.Manifest.Incremental! : release.Manifest.Full;
-            _status.Text = "Latest version: " + release.Manifest.Version + "\n" +
+            _status.Text = "Latest published version: " + release.Manifest.Version + "\n" +
                 (_method == UpdateDownloadChoice.NotNewer
                     ? _installedSchema == int.Parse(DatabaseHelper.RequiredDatabaseSchemaVersion)
                         ? "No newer approved application release is available on this update channel. " +
