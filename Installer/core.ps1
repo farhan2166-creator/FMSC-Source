@@ -201,7 +201,22 @@ function Open-UpdateWindow {
     $mark.SetBounds(30,38,54,54)
     $mark.SizeMode = [Windows.Forms.PictureBoxSizeMode]::Zoom
     $mark.BackColor = [Drawing.Color]::White
-    if ($brandIcon) { $mark.Image = $brandIcon.ToBitmap() }
+    # The packaged circular ICO has higher-resolution sizes than some EXE
+    # icon extractors return. Fall back to the verified launcher's icon.
+    foreach ($logoRoot in @($AppSource, $AppDir)) {
+        if ([string]::IsNullOrWhiteSpace([string]$logoRoot)) { continue }
+        try {
+            $logoPath = Join-Path $logoRoot 'Assets\FMSC_Logo_Circular.ico'
+            if (-not (Test-Path -LiteralPath $logoPath -PathType Leaf)) { continue }
+            $logoIcon = [Drawing.Icon]::new($logoPath, [Drawing.Size]::new(64,64))
+            try { $mark.Image = $logoIcon.ToBitmap() }
+            finally { $logoIcon.Dispose() }
+            break
+        } catch {
+            # Branding is optional during recovery; never block installation.
+        }
+    }
+    if (-not $mark.Image -and $brandIcon) { $mark.Image = $brandIcon.ToBitmap() }
     $name = New-Object Windows.Forms.Label
     $name.SetBounds(98,36,600,36)
     $name.Text = 'FMSC School Management'
