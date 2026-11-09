@@ -217,9 +217,13 @@ public static class DatabaseBackupManager
         if (!reader.Read())
             throw new InvalidOperationException(
                 "The selected file has no readable SQL Server backup header. It may not be a backup file.");
+        // Never substitute the current clock if SQL Server fails to return
+        // a genuine backup timestamp: recovery chronology must stay truthful.
+        if (reader["BackupStartDate"] is not DateTime backupStart)
+            throw new InvalidDataException("SQL backup header is missing its original backup creation time.");
         return new BackupInfo {
             DatabaseName = reader["DatabaseName"] as string ?? "(unknown)",
-            BackupStartDate = reader["BackupStartDate"] is DateTime start ? start : DateTime.Now,
+            BackupStartDate = backupStart,
             BackupFinishDate = reader["BackupFinishDate"] is DateTime finish ? finish : null
         };
     }
