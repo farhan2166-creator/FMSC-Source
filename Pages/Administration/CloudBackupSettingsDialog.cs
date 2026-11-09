@@ -203,8 +203,21 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
             newSettings.Validate();
             if (newSettings.AutomaticEnabled && BackupSettings.GetBackupFolder().Length == 0)
                 throw new InvalidOperationException("Select a local backup folder on the Backup / Restore page before scheduling.");
-            await CloudBackupTaskSchedule.ConfigureAsync(newSettings.AutomaticEnabled);
+            // Persist settings first, then register the task. If Windows
+            // rejects task registration, restore the previously saved state
+            // so FMSC never claims automatic backup is active when it isn't.
             CloudBackupSettings.Save(newSettings);
+            try { await CloudBackupTaskSchedule.ConfigureAsync(newSettings.AutomaticEnabled); }
+            catch
+            {
+                try { CloudBackupSettings.Save(previous); }
+                catch (Exception rollbackError)
+                {
+                    AppExceptionHandler.LogNonFatal(rollbackError,
+                        "Could not roll back cloud backup settings after task registration failure");
+                }
+                throw;
+            }
             DialogResult = DialogResult.OK;
             Close();
         }
