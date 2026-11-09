@@ -168,5 +168,45 @@ internal static partial class Program
             && (string)modeRows.Rows[0]["StatusText"] == "Ready for manual chats",
             "Already active manual WhatsApp is displayed plainly and cannot be re-enabled by mistake");
         Check(!send.Enabled, "An unreviewed page cannot send or open a chat before preview and confirmation");
+
+        // Render at dashboard scale. Merely having seven audience options in
+        // memory did not catch the blank Select Recipients card seen in the app.
+        using var host = new Form { ClientSize = new Size(1200, 780), ShowInTaskbar = false };
+        host.Controls.Add(page);
+        host.Show();
+        Application.DoEvents();
+        var targetCard = cards[0];
+        var audienceField = audience.Parent!;
+        Rectangle visibleInput = Rectangle.Intersect(
+            audience.RectangleToScreen(audience.ClientRectangle),
+            targetCard.Content.RectangleToScreen(targetCard.Content.ClientRectangle));
+        Check(targetCard.Visible && audience.Visible && audienceField.Visible
+            && audienceField.Dock == DockStyle.Fill
+            && audience.Width > 100 && audience.Height > 15
+            && visibleInput.Width > 100 && visibleInput.Height > 15,
+            "Recipients page visibly renders the Send to selector below its header at dashboard size");
+        var campusPanel = (Control)type.GetField("campusField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        var classPanel = (Control)type.GetField("classField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        var studentPanel = (Control)type.GetField("studentField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        var staffPanel = (Control)type.GetField("staffField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        Check(!campusPanel.Visible && !classPanel.Visible && !studentPanel.Visible && !staffPanel.Visible,
+            "Entire-school audience needs no extra pickers");
+        audience.SelectedIndex = 1; Application.DoEvents();
+        Check(campusPanel.Visible && !classPanel.Visible && campusPanel.Top > audienceField.Top,
+            "Campus audience visibly adds the campus selector below Send to");
+        audience.SelectedIndex = 2; Application.DoEvents();
+        Check(campusPanel.Visible && classPanel.Visible && classPanel.Top > campusPanel.Top,
+            "Class audience visibly adds campus and class selectors in order");
+        audience.SelectedIndex = 4; Application.DoEvents();
+        Check(studentPanel.Visible && !campusPanel.Visible && !classPanel.Visible,
+            "Individual audience displays the existing student picker");
+        audience.SelectedIndex = 6; Application.DoEvents();
+        Check(staffPanel.Visible && !studentPanel.Visible,
+            "Staff audience displays the existing staff picker");
+        audience.SelectedIndex = 0; Application.DoEvents();
+        Check(audience.Visible && !campusPanel.Visible && !classPanel.Visible
+            && !studentPanel.Visible && !staffPanel.Visible,
+            "Switching back to entire school keeps the selector visible and collapses optional fields");
+        host.Close();
     }
 }
