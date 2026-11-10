@@ -87,6 +87,13 @@
         <MakeDir Directories="$(BaseIntermediateOutputPath)FmscSetup/$(Configuration)" />
         <Exec Command="&quot;$(windir)\Microsoft.NET\Framework64\v4.0.30319\csc.exe&quot; /nologo /target:winexe /optimize+ /win32icon:&quot;$(MSBuildProjectDirectory)\Assets\FMSC_Logo_Circular.ico&quot; /out:&quot;$(BaseIntermediateOutputPath)FmscSetup\$(Configuration)\FMSC.Setup.exe&quot; &quot;$(MSBuildProjectDirectory)\Installer\FMSC.Setup.cs&quot;" />
     </Target>
+    <!-- Standalone WinForms uninstall launcher; the engine stages outside the app. -->
+    <Target Name="BuildFmscUninstallLauncher" BeforeTargets="PrepareForBuild"
+            Inputs="$(MSBuildProjectDirectory)/Installer/FMSC.Uninstall.cs"
+            Outputs="$(BaseIntermediateOutputPath)FmscUninstall/$(Configuration)/FMSC.Uninstall.exe">
+        <MakeDir Directories="$(BaseIntermediateOutputPath)FmscUninstall/$(Configuration)" />
+        <Exec Command="&quot;$(windir)\Microsoft.NET\Framework64\v4.0.30319\csc.exe&quot; /nologo /target:winexe /optimize+ /win32icon:&quot;$(MSBuildProjectDirectory)\Assets\FMSC_Logo_Circular.ico&quot; /out:&quot;$(BaseIntermediateOutputPath)FmscUninstall\$(Configuration)\FMSC.Uninstall.exe&quot; &quot;$(MSBuildProjectDirectory)\Installer\FMSC.Uninstall.cs&quot;" />
+    </Target>
     <!-- Opt-in test binary; normal builds contain no disposable-target override. -->
     <PropertyGroup Condition="'$(FmscLevel2)' == 'true'">
         <DefineConstants>$(DefineConstants);FMSC_LEVEL2</DefineConstants>
@@ -103,6 +110,7 @@
         <Compile Remove="Tools/**/*.cs" />
         <Compile Remove="Installer/Launch-FMSC.cs" />
         <Compile Remove="Installer/FMSC.Setup.cs" />
+        <Compile Remove="Installer/FMSC.Uninstall.cs" />
     </ItemGroup>
 	<PropertyGroup>
 		<!-- Local verification repositories and generated files are not application inputs. -->
@@ -132,6 +140,8 @@
 		<Content Include="Installer/Launch-FMSC.ps1" Link="UpdateSupport/Launch-FMSC.ps1" CopyToPublishDirectory="PreserveNewest" />
 		<Content Include="$(BaseIntermediateOutputPath)FmscLauncher/$(Configuration)/FMSC.Launcher.exe" Link="UpdateSupport/FMSC.Launcher.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
         <Content Include="$(BaseIntermediateOutputPath)FmscSetup/$(Configuration)/FMSC.Setup.exe" Link="UpdateSupport/FMSC.Setup.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+        <Content Include="$(BaseIntermediateOutputPath)FmscUninstall/$(Configuration)/FMSC.Uninstall.exe" Link="FMSC.Uninstall.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+        <Content Include="Installer/Uninstall-FMSC.ps1" Link="UpdateSupport/Uninstall-FMSC.ps1" CopyToPublishDirectory="PreserveNewest" />
 		<Content Include="Migrations/*.sql" Link="UpdateSupport/Migrations/%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
 		<Content Include="Assets\academics.png">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -265,6 +275,8 @@
 		<Copy SourceFiles="@(MigrationApplierFiles)" DestinationFolder="$(ReleaseRoot)Migrations" SkipUnchangedFiles="true" />
 		<Copy SourceFiles="$(MSBuildProjectDirectory)\Installer\core.ps1" DestinationFiles="$(ReleaseRoot)core.ps1" SkipUnchangedFiles="true" />
 		<Copy SourceFiles="$(BaseIntermediateOutputPath)FmscSetup/$(Configuration)/FMSC.Setup.exe" DestinationFiles="$(ReleaseRoot)FMSC.Setup.exe" SkipUnchangedFiles="true" />
+		<Copy SourceFiles="$(BaseIntermediateOutputPath)FmscUninstall/$(Configuration)/FMSC.Uninstall.exe" DestinationFiles="$(ReleaseRoot)FMSC.Uninstall.exe" SkipUnchangedFiles="true" />
+		<Copy SourceFiles="$(MSBuildProjectDirectory)\Installer\Uninstall-FMSC.ps1" DestinationFiles="$(ReleaseRoot)Uninstall-FMSC.ps1" SkipUnchangedFiles="true" />
 		<Copy SourceFiles="$(MSBuildProjectDirectory)\Installer\UpdateRecovery.ps1" DestinationFiles="$(ReleaseRoot)UpdateRecovery.ps1" SkipUnchangedFiles="true" />
 		<Copy SourceFiles="$(MSBuildProjectDirectory)\Installer\Install FMSC_SMS.bat" DestinationFiles="$(ReleaseRoot)Install FMSC_SMS.bat" SkipUnchangedFiles="true" />
 	</Target>
