@@ -60,6 +60,54 @@ Source `Installer/core.ps1:30–31` declares app **1.0.24 / schema 15**, but the
 
 `CloudBackupProviders.json` has empty Google client ID and Dropbox app key. `CloudBackupOAuth.cs:54–59` refuses a connection with empty registration. No credentials should be invented or copied into this audit. Publisher must securely configure provider app registrations.
 
+
+### DSA-10 — Interactive cloud-backup encryption blocks WinForms synchronization context
+**High responsiveness risk | Source-confirmed scheduling path, performance unmeasured.**
+
+`Pages/Administration/BackupRestorePage.cs:424–445` awaits `CloudBackupCoordinator.CreateAndUploadAsync()` from a WinForms action. The coordinator awaits its SQL backup worker without `ConfigureAwait(false)`, resumes on the captured WinForms synchronization context, then invokes the **synchronous, multi-gigabyte** `CloudBackupCrypto.Encrypt` at `CloudBackupCoordinator.cs:78–86`. The progress/status UI and Windows message pump are blocked for the duration of encryption (and synchronous local-backup pruning). Offload CPU/disk-intensive encryption to a worker without losing job state, cancellation/rollback, or the permission boundary. Test with a large synthetic backup and UI responsiveness checks.
+
+### DSA-11 — Compiler detects stack allocations inside every cloud encryption/decryption chunk
+**Medium large-backup reliability risk | Compiler warning CA2014, actual stack overflow unproven.**
+
+`Services/Backup/CloudBackupCrypto.cs:53–69,104–120` creates `stackalloc` nonce and authenticated-data buffers on every 1-MiB chunk. Very large files can accumulate stack usage across loop iterations. The Windows audit build emitted four `CA2014` warnings at those locations, plus a separate nullable dereference warning (`CS8602`) in a test file. Move fixed-size spans outside each loop, reset their contents on each chunk, and add multi-gigabyte synthetic roundtrip tests before declaring this resolved.
+
+### DSA-12 — Cloud Settings dialog can close during an asynchronous save/account connection
+**Medium UI lifecycle race | Source-level conditional failure, not reproduced.**
+
+`Pages/Administration/CloudBackupSettingsDialog.cs:79–95` leaves Cancel/close available while async Google/Dropbox authentication or `SaveAsync` is pending. `ToggleProviderAsync:98–120` re-enables/relabels controls in its `finally`; `SaveAsync:177–230` saves settings, awaits Windows task registration, then sets `DialogResult`/closes the form. There is no dialog `FormClosing` busy guard in this class or its `ApplicationWindowForm` base. Closing the dialog during these awaits can allow a discarded dialog to finish persisting settings or update disposed controls. Prevent closure while a state-changing operation is active or implement explicit cancellation and lifetime-safe continuation handling.
+
+## Whole-repository automated evidence — first audit CI run
+
+**Review PR:** [#161](https://github.com/farhan2166-creator/FMSC-Source/pull/161) (draft, no app/SQL production changes).
+**Actual workflow:** [17 - Deep Source SQL and Windows UI Coverage, run 42816089972](https://github.com/farhan2166-creator/FMSC-Source/actions/runs/42816089972) — first execution **PASS**, including all three jobs.
+
+- Read every checked-out **751 C# source files**, including **487** production-area C# files, ~**100,605 production source lines**, and 254 test files. This is an automated file-level source inventory, not 751 individual expert code reviews.
+- Parsed **265** schema-only baseline DACPAC stored-procedure bodies, plus **14** numbered SQL migration files containing **43** procedure create/alter statements. The baseline model is schema 1; current schema 15 combines subsequent migration changes. This is not a fresh `sys.sql_modules` snapshot of an upgraded database.
+- The first static pass reported **142 heuristically matched candidates** across C# source and tests. These include expected blocking test helpers, intentionally caught exceptions and false-positive calls, **not 142 bugs**. Four unresolved `Query("print"|"export"|"zoom")` matches were false positives from non-database helpers; the scanner was corrected on the audit branch.
+- The first UI-class extractor indexed **111** classes, but omitted `StudentAdmissionPage : ContextPage`. The scanner was corrected to include `ContextPage` and more form entry points; the first number must not be presented as exhaustive UI coverage.
+- Existing native Windows UI suite **PASS: 15 test modes** (`RunDurableUiContracts.ps1 -IncludePdfReports`), including admission layouts, collection counter controls, fees/report views, certificate/PDF rendering and print layout. These are **SQL-free control/renderer tests**, not real operator sessions.
+- Existing public disposable Windows SQL/installer job **PASS**, with a generated record-free baseline, real installer/LocalDB under the runner, recovery interruptions and cleanup; **100 automatic-billing SQL checks** also passed. The installed LocalDB runtime on the hosted runner was **preexisting**, so **pristine MSI/Visual C++ installation is not demonstrated**.
+- Audit run evidence: [Actions job logs](https://github.com/farhan2166-creator/FMSC-Source/actions/runs/42816089972). The Windows disposable test's synthetic checkout/source commit may be the PR-generated merge commit rather than original main; this is not a source publication.
+- The currently advertised cloud OAuth client identifiers remain empty, so genuine provider authorization, uploads, ambiguous responses and restore are **not live-tested**.
+
+### Operator workflow verification matrix
+
+| Workflow | Evidence at reviewed SHA | Essential coverage missing |
+|---|---|---|
+| Pristine Windows install / VC++ / LocalDB | Public disposable installer PASS; synthetic prerequisite checks exist | Machine with *no* LocalDB/VC++, interactive MSI and reboot |
+| Initial administrator sign-in | First-run C# and SQL bootstrap inspected | Actual GUI, keyboard/focus, cancellation and second Windows account |
+| Setup readiness and school profile | Source and regression fixture inspected | Real untouched template → UI School Profile and fee setup |
+| First and second admissions | Real SQL admission procedure regression exists | Full UI-selected explicit numbers on first empty school |
+| Tuition/transport billing | 100 disposable real SQL tests PASS | Interactive preview/confirm, print and offline operator paths |
+| Payments, credit, refunds, reversals | Real SQL/transaction paths and prior lifecycle tests inspected | All financial UI modal / restart / uncertain-commit sequences |
+| Campus/class transfer, leaving, readmission | Source and lifecycle tests inspected | Complete interactive workflow permutations including permission variants |
+| Certificates and reports | Native WinForms/RDLC/PDF test modes PASS | Actual printer, both paper feeds, margin/letterhead physical checks |
+| Cloud backup & restore | Source reviewed; local crypto corruption tests exist | Provider OAuth IDs, real provider API, fault-injection and large DB |
+| Updater/recovery | Actual synthetic installer and interruption recovery PASS | Production old-schema school clone, reboot, network and non-admin account |
+| Multi-user/local database | Windows identity/LocalDB dependency inspected | Real multi-PC shared database (separate future design) |
+
+**Interpretation:** Complete **file inventory** and multiple real Windows/SQL test jobs are achieved. Complete **semantic reasoning over every source file / stored procedure** and **end-to-end GUI operator execution** are not achieved by those jobs; these remain explicit verification gates and must not be reported as passes.
+
 ## Coverage boundary and follow-up
 
 The above issues are independent of prior audit history. A source file inventory, source-code inspection, successful synthetic CI, and static SQL/schema analysis must never be presented as an exhaustive interactive Windows/operator verification. The remaining coverage items are: enumerate every C# file and stored procedure, inspect SQL definitions in the schema-only DACPAC (not only object manifest signatures), reconcile every navigation destination with UI permissions and save/restore path, run clean Windows LocalDB first-install/first-payment and recovery scenarios, verify financial reversals/refunds and cross-campus isolation, and validate real Google/Dropbox behavior with disposable accounts. Mark each executed scenario with actual reproducible logs, timestamps, and reviewed commit SHA.
