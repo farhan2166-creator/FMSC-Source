@@ -19,6 +19,9 @@ internal static class Program
             return Task.CompletedTask;
         });
         if (ready)
+            ready = await Evidence.Stage("Fresh-school fee type policy and Setup Readiness",
+                () => { FeeSetupBootstrapChecks.Run(fixture!, Evidence); return Task.CompletedTask; });
+        if (ready)
         {
             if (args.Contains("--mutation-fixture")) await SeedLegacyMutation(fixture!);
             else if (args.Contains("--school-scenarios")) await new SchoolScenarios(fixture!, Evidence).Run();
