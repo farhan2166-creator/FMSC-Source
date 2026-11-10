@@ -192,6 +192,10 @@ jobs:
 
       - name: Verify normal launcher creates no PowerShell console
         shell: powershell
+        run: .\Tools\TestStandaloneUninstall.ps1
+
+      - name: Verify normal launcher creates no PowerShell console
+        shell: powershell
         run: .\Tools\TestWindowlessLauncher.ps1
 
       - name: Test prepared update installer integrity without touching SQL
