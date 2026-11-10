@@ -189,6 +189,11 @@ def main():
     private = tempfile.TemporaryDirectory(prefix="fmsc-level1-private-")
     secret = "A!" + secrets.token_urlsafe(32) + "9z"
     env = docker_env()
+    schema_source = (ROOT / "Installer/core.ps1").read_text()
+    schema_match = re.search(r"\$DatabaseVersion\s*=\s*'(\d+)'", schema_source)
+    if schema_match is None:
+        raise ValueError("Cannot pass the current installer schema into disposable SQL checks.")
+    env.update(FMSC_AUDIT_SCHEMA_VERSION=schema_match.group(1))
     env.update(SQLCMDPASSWORD=secret, FMSC_TEST_RUN_ID=str(token), FMSC_TEST_PRIVATE_ROOT=private.name,
                XDG_DATA_HOME=str(Path(private.name) / "data"), DOTNET_CLI_TELEMETRY_OPTOUT="1")
     if os.environ.get("GITHUB_ACTIONS") == "true":
