@@ -17,7 +17,21 @@ internal sealed class Fixture
         Sql.Query("INSERT dbo.AdmissionNumberCounter(CounterId,LastNumber) VALUES(1,1000);");
         // DacFx round-trips this property as varchar. Repair ONLY this disposable fixture's identity/type.
         Sql.Query("DECLARE @Scope uniqueidentifier=NEWID(); EXEC sys.sp_updateextendedproperty @name=N'FMSC_QuickRegistrationScope',@value=@Scope;");
-        using (var c = DatabaseHelper.GetConnection()) { c.Open(); DatabaseCompatibility.Validate(c); }
+        using (var c = DatabaseHelper.GetConnection())
+        {
+            c.Open();
+            try { DatabaseCompatibility.Validate(c); }
+            catch (DatabaseCompatibilityException ex)
+            {
+                // This is an owned, data-free SQL fixture. Only the names of
+                // missing schema components may enter CI's sanitized report.
+                string details = ex.Failure.Issue == DatabaseCompatibilityIssue.SchemaStructure
+                    ? string.Join("; ", ex.Failure.Details.Split('\n')
+                        .Take(6).Select(line => line.Trim()))
+                    : ex.Failure.Issue.ToString();
+                throw new AssertionFailure("Disposable structural contract failed: " + details);
+            }
+        }
         Sql.Query("INSERT dbo.Roles(RoleName,Description) VALUES(N'Administrator',N'Fictional full-authority test role'),(N'Accountant',N'Fictional restricted test role');");
         // The baseline installs 28 codes; migration 9 supplies three new
         // communication codes. Seed only missing fixture permissions, then
