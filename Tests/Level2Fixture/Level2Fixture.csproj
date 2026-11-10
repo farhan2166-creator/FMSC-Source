@@ -19,6 +19,7 @@
     <Compile Include="../../Pages/Finance/Collection/CollectionRecoveryJournal.cs" Link="CollectionRecoveryJournal.cs" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilityRequirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilityRequirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema10Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema12Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema12Requirements.json" />
     <EmbeddedResource Include="../../Core/PermissionCatalog.json" LogicalName="FMSC_SMS.Core.PermissionCatalog.json" />
     <Using Include="System.Data" /><Using Include="FMSC_SMS" /><Using Include="FMSC_SMS.Core" />
     <Using Include="FMSC_SMS.Pages.Security" /><Using Include="FMSC_SMS.Pages.Finance.Collection" />

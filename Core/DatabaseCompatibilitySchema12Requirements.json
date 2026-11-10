@@ -1,0 +1,308 @@
+{
+  "objects": [
+    {
+      "schema": "dbo",
+      "name": "SaveSchoolCertificateSignature",
+      "type": "P "
+    },
+    {
+      "schema": "dbo",
+      "name": "GetSchoolCertificateSignature",
+      "type": "P "
+    },
+    {
+      "schema": "dbo",
+      "name": "GetPrintedCertificateSignature",
+      "type": "P "
+    },
+    {
+      "schema": "dbo",
+      "name": "AdministratorRecoveryHost",
+      "type": "U "
+    },
+    {
+      "schema": "dbo",
+      "name": "AdministratorRecoveryEvents",
+      "type": "U "
+    }
+  ],
+  "columns": [
+    {
+      "schema": "dbo",
+      "objectName": "SchoolProfile",
+      "name": "PrincipalSignatureImage",
+      "type": "varbinary",
+      "maxLength": -1,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SchoolProfile",
+      "name": "PrincipalSignatureContentType",
+      "type": "nvarchar",
+      "maxLength": 80,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SchoolProfile",
+      "name": "PrintPrincipalSignature",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryHost",
+      "name": "HostId",
+      "type": "tinyint",
+      "maxLength": 1,
+      "precision": 3,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryHost",
+      "name": "DevicePublicKeySha256",
+      "type": "binary",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryHost",
+      "name": "WindowsSid",
+      "type": "nvarchar",
+      "maxLength": 368,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryHost",
+      "name": "BoundUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryEvents",
+      "name": "RecoveryEventId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": true,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryEvents",
+      "name": "TargetUserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryEvents",
+      "name": "PreviousUsername",
+      "type": "nvarchar",
+      "maxLength": 200,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryEvents",
+      "name": "NewUsername",
+      "type": "nvarchar",
+      "maxLength": 200,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryEvents",
+      "name": "DevicePublicKeySha256",
+      "type": "binary",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryEvents",
+      "name": "WindowsSid",
+      "type": "nvarchar",
+      "maxLength": 368,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryEvents",
+      "name": "WindowsComputer",
+      "type": "nvarchar",
+      "maxLength": 256,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryEvents",
+      "name": "RecoveredUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    }
+  ],
+  "parameters": [
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolCertificateSignature",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolCertificateSignature",
+      "name": "@SignatureImage",
+      "type": "varbinary",
+      "maxLength": -1,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolCertificateSignature",
+      "name": "@SignatureContentType",
+      "type": "nvarchar",
+      "maxLength": 80,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolCertificateSignature",
+      "name": "@PrintSignature",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "GetSchoolCertificateSignature",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "GetPrintedCertificateSignature",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    }
+  ],
+  "tableTypes": [],
+  "uniqueIndexes": [
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryHost",
+      "name": "PK_AdministratorRecoveryHost",
+      "keys": "HostId"
+    },
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryEvents",
+      "name": "PK_AdministratorRecoveryEvents",
+      "keys": "RecoveryEventId"
+    }
+  ],
+  "triggers": [],
+  "foreignKeys": [
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryEvents",
+      "referencedSchema": "dbo",
+      "referencedObject": "Users",
+      "columns": "TargetUserId",
+      "referencedColumns": "UserId",
+      "deleteAction": 0,
+      "updateAction": 0
+    }
+  ],
+  "checkConstraints": [
+    {
+      "schema": "dbo",
+      "objectName": "AdministratorRecoveryHost",
+      "name": "CK_AdministratorRecoveryHostSingleton"
+    }
+  ]
+}

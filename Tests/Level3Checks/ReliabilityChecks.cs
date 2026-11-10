@@ -284,6 +284,29 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
             try { DatabaseCompatibility.Validate(c); throw new AssertionFailure("A current-schema database with a missing required procedure was accepted."); }
             catch (DatabaseCompatibilityException) { r.Check(true, "A matching version does not bypass structural requirements."); }
         } finally { Sql.Query("EXEC sys.sp_rename N'dbo.FMSC_Level3HiddenStatement',N'GetFeeStatement';"); }
+        // Schema 11 and 12 must be checked just like the baseline objects:
+        // version 12 alone must never authorize using a damaged school DB.
+        void MustRejectHiddenObject(string original, string hidden, string label, bool column = false)
+        {
+            string suffix = column ? ",'COLUMN'" : "";
+            Sql.Query($"EXEC sys.sp_rename N'{original}',N'{hidden}'{suffix};");
+            try
+            {
+                using var c = DatabaseHelper.GetConnection(); c.Open();
+                try { DatabaseCompatibility.Validate(c); throw new AssertionFailure("Missing " + label + " was accepted."); }
+                catch (DatabaseCompatibilityException) { r.Check(true, "Runtime refuses missing " + label + " at schema 12."); }
+            }
+            finally
+            {
+                // Keep exact object/table/column identity in the isolated fixture.
+                string parent = original[..original.LastIndexOf('.')];
+                Sql.Query($"EXEC sys.sp_rename N'{(parent + "." + hidden)}',N'{original[(original.LastIndexOf('.') + 1)..]}'{suffix};");
+            }
+        }
+        MustRejectHiddenObject("dbo.GetPrintedCertificateSignature", "FMSC_Level3HiddenSignature", "schema-11 signature procedure");
+        MustRejectHiddenObject("dbo.SchoolProfile.PrincipalSignatureImage", "FMSC_Level3HiddenSignatureImage", "schema-11 signature field", column: true);
+        MustRejectHiddenObject("dbo.AdministratorRecoveryHost", "FMSC_Level3HiddenRecoveryHost", "schema-12 registered recovery host");
+        MustRejectHiddenObject("dbo.AdministratorRecoveryEvents", "FMSC_Level3HiddenRecoveryAudit", "schema-12 recovery audit");
         using (var c = DatabaseHelper.GetConnection()) { c.Open(); DatabaseCompatibility.Validate(c); }
         r.Check(FinancialSnapshot() == before, "Compatibility refusal and fixture restoration preserve every financial and academic row.");
         return Task.CompletedTask;

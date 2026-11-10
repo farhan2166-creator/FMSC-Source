@@ -216,6 +216,12 @@ def main():
             fixture_labels = re.findall(r"^MUTATION_CHECK_FAIL: ([A-Za-z0-9 ,.'()/-]{1,140})\s*$",
                                         result.stdout + result.stderr, re.MULTILINE)
             fixture_error = ["Mutation fixture assertion: " + fixture_labels[-1]] if fixture_labels else []
+            # The synthetic-only runtime schema compatibility fixture may
+            # emit one sanitized metadata label. Never propagate raw SQL text,
+            # school rows, credentials, connection URLs or full exception data.
+            manifest_labels = re.findall(r"^SCHEMA_CONTRACT_FAIL: ([A-Za-z0-9 .()/-]{1,120})\s*$",
+                                         result.stdout + result.stderr, re.MULTILINE)
+            manifest_error = ["Synthetic schema contract: " + manifest_labels[-1]] if manifest_labels else []
             # A numeric source line in the owned AdministrationSqlChecks fixture
             # identifies a missing synthetic prerequisite without leaking SQL,
             # connection values, real names, or the raw stack trace.
@@ -223,8 +229,8 @@ def main():
                                      result.stdout + result.stderr)
             admin_location = ["Administration fixture source line " + admin_lines[-1]] if admin_lines else []
             raise RuntimeError("Child command failed with exit " + str(result.returncode) +
-                               ("; " + " | ".join((errors + codes + fixture_error + admin_location)[-3:])
-                                if errors or codes or fixture_error or admin_location else ""))
+                               ("; " + " | ".join((errors + codes + fixture_error + manifest_error + admin_location)[-3:])
+                                if errors or codes or fixture_error or manifest_error or admin_location else ""))
         return result.stdout + result.stderr
 
     def stage(name, action):
@@ -351,7 +357,12 @@ def main():
             report["scenarios"] += [{"name": s["Name"], "result": s["Result"], "assertions": s["Assertions"], "seconds": s["Seconds"],
                 "assertion": s.get("Assertion"), "category": s.get("Category"), "sqlError": s.get("SqlError")} for s in data["scenarios"]]
         if result.returncode:
-            raise RuntimeError("Lifecycle runner reported failed or blocked scenarios; inspect the sanitized assertions.")
+            # Capture only synthetic schema *metadata* labels, not child SQL,
+            # connection strings or data rows (all raw output remains private).
+            labels = re.findall(r"^SCHEMA_CONTRACT_FAIL: ([A-Za-z0-9 .()/-]{1,120})\s*$",
+                                result.stdout + result.stderr, re.MULTILINE)
+            hint = ("; Synthetic schema contract: " + labels[-1]) if labels else ""
+            raise RuntimeError("Lifecycle runner reported failed or blocked scenarios; inspect the sanitized assertions." + hint)
 
     def existing(project, suffix, mode=None):
         provision(suffix)

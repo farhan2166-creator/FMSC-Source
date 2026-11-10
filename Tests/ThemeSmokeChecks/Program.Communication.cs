@@ -202,6 +202,34 @@ internal static partial class Program
         Check(feeText.Contains("Sample Student") && feeText.Contains("1,250.50")
             && feeText.Contains("F-0023") && !feeText.Contains("[OutstandingAmount]"),
             "Fee reminders use real per-recipient balance and admission identifiers");
+        // One guardian phone: two approved sibling balances must appear in
+        // the ONE manually opened message, not silently report just the first.
+        var feeStudentType = prepared.GetNestedType("FeeStudent", BindingFlags.NonPublic)!;
+        object FeeStudent(int id, string name, string admission, decimal balance, bool linked) =>
+            Activator.CreateInstance(feeStudentType, id, name, admission, balance, linked)!;
+        var array = Array.CreateInstance(feeStudentType, 2);
+        array.SetValue(FeeStudent(23, "Sample Student", "F-0023", 500m, true), 0);
+        array.SetValue(FeeStudent(24, "Sibling Student", "F-0024", 700m, true), 1);
+        var aggregate = prepared.GetMethod("AggregateFeeReminder", BindingFlags.NonPublic | BindingFlags.Static)!;
+        object consolidated = aggregate.Invoke(null, new object[]{ Details(500m), array })!;
+        string combined = RenderFormat(TemplateProperty(FeeTemplate(), "Body"), consolidated);
+        Check(combined.Contains("Sample Student") && combined.Contains("Sibling Student")
+            && combined.Contains("F-0023") && combined.Contains("F-0024")
+            && combined.Contains("1,200.00") && !combined.Contains("500.00"),
+            "One guardian chat includes BOTH linked siblings and their combined current outstanding fee.");
+        array.SetValue(FeeStudent(24, "Unrelated Student", "F-0024", 700m, false), 1);
+        bool unrelatedRefused = false;
+        try { aggregate.Invoke(null, new object[]{ Details(500m), array }); }
+        catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
+        { unrelatedRefused = true; }
+        Check(unrelatedRefused,
+            "Shared phone without proven family relationship cannot disclose unrelated student debt.");
+        array.SetValue(FeeStudent(24, "Sibling Student", "F-0024", 0m, true), 1);
+        bool settledRefused = false;
+        try { aggregate.Invoke(null, new object[]{ Details(500m), array }); }
+        catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
+        { settledRefused = true; }
+        Check(settledRefused, "Changed or settled sibling fee records cannot be silently aggregated.");
         Check(admissionText.Contains("09 Nov 2026") && admissionText.Contains("F-0023"),
             "Admission welcomes use the saved student admission date and number");
         bool rejectedMissingBalance = false;
