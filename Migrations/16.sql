@@ -108,18 +108,43 @@ DECLARE @AdmitDefinition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.AdmitSt
 IF @AdmitDefinition IS NULL
     THROW 51007,'Admission procedure definition unavailable for reviewed transport guard.',1;
 SET @AdmitDefinition=REPLACE(@AdmitDefinition,NCHAR(13),N'');
-DECLARE @OldTransportGuard nvarchar(200)=N'WHERE  FT.IsMandatory = 1
-           AND NOT EXISTS';
-DECLARE @NewTransportGuard nvarchar(280)=N'WHERE  FT.IsMandatory = 1
-           AND (@UsesTransport=1 OR FT.IsTransportLinked=0)
-           AND NOT EXISTS';
-IF CHARINDEX(@OldTransportGuard,@AdmitDefinition)=0
- OR CHARINDEX(@OldTransportGuard,@AdmitDefinition,
-              CHARINDEX(@OldTransportGuard,@AdmitDefinition)+LEN(@OldTransportGuard))>0
+-- The schema-only DACPAC and detached SQL baselines may format the
+-- equivalent predicate with different line endings, tabs, brackets and
+-- indentation. Validate the one EXACT original predicate semantically,
+-- then replace just that segment; never blindly replace an arbitrary WHERE.
+DECLARE @MissingGuardPos int=CHARINDEX(N'@MissingMandatoryFees',@AdmitDefinition);
+DECLARE @AggregatePos int=CASE WHEN @MissingGuardPos>0
+    THEN CHARINDEX(N'STRING_AGG',UPPER(@AdmitDefinition),@MissingGuardPos)
+    ELSE 0 END;
+DECLARE @WherePos int=CASE WHEN @AggregatePos>0
+    THEN CHARINDEX(N'WHERE',UPPER(@AdmitDefinition),@AggregatePos)
+    ELSE 0 END;
+DECLARE @ExistsPos int=CASE WHEN @WherePos>0
+    THEN CHARINDEX(N'EXISTS',UPPER(@AdmitDefinition),@WherePos)
+    ELSE 0 END;
+DECLARE @SelectedGuardPos int=CASE WHEN @ExistsPos>0
+    THEN CHARINDEX(N'IF @UseSelectedFeeTypes',@AdmitDefinition,@ExistsPos)
+    ELSE 0 END;
+IF @AggregatePos=0 OR @WherePos<=@AggregatePos OR @ExistsPos<=@WherePos
+ OR @SelectedGuardPos<=@ExistsPos OR @ExistsPos-@WherePos>256
  OR CHARINDEX(N'@UsesTransport',@AdmitDefinition)=0
  OR CHARINDEX(N'@UseSelectedFeeTypes',@AdmitDefinition)=0
     THROW 51008,'The reviewed admission transport predicate has changed; inspect before migrating.',1;
-SET @AdmitDefinition=REPLACE(@AdmitDefinition,@OldTransportGuard,@NewTransportGuard);
+DECLARE @OldPredicate nvarchar(256)=SUBSTRING(@AdmitDefinition,
+    @WherePos,@ExistsPos-@WherePos);
+DECLARE @NormalizedPredicate nvarchar(256)=UPPER(
+    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(@OldPredicate,
+        NCHAR(10),N''),NCHAR(9),N''),NCHAR(160),N''),
+        N' ',N''),N'[',N''),N']',N''));
+IF @NormalizedPredicate<>N'WHEREFT.ISMANDATORY=1ANDNOT'
+ OR CHARINDEX(N'FT.FeeTypeName',SUBSTRING(@AdmitDefinition,
+       @AggregatePos,@WherePos-@AggregatePos))=0
+    THROW 51008,'The reviewed admission transport predicate has changed; inspect before migrating.',1;
+-- Replace exactly one guarded predicate. Keep the original remainder
+-- of dbo.AdmitStudent, its authorization/transactions and rate checks intact.
+SET @AdmitDefinition=STUFF(@AdmitDefinition,
+    @WherePos,@ExistsPos-@WherePos,
+    N'WHERE FT.IsMandatory=1 AND (@UsesTransport=1 OR FT.IsTransportLinked=0) AND NOT ');
 -- Some originally published procedures retain leading comments/newlines.
 -- Do not guess the starting byte; locate the header keyword and verify the
 -- actual procedure identity before constructing an ALTER-only batch.
