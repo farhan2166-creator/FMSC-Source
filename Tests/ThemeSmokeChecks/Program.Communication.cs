@@ -204,6 +204,33 @@ internal static partial class Program
             "Fee reminders use real per-recipient balance and admission identifiers");
         Check(admissionText.Contains("09 Nov 2026") && admissionText.Contains("F-0023"),
             "Admission welcomes use the saved student admission date and number");
+
+        // Two consenting students in the same batch scope can have ONE phone.
+        // The human opens one chat, but the reminder must disclose BOTH
+        // student identities and sum both live positive ledger balances.
+        using var sharedFeeRows = new DataTable();
+        sharedFeeRows.Columns.Add("RecordId", typeof(int));
+        sharedFeeRows.Columns.Add("RecordName", typeof(string));
+        sharedFeeRows.Columns.Add("AdmissionNumber", typeof(string));
+        sharedFeeRows.Columns.Add("Outstanding", typeof(decimal));
+        sharedFeeRows.Rows.Add(23, "Sample Student", "F-0023", 500m);
+        sharedFeeRows.Rows.Add(24, "Sample Sibling", "F-0024", 700m);
+        var aggregate = prepared.GetMethod("AggregateOutstanding",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        object combined = aggregate.Invoke(null, new object[] { Details(500m), sharedFeeRows })!;
+        string combinedText = RenderFormat(TemplateProperty(FeeTemplate(), "Body"), combined);
+        Check(combinedText.Contains("Sample Student, Sample Sibling")
+            && combinedText.Contains("F-0023, F-0024")
+            && combinedText.Contains("1,200.00") && !combinedText.Contains("500.00"),
+            "One shared guardian receives the combined eligible sibling balance with both admission numbers");
+        bool missingSelectedRejected = false;
+        sharedFeeRows.Rows.RemoveAt(0);
+        try { aggregate.Invoke(null, new object[] { Details(500m), sharedFeeRows }); }
+        catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
+        { missingSelectedRejected = true; }
+        Check(missingSelectedRejected,
+            "Changed, settled or excluded original recipient refuses a stale shared-number reminder");
+
         bool rejectedMissingBalance = false;
         try { RenderFormat(TemplateProperty(FeeTemplate(), "Body"), Details(null)); }
         catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
