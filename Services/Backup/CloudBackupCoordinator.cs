@@ -50,12 +50,14 @@ internal static class CloudBackupCoordinator
         if (!CloudBackupSettings.HasLocalRecoveryPassphrase)
             throw new InvalidOperationException("Enroll and independently retain a recovery passphrase before cloud backups can run.");
 
-        using var mutex = new Mutex(false, "Local\\FMSC-CloudBackup-Job");
-        if (!mutex.WaitOne(0)) throw new InvalidOperationException("Another FMSC cloud backup or upload is already running.");
+        EnsurePrivateDirectories();
+        // The lease survives awaits and may be disposed by any continuation thread.
+        // The OS releases it after a crash, so no stale flag can block a restart.
+        using var jobLease = CloudBackupJobLock.TryAcquire(Path.Combine(Root, "cloud-job.lock"))
+            ?? throw new InvalidOperationException("Another FMSC cloud backup or upload is already running.");
         try
         {
-            EnsurePrivateDirectories();
-            await RetryPendingUploadsCoreAsync(settings, token);
+            await RetryPendingUploadsCoreAsync(settings, token).ConfigureAwait(false);
             if (scheduled && !settings.IsDue(DateTimeOffset.Now, LoadState().LastSuccessfulLocalBackup))
                 return new BackupOutcome(false, false, false, "No scheduled backup is due.");
 
@@ -76,14 +78,17 @@ internal static class CloudBackupCoordinator
                 if (!result.Success) throw new IOException(result.Message);
             }
             // Only a verified SQL header is used to create the remote recovery timestamp.
-            var info = DatabaseBackupManager.GetBackupInfo(bak);
+            var info = await Task.Run(() => DatabaseBackupManager.GetBackupInfo(bak), token)
+                .ConfigureAwait(false);
             if (info is null || !info.IsForFmscDatabase || info.BackupStartDate == default)
                 throw new InvalidDataException("Verified SQL backup metadata is not readable.");
             DateTime sqlCreated = DateTime.SpecifyKind(info.BackupStartDate, DateTimeKind.Local).ToUniversalTime();
             string id = Guid.NewGuid().ToString("N");
             string packaged = Path.Combine(Queue, id + ".fmscbackup");
-            CloudBackupCrypto.Encrypt(bak, packaged, CloudBackupSettings.OpenRecoveryPassphrase(),
-                sqlCreated, info.BackupStartDate);
+            // Large encrypted SQL backups must never block the WinForms message pump.
+            await Task.Run(() => CloudBackupCrypto.Encrypt(
+                bak, packaged, CloudBackupSettings.OpenRecoveryPassphrase(),
+                sqlCreated, info.BackupStartDate), token).ConfigureAwait(false);
             string digest;
             await using (var content = File.OpenRead(packaged))
                 digest = Convert.ToHexString(await SHA256.HashDataAsync(content, token)).ToLowerInvariant();
@@ -108,13 +113,14 @@ internal static class CloudBackupCoordinator
                 catch (Exception ex) { issues.Add("Dropbox: " + SafeTransportError(ex)); }
             }
             RemoveFullyDeliveredPayload(pending, settings);
-            PruneLocalAutomaticBackups(folder, settings.MaximumLocalBackups);
+            await Task.Run(() => PruneLocalAutomaticBackups(folder, settings.MaximumLocalBackups), token)
+                .ConfigureAwait(false);
             string summary = issues.Count == 0
                 ? "Verified local backup uploaded to the selected cloud destinations."
                 : "Verified local backup succeeded. Cloud upload is pending retry: " + string.Join("; ", issues);
             return new BackupOutcome(true, google, dropbox, summary);
         }
-        finally { mutex.ReleaseMutex(); }
+        finally { /* jobLease is disposed on exit, including exceptions */ }
     }
 
     internal static async Task<int> RunScheduledAsync(CancellationToken token = default)
@@ -172,10 +178,10 @@ internal static class CloudBackupCoordinator
     internal static async Task RetryPendingUploadsAsync(CancellationToken token = default)
     {
         var settings = CloudBackupSettings.Load();
-        using var mutex = new Mutex(false, "Local\\FMSC-CloudBackup-Job");
-        if (!mutex.WaitOne(0)) return;
-        try { await RetryPendingUploadsCoreAsync(settings, token); }
-        finally { mutex.ReleaseMutex(); }
+        EnsurePrivateDirectories();
+        using var jobLease = CloudBackupJobLock.TryAcquire(Path.Combine(Root, "cloud-job.lock"));
+        if (jobLease is null) return;
+        await RetryPendingUploadsCoreAsync(settings, token).ConfigureAwait(false);
     }
 
     internal static async Task<IReadOnlyList<CloudSelection>> BrowseCloudAsync(CancellationToken token = default)
