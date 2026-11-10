@@ -32,23 +32,25 @@ internal sealed class Fixture
             Console.WriteLine("SCHEMA_CONTRACT_FAIL: " + safe);
             throw;
         }
-        Sql.Query("INSERT dbo.Roles(RoleName,Description) VALUES(N'Administrator',N'Fictional full-authority test role'),(N'Accountant',N'Fictional restricted test role');");
-        // The baseline installs 28 codes; migration 9 supplies three new
-        // communication codes. Seed only missing fixture permissions, then
-        // verify that every pre-existing definition exactly matches the catalog.
-        foreach (var definition in PermissionCatalog.All.Values)
-            Sql.Query("""
-                IF NOT EXISTS(SELECT 1 FROM dbo.Permissions WHERE PermissionCode=@Code)
-                    INSERT dbo.Permissions(PermissionCode,PermissionName,Description)
-                    VALUES(@Code,@Name,@Description);
-                IF NOT EXISTS(SELECT 1 FROM dbo.Permissions
-                    WHERE PermissionCode=@Code AND PermissionName=@Name AND Description=@Description)
-                    THROW 51099,'Permission metadata drifted from the audited catalog.',1;
-                """,
-                Sql.P("@Code", definition.Code), Sql.P("@Name", definition.Name),
-                Sql.P("@Description", definition.Description));
+        // No fixture-side bootstrap: migration 16 must supply reference roles,
+        // the 31 known permissions and billing state to an empty database BEFORE
+        // any administrator attempts to sign in. This is the real first-run
+        // stored-procedure precondition, not a synthetic SQL repair.
+        if (Sql.Count("SELECT COUNT(*) FROM dbo.Roles WHERE RoleName IN (N'Administrator',N'Accountant');") != 2)
+            throw new InvalidOperationException("Production migration did not prepare both school roles.");
+        if (Sql.Count("SELECT COUNT(*) FROM dbo.BillingAutomationState WHERE StateId=1;") != 1)
+            throw new InvalidOperationException("Production migration did not initialize the billing singleton.");
         if (Sql.Count("SELECT COUNT(*) FROM dbo.Permissions;") != PermissionCatalog.All.Count)
-            throw new InvalidOperationException("The fixture contains unexpected permission entries.");
+            throw new InvalidOperationException("Production migration did not seed the full permission catalog.");
+        foreach (var definition in PermissionCatalog.All.Values)
+        {
+            if (Sql.Count("""
+                SELECT COUNT(*) FROM dbo.Permissions
+                 WHERE PermissionCode=@Code AND PermissionName=@Name AND Description=@Description;
+                """, Sql.P("@Code", definition.Code), Sql.P("@Name", definition.Name),
+                Sql.P("@Description", definition.Description)) != 1)
+                throw new InvalidOperationException("Production reference permission does not match the reviewed catalog: " + definition.Code);
+        }
         var f = new Fixture();
         byte[] salt = RandomNumberGenerator.GetBytes(32);
         byte[] hash = Rfc2898DeriveBytes.Pbkdf2(Guid.NewGuid().ToString("N"), salt, 100_000, HashAlgorithmName.SHA512, 64);
