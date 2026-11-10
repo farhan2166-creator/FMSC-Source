@@ -120,10 +120,17 @@ IF CHARINDEX(@OldTransportGuard,@AdmitDefinition)=0
  OR CHARINDEX(N'@UseSelectedFeeTypes',@AdmitDefinition)=0
     THROW 51008,'The reviewed admission transport predicate has changed; inspect before migrating.',1;
 SET @AdmitDefinition=REPLACE(@AdmitDefinition,@OldTransportGuard,@NewTransportGuard);
-SET @AdmitDefinition=LTRIM(@AdmitDefinition);
+-- Some originally published procedures retain leading comments/newlines.
+-- Do not guess the starting byte; locate the header keyword and verify the
+-- actual procedure identity before constructing an ALTER-only batch.
 DECLARE @ProcedureKeywordPos int=CHARINDEX(N'PROCEDURE',UPPER(@AdmitDefinition));
-IF @ProcedureKeywordPos<7 OR @ProcedureKeywordPos>70
- OR (LEFT(UPPER(@AdmitDefinition),6)<>N'CREATE' AND LEFT(UPPER(@AdmitDefinition),5)<>N'ALTER')
+DECLARE @Header nvarchar(256)=UPPER(LEFT(@AdmitDefinition,
+    CASE WHEN @ProcedureKeywordPos BETWEEN 1 AND 256
+         THEN @ProcedureKeywordPos ELSE 256 END));
+IF @ProcedureKeywordPos<1 OR @ProcedureKeywordPos>256
+ OR (CHARINDEX(N'CREATE',@Header)=0 AND CHARINDEX(N'ALTER',@Header)=0)
+ OR CHARINDEX(N'ADMITSTUDENT',UPPER(SUBSTRING(
+       @AdmitDefinition,@ProcedureKeywordPos+LEN(N'PROCEDURE'),100)))=0
     THROW 51009,'Unexpected admission procedure header; refuse unreviewed alteration.',1;
 -- ALTER PROCEDURE must be the first statement of its dynamic batch.
 SET @AdmitDefinition=N'ALTER PROCEDURE'+SUBSTRING(
