@@ -17,7 +17,8 @@ public static class SchemaLengths
     public const int StudentPlaceOfBirth = 500;                      // Students.PlaceOfBirth
     // Shared text columns that are the SAME length in every table.
     public const int City = 100;                                     // Campuses/SchoolProfile.City
-    public const int ContactNumber = 30;                             // Students/Staff/Campuses/SchoolProfile
+    public const int ContactNumber = 30;                             // Students/Staff/Campuses
+    public const int SchoolProfileContactNumber = 150;               // SchoolProfile.ContactNumber (comma-separated list)
     public const int AlternateContactNumber = 30;                    // Students/Staff
     public const int Address = 500;                                  // Students/Staff.Address
     public const int AddressLine = 500;                              // Campuses/SchoolProfile.AddressLine
