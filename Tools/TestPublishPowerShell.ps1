@@ -103,7 +103,7 @@ try {
     }
     foreach ($pair in @(
         ,@($sqlCmd, (Join-Path $application 'UpdateSupport/Tools/SqlCmd/sqlcmd.exe'))
-        ,@($prerequisite, (Join-Path $application 'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')),
+        ,@($prerequisite, (Join-Path $application 'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi'))
         ,@($redist, (Join-Path $application 'UpdateSupport/Tools/VcRedist/vc_redist.x64.exe'))
     )) {
         if ((Get-FileHash -LiteralPath $pair[0] -Algorithm SHA256).Hash -ne
