@@ -1,6 +1,6 @@
 # Production database migrations
 
-**Current source target (8 November 2026): FMSC application 1.0.16, database schema 10.** The committed consecutive production migration chain is `2.sql`–`10.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
+**Current source target (10 November 2026): FMSC application 1.0.23, database schema 14.** The committed consecutive production migration chain is `2.sql`–`14.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
 
 **Historical starting point:** The first production release used application **1.0.0**, database **1**.
 The schema-1 baseline contains the complete original production schema.
@@ -37,7 +37,7 @@ communication module, when present, gets a permission-checked contact-linking
 procedure plus pre-send consent revalidation. No messages send automatically and
 the migration does not install the optional module.
 
-Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed **2.sql–10.sql** production chain where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts. See [the historical baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
+Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed **2.sql–14.sql** production chain where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts. See [the historical baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
 
 # Apply migrations without the installer
 
@@ -158,3 +158,19 @@ resume/skip/operator-report semantics, and a database trigger refusing a
 provider API attempt from manual profiles. The administrator must explicitly
 enable the free WhatsApp handoff; it never sends itself or produces verified
 delivery receipts. This extension is in the **committed `10.sql`**; migration 9 is not retroactively edited. An operator report does not prove provider delivery. A database upgrade to 10 alone cannot add the new WinForms UI to an older installed executable; use a validated matching application build.
+
+## Schema 14 — Editable fee-type policy for new-school setup
+
+Migration `14.sql` requires schema 13. It exposes the existing `IsMandatory` and
+`IsTransportLinked` flags through `GetFeeTypes` and extends
+`SaveFeeTypeWithDefaultFrequency` to persist both in the same transaction as the
+fee name, description, and frequency. Existing flags, fee configurations,
+student assignments and bills are **not** modified by the migration. Older
+procedure callers that omit the two new optional parameters retain their
+current policy values. Operators can now open **Fee Rate Setup → Fee Types**,
+select Tuition Fee (or another non-transport fee), mark **Mandatory fee**, save,
+then re-run **Setup Readiness**. Class fee rates remain separately configured.
+
+The disposable Lifecycle SQL fixture verifies the same save path used by the
+editor, including the missing-mandatory readiness warning, its resolution,
+transport-linked round-trip and a legacy caller that omits new parameters.
