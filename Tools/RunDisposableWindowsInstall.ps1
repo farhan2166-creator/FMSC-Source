@@ -23,6 +23,7 @@ $app=Join-Path $release 'FMSC_SMS'
 $tools=Join-Path $release 'Tools'
 $database=Join-Path $release 'Database'
 $localMsi=Join-Path $tools 'SqlLocalDB.msi'
+$vcRedist=Join-Path $tools 'vc_redist.x64.exe'
 $sqlcmd=Join-Path $tools 'sqlcmd.exe'
 $instance='(localdb)\MSSQLLocalDB'
 $installed='C:\FMSC School Management'
@@ -279,8 +280,13 @@ try {
     $downloadedMsi=Join-Path $root 'SqlLocalDB.msi'
     Invoke-FmscPinnedDownload -Uri (Get-FmscToolSpec 'LocalDb').url -OutFile $downloadedMsi -TimeoutSec 300
     if ((Get-Item -LiteralPath $downloadedMsi).Length -lt 1000000) { throw 'LocalDB MSI is incomplete.' }
-    Assert-FmscMicrosoftMsi $downloadedMsi
+    Assert-FmscMicrosoftPackage $downloadedMsi
     Copy-Item -LiteralPath $downloadedMsi -Destination $localMsi
+    $downloadedVc=Join-Path $root 'vc_redist.x64.exe'
+    Invoke-FmscPinnedDownload -Uri (Get-FmscToolSpec 'VcRedist').url -OutFile $downloadedVc -TimeoutSec 300
+    if ((Get-Item -LiteralPath $downloadedVc).Length -lt 1000000) { throw 'Visual C++ x64 redistributable is incomplete.' }
+    Assert-FmscMicrosoftPackage $downloadedVc
+    Copy-Item -LiteralPath $downloadedVc -Destination $vcRedist
     if ($existing) {
         $msiCoverage='PREINSTALLED_NOT_A_CLEAN_MSI_TEST'
         Write-Host 'LocalDB already present in GitHub runner image; MSI installation was NOT exercised.'
@@ -332,7 +338,7 @@ try {
     $arguments=@('publish',(Join-Path $project 'FMSC_SMS.csproj'),'-c','Release','-r','win-x64',
         '--self-contained','true','-p:PublishProfile=PortableRelease',
         "-p:PublishDir=$app/","-p:ReleaseRoot=$release/",
-        "-p:LocalDbMsiPath=$localMsi","-p:BundledGitDirectory=$transport",
+        "-p:LocalDbMsiPath=$localMsi","-p:VcRedistPath=$vcRedist","-p:BundledGitDirectory=$transport",
         "-p:BundledSqlCmdPath=$sqlcmd",
         "-p:DeploymentDatabaseDirectory=$(Join-Path $root 'empty-source')",
         '-p:PublishSingleFile=false','-p:PublishTrimmed=false')
@@ -341,8 +347,9 @@ try {
     foreach ($file in @('FMSC_SMS/FMSC_SMS.exe','FMSC_SMS/UpdateSupport/FMSC.Setup.exe',
         'FMSC_SMS/UpdateTransport/cmd/git.exe','FMSC_SMS/UpdateTransport/usr/bin/ssh.exe',
         'FMSC_SMS/UpdateTransport/COPYING-GIT.txt',
-        'FMSC_SMS/UpdateSupport/Tools/SqlCmd/sqlcmd.exe','FMSC_SMS/UpdateSupport/Tools/LocalDb/SqlLocalDB.msi','core.ps1','Install FMSC_SMS.bat','FMSC.Setup.exe',
-        'Tools/SqlLocalDB.msi','Tools/sqlcmd.exe')) {
+        'FMSC_SMS/UpdateSupport/Tools/SqlCmd/sqlcmd.exe','FMSC_SMS/UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
+        'FMSC_SMS/UpdateSupport/Tools/VcRedist/vc_redist.x64.exe','core.ps1','Install FMSC_SMS.bat','FMSC.Setup.exe',
+        'Tools/SqlLocalDB.msi','Tools/vc_redist.x64.exe','Tools/sqlcmd.exe')) {
         if (-not (Test-Path -LiteralPath (Join-Path $release $file) -PathType Leaf)) {
             throw "Real installer asset missing: $file"
         }
@@ -571,7 +578,7 @@ VALUES(1,N'Fictional Level 3 Install School',SYSUTCDATETIME(),SYSUTCDATETIME(),@
         $archive=[IO.Compression.ZipFile]::OpenRead($zipPath)
         try {
             $entries=@($archive.Entries | ForEach-Object { $_.FullName.Replace('\','/') })
-            foreach ($required in @('FMSC_SMS/FMSC_SMS.exe','FMSC_SMS/UpdateSupport/FMSC.Setup.exe','core.ps1','Install FMSC_SMS.bat','FMSC.Setup.exe','Tools/SqlLocalDB.msi','Tools/sqlcmd.exe','Database/PUT_MDF_AND_LDF_HERE.txt','READ_ME_FIRST.txt','SHA256SUMS.txt')) {
+            foreach ($required in @('FMSC_SMS/FMSC_SMS.exe','FMSC_SMS/UpdateSupport/FMSC.Setup.exe','core.ps1','Install FMSC_SMS.bat','FMSC.Setup.exe','Tools/SqlLocalDB.msi','Tools/vc_redist.x64.exe','Tools/sqlcmd.exe','Database/PUT_MDF_AND_LDF_HERE.txt','READ_ME_FIRST.txt','SHA256SUMS.txt')) {
                 if ($required -notin $entries) { throw "ZIP is missing $required" }
             }
             if (@($entries | Where-Object { $_ -match '(?i)\.(mdf|ldf|ndf|bak)$' }).Count) { throw 'Database file entered the installer ZIP.' }

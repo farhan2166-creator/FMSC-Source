@@ -27,7 +27,7 @@ function Wait-OriginalFmscExit {
     }
 }
 $AppName = 'FMSC School Management System'
-$AppVersion = '1.0.21'
+$AppVersion = '1.0.22'
 $DatabaseVersion = '12'
 $ReleaseRoot = $PSScriptRoot
 $AppSource      = Join-Path $ReleaseRoot 'FMSC_SMS'
@@ -1237,6 +1237,44 @@ function Invoke-PendingMigrations {
     }
 }
 
+# SQL Server 2022 LocalDB's VSS Writer can fail on clean Windows
+# without a supported Visual C++ v14 x64 runtime.
+function Test-FmscVcRuntime {
+    foreach($key in @(
+        'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64'
+    )){
+        $runtime=Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+        if($runtime -and [int]$runtime.Installed -eq 1 -and
+            ([int]$runtime.Major -gt 14 -or
+             ([int]$runtime.Major -eq 14 -and [int]$runtime.Minor -ge 30))){
+            return $true
+        }
+    }
+    return $false
+}
+function Invoke-FmscVcRuntimeInstallation {
+    param([Parameter(Mandatory=$true)][string]$Path,
+          [Parameter(Mandatory=$true)][string]$LogDirectory)
+    if(Test-FmscVcRuntime){
+        Write-Success 'Microsoft Visual C++ x64 runtime is already installed.'
+        return
+    }
+    Assert-FmscMicrosoftPackage $Path
+    $log=Join-Path $LogDirectory ('VcRedist-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.log')
+    Write-Step 'Installing Microsoft Visual C++ x64 runtime before LocalDB...'
+    Write-Log "Visual C++ setup diagnostic log: $log"
+    $setup=Start-Process -FilePath $Path -ArgumentList @(
+        '/install','/quiet','/norestart','/log',"`"$log`""
+    ) -Wait -PassThru
+    if($setup.ExitCode -in @(3010,1641)){
+        throw "Microsoft Visual C++ setup requires a Windows restart (code $($setup.ExitCode)). Restart and rerun FMSC. Log: $log"
+    }
+    if($setup.ExitCode -ne 0 -or -not(Test-FmscVcRuntime)){
+        throw "Microsoft Visual C++ x64 runtime setup failed or is unverified (code $($setup.ExitCode)). Log: $log"
+    }
+    Write-Success 'Microsoft Visual C++ x64 runtime installed and verified.'
+}
 function Invoke-LocalDbMsiInstallation {
     param([Parameter(Mandatory=$true)][string]$MsiPath,
           [Parameter(Mandatory=$true)][string]$LogDirectory)
@@ -1692,13 +1730,19 @@ try {
         }
     }
     Write-Step 'Retaining verified maintenance tools on this PC...'
-    foreach($ToolName in @('Git','SqlCmd','LocalDb')){
+    foreach($ToolName in @('Git','SqlCmd','LocalDb','VcRedist')){
         $null=Install-FmscMaintenanceTool $ToolName $AppSource
     }
+    # Every fresh setup and application update validates this prerequisite.
+    # Existing compatible runtimes are skipped. If missing, install before
+    # starting SQL or touching the school's database.
+    $VcRedistRoot=Find-FmscMaintenanceTool 'VcRedist'
+    if(-not $VcRedistRoot){throw 'Verified Visual C++ runtime prerequisite is unavailable.'}
+    Invoke-FmscVcRuntimeInstallation -Path (Join-Path $VcRedistRoot 'vc_redist.x64.exe') -LogDirectory $DatabaseDir
     if (-not $SqlLocalDb) {
         Write-WarningMessage `
             'SQL Server LocalDB was not found.'
-        # The self-contained win-x64 application includes its .NET Desktop Runtime. Tools carries only database prerequisites: sqlcmd.exe and SqlLocalDB.msi.
+        # The self-contained app includes .NET; verified SQL tools and VC++ are retained separately.
         $MsiRoot=Install-FmscMaintenanceTool 'LocalDb' $AppSource
         $MsiPath=Join-Path $MsiRoot 'SqlLocalDB.msi'
         Invoke-LocalDbMsiInstallation -MsiPath $MsiPath -LogDirectory $DatabaseDir

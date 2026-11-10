@@ -1,7 +1,7 @@
 # Shared install/update/repair resolver. Never touches the school database or credentials.
 param(
     [ValidateSet('Library','Resolve','Install')][string]$Action='Library',
-    [ValidateSet('Git','SqlCmd','LocalDb')][string]$Tool='Git',
+    [ValidateSet('Git','SqlCmd','LocalDb','VcRedist')][string]$Tool='Git',
     [string]$ApplicationDirectory=''
 )
 $ErrorActionPreference='Stop'
@@ -12,7 +12,7 @@ if([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and $PSVersionTa
 $script:FmscToolCatalog=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ToolCatalog.json') -Raw | ConvertFrom-Json
 
 function Get-FmscToolSpec([string]$Name) {
-    if($Name -notin @('Git','SqlCmd','LocalDb')){throw 'Unknown maintenance tool.'}
+    if($Name -notin @('Git','SqlCmd','LocalDb','VcRedist')){throw 'Unknown maintenance tool.'}
     return $script:FmscToolCatalog.$Name
 }
 function Assert-FmscToolPaths([string]$Root) {
@@ -25,11 +25,11 @@ function Assert-FmscToolPaths([string]$Root) {
         if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Linked tool files are forbidden.'}
     }
 }
-function Assert-FmscMicrosoftMsi([string]$Path) {
+function Assert-FmscMicrosoftPackage([string]$Path) {
     $sig=Get-AuthenticodeSignature -LiteralPath $Path
     if($sig.Status -ne 'Valid' -or $null -eq $sig.SignerCertificate -or
         $sig.SignerCertificate.Subject -notmatch '(^|, *)O=Microsoft Corporation(,|$)'){
-        throw 'The LocalDB installer is not a valid Microsoft-signed package.'
+        throw 'The prerequisite is not a valid Microsoft-signed package.'
     }
 }
 function Assert-FmscTransportRuntime([string]$Root) {
@@ -85,7 +85,10 @@ function Test-FmscTool([string]$Root,[string]$Name) {
         # Extra DLLs/executables are corruption too; do not load an unlisted file.
         $actual=@(Get-ChildItem -LiteralPath $Root -Recurse -File -Force | Where-Object {$_.Name -ne 'FMSC.ToolIntegrity.json'})
         if($actual.Count -ne $seen.Count){return $false}
-        if($Name -eq 'LocalDb'){Assert-FmscMicrosoftMsi (Join-Path $Root 'SqlLocalDB.msi')}
+        if($Name -in @('LocalDb','VcRedist')){
+            $package=if($Name -eq 'LocalDb'){'SqlLocalDB.msi'}else{'vc_redist.x64.exe'}
+            Assert-FmscMicrosoftPackage (Join-Path $Root $package)
+        }
         return $true
     } catch {return $false}
 }
@@ -136,12 +139,13 @@ function Receive-FmscTool([string]$Name,[string]$Destination) {
     $temporary=Join-Path $parent ('fmsc-tool-download-'+[Guid]::NewGuid().ToString('N'))
     $null=New-Item -ItemType Directory -Path $temporary
     try {
-        $archive=Join-Path $temporary $(if($Name -eq 'LocalDb'){'SqlLocalDB.msi'}else{'download'})
+        $archiveName=switch($Name){LocalDb {'SqlLocalDB.msi'} VcRedist {'vc_redist.x64.exe'} default {'download'}}
+        $archive=Join-Path $temporary $archiveName
         Invoke-FmscPinnedDownload -Uri $spec.url -OutFile $archive -TimeoutSec 300
-        if($Name -eq 'LocalDb'){
-            Assert-FmscMicrosoftMsi $archive
+        if($Name -in @('LocalDb','VcRedist')){
+            Assert-FmscMicrosoftPackage $archive
             $null=New-Item -ItemType Directory -Path $Destination
-            Copy-Item -LiteralPath $archive -Destination (Join-Path $Destination 'SqlLocalDB.msi')
+            Copy-Item -LiteralPath $archive -Destination (Join-Path $Destination $archiveName)
         } else {
             if((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $spec.sha256){throw "Pinned $Name archive checksum mismatch."}
             $zip=$archive+'.zip';Move-Item -LiteralPath $archive -Destination $zip
@@ -193,14 +197,14 @@ function Remove-FmscSupersededMaintenanceTools {
     if(-not(Test-Path -LiteralPath $root -PathType Container)){return}
     Assert-FmscRecoveryStorage $root
     $selected=@{}
-    foreach($name in @('Git','SqlCmd','LocalDb')){
+    foreach($name in @('Git','SqlCmd','LocalDb','VcRedist')){
         $current=Find-FmscMaintenanceTool $name
         if(-not $current -or -not(Test-FmscTool $current $name)){
             throw "Current $name maintenance tool cannot be verified; pruning refused."
         }
         $selected[$name]=[IO.Path]::GetFullPath($current).TrimEnd('\')
     }
-    foreach($name in @('Git','SqlCmd','LocalDb')){
+    foreach($name in @('Git','SqlCmd','LocalDb','VcRedist')){
         $spec=Get-FmscToolSpec $name
         $pattern='^'+[regex]::Escape($name+'-'+$spec.version+'-')+'[a-f0-9]{32}$'
         foreach($candidate in @(Get-ChildItem -LiteralPath $root -Directory -Force)){

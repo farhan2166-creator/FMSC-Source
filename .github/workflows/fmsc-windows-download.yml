@@ -192,7 +192,7 @@ jobs:
       - name: Publish self-contained Windows x64 application
         shell: pwsh
         run: |
-          dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output out/windows-x64-app -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$env:GITHUB_WORKSPACE/out/prerequisites/MinGit" "-p:LocalDbMsiPath=$env:GITHUB_WORKSPACE/out/prerequisites/SqlLocalDB.msi" "-p:BundledSqlCmdPath=$env:GITHUB_WORKSPACE/out/prerequisites/sqlcmd.exe" -p:PublishSingleFile=false -p:PublishTrimmed=false
+          dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output out/windows-x64-app -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$env:GITHUB_WORKSPACE/out/prerequisites/MinGit" "-p:LocalDbMsiPath=$env:GITHUB_WORKSPACE/out/prerequisites/SqlLocalDB.msi" "-p:VcRedistPath=$env:GITHUB_WORKSPACE/out/prerequisites/vc_redist.x64.exe" "-p:BundledSqlCmdPath=$env:GITHUB_WORKSPACE/out/prerequisites/sqlcmd.exe" -p:PublishSingleFile=false -p:PublishTrimmed=false
           if ($LASTEXITCODE -ne 0) { throw "Windows publish failed." }
 
       - name: Verify ZIP contents and add build manifest
@@ -209,6 +209,7 @@ jobs:
               'UpdateTransport/THIRD_PARTY_NOTICES.txt',
               'UpdateSupport/Tools/SqlCmd/sqlcmd.exe',
               'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
+              'UpdateSupport/Tools/VcRedist/vc_redist.x64.exe',
               'UpdateSupport/MaintenanceTools.ps1',
               'UpdateSupport/ToolCatalog.json')) {
             if (-not (Test-Path -LiteralPath (Join-Path $root $name) -PathType Leaf)) {
@@ -217,7 +218,7 @@ jobs:
           }
           $toolApp = $root
           . (Join-Path $toolApp 'UpdateSupport/MaintenanceTools.ps1')
-          foreach ($toolName in @('Git','SqlCmd','LocalDb')) {
+          foreach ($toolName in @('Git','SqlCmd','LocalDb','VcRedist')) {
             $spec = Get-FmscToolSpec $toolName
             $bundle = Join-Path $toolApp $spec.folder
             if ($toolName -ne 'Git') { $bundle = Join-Path $bundle $toolName }
@@ -226,6 +227,7 @@ jobs:
           foreach ($pair in @(
             ,@('out/prerequisites/sqlcmd.exe','UpdateSupport/Tools/SqlCmd/sqlcmd.exe')
             ,@('out/prerequisites/SqlLocalDB.msi','UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')
+            ,@('out/prerequisites/vc_redist.x64.exe','UpdateSupport/Tools/VcRedist/vc_redist.x64.exe')
           )) {
             $source = Join-Path $env:GITHUB_WORKSPACE $pair[0]
             $published = Join-Path $root $pair[1]
@@ -252,7 +254,7 @@ jobs:
             ''
             'This is NOT a complete installer or a GitHub public Release.'
             'It contains no student records, MDF/LDF or database backups.'
-            'Contains a Microsoft-signed SQL LocalDB repair MSI and pinned sqlcmd for offline future maintenance.'
+            'Contains signed Microsoft Visual C++ x64 and SQL LocalDB installers and pinned sqlcmd for offline future maintenance.'
             'UpdateSupport contains the existing installer and numbered database migrations.'
             'UpdateTransport bundles pinned Git, OpenSSH, dependencies and license notices; system Git is not required.'
             'Existing school databases are preserved. Pending migrations run only through the post-exit installer safeguards.'

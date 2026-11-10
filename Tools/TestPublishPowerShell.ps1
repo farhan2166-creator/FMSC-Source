@@ -28,8 +28,10 @@ try {
     Set-Content -LiteralPath $sqlCmd -Value 'Synthetic offline SQL tool; not executable.'
     $prerequisite = Join-Path $scratch 'readability fixture.txt'
     Set-Content -LiteralPath $prerequisite -Value 'Test fixture; not an installer.'
+    $redist = Join-Path $scratch 'synthetic VC runtime.exe'
+    Set-Content -LiteralPath $redist -Value 'Synthetic Visual C++ runtime; not executable.'
 
-    foreach($pair in @(@('SqlCmd','sqlcmd.exe',$sqlCmd),@('LocalDb','SqlLocalDB.msi',$prerequisite))){
+    foreach($pair in @(@('SqlCmd','sqlcmd.exe',$sqlCmd),@('LocalDb','SqlLocalDB.msi',$prerequisite),@('VcRedist','vc_redist.x64.exe',$redist))){
         $folder=Join-Path $scratch $pair[0]
         $null=New-Item -ItemType Directory -Path $folder
         Copy-Item -LiteralPath $pair[2] -Destination (Join-Path $folder $pair[1])
@@ -49,7 +51,7 @@ try {
     $output = & dotnet publish (Join-Path $ProjectDirectory 'FMSC_SMS.csproj') `
         -c Release -r win-x64 --self-contained true -p:PublishProfile=PortableRelease `
         "-p:PublishDir=$application/" "-p:ReleaseRoot=$release/" `
-        "-p:LocalDbMsiPath=$prerequisite" "-p:DeploymentDatabaseDirectory=$database" `
+        "-p:LocalDbMsiPath=$prerequisite" "-p:VcRedistPath=$redist" "-p:DeploymentDatabaseDirectory=$database" `
         "-p:BundledGitDirectory=$transport" "-p:BundledSqlCmdPath=$sqlCmd" `
         -p:FmscSyntheticPublishFixture=true -p:PublishSingleFile=false -p:PublishTrimmed=false 2>&1
     $code = $LASTEXITCODE
@@ -74,10 +76,11 @@ try {
         'FMSC_SMS/UpdateTransport/THIRD_PARTY_NOTICES.txt',
         'FMSC_SMS/UpdateSupport/Tools/SqlCmd/sqlcmd.exe',
         'FMSC_SMS/UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
+        'FMSC_SMS/UpdateSupport/Tools/VcRedist/vc_redist.x64.exe',
         'FMSC_SMS/UpdateSupport/MaintenanceTools.ps1',
         'FMSC_SMS/UpdateSupport/ToolCatalog.json',
         'MaintenanceTools.ps1', 'ToolCatalog.json',
-        'UpdateRecovery.ps1', 'core.ps1', 'Install FMSC_SMS.bat', 'FMSC.Setup.exe', 'Tools/SqlLocalDB.msi')) {
+        'UpdateRecovery.ps1', 'core.ps1', 'Install FMSC_SMS.bat', 'FMSC.Setup.exe', 'Tools/SqlLocalDB.msi','Tools/vc_redist.x64.exe')) {
         $file = Join-Path $release $relative
         if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-Item -LiteralPath $file).Length -eq 0) {
             throw "Full publish did not copy its required output: $relative"
@@ -101,6 +104,7 @@ try {
     foreach ($pair in @(
         ,@($sqlCmd, (Join-Path $application 'UpdateSupport/Tools/SqlCmd/sqlcmd.exe'))
         ,@($prerequisite, (Join-Path $application 'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi'))
+        ,@($redist, (Join-Path $application 'UpdateSupport/Tools/VcRedist/vc_redist.x64.exe'))
     )) {
         if ((Get-FileHash -LiteralPath $pair[0] -Algorithm SHA256).Hash -ne
             (Get-FileHash -LiteralPath $pair[1] -Algorithm SHA256).Hash) {
@@ -143,6 +147,7 @@ try {
     # Exercise the actual copied helper, not merely its source-tree counterpart.
     # Use a child scope so the test's mocked process/console commands stay local.
     & (Join-Path $ProjectDirectory 'Tools/TestInstallerLocalDb.ps1') -InstallerPath (Join-Path $release 'core.ps1')
+    & (Join-Path $ProjectDirectory 'Tools/TestInstallerVcRuntime.ps1') -InstallerPath (Join-Path $release 'core.ps1')
     & (Join-Path $ProjectDirectory 'Tools/TestInstallerMigrations.ps1') -InstallerPath (Join-Path $release 'core.ps1')
     # Exercise the real published WinExe's headless path. These targets must be
     # refused before any network/SQL connection or interactive startup occurs.

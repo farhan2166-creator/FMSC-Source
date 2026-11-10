@@ -4,15 +4,17 @@
         <BundledGitDirectory Condition="'$(BundledGitDirectory)' == ''">$(FmscToolsDirectory)/MinGit</BundledGitDirectory>
         <BundledSqlCmdPath Condition="'$(BundledSqlCmdPath)' == ''">$(FmscToolsDirectory)/sqlcmd.exe</BundledSqlCmdPath>
         <LocalDbMsiPath Condition="'$(LocalDbMsiPath)' == ''">$(FmscToolsDirectory)/SqlLocalDB.msi</LocalDbMsiPath>
+        <VcRedistPath Condition="'$(VcRedistPath)' == ''">$(FmscToolsDirectory)/vc_redist.x64.exe</VcRedistPath>
     </PropertyGroup>
     <Target Name="PrepareMaintenanceInputs" BeforeTargets="PrepareForPublish"
             Condition="'$(FmscSyntheticPublishFixture)' != 'true'">
-        <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/Tools/PrepareMaintenanceTools.ps1&quot; -ToolsDirectory &quot;$(FmscToolsDirectory)&quot; -GitDirectory &quot;$(BundledGitDirectory)&quot; -SqlCmdPath &quot;$(BundledSqlCmdPath)&quot; -LocalDbMsiPath &quot;$(LocalDbMsiPath)&quot;"
+        <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/Tools/PrepareMaintenanceTools.ps1&quot; -ToolsDirectory &quot;$(FmscToolsDirectory)&quot; -GitDirectory &quot;$(BundledGitDirectory)&quot; -SqlCmdPath &quot;$(BundledSqlCmdPath)&quot; -LocalDbMsiPath &quot;$(LocalDbMsiPath)&quot; -VcRedistPath &quot;$(VcRedistPath)&quot;"
               EnvironmentVariables="PSModulePath=$(SystemRoot)\System32\WindowsPowerShell\v1.0\Modules" />
         <ItemGroup>
             <_MaintenanceGitFile Include="$(BundledGitDirectory)/**/*" />
             <_MaintenanceSqlCmdFile Include="$([System.IO.Path]::GetDirectoryName('$(BundledSqlCmdPath)'))/SqlCmd/**/*" />
             <_MaintenanceLocalDbFile Include="$([System.IO.Path]::GetDirectoryName('$(LocalDbMsiPath)'))/LocalDb/**/*" />
+            <_MaintenanceVcRedistFile Include="$([System.IO.Path]::GetDirectoryName('$(VcRedistPath)'))/VcRedist/**/*" />
             <!-- Build may already have assigned content paths. Add the freshly
                  prepared bundles with explicit publish paths. -->
             <ContentWithTargetPath Include="@(_MaintenanceGitFile)" CopyToPublishDirectory="Always">
@@ -24,6 +26,9 @@
             <ContentWithTargetPath Include="@(_MaintenanceLocalDbFile)" CopyToPublishDirectory="Always">
                 <TargetPath>UpdateSupport/Tools/LocalDb/%(_MaintenanceLocalDbFile.RecursiveDir)%(_MaintenanceLocalDbFile.Filename)%(_MaintenanceLocalDbFile.Extension)</TargetPath>
             </ContentWithTargetPath>
+            <ContentWithTargetPath Include="@(_MaintenanceVcRedistFile)" CopyToPublishDirectory="Always">
+                <TargetPath>UpdateSupport/Tools/VcRedist/%(_MaintenanceVcRedistFile.RecursiveDir)%(_MaintenanceVcRedistFile.Filename)%(_MaintenanceVcRedistFile.Extension)</TargetPath>
+            </ContentWithTargetPath>
         </ItemGroup>
     </Target>
     <ItemGroup>
@@ -34,6 +39,8 @@
                      Link="UpdateSupport/Tools/SqlCmd/%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="Always" />
             <Content Include="$([System.IO.Path]::GetDirectoryName('$(LocalDbMsiPath)'))/LocalDb/**/*"
                      Link="UpdateSupport/Tools/LocalDb/%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="Always" />
+            <Content Include="$([System.IO.Path]::GetDirectoryName('$(VcRedistPath)'))/VcRedist/**/*"
+                     Link="UpdateSupport/Tools/VcRedist/%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="Always" />
     </ItemGroup>
     <!-- The complete installer AND every update must carry Git/SSH and their
          supporting DLLs. Local compilation is unaffected; publish fails closed. -->
@@ -50,6 +57,8 @@
                Text="FMSC publishing requires verified go-sqlcmd. Supply BundledSqlCmdPath." />
         <Error Condition="'$(LocalDbMsiPath)' == '' Or !Exists('$(LocalDbMsiPath)')"
                Text="FMSC publishing requires the Microsoft-signed LocalDB MSI. Supply LocalDbMsiPath." />
+        <Error Condition="'$(VcRedistPath)' == '' Or !Exists('$(VcRedistPath)')"
+               Text="FMSC publishing requires the Microsoft-signed VC++ v14 x64 runtime. Supply VcRedistPath." />
     </Target>
     <Target Name="RequireBundledGitForPublish" BeforeTargets="PrepareForPublish"
             Condition="'$(FmscLevel2)' != 'true'">
@@ -221,6 +230,7 @@
 		<Error Condition="'@(_RequiredDeploymentFile)' != '' AND !Exists('%(FullPath)')" Text="Required release asset is missing: %(FullPath). Publishing has been stopped." />
 		<!-- Both SQL tools are bundled; .NET is included in the self-contained app. -->
 		<Error Condition="!Exists('$(LocalDbMsiPath)')" Text="Required LocalDB prerequisite is missing: $(LocalDbMsiPath). Supply LocalDbMsiPath or place SqlLocalDB.msi in ..\Tools." />
+        <Error Condition="!Exists('$(VcRedistPath)')" Text="Required Visual C++ runtime prerequisite is missing: $(VcRedistPath)." />
 		<Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Installer\ValidateReleaseAssets.ps1&quot; -DatabaseDirectory &quot;$(DeploymentDatabaseDirectory)&quot; -LocalDbMsiPath &quot;$(LocalDbMsiPath)&quot;"
               EnvironmentVariables="PSModulePath=$(SystemRoot)\System32\WindowsPowerShell\v1.0\Modules" />
 	</Target>
@@ -239,6 +249,7 @@
 		<Copy SourceFiles="$(MSBuildProjectDirectory)/Installer/MaintenanceTools.ps1;$(MSBuildProjectDirectory)/Installer/ToolCatalog.json" DestinationFolder="$(ReleaseRoot)" SkipUnchangedFiles="true" />
         <MakeDir Directories="$(ReleaseRoot)Tools" />
 		<Copy SourceFiles="$(LocalDbMsiPath)" DestinationFiles="$(ReleaseRoot)Tools\SqlLocalDB.msi" SkipUnchangedFiles="true" />
+        <Copy SourceFiles="$(VcRedistPath)" DestinationFiles="$(ReleaseRoot)Tools\vc_redist.x64.exe" SkipUnchangedFiles="true" />
 		<Copy SourceFiles="$(BundledSqlCmdPath)" DestinationFiles="$(ReleaseRoot)Tools\sqlcmd.exe" SkipUnchangedFiles="true" />
 		<MakeDir Directories="$(ReleaseRoot)Migrations" />
 		<ItemGroup>

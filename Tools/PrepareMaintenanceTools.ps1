@@ -1,7 +1,7 @@
 # Local publishing is offline by default. CI opts into approved downloads.
 param(
     [string]$ToolsDirectory=(Join-Path $PSScriptRoot '../../Tools'),
-    [string]$GitDirectory='', [string]$SqlCmdPath='', [string]$LocalDbMsiPath='',
+    [string]$GitDirectory='', [string]$SqlCmdPath='', [string]$LocalDbMsiPath='', [string]$VcRedistPath='',
     [switch]$DownloadMissing
 )
 $ErrorActionPreference='Stop'
@@ -10,8 +10,9 @@ $ToolsDirectory=[IO.Path]::GetFullPath($ToolsDirectory)
 if(-not $GitDirectory){$GitDirectory=Join-Path $ToolsDirectory 'MinGit'}
 if(-not $SqlCmdPath){$SqlCmdPath=Join-Path $ToolsDirectory 'sqlcmd.exe'}
 if(-not $LocalDbMsiPath){$LocalDbMsiPath=Join-Path $ToolsDirectory 'SqlLocalDB.msi'}
-foreach($name in @('Git','SqlCmd','LocalDb')){
-    $path=switch($name){Git {$GitDirectory} SqlCmd {$SqlCmdPath} LocalDb {$LocalDbMsiPath}}
+if(-not $VcRedistPath){$VcRedistPath=Join-Path $ToolsDirectory 'vc_redist.x64.exe'}
+foreach($name in @('Git','SqlCmd','LocalDb','VcRedist')){
+    $path=switch($name){Git {$GitDirectory} SqlCmd {$SqlCmdPath} LocalDb {$LocalDbMsiPath} VcRedist {$VcRedistPath}}
     if($name -eq 'Git'){$bundle=$path}else{$bundle=Join-Path (Split-Path $path -Parent) $name}
     if(Test-FmscTool $bundle $name){
         if($name -ne 'Git'){
@@ -26,7 +27,7 @@ foreach($name in @('Git','SqlCmd','LocalDb')){
     $existing=Test-Path -LiteralPath $path
     if($existing -and -not(Test-Path -LiteralPath $manifest)){
         try {
-            if($name -eq 'LocalDb'){Assert-FmscMicrosoftMsi $path}
+            if($name -in @('LocalDb','VcRedist')){Assert-FmscMicrosoftPackage $path}
             else {
                 $exe=if($name -eq 'Git'){Join-Path $path 'cmd/git.exe'}else{$path}
                 $reported=(& $exe --version 2>&1 | Out-String).Replace('.windows.','.')
