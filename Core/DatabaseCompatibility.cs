@@ -29,7 +29,7 @@ internal static class DatabaseCompatibility
 
     internal static void Validate(SqlConnection connection, SqlTransaction? inspectionTransaction)
     {
-        using (var capability = new SqlCommand("SELECT compatibility_level FROM sys.databases WHERE database_id=DB_ID();", connection, inspectionTransaction))
+        using (var capability = new SqlCommand("SELECT compatibility_level FROM sys.databases WHERE database_id=DB_ID();", connection) { Transaction = inspectionTransaction })
         {
             int level = Convert.ToInt32(capability.ExecuteScalar());
             if (level < 130)
@@ -41,7 +41,7 @@ internal static class DatabaseCompatibility
                 SELECT CAST(NULL AS nvarchar(50));
             ELSE
                 SELECT TOP(1) CONVERT(nvarchar(50),VersionNumber) FROM dbo.DatabaseVersion ORDER BY VersionId DESC;
-            """, connection, inspectionTransaction) { CommandTimeout = 30 };
+            """, connection) { CommandTimeout = 30, Transaction = inspectionTransaction };
         string? version;
         try { version = Convert.ToString(versionCommand.ExecuteScalar())?.Trim(); }
         catch (SqlException ex) when (ex.Number is 207 or 208)
@@ -160,7 +160,7 @@ internal static class DatabaseCompatibility
                 INSERT @Problems VALUES(N'Missing unique admission-number constraint/index.');
             SELECT COUNT(*) AS ProblemCount FROM @Problems;
             SELECT TOP(12) Problem FROM @Problems ORDER BY Problem;
-            """, connection, inspectionTransaction) { CommandTimeout = 30 };
+            """, connection) { CommandTimeout = 30, Transaction = inspectionTransaction };
         // Preserve the baseline, schema-10 messaging and schema-11/12
         // certificate signature / recovery contracts. This is read-only; no migration or repair is attempted.
         command.Parameters.Add("@Requirements", SqlDbType.NVarChar, -1);
