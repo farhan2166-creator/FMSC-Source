@@ -11,6 +11,52 @@ try
     string passphrase = "test-only-long-recovery-passphrase";
     var random = RandomNumberGenerator.GetBytes(2 * 1024 * 1024 + 137);
     File.WriteAllBytes(source, random);
+    // DSA-08: Dropbox's server-generated content hash is SHA-256 of the
+    // concatenation of individual 4-MiB block hashes, not the local SHA-256.
+    string oneBlockHash = Convert.ToHexString(SHA256.HashData(SHA256.HashData(random)))
+        .ToLowerInvariant();
+    if (CloudDropboxIntegrity.ComputeContentHash(source) != oneBlockHash)
+        throw new Exception("Dropbox one-block content hash calculation failed.");
+    byte[] block = RandomNumberGenerator.GetBytes(4 * 1024 * 1024);
+    byte[] tail = RandomNumberGenerator.GetBytes(17);
+    string twoBlock = Path.Combine(root, "dropbox-two-blocks.bin");
+    using (var output = File.Create(twoBlock))
+    {
+        output.Write(block);
+        output.Write(tail);
+    }
+    string expectedContentHash = Convert.ToHexString(SHA256.HashData(
+        SHA256.HashData(block).Concat(SHA256.HashData(tail)).ToArray())).ToLowerInvariant();
+    if (CloudDropboxIntegrity.ComputeContentHash(twoBlock) != expectedContentHash)
+        throw new Exception("Dropbox multi-block remote content hash calculation failed.");
+    using (var remoteReceipt = System.Text.Json.JsonDocument.Parse(
+        System.Text.Json.JsonSerializer.Serialize(new {
+            id = "id:verified-remote", name = "verified.fmscbackup",
+            size = new FileInfo(twoBlock).Length, content_hash = expectedContentHash
+        })))
+    {
+        CloudDropboxIntegrity.RequireMatchingMetadata(remoteReceipt.RootElement,
+            "verified.fmscbackup", new FileInfo(twoBlock).Length, expectedContentHash);
+        bool rejected = false;
+        try {
+            CloudDropboxIntegrity.RequireMatchingMetadata(remoteReceipt.RootElement,
+                "verified.fmscbackup", new FileInfo(twoBlock).Length, new string('0',64));
+        } catch (IOException) { rejected = true; }
+        if (!rejected) throw new Exception("Dropbox mismatched provider content hash accepted.");
+    }
+    using (var notFound = System.Text.Json.JsonDocument.Parse(
+        """{"error":{".tag":"path","path":{".tag":"not_found"}}}"""))
+    {
+        if (!CloudDropboxIntegrity.IsPathNotFound(notFound.RootElement))
+            throw new Exception("Dropbox missing-file response not recognized.");
+    }
+    using (var denied = System.Text.Json.JsonDocument.Parse(
+        """{"error":{".tag":"path","path":{".tag":"restricted_content"}}}"""))
+    {
+        if (CloudDropboxIntegrity.IsPathNotFound(denied.RootElement))
+            throw new Exception("Dropbox permission error treated as a missing backup.");
+    }
+
     var originalTime = new DateTime(2026, 11, 9, 13, 0, 0, DateTimeKind.Utc);
     // Simulate a school in UTC+5: SQL backup header contains a local
     // timestamp distinct from the cloud catalog's absolute UTC time.
