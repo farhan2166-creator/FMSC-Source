@@ -35,6 +35,25 @@ internal static partial class Program
             SaveProfile(19);
             Check(Convert.ToInt32(Scalar("SELECT TransportCutoffDay FROM dbo.SchoolProfile"))==19&&Convert.ToInt32(Scalar("SELECT FeeProrationCutoffDay FROM dbo.SchoolProfile"))==1,"School Profile saves the transport cutoff independently");
             Check(Rejected(()=>SaveProfile(29),59001),"The transport cutoff rejects days outside 1–28");
+
+            // Independent media operations must not silently save or overwrite
+            // unrelated School Profile fields or the certificate signature.
+            Execute("EXEC dbo.SaveSchoolLogo @UserId=1,@LogoImage=0x89504E470D0A1A0A,@LogoFileName=N'fixture.png',@LogoContentType=N'image/png';");
+            Execute("EXEC dbo.SaveSchoolCertificateSignature @UserId=1,@SignatureImage=0x89504E470D0A1A0A,@SignatureContentType=N'image/png',@PrintSignature=1;");
+            Execute("EXEC dbo.SaveSchoolProfileDetails @UserId=1,@SchoolName=N'Profile-only edit',@AddressLine=NULL,@City=NULL,@ContactNumber=NULL,@Email=NULL,@FeeProrationCutoffDay=1,@TransportCutoffDay=19;");
+            Check(Convert.ToInt32(Scalar("SELECT COUNT(*) FROM dbo.SchoolProfile WHERE SchoolName=N'Profile-only edit' AND LogoImage=0x89504E470D0A1A0A AND LogoContentType=N'image/png' AND PrincipalSignatureImage=0x89504E470D0A1A0A AND PrintPrincipalSignature=1"))==1,
+                "Saving school details preserves both saved media objects and signature printing");
+
+            Execute("EXEC dbo.SaveSchoolLogo @UserId=1,@LogoImage=NULL,@LogoFileName=NULL,@LogoContentType=NULL;");
+            Check(Convert.ToInt32(Scalar("SELECT COUNT(*) FROM dbo.SchoolProfile WHERE SchoolName=N'Profile-only edit' AND LogoImage IS NULL AND LogoFileName IS NULL AND LogoContentType IS NULL AND PrincipalSignatureImage IS NOT NULL AND PrintPrincipalSignature=1 AND TransportCutoffDay=19"))==1,
+                "Removing the logo never removes the signature or modifies school details");
+
+            Execute("EXEC dbo.SaveSchoolCertificateSignature @UserId=1,@SignatureImage=NULL,@SignatureContentType=NULL,@PrintSignature=0;");
+            Check(Convert.ToInt32(Scalar("SELECT COUNT(*) FROM dbo.SchoolProfile WHERE SchoolName=N'Profile-only edit' AND PrincipalSignatureImage IS NULL AND PrincipalSignatureContentType IS NULL AND PrintPrincipalSignature=0 AND LogoImage IS NULL"))==1,
+                "Removing the signature with SQL NULL content type works independently");
+            Check(Rejected(()=>Execute("EXEC dbo.SaveSchoolCertificateSignature @UserId=1,@SignatureImage=NULL,@SignatureContentType=N'';"),51121),
+                "An empty signature MIME type is not sent in place of SQL NULL");
+
             SaveProfile(null);Check(Convert.ToDateTime(Scalar("SELECT dbo.GetTransportBillingMonth('20261031')"))==month,"A blank transport cutoff permits this month without using the general fee cutoff");
             Execute("UPDATE dbo.AcademicYears SET StartDate='20260401',EndDate='20270331' WHERE IsCurrent=1; UPDATE dbo.SchoolProfile SET FeeProrationCutoffDay=1,TransportCutoffDay=16;");
             using var configured=new DataTable();
