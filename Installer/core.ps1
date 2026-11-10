@@ -1560,10 +1560,10 @@ function Register-FmscUninstaller {
         UninstallString = ('"' + $exe + '"')
     }
     foreach ($name in $properties.Keys) {
-        New-ItemProperty -LiteralPath $key -Name $name -Value $properties[$name] -PropertyType String -Force | Out-Null
+        New-ItemProperty -Path $key -Name $name -Value $properties[$name] -PropertyType String -Force | Out-Null
     }
-    New-ItemProperty -LiteralPath $key -Name NoModify -Value 1 -PropertyType DWord -Force | Out-Null
-    New-ItemProperty -LiteralPath $key -Name NoRepair -Value 1 -PropertyType DWord -Force | Out-Null
+    New-ItemProperty -Path $key -Name NoModify -Value 1 -PropertyType DWord -Force | Out-Null
+    New-ItemProperty -Path $key -Name NoRepair -Value 1 -PropertyType DWord -Force | Out-Null
 }
 
 try {
