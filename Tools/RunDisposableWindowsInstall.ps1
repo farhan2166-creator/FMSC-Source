@@ -68,6 +68,7 @@ function Assert-EmbeddedDatabaseContract([string]$Db) {
     $requirements=@(
         (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilityRequirements.json') -Raw)
         (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilitySchema10Requirements.json') -Raw)
+        (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilitySchema12Requirements.json') -Raw)
     )
     $cn=[System.Data.SqlClient.SqlConnection]::new("Data Source=$script:instance;Initial Catalog=$Db;Integrated Security=True;Encrypt=False")
     try {
