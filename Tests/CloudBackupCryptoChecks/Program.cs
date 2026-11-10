@@ -5,6 +5,31 @@ string root = Path.Combine(Path.GetTempPath(), "FMSC-CloudCryptoChecks-" + Guid.
 Directory.CreateDirectory(root);
 try
 {
+    // DSA-01: exclusive lease must survive await/thread switches, block another
+    // process/attempt, and become available when the handle is disposed.
+    string lockFile = Path.Combine(root, "cloud-job.lock");
+    using (var lease = CloudBackupJobLock.TryAcquire(lockFile)
+        ?? throw new Exception("First cloud job lease was refused."))
+    {
+        await Task.Run(async () =>
+        {
+            await Task.Yield();
+            using var competing = CloudBackupJobLock.TryAcquire(lockFile);
+            if (competing != null) throw new Exception("Cloud job exclusion failed.");
+        });
+    }
+    using (var retry = await Task.Run(() => CloudBackupJobLock.TryAcquire(lockFile)))
+    {
+        if (retry is null) throw new Exception("Cloud job lease was not released after async work.");
+    }
+    // A failed lock path is NOT mistaken for another job in progress.
+    try
+    {
+        using var invalidLock = CloudBackupJobLock.TryAcquire(Path.Combine(root, "missing-folder", "job.lock"));
+        throw new Exception("Cloud job lock failure was incorrectly accepted.");
+    }
+    catch (DirectoryNotFoundException) { }
+
     string source = Path.Combine(root, "source.bak");
     string package = Path.Combine(root, "source.fmscbackup");
     string restored = Path.Combine(root, "restored.bak");
