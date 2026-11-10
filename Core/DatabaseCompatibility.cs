@@ -24,7 +24,10 @@ internal static class DatabaseCompatibility
         return reader.ReadToEnd();
     }
 
-    internal static void Validate(SqlConnection connection, SqlTransaction? inspectionTransaction = null)
+    // Preserve the original one-argument method group used by restore verification.
+    internal static void Validate(SqlConnection connection) => Validate(connection, null);
+
+    internal static void Validate(SqlConnection connection, SqlTransaction? inspectionTransaction)
     {
         using (var capability = new SqlCommand("SELECT compatibility_level FROM sys.databases WHERE database_id=DB_ID();", connection, inspectionTransaction))
         {
