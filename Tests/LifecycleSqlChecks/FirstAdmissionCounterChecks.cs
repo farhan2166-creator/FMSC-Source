@@ -25,7 +25,10 @@ internal static class FirstAdmissionCounterChecks
                     Sql.P("@UserId", fixture.Admin), storedProcedure: true)) ?? "";
                 report.Check(next == "1", "The normal SQL preview proposes admission number 1.");
 
-                int first = Admit(fixture, connection, transaction, "First Student From Empty School");
+                // Actual WinForms admission submits an explicit number after
+                // displaying GetNextAdmissionNumber's preview.
+                int first = Admit(fixture, connection, transaction,
+                    "First Student From Empty School", next);
                 report.Check(Convert.ToString(ExecuteScalar(connection, transaction,
                     "SELECT AdmissionNumber FROM dbo.Students WHERE AdmissionId=@Id;",
                     Sql.P("@Id", first))) == "1",
@@ -34,7 +37,13 @@ internal static class FirstAdmissionCounterChecks
                     "SELECT LastNumber FROM dbo.AdmissionNumberCounter WHERE CounterId=1;")) == 1,
                     "The real admission writer advances the same singleton to 1.");
 
-                int second = Admit(fixture, connection, transaction, "Second Student From Empty School");
+                string nextAfterFirst = Convert.ToString(ExecuteScalar(connection, transaction,
+                    "dbo.GetNextAdmissionNumber",
+                    Sql.P("@UserId", fixture.Admin), storedProcedure: true)) ?? "";
+                report.Check(nextAfterFirst == "2",
+                    "After the first save, WinForms preview advances to number 2.");
+                int second = Admit(fixture, connection, transaction,
+                    "Second Student From Empty School", nextAfterFirst);
                 report.Check(Convert.ToString(ExecuteScalar(connection, transaction,
                     "SELECT AdmissionNumber FROM dbo.Students WHERE AdmissionId=@Id;",
                     Sql.P("@Id", second))) == "2",
@@ -42,6 +51,16 @@ internal static class FirstAdmissionCounterChecks
                 report.Check(Convert.ToInt32(ExecuteScalar(connection, transaction,
                     "SELECT LastNumber FROM dbo.AdmissionNumberCounter WHERE CounterId=1;")) == 2,
                     "The counter advances exactly once per successful admission.");
+
+                // Keep coverage of the SQL procedure's automatic-number
+                // fallback as a separate case; operator saves always use the
+                // explicit parameter above.
+                int fallback = Admit(fixture, connection, transaction,
+                    "SQL Fallback Student Without Explicit Number");
+                report.Check(Convert.ToString(ExecuteScalar(connection, transaction,
+                    "SELECT AdmissionNumber FROM dbo.Students WHERE AdmissionId=@Id;",
+                    Sql.P("@Id", fallback))) == "3",
+                    "The SQL fallback remains sequential after explicit UI admissions.");
             }
             finally
             {
@@ -62,7 +81,7 @@ internal static class FirstAdmissionCounterChecks
     }
 
     private static int Admit(Fixture fixture, SqlConnection connection,
-        SqlTransaction transaction, string name)
+        SqlTransaction transaction, string name, string? explicitNumber = null)
     {
         using var command = new SqlCommand("dbo.AdmitStudent", connection, transaction)
         {
@@ -70,6 +89,8 @@ internal static class FirstAdmissionCounterChecks
             CommandTimeout = 90
         };
         command.Parameters.AddRange(fixture.AdmissionArgs(name));
+        if (explicitNumber is not null)
+            command.Parameters.Add(Sql.P("@AdmissionNumber", explicitNumber));
         using var data = new DataSet();
         using (var adapter = new SqlDataAdapter(command)) adapter.Fill(data);
         if (data.Tables.Count == 0 || data.Tables[^1].Rows.Count != 1)
