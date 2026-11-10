@@ -12,6 +12,8 @@ if(!builder.InitialCatalog.StartsWith("FMSC_AuditChecks_",StringComparison.Ordin
 DatabaseHelper.ConnectionString=connectionText;
 int checks=0;
 void Check(bool valid,string message){if(!valid)throw new Exception(message);checks++;Console.WriteLine("PASS: "+message);}
+Check(PasswordPolicy.IsValid("x") && PasswordPolicy.IsValid(new string('x',1024)) && !PasswordPolicy.IsValid(null) && !PasswordPolicy.IsValid("") && !PasswordPolicy.IsValid(" \t"),
+    "account passwords allow user-chosen lengths while rejecting blank values");
 DataTable Query(string sql,params SqlParameter[] parameters)
 {
     using var connection=DatabaseHelper.GetConnection();connection.Open();using var command=new SqlCommand(sql,connection){CommandTimeout=120};command.Parameters.AddRange(parameters);
@@ -28,7 +30,7 @@ int view=userCatalog.Permissions.First(permission=>permission.Code=="Students.Vi
 int fees=userCatalog.Permissions.First(permission=>permission.Code=="Fees.View").Id;
 int adminRole=userCatalog.Roles.Single(role=>role.Protected).Id;
 string prefix="admin-audit-"+Guid.NewGuid().ToString("N")[..10];
-const string password="Fixture password 12345";
+const string password="x";
 
 var created=await users.SaveAsync(new(0,prefix+"-user","",true,new[]{office}),"",userCatalog.Token,password);
 Check(created.Outcome==AccessSaveOutcome.Saved&&created.Id>0,"production writer creates a user with a confirmed ID");
