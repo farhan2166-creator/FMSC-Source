@@ -8,6 +8,12 @@
     <Compile Include="../QuickRegistrationSqlChecks/DatabaseContext.cs" Link="DatabaseContext.cs" />
     <EmbeddedResource Include="../../Core/PermissionCatalog.json" LogicalName="FMSC_SMS.Core.PermissionCatalog.json" />
     <Compile Include="../../Core/PermissionCatalog.cs" Link="PermissionCatalog.cs" />
+    <Compile Include="../../Core/DatabaseCompatibility.cs" Link="DatabaseCompatibility.cs" />
+    <Compile Include="../../Core/DatabaseCompatibilityFailure.cs" Link="DatabaseCompatibilityFailure.cs" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilityRequirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilityRequirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema10Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema12Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema12Requirements.json" />
+
     <Compile Include="../../Core/AdministrativeAccess.cs" Link="AdministrativeAccess.cs" />
     <Compile Include="../../Core/PasswordPolicy.cs" Link="PasswordPolicy.cs" />
     <Compile Include="../../Pages/Security/AdministratorRecoverySql.cs" Link="AdministratorRecoverySql.cs" />
