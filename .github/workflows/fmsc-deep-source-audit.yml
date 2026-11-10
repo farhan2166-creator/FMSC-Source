@@ -39,6 +39,7 @@ jobs:
           path: |
             artifacts/deep-source-audit/deep-source-inventory.json
             artifacts/deep-source-audit/deep-source-summary.md
+            Tests/LifecycleSqlChecks/Baseline/schema.dacpac
           if-no-files-found: error
           retention-days: 7
 
@@ -70,5 +71,7 @@ jobs:
 
 # Audit-only: no production school DB, private fixture download, release,
 # upload to FMSC-Updates, change to app logic, or manual printer claim.
+# A copy of the already checked-in, record-free public test DACPAC is retained
+# for local SQL procedure review; no live MDF/LDF or operational data appears.
 # Generated inventory is candidate discovery, NOT an exhaustive semantic review.
 # Live operator walkthroughs remain separate and must be recorded as untested.
