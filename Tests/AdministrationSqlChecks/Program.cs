@@ -12,6 +12,7 @@ if(!builder.InitialCatalog.StartsWith("FMSC_AuditChecks_",StringComparison.Ordin
 DatabaseHelper.ConnectionString=connectionText;
 int checks=0;
 void Check(bool valid,string message){if(!valid)throw new Exception(message);checks++;Console.WriteLine("PASS: "+message);}
+CompatibilityManifestChecks.Run(connectionText, Check);
 DataTable Query(string sql,params SqlParameter[] parameters)
 {
     using var connection=DatabaseHelper.GetConnection();connection.Open();using var command=new SqlCommand(sql,connection){CommandTimeout=120};command.Parameters.AddRange(parameters);
