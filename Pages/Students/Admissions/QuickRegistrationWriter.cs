@@ -14,10 +14,10 @@ internal static class QuickRegistrationWriter
 {
     internal const string FeeQuery = """
         SELECT F.FeeTypeId,F.FeeTypeName,F.IsMandatory,F.IsTransportLinked,C.Amount,C.Frequency,
-            CONVERT(bit,F.IsMandatory) [Include],CONVERT(decimal(12,2),0) Discount,CONVERT(nvarchar(20),N'None') ConcessionLabel
+            CONVERT(bit,CASE WHEN F.IsMandatory=1 AND F.IsTransportLinked=0 THEN 1 ELSE 0 END) [Include],CONVERT(decimal(12,2),0) Discount,CONVERT(nvarchar(20),N'None') ConcessionLabel
         FROM dbo.CampusClassSections P CROSS JOIN dbo.FeeTypes F
         LEFT JOIN dbo.FeeConfigurations C ON C.CampusId=P.CampusId AND C.ClassId=P.ClassId AND C.FeeTypeId=F.FeeTypeId
-        WHERE P.ClassSectionId=@Placement AND (F.IsMandatory=1 OR C.FeeTypeId IS NOT NULL)
+        WHERE P.ClassSectionId=@Placement AND ((F.IsMandatory=1 AND F.IsTransportLinked=0) OR C.FeeTypeId IS NOT NULL)
         ORDER BY F.DisplayOrder,F.FeeTypeName;
         """;
 
