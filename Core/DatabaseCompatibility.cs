@@ -10,7 +10,8 @@ internal static class DatabaseCompatibility
     private static readonly Lazy<string[]> Requirements = new(() => new[]
     {
         LoadRequirements("FMSC_SMS.Core.DatabaseCompatibilityRequirements.json"),
-        LoadRequirements("FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json")
+        LoadRequirements("FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json"),
+        LoadRequirements("FMSC_SMS.Core.DatabaseCompatibilitySchema12Requirements.json")
     });
 
     private static string LoadRequirements(string resourceName)
@@ -157,8 +158,8 @@ internal static class DatabaseCompatibility
             SELECT COUNT(*) AS ProblemCount FROM @Problems;
             SELECT TOP(12) Problem FROM @Problems ORDER BY Problem;
             """, connection) { CommandTimeout = 30 };
-        // Preserve the existing dbo contract and also fail closed on schema-10
-        // msg structures. This is read-only; no migration or repair is attempted.
+        // Preserve the baseline, schema-10 messaging and schema-11/12
+        // certificate signature / recovery contracts. This is read-only; no migration or repair is attempted.
         command.Parameters.Add("@Requirements", SqlDbType.NVarChar, -1);
         foreach (string contract in Requirements.Value)
         {
