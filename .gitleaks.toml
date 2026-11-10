@@ -30,3 +30,17 @@ keywords = ["password", "pwd"]
 description = "A C# interpolated variable is not a literal connection password"
 regexTarget = "secret"
 regexes = ['''^\{[A-Za-z_][A-Za-z0-9_.]*\}$''']
+
+
+# The generated, record-free audit inventory is a CSV of Git object IDs.
+# The generic API-key heuristic sees lines whose source path contains 'key'
+# and mistakes adjacent 40-character blob SHA-1 IDs for credentials.
+# Scope this exclusion to that exact generated inventory, that exact rule,
+# and the Git-object-ID format. All other files/rules continue to be scanned.
+[[allowlists]]
+description = "Exact audit inventory Git blob SHA-1 identifiers, not credentials"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^Audit/Inventories/FMSC_FILE_INVENTORY_2026-11-10\.csv$''']
+regexTarget = "secret"
+regexes = ['''^[0-9a-f]{40}$''']
