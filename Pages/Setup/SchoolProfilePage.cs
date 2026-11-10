@@ -10,7 +10,7 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
     private readonly ModernTextBox city =
         HumanUi.TextBox(false, 200);
     private readonly ModernTextBox contactNumber =
-        HumanUi.TextBox(false, 150);
+        HumanUi.TextBox(false, SchemaLengths.SchoolProfileContactNumber);
     private readonly ModernTextBox email =
         HumanUi.TextBox(false, 250);
     private readonly ModernNumericTextBox feeProrationCutoffDay =
