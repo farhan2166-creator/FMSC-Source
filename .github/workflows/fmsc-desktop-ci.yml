@@ -12,6 +12,7 @@ on:
       - 'Services/Backup/**'
       - 'Tests/CloudBackupCryptoChecks/**'
       - 'Pages/Administration/BackupRestorePage.cs'
+      - 'Pages/Administration/CloudBackupSettingsDialog.cs'
       - 'Tests/ThemeSmokeChecks/**'
       - 'Tests/HelpChecks/**'
       - 'Tests/ReportReadChecks/**'
