@@ -179,6 +179,10 @@ jobs:
         shell: pwsh
         run: .\Tools\TestInstallerLocalDb.ps1
 
+      - name: Verify Visual C++ prerequisite before LocalDB (synthetic)
+        shell: pwsh
+        run: .\Tools\TestInstallerVcRuntime.ps1
+
       - name: Test migration discovery, versions and backup ordering
         shell: powershell
         run: .\Tools\TestInstallerMigrations.ps1
