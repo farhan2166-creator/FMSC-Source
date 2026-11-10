@@ -1733,15 +1733,18 @@ try {
     foreach($ToolName in @('Git','SqlCmd','LocalDb','VcRedist')){
         $null=Install-FmscMaintenanceTool $ToolName $AppSource
     }
+    # Every fresh setup and application update validates this prerequisite.
+    # Existing compatible runtimes are skipped. If missing, install before
+    # starting SQL or touching the school's database.
+    $VcRedistRoot=Find-FmscMaintenanceTool 'VcRedist'
+    if(-not $VcRedistRoot){throw 'Verified Visual C++ runtime prerequisite is unavailable.'}
+    Invoke-FmscVcRuntimeInstallation -Path (Join-Path $VcRedistRoot 'vc_redist.x64.exe') -LogDirectory $DatabaseDir
     if (-not $SqlLocalDb) {
         Write-WarningMessage `
             'SQL Server LocalDB was not found.'
-        # The self-contained win-x64 application includes its .NET Desktop Runtime. Tools carries only database prerequisites: sqlcmd.exe and SqlLocalDB.msi.
+        # The self-contained app includes .NET; verified SQL tools and VC++ are retained separately.
         $MsiRoot=Install-FmscMaintenanceTool 'LocalDb' $AppSource
         $MsiPath=Join-Path $MsiRoot 'SqlLocalDB.msi'
-        $VcRedistRoot=Find-FmscMaintenanceTool 'VcRedist'
-        if(-not $VcRedistRoot){throw 'Verified Visual C++ runtime prerequisite is unavailable.'}
-        Invoke-FmscVcRuntimeInstallation -Path (Join-Path $VcRedistRoot 'vc_redist.x64.exe') -LogDirectory $DatabaseDir
         Invoke-LocalDbMsiInstallation -MsiPath $MsiPath -LogDirectory $DatabaseDir
         $MachinePath =
             [Environment]::GetEnvironmentVariable(

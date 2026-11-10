@@ -223,22 +223,25 @@ jobs:
           $transport = Join-Path $root 'MinGit'
           $application = Join-Path $root 'Application'
           $msi = Join-Path $root 'synthetic-LocalDB.msi'
+          $vcRedist = Join-Path $root 'synthetic-vc_redist.x64.exe'
           $sqlCmd = Join-Path $root 'synthetic-sqlcmd.exe'
           try {
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-Content -LiteralPath $msi -Value 'Disposable fixture only'
+            Set-Content -LiteralPath $vcRedist -Value 'Disposable fixture only'
             Set-Content -LiteralPath $sqlCmd -Value 'Disposable fixture only'
             & .\Tools\PrepareBundledGit.ps1 -DestinationDirectory $transport
-            foreach($pair in @(@('SqlCmd','sqlcmd.exe',$sqlCmd),@('LocalDb','SqlLocalDB.msi',$msi))){
+            foreach($pair in @(@('SqlCmd','sqlcmd.exe',$sqlCmd),@('LocalDb','SqlLocalDB.msi',$msi),@('VcRedist','vc_redist.x64.exe',$vcRedist))){
               $folder=Join-Path $root $pair[0]
               New-Item -ItemType Directory -Path $folder | Out-Null
               Copy-Item -LiteralPath $pair[2] -Destination (Join-Path $folder $pair[1])
             }
-            dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output $application -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$transport" "-p:LocalDbMsiPath=$msi" "-p:BundledSqlCmdPath=$sqlCmd" -p:FmscSyntheticPublishFixture=true -p:PublishSingleFile=false -p:PublishTrimmed=false
+            dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output $application -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$transport" "-p:LocalDbMsiPath=$msi" "-p:VcRedistPath=$vcRedist" "-p:BundledSqlCmdPath=$sqlCmd" -p:FmscSyntheticPublishFixture=true -p:PublishSingleFile=false -p:PublishTrimmed=false
             if ($LASTEXITCODE -ne 0) { throw 'Bundled updater smoke publish failed.' }
             foreach ($relative in @('UpdateTransport/cmd/git.exe','UpdateTransport/usr/bin/ssh.exe',
                 'UpdateTransport/COPYING-GIT.txt','UpdateTransport/THIRD_PARTY_NOTICES.txt',
-                'UpdateSupport/Tools/SqlCmd/sqlcmd.exe','UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')) {
+                'UpdateSupport/Tools/SqlCmd/sqlcmd.exe','UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
+                'UpdateSupport/Tools/VcRedist/vc_redist.x64.exe')) {
               if (-not (Test-Path -LiteralPath (Join-Path $application $relative) -PathType Leaf)) {
                 throw "Published Git/SSH runtime is incomplete: $relative"
               }

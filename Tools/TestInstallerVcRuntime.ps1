@@ -13,8 +13,10 @@ $functions=@($ast.FindAll({
 if($functions.Count -ne 2){throw 'Expected VC++ registry check and installation helper.'}
 $vcCall=$source.IndexOf('Invoke-FmscVcRuntimeInstallation -Path (Join-Path $VcRedistRoot')
 $sqlCall=$source.IndexOf('Invoke-LocalDbMsiInstallation -MsiPath $MsiPath')
-if($vcCall -lt 0 -or $sqlCall -lt 0 -or $vcCall -ge $sqlCall){
-    throw 'VC++ must be installed before the LocalDB MSI.'
+$localDbGuard=$source.IndexOf('if (-not $SqlLocalDb) {', $vcCall)
+if($vcCall -lt 0 -or $sqlCall -lt 0 -or $vcCall -ge $sqlCall -or
+    $localDbGuard -lt 0 -or $vcCall -ge $localDbGuard){
+    throw 'VC++ must be checked for both updates and fresh setups before the LocalDB MSI.'
 }
 foreach($fn in $functions){Invoke-Expression $fn.Extent.Text}
 function Assert([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}

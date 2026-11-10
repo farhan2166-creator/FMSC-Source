@@ -210,10 +210,9 @@ jobs:
             'For a fresh install, supply the latest compatible detached database pair.'
             ''
             'Includes the self-contained .NET 8 app and signed Microsoft Visual C++ v14 x64,'
-            'SQL LocalDB 2022 MSI,
-            'pinned Microsoft sqlcmd tool and current installer core.ps1.'
+            'SQL LocalDB 2022 MSI, pinned Microsoft sqlcmd tool and installer core.ps1.'
             'Includes pinned Git for Windows MinGit and OpenSSH; no Git PATH setup needed.'
-            'Installed application retains signed LocalDB MSI and verified sqlcmd for offline update/recovery.'
+            'Installed application retains Microsoft-signed VC++ and LocalDB installers and verified sqlcmd for offline update/recovery.'
             'The migrations folder may be empty. Numbered SQL files newer than the'
             'installed database version run in numeric order, with a verified backup'
             'first. Missing intermediate files refuse without touching SQL.'
