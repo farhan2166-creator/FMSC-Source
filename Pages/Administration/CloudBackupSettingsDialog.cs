@@ -22,7 +22,11 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
     private readonly ModernButton dropboxConnect = ActionButton("Connect Dropbox");
     private readonly Label recoveryStatus = new() { AutoSize = true, ForeColor = AppTheme.MutedText };
     private readonly ModernButton save = ActionButton("Save Backup Settings");
+    private readonly ModernButton cancel = ActionButton("Cancel");
+    private readonly ModernButton passphraseButton = ActionButton("Set recovery passphrase");
     private readonly CloudBackupOptions previous;
+    private bool operationBusy;
+    private bool closingAfterSave;
 
     internal CloudBackupSettingsDialog()
     {
@@ -66,7 +70,6 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         AddRow(body, "Dropbox", dropbox);
         AddRow(body, "Dropbox maximum cloud backups", dropboxMax);
         AddRow(body, "Dropbox account", dropboxConnect);
-        var passphraseButton = ActionButton("Set recovery passphrase");
         AddRow(body, "Encryption recovery", passphraseButton);
         AddRow(body, "Recovery status", recoveryStatus);
         var note = new Label {
@@ -76,7 +79,6 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
             Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText, AutoSize = false
         };
         AddRow(body, "Important", note, AppScale.Scale(87));
-        var cancel = ActionButton("Cancel");
         cancel.DialogResult = DialogResult.Cancel;
         var actions = new FlowLayoutPanel {
             Dock = DockStyle.Bottom, Height = AppScale.Scale(62),
@@ -93,11 +95,44 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         dropboxConnect.Click += async (_, _) => await ToggleProviderAsync(CloudProvider.Dropbox, dropboxConnect);
         passphraseButton.Click += (_, _) => SetRecoveryPassphrase();
         save.Click += async (_, _) => await SaveAsync();
+        FormClosing += (_, e) =>
+        {
+            // A pending OAuth connection or settings/task registration can
+            // outlive the dialog. Do not allow disposal or a false Cancel.
+            if (operationBusy && !closingAfterSave)
+            {
+                e.Cancel = true;
+                DialogResult = DialogResult.None;
+            }
+        };
+    }
+
+    private bool TryBeginOperation()
+    {
+        if (operationBusy || IsDisposed || Disposing) return false;
+        operationBusy = true;
+        driveConnect.Enabled = false;
+        dropboxConnect.Enabled = false;
+        save.Enabled = false;
+        cancel.Enabled = false;
+        passphraseButton.Enabled = false;
+        return true;
+    }
+
+    private void EndOperation()
+    {
+        operationBusy = false;
+        if (IsDisposed || Disposing) return;
+        driveConnect.Enabled = true;
+        dropboxConnect.Enabled = true;
+        save.Enabled = true;
+        cancel.Enabled = true;
+        passphraseButton.Enabled = true;
     }
 
     private async Task ToggleProviderAsync(CloudProvider provider, ModernButton button)
     {
-        button.Enabled = false;
+        if (!TryBeginOperation()) return;
         try
         {
             if (CloudBackupOAuth.IsConnected(provider))
@@ -115,8 +150,8 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         }
         finally
         {
-            RefreshConnectionState();
-            button.Enabled = true;
+            if (!IsDisposed && !Disposing) RefreshConnectionState();
+            EndOperation();
         }
     }
 
@@ -176,7 +211,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
 
     private async Task SaveAsync()
     {
-        save.Enabled = false;
+        if (!TryBeginOperation()) return;
         try
         {
             if (google.Checked && !CloudBackupOAuth.IsConnected(CloudProvider.GoogleDrive))
@@ -218,15 +253,17 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                 }
                 throw;
             }
+            closingAfterSave = true;
             DialogResult = DialogResult.OK;
             Close();
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Backup settings not saved",
-                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (!IsDisposed)
+                MessageBox.Show(this, ex.Message, "Backup settings not saved",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
-        finally { save.Enabled = true; }
+        finally { EndOperation(); }
     }
 
     private void RefreshConnectionState()
