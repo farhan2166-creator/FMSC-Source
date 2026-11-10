@@ -40,7 +40,10 @@ internal static partial class Program
             // unrelated School Profile fields or the certificate signature.
             Execute("EXEC dbo.SaveSchoolLogo @UserId=1,@LogoImage=0x89504E470D0A1A0A,@LogoFileName=N'fixture.png',@LogoContentType=N'image/png';");
             Execute("EXEC dbo.SaveSchoolCertificateSignature @UserId=1,@SignatureImage=0x89504E470D0A1A0A,@SignatureContentType=N'image/png',@PrintSignature=1;");
-            Execute("EXEC dbo.SaveSchoolProfileDetails @UserId=1,@SchoolName=N'Profile-only edit',@AddressLine=NULL,@City=NULL,@ContactNumber=NULL,@Email=NULL,@FeeProrationCutoffDay=1,@TransportCutoffDay=19;");
+            const string schoolPhones="03001234567, 03121234567, 03331234567, 03441234567";
+            Execute("EXEC dbo.SaveSchoolProfileDetails @UserId=1,@SchoolName=N'Profile-only edit',@AddressLine=NULL,@City=NULL,@ContactNumber=@Phones,@Email=NULL,@FeeProrationCutoffDay=1,@TransportCutoffDay=19;",P("@Phones",schoolPhones));
+            Check(Convert.ToString(Scalar("SELECT ContactNumber FROM dbo.SchoolProfile WHERE SchoolProfileId=1"))==schoolPhones,
+                "More than two complete school phone numbers survive SQL persistence without truncation");
             Check(Convert.ToInt32(Scalar("SELECT COUNT(*) FROM dbo.SchoolProfile WHERE SchoolName=N'Profile-only edit' AND LogoImage=0x89504E470D0A1A0A AND LogoContentType=N'image/png' AND PrincipalSignatureImage=0x89504E470D0A1A0A AND PrintPrincipalSignature=1"))==1,
                 "Saving school details preserves both saved media objects and signature printing");
 
