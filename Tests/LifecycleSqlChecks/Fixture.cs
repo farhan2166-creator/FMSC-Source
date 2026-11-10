@@ -95,10 +95,18 @@ internal sealed class Fixture
         Sql.P("@StartDate", new DateTime(year, 1, 1)), Sql.P("@EndDate", new DateTime(year, 12, 31)), Sql.P("@IsCurrent", current), Sql.P("@Remarks", "Synthetic fixture"), Sql.P("@UserId", Admin));
     private int Fee(string code, string name, bool mandatory, string frequency)
     {
-        int id = Sql.Key("SaveFeeType", Sql.P("@UserId", Admin), Sql.P("@FeeTypeCode", code), Sql.P("@FeeTypeName", name));
-        // Mandatory/system flags are reference data, not a supported SaveFeeType edit.
-        Sql.Query("UPDATE dbo.FeeTypes SET IsMandatory=@Mandatory,IsSystemDefined=@Mandatory,DefaultFrequency=@Frequency WHERE FeeTypeId=@Id;",
-            Sql.P("@Mandatory", mandatory), Sql.P("@Frequency", frequency), Sql.P("@Id", id)); return id;
+        // Use the same fee-type writer as the operator's editor. A fresh school
+        // must be able to configure required fees without direct SQL updates.
+        int id = Sql.Key("SaveFeeTypeWithDefaultFrequency",
+            Sql.P("@UserId", Admin), Sql.P("@FeeTypeId", 0),
+            Sql.P("@FeeTypeCode", code), Sql.P("@FeeTypeName", name),
+            Sql.P("@Description", null), Sql.P("@DisplayOrder", 0),
+            Sql.P("@DefaultFrequency", frequency),
+            Sql.P("@IsMandatory", mandatory), Sql.P("@IsTransportLinked", false));
+        // System-defined is reference-test metadata, not an operator setting.
+        Sql.Query("UPDATE dbo.FeeTypes SET IsSystemDefined=@System WHERE FeeTypeId=@Id;",
+            Sql.P("@System", mandatory), Sql.P("@Id", id));
+        return id;
     }
     internal int Rate(int classId, int fee, decimal amount, string frequency) => Sql.Key("SaveFeeConfiguration",
         Sql.P("@UserId", Admin), Sql.P("@CampusId", Campus), Sql.P("@ClassId", classId), Sql.P("@FeeTypeId", fee),
