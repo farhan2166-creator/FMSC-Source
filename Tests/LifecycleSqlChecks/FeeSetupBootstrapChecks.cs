@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using System.Data;
 
 // Runs only against the disposable schema-only Lifecycle SQL fixture, after
 // creating a synthetic Administrator and before admitting any students.
@@ -29,6 +30,71 @@ internal static class FeeSetupBootstrapChecks
     private static bool MissingMandatoryFee(Fixture f) =>
         Sql.Proc("GetSetupReadiness", Sql.P("@UserId", f.Admin))
             .AsEnumerable().Any(row => Convert.ToString(row["Area"]) == "Fee types");
+
+    private static void CheckDefaultAdmissionWithoutTransport(Fixture f, Report report)
+    {
+        // This is an explicit SQL transaction in the owned disposable fixture:
+        // test the real default admission procedure, then roll back every row.
+        // Setup Readiness excludes mandatory transport rate requirements when
+        // the student has NOT opted into transport; the writer must agree.
+        using (var connection = DatabaseHelper.GetConnection())
+        {
+            connection.Open();
+            using var transaction = connection.BeginTransaction();
+            try
+            {
+                using var command = new SqlCommand("dbo.AdmitStudent", connection, transaction) {
+                    CommandType = CommandType.StoredProcedure, CommandTimeout = 90
+                };
+                command.Parameters.AddRange(f.AdmissionArgs("Non Transport Admission Fixture"));
+                using var result = new DataSet();
+                using (var adapter = new SqlDataAdapter(command)) adapter.Fill(result);
+                report.Check(result.Tables.Count > 0 &&
+                             result.Tables[^1].Rows.Count == 1,
+                    "Default non-transport admission succeeds without a mandatory transport rate.");
+                report.Check(SqlCount(connection, transaction,
+                    "SELECT COUNT(*) FROM dbo.Students WHERE StudentName=N'Non Transport Admission Fixture';") == 1,
+                    "Non-transport admission writes a student only within the rollback test transaction.");
+            }
+            finally { if (transaction.Connection is not null) transaction.Rollback(); }
+        }
+        // When the school explicitly opts into transport, a missing mandatory
+        // transport fee rate must still block the save.
+        bool refused = false;
+        using (var connection = DatabaseHelper.GetConnection())
+        {
+            connection.Open();
+            using var transaction = connection.BeginTransaction();
+            try
+            {
+                using var command = new SqlCommand("dbo.AdmitStudent", connection, transaction) {
+                    CommandType = CommandType.StoredProcedure, CommandTimeout = 90
+                };
+                var args = f.AdmissionArgs("Transport Rate Missing Fixture");
+                args.Single(p => p.ParameterName == "@UsesTransport").Value = true;
+                command.Parameters.AddRange(args);
+                using var results = new DataSet();
+                using var adapter = new SqlDataAdapter(command);
+                adapter.Fill(results);
+            }
+            catch (SqlException ex) when (ex.Number == 51019) { refused = true; }
+            finally
+            {
+                try { if (transaction.Connection is not null) transaction.Rollback(); }
+                catch (InvalidOperationException) { /* XACT_ABORT already rolled back. */ }
+            }
+        }
+        report.Check(refused,
+            "A transport opt-in still refuses admission when its mandatory class rate is absent.");
+        report.Check(Sql.Count("SELECT COUNT(*) FROM dbo.Students;") == 0,
+            "Optional transport scenarios leave no synthetic admissions after rollback.");
+    }
+
+    private static int SqlCount(SqlConnection connection, SqlTransaction tx, string sql)
+    {
+        using var command = new SqlCommand(sql, connection, tx);
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
 
     internal static void Run(Fixture f, Report report)
     {
@@ -64,6 +130,17 @@ internal static class FeeSetupBootstrapChecks
         report.Check(Convert.ToBoolean(Find(FeeTypes(f), f.Purchase)["IsTransportLinked"]) &&
                      !MissingMandatoryFee(f),
             "Transport linked policy round-trips and does not replace the non-transport prerequisite.");
+
+        // DSA-14: a mandatory transport-only fee with no class rate cannot
+        // block a non-transport child when Setup Readiness reports no gap.
+        Save(f, f.Purchase, "PURCHASE", "Fictional workbook purchase", "As Needed", true, true);
+        var readiness = Sql.Proc("GetSetupReadiness", Sql.P("@UserId", f.Admin));
+        report.Check(!readiness.AsEnumerable().Any(r =>
+                         Convert.ToString(r["Area"]) == "Fee rates" &&
+                         (Convert.ToString(r["Issue"]) ?? "").Contains("Fictional workbook purchase")),
+            "Setup Readiness does not require transport-only rates from ordinary admissions.");
+        CheckDefaultAdmissionWithoutTransport(f, report);
+
 
         // Restore the fixture's billing semantics before Lifecycle/Level 3 tests.
         Save(f, f.Purchase, "PURCHASE", "Fictional workbook purchase", "As Needed", false, false);
