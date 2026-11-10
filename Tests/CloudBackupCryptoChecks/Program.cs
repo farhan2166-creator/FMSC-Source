@@ -43,6 +43,18 @@ try
     string invalid = Path.Combine(root, "invalid.fmscbackup");
     File.WriteAllBytes(invalid, Array.Empty<byte>());
     MustReject(() => CloudBackupCrypto.Decrypt(invalid, restored, passphrase), "empty package");
+    // DSA-03: a retained local ciphertext pending to another provider must
+    // never re-upload its intentionally pruned Google/Dropbox remote copy.
+    if (CloudBackupDeliveryPolicy.RequiresUpload(true, "", true) ||
+        !CloudBackupDeliveryPolicy.RequiresUpload(true, "", false) ||
+        CloudBackupDeliveryPolicy.RequiresUpload(true, "id:present", false) ||
+        CloudBackupDeliveryPolicy.RequiresUpload(false, "", false) ||
+        !CloudBackupDeliveryPolicy.HasCompletedProvider(true, "", true) ||
+        CloudBackupDeliveryPolicy.HasCompletedProvider(true, "", false) ||
+        !CloudBackupDeliveryPolicy.HasCompletedProvider(true, "id:present", false) ||
+        !CloudBackupDeliveryPolicy.HasCompletedProvider(false, "", false))
+        throw new Exception("Cloud provider retention incorrectly requeued a pruned backup.");
+
     var h1 = new string('a', 64);
     var h2 = new string('b', 64);
     var earliestCreated = new DateTime(2026, 11, 9, 10, 0, 0, DateTimeKind.Utc);
