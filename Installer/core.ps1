@@ -1540,6 +1540,32 @@ function Invoke-FmscSafeUpdateAbort {
     Write-Log "Safe update abort verified: previous application $installedVersion, database schema $observedSchema, failed release $($script:RecoveryJournal.Version)."
 }
 
+function Register-FmscUninstaller {
+    # Windows Settings / Installed apps. The EXE remains in the installed app
+    # and the engine stages itself outside that folder before deleting it.
+    $exe = Join-Path $AppDir 'FMSC.Uninstall.exe'
+    $script = Join-Path $AppDir 'UpdateSupport\Uninstall-FMSC.ps1'
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $script -PathType Leaf)) {
+        throw 'The standalone FMSC uninstaller is missing from the installed application.'
+    }
+    $key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\FMSC-SchoolManagement'
+    if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force | Out-Null }
+    $properties = @{
+        DisplayName = 'FMSC School Management'
+        DisplayVersion = $AppVersion
+        Publisher = 'FMSC'
+        InstallLocation = $AppDir
+        DisplayIcon = ('"' + $exe + '",0')
+        UninstallString = ('"' + $exe + '"')
+    }
+    foreach ($name in $properties.Keys) {
+        New-ItemProperty -LiteralPath $key -Name $name -Value $properties[$name] -PropertyType String -Force | Out-Null
+    }
+    New-ItemProperty -LiteralPath $key -Name NoModify -Value 1 -PropertyType DWord -Force | Out-Null
+    New-ItemProperty -LiteralPath $key -Name NoRepair -Value 1 -PropertyType DWord -Force | Out-Null
+}
+
 try {
     Open-UpdateWindow
     $existingRecovery = Read-FmscRecoveryJournal $script:RecoveryRoot
@@ -1591,6 +1617,7 @@ try {
         Confirm-FmscRecoveryBackup -CurrentSchema (Convert-ToDbVersion (Get-DatabaseVersion))
         Complete-VerifiedApplicationUpdate -ApplicationDirectory $AppDir -Source $AppDir -Prepared (Join-Path $script:RecoveryRoot 'verification')
         Remove-FmscCompletedSnapshot
+        try { Register-FmscUninstaller } catch { Write-WarningMessage "Could not register Windows uninstall entry: $($_.Exception.Message)" }
         Release-FmscInstallerLock
         Start-FmscAfterInstallation -Application (Join-Path $AppDir 'FMSC_SMS.exe')
         return
@@ -2106,7 +2133,13 @@ try {
     Pause-Long
     Complete-VerifiedApplicationUpdate -ApplicationDirectory $AppDir -Source $AppSource -Prepared $PreparedRoot
     if ($script:RecoveryJournal) { Remove-FmscCompletedSnapshot }
-    Write-Section `
+    try {
+        Register-FmscUninstaller
+        Write-Success 'Standalone uninstaller registered in Windows Installed apps.'
+    } catch {
+        Write-WarningMessage "Uninstall registration is pending: $($_.Exception.Message)"
+    }
+    Write-Section 
         'STEP 8 OF 8  -  COMPLETED'
     Write-Host ''
     Write-Host `
