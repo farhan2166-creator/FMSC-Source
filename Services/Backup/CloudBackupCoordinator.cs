@@ -31,6 +31,10 @@ internal static class CloudBackupCoordinator
         public DateTime SqlCreatedUtc { get; set; }
         public string GoogleDriveId { get; set; } = "";
         public string DropboxId { get; set; } = "";
+        // Persisted in each existing JSON journal. Missing properties in old
+        // entries default false (never marked pruned), preserving old state.
+        public bool GoogleDrivePruned { get; set; }
+        public bool DropboxPruned { get; set; }
         public long Size { get; set; }
     }
     private sealed class State { public DateTimeOffset? LastSuccessfulLocalBackup { get; set; } }
@@ -234,12 +238,14 @@ internal static class CloudBackupCoordinator
         foreach (var pending in ReadPending().Where(p => File.Exists(p.PackageFile)))
         {
             token.ThrowIfCancellationRequested();
-            if (settings.GoogleDriveEnabled && pending.GoogleDriveId.Length == 0)
+            if (CloudBackupDeliveryPolicy.RequiresUpload(
+                settings.GoogleDriveEnabled, pending.GoogleDriveId, pending.GoogleDrivePruned))
             {
                 try { await UploadOneAsync(pending, CloudProvider.GoogleDrive, settings, token); }
                 catch (Exception ex) { AppExceptionHandler.LogNonFatal(ex, "Retrying Google Drive encrypted backup upload"); }
             }
-            if (settings.DropboxEnabled && pending.DropboxId.Length == 0)
+            if (CloudBackupDeliveryPolicy.RequiresUpload(
+                settings.DropboxEnabled, pending.DropboxId, pending.DropboxPruned))
             {
                 try { await UploadOneAsync(pending, CloudProvider.Dropbox, settings, token); }
                 catch (Exception ex) { AppExceptionHandler.LogNonFatal(ex, "Retrying Dropbox encrypted backup upload"); }
@@ -257,8 +263,16 @@ internal static class CloudBackupCoordinator
         if (!string.Equals(copy.PackageSha256, p.Sha256, StringComparison.OrdinalIgnoreCase) ||
             copy.Size != p.Size)
             throw new IOException(provider + " did not confirm an intact encrypted upload.");
-        if (provider == CloudProvider.GoogleDrive) p.GoogleDriveId = copy.RemoteId;
-        else p.DropboxId = copy.RemoteId;
+        if (provider == CloudProvider.GoogleDrive)
+        {
+            p.GoogleDriveId = copy.RemoteId;
+            p.GoogleDrivePruned = false;
+        }
+        else
+        {
+            p.DropboxId = copy.RemoteId;
+            p.DropboxPruned = false;
+        }
         SavePending(p); // commit this provider result before touching the next provider
         try { await PruneRemoteAsync(provider, settings, p.Sha256, token); }
         catch (Exception ex) { AppExceptionHandler.LogNonFatal(ex, "Cloud retention failed after successful upload"); }
@@ -290,16 +304,29 @@ internal static class CloudBackupCoordinator
             var original = known.FirstOrDefault(p => (provider == CloudProvider.GoogleDrive
                 ? p.GoogleDriveId : p.DropboxId) == old.RemoteId);
             if (original is null) continue;
-            if (provider == CloudProvider.GoogleDrive) original.GoogleDriveId = "";
-            else original.DropboxId = "";
+            if (provider == CloudProvider.GoogleDrive)
+            {
+                original.GoogleDriveId = "";
+                original.GoogleDrivePruned = true;
+            }
+            else
+            {
+                original.DropboxId = "";
+                original.DropboxPruned = true;
+            }
+            // This intentionally removed copy is still a completed delivery;
+            // never turn it into a new pending upload while the other provider
+            // is unavailable.
             SavePending(original);
         }
     }
 
     private static void RemoveFullyDeliveredPayload(Pending p, CloudBackupOptions settings)
     {
-        if ((!settings.GoogleDriveEnabled || p.GoogleDriveId.Length > 0) &&
-            (!settings.DropboxEnabled || p.DropboxId.Length > 0) &&
+        if (CloudBackupDeliveryPolicy.HasCompletedProvider(
+                settings.GoogleDriveEnabled, p.GoogleDriveId, p.GoogleDrivePruned) &&
+            CloudBackupDeliveryPolicy.HasCompletedProvider(
+                settings.DropboxEnabled, p.DropboxId, p.DropboxPruned) &&
             File.Exists(p.PackageFile))
             File.Delete(p.PackageFile);
         // Keep the small journal: it proves what we uploaded and protects
