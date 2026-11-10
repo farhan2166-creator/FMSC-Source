@@ -84,6 +84,20 @@ This is a distinct gap from the counter fixed in migration 15. `Tests/LifecycleS
 
 Therefore, the **approved seeded owner snapshot** and a truly *data-free* schema are different supported conditions; the latter is not proved capable of first login/ongoing billing. A schema-only database without its Administrator role cannot satisfy the documented first-run test precondition, while absent permission catalog or billing singleton can invalidate later flows. First reproduce on a disposable schema-only copy with no manual role/permission/singleton inserts, then specify an official versioned idempotent seed policy if a genuinely blank installation is to be supported. Do not automatically initialize real school records, replace approved snapshots, or invent migrations without review.
 
+
+### DSA-14 — Setup Readiness and default admission disagree about mandatory transport rates
+**Medium/High conditional first-admission blocker | Source-confirmed cross-procedure mismatch; actual fresh UI reproduction pending.**
+
+The baseline \`dbo.GetSetupReadiness\` stored-procedure body (record-free \`Tests/LifecycleSqlChecks/Baseline/schema.dacpac\`, also \`Tests/LifecycleSqlChecks/Baseline/Sql/GetSetupReadiness.sql:75–105\`) checks for missing required class rates only where \`FeeTypes.IsMandatory=1 AND IsTransportLinked=0\`. But baseline \`dbo.AdmitStudent\` uses \`FeeTypes.IsMandatory=1\` **without excluding transport-linked types** to compute \`@MissingMandatoryFees\` when \`@UseSelectedFeeTypes=0\`. The Quick Registration writer calls \`AdmitStudent\` using the provided arguments without setting \`@UseSelectedFeeTypes\`; the ordinary direct-admission UI explicitly sets it to 1 (\`StudentAdmissionPage.cs:4215–4234\`).
+
+Consequently, a fresh school can configure a mandatory transport-linked fee type with no class rate, see no **transport fee-rate** warning in Setup Readiness, and still encounter \`Required fee configuration is missing\` when using the default admissions route, even for an intake that does not use transport. Verify the exact Quick Registration caller's default TVP settings and reproduce with a synthetic database. Resolve the business rule explicitly: either transport is globally required regardless of opt-in, and readiness must show it, or only transport users require its class rate, and the default admission guard must match.
+
+### SQL stored-procedure review (baseline body, not current DB final text)
+
+The audit workflow supplied the complete, **record-free** schema 1 DACPAC; manual inspection extracted and examined the 265 stored-procedure bodies (including administrator bootstrap, first-run status, admission/allocation/counter procedures, billing/reversal/credit, SaveUser/roles/permissions, fee receipt numbering, setup ordering and backup/restore helpers). Static candidate review found 120 mutating baseline procedures, 106 with explicit BEGIN TRAN, and 10 with multiple writes but no local BEGIN TRAN. Importantly, several **require a caller-owned transaction** (\`ApplyCollectionCredit\`, \`IssueCollectionReceipt\`, \`PostEnrollmentOpeningCharges\`), while \`GetNextRegistrationNumber\` is only called by transactional parent admission writers; these patterns must **not** be reported as independent failures. Procedures with no literal \`RequirePermission\` frequently invoke \`RequireAnyPermission\` or \`RequireAuthenticatedUser\`, so apparent missing-permission flags were also checked before making claims.
+
+The baseline DACPAC is schema 1 and cannot alone certify current schema-15 post-migration procedure definitions. Migration SQL 2–15 was inventoried, with 43 procedure CREATE/ALTER statements; current schema-15 SQL behavior still needs a verified freshly migrated synthetic database's \`sys.sql_modules\` snapshot and procedure-level execution.
+
 ## Whole-repository automated evidence — first audit CI run
 
 **Review PR:** [#161](https://github.com/farhan2166-creator/FMSC-Source/pull/161) (draft, no app/SQL production changes).
