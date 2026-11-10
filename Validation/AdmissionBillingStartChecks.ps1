@@ -6,7 +6,7 @@ UPDATE dbo.FeeTypes SET IsMandatory=1 WHERE FeeTypeId=1;
 INSERT dbo.FeeTypes(FeeTypeCode,FeeTypeName,DefaultFrequency,IsMandatory) VALUES(N'ADMISSION',N'Admission',N'Yearly',1);
 INSERT dbo.FeeConfigurations(CampusId,ClassId,FeeTypeId,Amount,Frequency)
  VALUES(1,1,1,10000,N'Monthly'),(1,1,3,500,N'Yearly');
-INSERT dbo.AdmissionNumberCounter(CounterId,LastNumber) VALUES(1,2000);
+UPDATE dbo.AdmissionNumberCounter SET LastNumber=2000 WHERE CounterId=1;
 DECLARE @Start date=(SELECT StartDate FROM dbo.AcademicYears WHERE AcademicYearId=1);
 INSERT dbo.AcademicYears(YearName,StartDate,EndDate,IsCurrent)
  VALUES(N'Past fixture year',DATEADD(year,-1,@Start),DATEADD(day,-1,@Start),0);

@@ -45,7 +45,7 @@ Refused "DECLARE @D date=(SELECT DATEADD(day,-1,EnrollmentDate) FROM dbo.Enrollm
 $result=Query "DECLARE @D date=(SELECT DATEADD(day,5,EnrollmentDate) FROM dbo.Enrollments WHERE EnrollmentId=1); EXEC dbo.SetEnrollmentBillingStartDate @UserId=1,@EnrollmentId=1,@BillingStartDate=@D,@Reason=N'Reviewed legacy date';"
 Check ($result.Tables[0].Rows[0].EnrollmentId -eq 1 -and $result.Tables[0].Rows[0].AdmissionId -eq 1 -and ([datetime]$result.Tables[0].Rows[0].NewBillingStartDate-$result.Tables[0].Rows[0].OldBillingStartDate).Days -eq 5) 'Billing start returns original/new dates and identities.'
 Check ((Number 'SELECT COUNT(*) FROM dbo.Enrollments WHERE EnrollmentId=1 AND BillingStartDate=DATEADD(day,5,EnrollmentDate);') -eq 1) 'Billing start editing preserves the independent enrollment date.'
-[void](Query 'INSERT dbo.AdmissionNumberCounter(CounterId,LastNumber) VALUES(1,1004);')
+[void](Query 'UPDATE dbo.AdmissionNumberCounter SET LastNumber=1004 WHERE CounterId=1;')
 Refused "EXEC dbo.SetStudentAdmissionNumber @UserId=1,@AdmissionId=1,@AdmissionNumber='2001a';" 59205 'Admission number editing still requires the caller transaction.'
 Refused "BEGIN TRAN; EXEC dbo.SetStudentAdmissionNumber @UserId=2,@AdmissionId=1,@AdmissionNumber='2001a'; COMMIT;" 50003 'Admission number editing retains permission checks.'
 Refused "BEGIN TRAN; EXEC dbo.SetStudentAdmissionNumber @UserId=1,@AdmissionId=1,@AdmissionNumber='bad'; COMMIT;" 59203 'Invalid admission number remains rejected.'
