@@ -4,6 +4,7 @@ Reports paths and rule failures only; never print matched credentials.
 """
 import argparse
 import io
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -97,15 +98,33 @@ def main():
             shutil.copyfile(original, target)
         # Redact findings; disallow inline/fingerprint suppression outside reviewed config.
         common = ['--config', str(Path('.gitleaks.toml').resolve()), '--redact', '--no-banner', '--ignore-gitleaks-allow', '--gitleaks-ignore-path', str(Path(temp) / 'no-ignores')]
-        for command in (
-            [args.gitleaks, 'git', '.', '--log-opts=--all', *common],
-            [args.gitleaks, 'dir', '.', *common],
-            [args.gitleaks, 'dir', str(Path(temp) / 'packages'), *common],
+        for scan_name, command in (
+            ('history', [args.gitleaks, 'git', '.', '--log-opts=--all', *common]),
+            ('source', [args.gitleaks, 'dir', '.', *common]),
+            ('schema', [args.gitleaks, 'dir', str(Path(temp) / 'packages'), *common]),
         ):
+            # The scanner's findings file is temporary and never uploaded.
+            # Only non-sensitive rule/path/commit identifiers may enter CI logs.
+            report = Path(temp) / (scan_name + '-gitleaks.json')
+            command += ['--report-format', 'json', '--report-path', str(report)]
             result = subprocess.run(command, check=False,
-                cwd=source if command[1:3] == ['dir', '.'] else None)
+                cwd=source if scan_name == 'source' else None)
+            if report.exists():
+                try:
+                    findings = json.loads(report.read_text(encoding='utf-8'))
+                    for finding in findings:
+                        if not isinstance(finding, dict):
+                            continue
+                        rule = str(finding.get('RuleID', 'unknown'))[:100]
+                        path = str(finding.get('File', 'unknown'))[:250]
+                        commit = str(finding.get('Commit', ''))[:40]
+                        print(f'Potential secret [{scan_name}]: rule={rule}; file={path}; commit={commit}')
+                except (ValueError, OSError) as exc:
+                    failures.append('Unreadable sanitized scanner report (' + scan_name + '): ' +
+                                    type(exc).__name__)
             if result.returncode:
-                failures.append('Gitleaks scan failed or detected a secret (exit %s).' % result.returncode)
+                failures.append('Gitleaks ' + scan_name +
+                                ' scan failed or detected a secret (exit %s).' % result.returncode)
     for failure in sorted(set(failures)):
         print(failure)
     if failures:
