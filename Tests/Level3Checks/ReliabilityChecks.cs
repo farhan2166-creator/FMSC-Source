@@ -299,7 +299,7 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
             finally
             {
                 // Keep exact object/table/column identity in the isolated fixture.
-                string parent = original.Contains('.', StringComparison.Ordinal) ? original[..original.LastIndexOf('.')] : "";
+                string parent = original[..original.LastIndexOf('.')];
                 Sql.Query($"EXEC sys.sp_rename N'{(parent + "." + hidden)}',N'{original[(original.LastIndexOf('.') + 1)..]}'{suffix};");
             }
         }
