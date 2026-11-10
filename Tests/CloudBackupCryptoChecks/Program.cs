@@ -70,6 +70,25 @@ try
         throw new Exception("Authenticated original SQL backup time was altered by local time zone.");
     if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(File.ReadAllBytes(restored)), SHA256.HashData(random)))
         throw new Exception("Cloud backup did not survive round trip.");
+    // DSA-11: exercise many encryption/decryption chunks and compare streaming
+    // digests without loading the expanded fixture into memory.
+    string largeSql = Path.Combine(root, "many-chunks.bak");
+    string largePackage = Path.Combine(root, "many-chunks.fmscbackup");
+    string largeRestore = Path.Combine(root, "many-chunks-verified.bak");
+    using (var output = File.Create(largeSql))
+    {
+        byte[] payload = RandomNumberGenerator.GetBytes(1024 * 1024);
+        for (int i = 0; i < 24; i++) output.Write(payload);
+    }
+    CloudBackupCrypto.Encrypt(largeSql, largePackage, passphrase, originalTime, originalSqlHeaderTime);
+    CloudBackupCrypto.Decrypt(largePackage, largeRestore, passphrase);
+    using (var expected = File.OpenRead(largeSql))
+    using (var actual = File.OpenRead(largeRestore))
+    {
+        if (!CryptographicOperations.FixedTimeEquals(
+            SHA256.HashData(expected), SHA256.HashData(actual)))
+            throw new Exception("Multi-chunk encrypted SQL backup roundtrip failed.");
+    }
     File.Delete(restored);
     MustReject(() => CloudBackupCrypto.Decrypt(package, restored, "wrong-but-valid-recovery-key"), "incorrect passphrase");
     if (File.Exists(restored)) throw new Exception("Wrong-key attempt left a restorable output.");
