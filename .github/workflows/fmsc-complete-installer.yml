@@ -157,7 +157,7 @@ jobs:
           }
           foreach ($pair in @(
             ,@('Tools/sqlcmd.exe','FMSC_SMS/UpdateSupport/Tools/SqlCmd/sqlcmd.exe')
-            ,@('Tools/SqlLocalDB.msi','FMSC_SMS/UpdateSupport/Tools/LocalDb/SqlLocalDB.msi'),
+            ,@('Tools/SqlLocalDB.msi','FMSC_SMS/UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')
             ,@('Tools/vc_redist.x64.exe','FMSC_SMS/UpdateSupport/Tools/VcRedist/vc_redist.x64.exe')
           )) {
             $one=(Get-FileHash -LiteralPath (Join-Path $root $pair[0]) -Algorithm SHA256).Hash
