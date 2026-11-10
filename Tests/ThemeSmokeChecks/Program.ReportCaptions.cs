@@ -126,6 +126,43 @@ internal static partial class Program
                 using var alternateDocument = UglyToad.PdfPig.PdfDocument.Open(alternatePdf);
                 Check(alternateDocument.NumberOfPages==1,
                     name+" "+alternativeMode+" fits its content on one page.");
+
+                // Exercise both stationery modes with the real optional principal
+                // signature and preserve the approved unsigned layout unchanged.
+                if(name is "LeaveCertificate" or "RegularStudentCertificate")
+                {
+                    using var signatureBitmap = new Bitmap(150, 40);
+                    using (var graphics = Graphics.FromImage(signatureBitmap))
+                    {
+                        graphics.Clear(Color.White);
+                        graphics.DrawLine(Pens.Black, 8, 22, 140, 14);
+                    }
+                    using var bytes = new MemoryStream();
+                    signatureBitmap.Save(bytes, System.Drawing.Imaging.ImageFormat.Png);
+                    byte[] signature = bytes.ToArray();
+                    foreach(var signatureMode in new[]{ CertificatePaperMode.PreprintedLetterhead,
+                        CertificatePaperMode.PlainPaper })
+                    {
+                        string unsigned = CertificateLetterhead.Definition(path, school, mode:signatureMode);
+                        Check(CertificateSignature.Apply(unsigned, signature, "image/png", false)==unsigned,
+                            name+" "+signatureMode+" retains its exact unsigned certificate definition.");
+                        string signed = CertificateSignature.Apply(unsigned, signature, "image/png", true);
+                        var signedLayout = XDocument.Parse(signed);
+                        Check(signedLayout.Descendants(ns+"Image").Count(element=>
+                                (string?)element.Attribute("Name")=="PrincipalSignaturePrintImage")==1
+                              && signedLayout.Descendants(ns+"Line").Any(element=>
+                                (string?)element.Attribute("Name")=="lnPrincipal"),
+                            name+" "+signatureMode+" prints the optional image without removing the principal line.");
+                        using var signedReport = new LocalReport();
+                        signedReport.LoadReportDefinition(new StringReader(signed));
+                        signedReport.EnableExternalImages = true;
+                        foreach(ReportDataSource source in report.DataSources)
+                            signedReport.DataSources.Add(new ReportDataSource(source.Name, source.Value));
+                        using var signedPdf = UglyToad.PdfPig.PdfDocument.Open(signedReport.Render("PDF"));
+                        Check(signedPdf.NumberOfPages==1,
+                            name+" "+signatureMode+" with principal signature renders on one PDF page.");
+                    }
+                }
             }
         }
     }
