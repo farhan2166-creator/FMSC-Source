@@ -68,6 +68,80 @@ internal static class CommunicationPreparedMessages
     /// recipient scope, opt-out, destination and sender authorization. Query
     /// admission/fee facts fresh before opening a browser chat, never on send.
     /// </summary>
+
+    // A bulk fee batch deduplicates WhatsApp destinations, NOT debts.
+    // Rebuild all currently eligible students for this batch scope and phone.
+    private const string SharedOutstandingSql = """
+        EXEC dbo.RequirePermission @UserId,N'Communication.Send';
+        EXEC dbo.RequirePermission @UserId,N'Students.View';
+        EXEC dbo.RequirePermission @UserId,N'Fees.View';
+        SELECT S2.AdmissionId RecordId, S2.StudentName RecordName,
+               S2.AdmissionNumber, F.Outstanding
+        FROM msg.ManualHandoff H
+        JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
+        JOIN msg.Batch B ON B.BatchId=R.BatchId
+        JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
+        JOIN dbo.Students S2 ON S2.Status=N'Active' AND S2.SchoolMessageConsent=1
+            AND msg.NormalizeMobile(S2.ContactNumber)=R.PhoneE164
+        OUTER APPLY (
+            SELECT TOP (1) E.ClassSectionId,E.Status
+            FROM dbo.Enrollments E WHERE E.AdmissionId=S2.AdmissionId
+            ORDER BY CASE WHEN E.Status=N'Active' THEN 0 ELSE 1 END,E.EnrollmentId DESC
+        ) E2
+        LEFT JOIN dbo.CampusClassSections CCS ON CCS.ClassSectionId=E2.ClassSectionId
+        OUTER APPLY (
+            SELECT SUM(dbo.GetFeeChargeBalance(C.BillingChargeId)) Outstanding
+            FROM dbo.BillingCharges C
+            WHERE C.AdmissionId=S2.AdmissionId AND C.Status<>N'Cancelled'
+        ) F
+        WHERE H.RecipientId=@RecipientId AND H.State='Opened'
+          AND R.State='Pending' AND B.Audience='OutstandingFees'
+          AND S.Status=N'Active' AND S.SchoolMessageConsent=1
+          AND msg.NormalizeMobile(S.ContactNumber)=R.PhoneE164
+          AND NOT EXISTS (
+              SELECT 1 FROM msg.Suppression O
+              WHERE O.Channel='WhatsApp' AND O.PhoneE164=R.PhoneE164)
+          AND E2.Status=N'Active'
+          AND (B.CampusId=0 OR CCS.CampusId=B.CampusId)
+          AND (B.ClassId=0 OR CCS.ClassId=B.ClassId)
+          AND F.Outstanding>0
+        ORDER BY S2.AdmissionId;
+        """;
+
+    // A pure aggregation step is separately exercised with synthetic records.
+    internal static Values AggregateOutstanding(Values selected, DataTable eligible)
+    {
+        if (eligible.Rows.Count == 0 ||
+            !eligible.AsEnumerable().Any(row => Convert.ToInt32(row["RecordId"]) == selected.RecordId))
+            throw new InvalidOperationException(
+                "The recipient's current outstanding amount or consent changed. Review the fee audience again.");
+        var students = eligible.AsEnumerable()
+            .GroupBy(row => Convert.ToInt32(row["RecordId"]))
+            .Select(group => group.Single())
+            .ToArray();
+        decimal total = 0;
+        var names = new List<string>();
+        var admissions = new List<string>();
+        foreach (DataRow row in students)
+        {
+            decimal amount = row.IsNull("Outstanding") ? 0 : Convert.ToDecimal(row["Outstanding"]);
+            if (amount <= 0)
+                throw new InvalidOperationException("An outstanding balance changed. Review this recipient again.");
+            total = checked(total + amount);
+            string name = Convert.ToString(row["RecordName"])?.Trim() ?? "";
+            names.Add(name.Length > 0 ? name : "school record #" + row["RecordId"]);
+            string number = Convert.ToString(row["AdmissionNumber"])?.Trim() ?? "";
+            admissions.Add(number.Length > 0 ? number : Convert.ToString(row["RecordId"])!);
+        }
+        return selected with {
+            RecordName = string.Join(", ", names),
+            AdmissionNumber = string.Join(", ", admissions),
+            // A single admission date must not be claimed for multiple children.
+            AdmissionDate = students.Length == 1 ? selected.AdmissionDate : null,
+            Outstanding = total
+        };
+    }
+
     internal static async Task<Values> ReadLiveAsync(long recipientId, bool needsFees)
     {
         const string sql = """
@@ -123,10 +197,17 @@ internal static class CommunicationPreparedMessages
         if (actor != CurrentUser.UserId || table.Rows.Count != 1)
             throw new InvalidOperationException("School records or signed-in account changed. Review the WhatsApp recipient again.");
         DataRow row = table.Rows[0];
-        return new Values(Convert.ToInt32(row["RecordId"]),
+        var selected = new Values(Convert.ToInt32(row["RecordId"]),
             Convert.ToString(row["RecordName"]) ?? "",
             row.IsNull("AdmissionNumber") ? null : Convert.ToString(row["AdmissionNumber"]),
             row.IsNull("AdmissionDate") ? null : Convert.ToDateTime(row["AdmissionDate"]),
             row.IsNull("Outstanding") ? null : Convert.ToDecimal(row["Outstanding"]));
+        if (!needsFees) return selected;
+        using DataTable audience = await DatabaseHelper.QuerySqlAsync(SharedOutstandingSql,
+            DatabaseHelper.Int("@UserId", actor),
+            DatabaseHelper.P("@RecipientId", recipientId));
+        if (actor != CurrentUser.UserId)
+            throw new InvalidOperationException("The signed-in user changed. Review the fee reminder again.");
+        return AggregateOutstanding(selected, audience);
     }
 }
