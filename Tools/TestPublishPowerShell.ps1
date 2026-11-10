@@ -70,6 +70,7 @@ try {
         'FMSC_SMS/UpdateSupport/core.ps1', 'FMSC_SMS/UpdateSupport/UpdateRecovery.ps1',
         'FMSC_SMS/UpdateSupport/Launch-FMSC.ps1', 'FMSC_SMS/UpdateSupport/FMSC.Launcher.exe',
         'FMSC_SMS/UpdateSupport/FMSC.Setup.exe',
+        'FMSC_SMS/FMSC.Uninstall.exe', 'FMSC_SMS/UpdateSupport/Uninstall-FMSC.ps1',
         'FMSC_SMS/UpdateTransport/cmd/git.exe',
         'FMSC_SMS/UpdateTransport/usr/bin/ssh.exe',
         'FMSC_SMS/UpdateTransport/COPYING-GIT.txt',
@@ -80,7 +81,8 @@ try {
         'FMSC_SMS/UpdateSupport/MaintenanceTools.ps1',
         'FMSC_SMS/UpdateSupport/ToolCatalog.json',
         'MaintenanceTools.ps1', 'ToolCatalog.json',
-        'UpdateRecovery.ps1', 'core.ps1', 'Install FMSC_SMS.bat', 'FMSC.Setup.exe', 'Tools/SqlLocalDB.msi','Tools/vc_redist.x64.exe')) {
+        'UpdateRecovery.ps1', 'core.ps1', 'Install FMSC_SMS.bat', 'FMSC.Setup.exe',
+        'FMSC.Uninstall.exe', 'Uninstall-FMSC.ps1', 'Tools/SqlLocalDB.msi','Tools/vc_redist.x64.exe')) {
         $file = Join-Path $release $relative
         if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-Item -LiteralPath $file).Length -eq 0) {
             throw "Full publish did not copy its required output: $relative"
@@ -96,6 +98,8 @@ try {
         ,@('Installer/ToolCatalog.json', 'ToolCatalog.json')
         ,@('Installer/ToolCatalog.json', 'FMSC_SMS/UpdateSupport/ToolCatalog.json')
         ,@('Installer/Launch-FMSC.ps1', 'FMSC_SMS/UpdateSupport/Launch-FMSC.ps1')
+        ,@('Installer/Uninstall-FMSC.ps1', 'Uninstall-FMSC.ps1')
+        ,@('Installer/Uninstall-FMSC.ps1', 'FMSC_SMS/UpdateSupport/Uninstall-FMSC.ps1')
     )) {
         $expected = (Get-FileHash -LiteralPath (Join-Path $ProjectDirectory $pair[0]) -Algorithm SHA256).Hash
         $actual = (Get-FileHash -LiteralPath (Join-Path $release $pair[1]) -Algorithm SHA256).Hash
@@ -112,6 +116,7 @@ try {
         }
     }
     & (Join-Path $ProjectDirectory 'Tools/TestOfflineSqlPrerequisites.ps1')
+    & (Join-Path $ProjectDirectory 'Tools/TestStandaloneUninstall.ps1')
     & (Join-Path $ProjectDirectory 'Tools/TestWindowlessLauncher.ps1') -LauncherPath (Join-Path $application 'UpdateSupport/FMSC.Launcher.exe')
     # GUI setup is one native executable copied to both first install and
     # private update support. Inspect PE subsystem without running UAC or SQL.
@@ -126,6 +131,18 @@ try {
     if ($pe -lt 64 -or $pe + 96 -ge $setupBytes.Length -or
         [BitConverter]::ToUInt16($setupBytes, $pe + 24 + 68) -ne 2) {
         throw 'FMSC.Setup.exe must be a Windows GUI executable, not a console application.'
+    }
+    $uninstallRelease = Join-Path $release 'FMSC.Uninstall.exe'
+    $uninstallApplication = Join-Path $application 'FMSC.Uninstall.exe'
+    if ((Get-FileHash -LiteralPath $uninstallRelease -Algorithm SHA256).Hash -cne
+        (Get-FileHash -LiteralPath $uninstallApplication -Algorithm SHA256).Hash) {
+        throw 'The full installer and installed application must package the same uninstaller.'
+    }
+    $uninstallBytes = [IO.File]::ReadAllBytes($uninstallRelease)
+    $uninstallPe = [BitConverter]::ToInt32($uninstallBytes,0x3c)
+    if ($uninstallPe -lt 64 -or $uninstallPe+96 -ge $uninstallBytes.Length -or
+        [BitConverter]::ToUInt16($uninstallBytes,$uninstallPe+24+68) -ne 2) {
+        throw 'FMSC.Uninstall.exe must be a Windows GUI executable.'
     }
     & (Join-Path $ProjectDirectory 'Tools/TestUpdateAutomation.ps1')
     if (-not (Test-Path -LiteralPath (Join-Path $release 'Migrations') -PathType Container)) { throw 'Package must include its migrations folder even when empty.' }
