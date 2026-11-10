@@ -6,7 +6,7 @@ $prep=Get-Content (Join-Path $root 'Tools/PrepareWorkflow04Release.ps1') -Raw
 $dispatch=Get-Content (Join-Path $root 'Tools/DispatchSandboxAcceptance.ps1') -Raw
 $wait=Get-Content (Join-Path $root 'Tools/WaitForSandboxAttestation.ps1') -Raw
 function Check([bool]$Pass,[string]$Failure) { if (-not $Pass) { throw "Workflow04 regression: $Failure" } }
-foreach ($name in @('PrepareWorkflow04Release.ps1','DispatchSandboxAcceptance.ps1','WaitForSandboxAttestation.ps1','AssertSandboxPublicationGate.ps1')) {
+foreach ($name in @('PrepareWorkflow04Release.ps1','ResolveWorkflow04Version.ps1','DispatchSandboxAcceptance.ps1','WaitForSandboxAttestation.ps1','AssertSandboxPublicationGate.ps1')) {
     $tokens=$null;$errors=$null
     $null=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root ('Tools/'+$name)),[ref]$tokens,[ref]$errors)
     Check (@($errors).Count -eq 0) "PowerShell parser errors in $name."
@@ -34,6 +34,43 @@ Check ([int][regex]::Match($core,$schemaPattern).Groups[1].Value -ge 7) 'Schema 
 Check ($prep.Contains('Missing consecutive migration') -and $prep.Contains('outside the declared target schema')) 'Migration inventory fail-closed preflight missing.'
 Check ($prep.Contains('channel/stable.json') -and $prep.Contains('Installer/core.ps1') -and
     $prep.Contains('refs/heads/main') -and $prep.Contains('Reusing pending')) 'Preparation must use feed version and preserve retryability.'
+
+Check ($prep.Contains('Resolve-FmscWorkflow04Version') -and
+    $prep.Contains('if ($decision.RequiresBump)') -and
+    $prep.Contains('Reusing pending Source version')) 'Workflow 04 no longer uses the tested release version decision.'
+. (Join-Path $root 'Tools/ResolveWorkflow04Version.ps1')
+# No GitHub calls or version-file writes: these are policy decisions only.
+$accepted = @(
+    @{ Source='1.0.21'; Feed='1.0.21'; Release='1.0.22'; Bump=$true },
+    @{ Source='1.0.22'; Feed='1.0.21'; Release='1.0.22'; Bump=$false },
+    @{ Source='1.0.24'; Feed='1.0.21'; Release='1.0.24'; Bump=$false },
+    @{ Source='1.0.99'; Feed='1.0.21'; Release='1.0.99'; Bump=$false },
+    @{ Source='1.0.25'; Feed='1.0.24'; Release='1.0.25'; Bump=$false }
+)
+foreach ($case in $accepted) {
+    $decision=Resolve-FmscWorkflow04Version -SourceVersion $case.Source -PublishedVersion $case.Feed
+    Check ($decision.ReleaseVersion -ceq $case.Release -and
+        $decision.RequiresBump -eq $case.Bump) "Incorrect release preparation for $($case.Feed) -> $($case.Source)."
+}
+$refused = @(
+    @{ Source='1.0.20'; Feed='1.0.21' }, # downgrade
+    @{ Source='1.0.23'; Feed='1.0.24' }, # previously published source is now stale
+    @{ Source='1.1.0'; Feed='1.0.21' }, # different minor
+    @{ Source='2.0.1'; Feed='1.0.21' }, # different major
+    @{ Source='0.9.99'; Feed='1.0.21' }, # older release line
+    @{ Source='1.0.021'; Feed='1.0.21' }, # noncanonical
+    @{ Source='1.0.bad'; Feed='1.0.21' }, # malformed source
+    @{ Source='1.0.24'; Feed='1.0.bad' }, # malformed feed
+    @{ Source='1.0.2147483647'; Feed='1.0.2147483647' } # patch overflow
+)
+foreach ($case in $refused) {
+    $rejected=$false
+    try {
+        $null=Resolve-FmscWorkflow04Version -SourceVersion $case.Source -PublishedVersion $case.Feed
+    } catch { $rejected=$true }
+    Check $rejected "Unsafe version change accepted: $($case.Feed) -> $($case.Source)."
+}
+
 Check ($prep.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and $prep.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Release secrets are not checked before version commit.'
 Check ($dispatch.Contains('fmsc/sandbox-mdf-ldf/v2') -and $dispatch.Contains('previous_status_id=') -and $dispatch.Contains("ref='main'") -and $dispatch.Contains('source_sha=$SourceSha')) 'Dispatch lacks pinned commit/status baseline.'
 $gate=Get-Content (Join-Path $root 'Tools/AssertSandboxPublicationGate.ps1') -Raw
