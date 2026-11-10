@@ -114,6 +114,8 @@ jobs:
             'FMSC_SMS/FMSC_SMS.deps.json',
             'FMSC_SMS/FMSC_SMS.runtimeconfig.json',
             'FMSC_SMS/UpdateSupport/FMSC.Setup.exe',
+            'FMSC_SMS/FMSC.Uninstall.exe',
+            'FMSC_SMS/UpdateSupport/Uninstall-FMSC.ps1',
             'FMSC_SMS/UpdateTransport/cmd/git.exe',
             'FMSC_SMS/UpdateTransport/usr/bin/ssh.exe',
             'FMSC_SMS/UpdateTransport/COPYING-GIT.txt',
@@ -124,6 +126,8 @@ jobs:
             'FMSC_SMS/UpdateSupport/MaintenanceTools.ps1',
             'FMSC_SMS/UpdateSupport/ToolCatalog.json',
             'FMSC.Setup.exe',
+            'FMSC.Uninstall.exe',
+            'Uninstall-FMSC.ps1',
             'Install FMSC_SMS.bat',
             'core.ps1',
             'MaintenanceTools.ps1',
@@ -150,6 +154,8 @@ jobs:
             ,@('Installer/core.ps1', 'core.ps1')
             ,@('Installer/MaintenanceTools.ps1', 'MaintenanceTools.ps1')
             ,@('Installer/ToolCatalog.json', 'ToolCatalog.json')
+            ,@('Installer/Uninstall-FMSC.ps1', 'Uninstall-FMSC.ps1')
+            ,@('Installer/Uninstall-FMSC.ps1', 'FMSC_SMS/UpdateSupport/Uninstall-FMSC.ps1')
           )) {
             $expected = (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $pair[0]) -Algorithm SHA256).Hash
             $actual = (Get-FileHash -LiteralPath (Join-Path $root $pair[1]) -Algorithm SHA256).Hash
@@ -164,6 +170,7 @@ jobs:
             $two=(Get-FileHash -LiteralPath (Join-Path $root $pair[1]) -Algorithm SHA256).Hash
             if ($one -ne $two) { throw "Installed/offline prerequisite mismatch: $($pair[1])" }
           }
+          & (Join-Path $env:GITHUB_WORKSPACE 'Tools/TestStandaloneUninstall.ps1')
           & (Join-Path $env:GITHUB_WORKSPACE 'Tools/TestInstallerLocalDb.ps1') -InstallerPath (Join-Path $root 'core.ps1')
           & (Join-Path $env:GITHUB_WORKSPACE 'Tools/TestInstallerVcRuntime.ps1') -InstallerPath (Join-Path $root 'core.ps1')
           & (Join-Path $env:GITHUB_WORKSPACE 'Tools/TestInstallerMigrations.ps1') -InstallerPath (Join-Path $root 'core.ps1')
