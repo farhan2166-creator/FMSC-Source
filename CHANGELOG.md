@@ -349,3 +349,10 @@ For the original fixes, implementation passes, schema verification and historica
 - Clarify the leaving-fee review: show each charge's reversal restriction, explain that kept dues remain payable and reversal decisions save with the certificate, name the Fee Collection destination, and count or disable the view-only settled/zero-amount history checkbox. Preserve financial eligibility and invalidate a reviewed decision when its placement changes.
 
 - Simplify financial screen wording and add practical rupee-example tooltips across collection, student advance balances, payment adjustments, fee/discount changes, posting, rate setup, transfers, readmission, leaving and reports. Explain new money versus existing advance, amounts to keep as paid, fee cancellation versus payment reversal, and excess paid money. Preserve financial calculations, permissions and transaction codes.
+
+
+## 1.0.24 — Initialize first admission counter (schema 15)
+
+- Initialize a missing `AdmissionNumberCounter` singleton when installing or upgrading an empty school, so the first direct admission can use number 1 without SQL tools.
+- Preserve all existing counter rows. Only reconstruct a lost counter for populated databases from safely interpretable numeric admission identifiers; refuse ambiguous cases instead of risking duplicates.
+- Replace the SQL lifecycle fixture's premature counter insertion with true first- and second-admission regression coverage, including transaction rollback and restored test fixture numbering.
