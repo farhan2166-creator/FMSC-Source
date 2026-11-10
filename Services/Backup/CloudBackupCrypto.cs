@@ -49,14 +49,16 @@ internal static class CloudBackupCrypto
             using var aes = new AesGcm(key, TagBytes);
             int index = 0;
             long remaining = input.Length;
+            // Reuse fixed buffers; stackalloc inside an arbitrarily long loop
+            // can exhaust the stack before the frame returns (CA2014).
+            Span<byte> nonce = stackalloc byte[12];
+            Span<byte> aad = stackalloc byte[HeaderBytes + 8];
             while (remaining > 0)
             {
                 int count = (int)Math.Min(ChunkBytes, remaining);
                 input.ReadExactly(plain.AsSpan(0, count));
-                Span<byte> nonce = stackalloc byte[12];
                 header.AsSpan(28, NoncePrefixBytes).CopyTo(nonce);
                 BinaryPrimitives.WriteInt32LittleEndian(nonce[8..], index);
-                Span<byte> aad = stackalloc byte[HeaderBytes + 8];
                 header.AsSpan().CopyTo(aad);
                 BinaryPrimitives.WriteInt32LittleEndian(aad[HeaderBytes..], index);
                 BinaryPrimitives.WriteInt32LittleEndian(aad[(HeaderBytes + 4)..], count);
@@ -100,15 +102,15 @@ internal static class CloudBackupCrypto
             using var aes = new AesGcm(key, TagBytes);
             int index = 0;
             long remaining = length;
+            Span<byte> nonce = stackalloc byte[12];
+            Span<byte> aad = stackalloc byte[HeaderBytes + 8];
             while (remaining > 0)
             {
                 int count = (int)Math.Min(ChunkBytes, remaining);
                 input.ReadExactly(cipher.AsSpan(0, count));
                 input.ReadExactly(tag);
-                Span<byte> nonce = stackalloc byte[12];
                 header.AsSpan(28, NoncePrefixBytes).CopyTo(nonce);
                 BinaryPrimitives.WriteInt32LittleEndian(nonce[8..], index);
-                Span<byte> aad = stackalloc byte[HeaderBytes + 8];
                 header.AsSpan().CopyTo(aad);
                 BinaryPrimitives.WriteInt32LittleEndian(aad[HeaderBytes..], index);
                 BinaryPrimitives.WriteInt32LittleEndian(aad[(HeaderBytes + 4)..], count);
