@@ -28,10 +28,10 @@ PATTERNS = {
     "disable_certificate_busy_guard_candidate": re.compile(r"creatingCertificate[\s\S]{0,1600}ApplyWorkflowState", re.I),
 }
 PROC_DEF = re.compile(r"\b(?:CREATE\s+(?:OR\s+ALTER\s+)?|ALTER\s+)(?:PROC|PROCEDURE)\s+(?:\[?([a-zA-Z_][\w]*)\]?\s*\.\s*)?\[?([A-Za-z_][\w]*)\]?", re.I)
-CALL = re.compile(r"\b(?:DatabaseHelper\.)?(?:Query(?:User)?(?:Async)?|Execute(?:User)?|Scalar(?:User)?|QueryMultiple(?:User)?)\s*\(\s*\"([A-Za-z_][A-Za-z0-9_.]*)\"", re.I)
+CALL = re.compile(r"\bDatabaseHelper\.(?:Query(?:User)?(?:Async)?|Execute(?:User)?|Scalar(?:User)?|QueryMultiple(?:User)?)\s*\(\s*\"([A-Za-z_][A-Za-z0-9_.]*)\"", re.I)
 COMMAND = re.compile(r"\bnew\s+SqlCommand\s*\(\s*\"(?:dbo\.)?([A-Za-z_][A-Za-z0-9_]*)\"", re.I)
 UI_CLASS = re.compile(r"\b(?:class)\s+([A-Za-z_][\w]*)\s*:\s*([^\{\r\n]+)")
-UI_ROOT = re.compile(r"\b(?:Form|V2Page|MasterPage|ApplicationWindowForm|UserControl|WorkspacePage)\b")
+UI_ROOT = re.compile(r"\b(?:ContextPage|V2Page|MasterPage|ApplicationWindowForm|Form|UserControl|WorkspacePage|Page|LoginForm)\b")
 NAMESPACE_ELEMENT = "Element"
 
 
@@ -64,7 +64,7 @@ def collect_cs() -> tuple[list[dict], list[dict], dict[str, str], list[dict]]:
         entries.append({"path": rel, "bytes": len(raw), "lines": content.count("\n") + 1,
                         "sha256": hashlib.sha256(raw).hexdigest(),
                         "production": is_prod, "flags": sorted(set(flags))})
-        if rel.startswith("Pages/"):
+        if rel.startswith("Pages/") or rel in ("MainDashboardForm.cs", "Core/DatabaseConnectionForm.cs"):
             for m in UI_CLASS.finditer(content):
                 cls, base = m.groups()
                 if UI_ROOT.search(base):
@@ -108,7 +108,9 @@ def collect_sql() -> tuple[list[dict], list[dict], list[str]]:
                                "bodyAvailable": bool(body.strip()),
                                "bodyBytes": len(body.encode("utf8")),
                                "writes": bool(re.search(r"\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE)\b", body, re.I)),
-                               "requiresPermission": bool(re.search(r"\bRequire(?:Any)?Permission\b", body, re.I))})
+                               "requiresPermission": bool(re.search(r"\bRequire(?:Any)?Permission\b", body, re.I)),
+                               "hasExplicitTransaction": bool(re.search(r"\bBEGIN\s+TRAN(?:SACTION)?\b", body, re.I)),
+                               "dynamicSql": bool(re.search(r"\b(sp_executesql|EXEC\s*\()", body, re.I))})
     migration_statements = []
     for path in sorted((ROOT / "Migrations").glob("*.sql"), key=lambda x: int(x.stem) if x.stem.isdigit() else 99999):
         rel = path.relative_to(ROOT).as_posix()
