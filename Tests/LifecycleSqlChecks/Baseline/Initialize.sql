@@ -11,6 +11,6 @@ INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'1',SYSDATETIME(),N'Disposable fixture',N'Complete first-production schema baseline');
 DECLARE @Scope uniqueidentifier=NEWID();
 EXEC sys.sp_updateextendedproperty @name=N'FMSC_QuickRegistrationScope',@value=@Scope;
--- Operational singleton normally supplied by the owner's baseline snapshot.
-INSERT dbo.BillingAutomationState(StateId,StartMonth)
-VALUES(1,DATEFROMPARTS(YEAR(GETDATE()),MONTH(GETDATE()),1));
+-- Do not seed roles, permissions or BillingAutomationState in the
+-- disposable fixture. Production migration 16 must prove that it initializes
+-- these first-run prerequisites from genuinely schema-only state.

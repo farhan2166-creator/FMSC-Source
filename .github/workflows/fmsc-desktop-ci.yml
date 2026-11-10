@@ -17,6 +17,7 @@ on:
       - 'Tests/HelpChecks/**'
       - 'Tests/ReportReadChecks/**'
       - 'Tools/test_permission_policy.py'
+      - 'Tools/test_first_run_schema_contract.py'
       - 'Core/MaintenanceTools.cs'
       - 'Core/SqlDependencyRepair.cs'
       - 'Installer/**'

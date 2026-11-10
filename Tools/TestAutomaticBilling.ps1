@@ -255,7 +255,25 @@ COMMIT;
  Check (($lines.Tables[0].Select("AdmissionId=5 AND Amount=0")).Count -eq 1) 'An included free child is shown as a zero-payable receipt line without a fake payment.'
  $header=Query 'EXEC dbo.GetFeeReceiptGroup @UserId=1,@ReceiptNumber=@Receipt;' @{'@Receipt'=$receipt}
  Check ($header.Tables[0].Rows[0].StudentCount -eq 2) 'Family receipt count includes the explicitly selected free child.'
- [void](Query "INSERT dbo.Roles(RoleName) VALUES(N'Accountant'); INSERT dbo.Users(Username,RoleId) VALUES(N'fictional_accountant',2); INSERT dbo.UserRoles(UserId,RoleId) VALUES(2,2); INSERT dbo.Permissions(PermissionCode,PermissionName) VALUES(N'Fees.Collect',N'Collect'),(N'Fees.View',N'View'); INSERT dbo.RolePermissions(RoleId,PermissionId) SELECT 2,PermissionId FROM dbo.Permissions;")
+ $accountantSql=@'
+IF (SELECT COUNT(*) FROM dbo.Roles WHERE RoleName=N'Accountant')<>1
+ OR NOT EXISTS(SELECT 1 FROM dbo.Permissions WHERE PermissionCode=N'Fees.Collect')
+ OR NOT EXISTS(SELECT 1 FROM dbo.Permissions WHERE PermissionCode=N'Fees.View')
+    THROW 51017,'Billing fixture requires schema-16 reference roles and permissions.',1;
+INSERT dbo.Users(Username,RoleId)
+SELECT N'fictional_accountant',RoleId FROM dbo.Roles WHERE RoleName=N'Accountant';
+IF SCOPE_IDENTITY()<>2
+    THROW 51018,'The accountant fixture must be synthetic user 2.',1;
+INSERT dbo.UserRoles(UserId,RoleId)
+SELECT 2,RoleId FROM dbo.Roles WHERE RoleName=N'Accountant';
+INSERT dbo.RolePermissions(RoleId,PermissionId)
+SELECT R.RoleId,P.PermissionId FROM dbo.Roles R CROSS JOIN dbo.Permissions P
+WHERE R.RoleName=N'Accountant'
+  AND P.PermissionCode IN(N'Fees.Collect',N'Fees.View')
+  AND NOT EXISTS(SELECT 1 FROM dbo.RolePermissions RP
+                 WHERE RP.RoleId=R.RoleId AND RP.PermissionId=P.PermissionId);
+'@
+ [void](Query $accountantSql)
  $creditBeforeAccountant=Number 'SELECT SUM(Amount) FROM dbo.StudentCreditEntries WHERE AdmissionId=2;'
  [void](Query "DECLARE @R uniqueidentifier=NEWID(); EXEC dbo.ProcessStudentCredit @UserId=2,@AdmissionId=2,@Action=N'Refund',@Amount=500,@RequestId=@R,@Reason=N'Fictional accountant credit refund';")
  Check ((Number 'SELECT SUM(Amount) FROM dbo.StudentCreditEntries WHERE AdmissionId=2;') -eq ($creditBeforeAccountant-500)) 'Accountant can refund unused credit with existing collection authority.'
