@@ -160,7 +160,10 @@ jobs:
             @('Tools/UpdatePackages/UpdatePackages.csproj', '--self-test'),
             @('Tools/UpdateDistribution/UpdateDistribution.csproj', '--self-test'),
             @('Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj', '--update-dialog'),
-            @('Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj', '--post-fix')
+            @('Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj', '--post-fix'),
+            @('Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj', '--communication-workflow'),
+            @('Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj', '--report-captions'),
+            @('Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj', '--certificate-pdf-review')
           )
           foreach ($command in $commands) {
             dotnet run --project $command[0] -c Release -- $command[1]
