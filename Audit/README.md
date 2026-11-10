@@ -5,6 +5,7 @@ The **latest approved business policy** is maintained in [Business Decisions](..
 ## Current deep audit (10 November 2026)
 
 - [Deep source, SQL and Windows UI audit](Reviews/FMSC_DEEP_SOURCE_SQL_UI_AUDIT_2026-11-10.md) — pinned source findings, severity and reproduction boundaries.
+- [Immutable 751-C# / 45-SQL file inventory](Inventories/FMSC_FILE_INVENTORY_2026-11-10.csv) — pinned path/blob SHA and file-size index; records automated coverage, not manual per-file certification.
 - [Read-only inventory scanner](Tools/deep_source_scan.py) — enumerates every checked-out C# file, schema-only test DACPAC procedure, migrations, and Windows UI class candidates. Its output is **not** a live desktop acceptance certificate.
 
 ## Numbered audit guides
