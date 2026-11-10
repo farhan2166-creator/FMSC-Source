@@ -15,6 +15,8 @@ Database/                 You provide FMSC_DB.mdf and FMSC_DB_log.ldf for a fres
 Tools/                    Signed Microsoft vc_redist.x64.exe and SqlLocalDB.msi; verified sqlcmd.exe
 Migrations/               Empty at first-production schema 1; future numbered upgrades begin at 2.sql
 FMSC.Setup.exe             Native Windows GUI entry point for new installs
+FMSC.Uninstall.exe         Separate administrator-approved uninstaller
+Uninstall-FMSC.ps1         Uninstaller engine (also included in app UpdateSupport)
 Install FMSC_SMS.bat        Compatibility shortcut to FMSC.Setup.exe
 core.ps1                   Existing protected install/update engine
 READ_ME_FIRST.txt         Packaging instructions
@@ -99,6 +101,18 @@ The in-app updater launches the verified **UpdateSupport/FMSC.Setup.exe** from i
 - Run the same verified installer with the app closed. The original first-production baseline requires **schema 1**. That historical schema-3 description is not a current requirement. The required schema comes from the exact release's [`Installer/core.ps1`](../Installer/core.ps1) and its complete numbered migration chain; a matching approved detached database or its verified migration path is required. Legacy pre-release schemas carrying higher version labels are **not** silently downgraded to 1; use the separately approved fresh-baseline installation procedure in [first-release baseline](FIRST_RELEASE_BASELINE.md).
 - Record the automatic pre-migration safety backup, installer status, original/current version, and post-upgrade application compatibility. Recovery requires a tested restore path.
 - If anything fails, **do not manually rerun SQL migrations on the live school database**. Follow [recovery](BACKUP_RECOVERY.md), and use a verified disposable clone for diagnosis.
+
+## Uninstalling FMSC while retaining school data
+
+Close all FMSC windows and complete any pending update/recovery. In Windows **Settings → Apps → Installed apps**, select **FMSC School Management → Uninstall**. You can also double-click **FMSC.Uninstall.exe** inside \`C:\FMSC School Management\` or in the complete installer folder. Approve UAC, review the independent uninstall confirmation window and select **Uninstall**. Cancel makes no changes.
+
+The uninstaller removes the installed application, staged/rollback application versions, updater and maintained tool bundles, FMSC per-Windows-profile local caches/settings, the FMSC desktop shortcut and the Windows uninstall entry. It does not uninstall SQL Server LocalDB or the shared Visual C++ runtime, run SQL migrations, detach the database, or delete files outside its allowlisted FMSC folders. It stops if the application is open or an update/recovery is unfinished.
+
+Existing \`.mdf\`, \`.ldf\` and \`.bak\` files (as well as secondary database/backup formats) under \`C:\ProgramData\FMSC_Database\` remain in place. Protected files found inside removable FMSC application/updater/cache folders are copied first to \`C:\ProgramData\FMSC_Database\UninstallPreserved\<unique-id>\`, with SHA-256 verification. If copying or verification fails, uninstall refuses to delete those source folders. Database files are **not** detached, modified or repaired by uninstall. Backups placed elsewhere by the school are untouched.
+
+**Caution:** Uninstall deletes application-local preferences, updater authorization and user secrets, including any cloud-backup credentials and encryption keys stored outside the protected data/backup files. Ensure independent cloud-backup recovery keys are retained securely before uninstalling; preserving a ciphertext backup file alone may not make it decryptable. Future installation must use the supported existing-database detection and migration checks.
+
+The uninstaller must be tested on disposable Windows installations before use on a school computer.
 
 ## Disposable Windows installation acceptance in GitHub Actions
 
