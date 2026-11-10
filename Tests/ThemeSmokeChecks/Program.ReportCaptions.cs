@@ -126,6 +126,38 @@ internal static partial class Program
                 using var alternateDocument = UglyToad.PdfPig.PdfDocument.Open(alternatePdf);
                 Check(alternateDocument.NumberOfPages==1,
                     name+" "+alternativeMode+" fits its content on one page.");
+
+                // Windows rendering acceptance for optional School Profile
+                // signature: both approved leaving-pad and ordinary certificates
+                // must remain printable when the image is enabled.
+                if(name is "LeaveCertificate" or "RegularStudentCertificate")
+                {
+                    using var signatureBitmap = new Bitmap(150, 40);
+                    using var graphics = Graphics.FromImage(signatureBitmap);
+                    graphics.Clear(Color.White);
+                    graphics.DrawLine(Pens.Black, 8, 22, 140, 14);
+                    using var imageBytes = new MemoryStream();
+                    signatureBitmap.Save(imageBytes, System.Drawing.Imaging.ImageFormat.Png);
+                    string unsigned = CertificateLetterhead.Definition(path,school,
+                        mode:CertificateLetterhead.DefaultMode(path));
+                    Check(CertificateSignature.Apply(unsigned,imageBytes.ToArray(),"image/png",false)==unsigned,
+                        name+" keeps byte-identical certificate content when signature printing is disabled.");
+                    string signed = CertificateSignature.Apply(unsigned,imageBytes.ToArray(),"image/png",true);
+                    var signedDefinition = XDocument.Parse(signed);
+                    Check(signedDefinition.Descendants(ns+"Image").Any(element=>
+                        (string?)element.Attribute("Name")=="PrincipalSignaturePrintImage"),
+                        name+" inserts the optional principal signature without replacing the existing line.");
+                    using var signedReport = new LocalReport();
+                    signedReport.LoadReportDefinition(new StringReader(signed));
+                    signedReport.EnableExternalImages=true;
+                    foreach(ReportDataSource source in report.DataSources)
+                        signedReport.DataSources.Add(new ReportDataSource(source.Name,source.Value));
+                    byte[] signedPdf=signedReport.Render("PDF");
+                    using var signedDocument=UglyToad.PdfPig.PdfDocument.Open(signedPdf);
+                    Check(signedDocument.NumberOfPages==1,
+                        name+" enabled signature renders on one PDF page at its approved paper-mode margins.");
+                }
+
             }
         }
     }
