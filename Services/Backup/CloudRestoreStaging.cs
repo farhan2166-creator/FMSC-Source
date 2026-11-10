@@ -22,13 +22,22 @@ internal static class CloudRestoreStaging
         // being mistaken for a completed download or a current restore source.
         string root = Path.Combine(DatabaseHelper.DatabaseFolder, "CloudRestoreStaging");
         string folder = Path.Combine(root, Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(folder);
-        RestrictToCurrentWindowsUser(folder);
         string cloudPackage = Path.Combine(folder, "selected.fmscbackup");
         string bak = Path.Combine(folder, "verified-download.bak");
         bool databaseRestored = false;
+        bool sqlRestoreStarted = false;
         try
         {
+            Directory.CreateDirectory(root);
+            // Never silently delete a post-SQL failure's recovery evidence.
+            // Cap those retained attempts so repeated failures cannot fill
+            // the same volume as the school's live database.
+            if (Directory.EnumerateDirectories(root).Take(5).Count() >= 5)
+                throw new InvalidOperationException(
+                    "Five previous cloud restore attempts require administrator review. " +
+                    "Inspect and clear the protected CloudRestoreStaging folders after preserving recovery evidence.");
+            Directory.CreateDirectory(folder);
+            RestrictToCurrentWindowsUser(folder);
             await downloadPackage(cloudPackage, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             if (!File.Exists(cloudPackage) || new FileInfo(cloudPackage).Length == 0)
@@ -60,6 +69,7 @@ internal static class CloudRestoreStaging
             string safetyPath = Path.GetFullPath(permanentSafetyFolder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (safetyPath.StartsWith(stagePath, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("The recovery safety-backup folder cannot be inside the temporary cloud download folder.");
+            sqlRestoreStarted = true; // Preserve stage if any SQL work may have begun.
             var result = await Task.Run(() => DatabaseBackupManager.RestoreBackup(
                 bak, safetyBackupFolderOverride: permanentSafetyFolder, historyPathOverride: cloudHistoryPath))
                 .ConfigureAwait(false);
@@ -93,9 +103,20 @@ internal static class CloudRestoreStaging
         }
         finally
         {
-            // No deletion on failed restore; preserve evidence for supervised
-            // recovery. On successful restore, deletion runs above so a
-            // cleanup warning is visible to the administrator.
+            // An invalid passphrase, corrupt download, canceled request or
+            // incompatible SQL header never touched SQL: remove ALL temporary
+            // ciphertext/plaintext so repeated attempts cannot fill the drive.
+            // Once SQL begins, preserve the stage if restore fails, for
+            // supervised recovery. Successful restores clean above.
+            if (!sqlRestoreStarted && Directory.Exists(folder))
+            {
+                try { Directory.Delete(folder, recursive: true); }
+                catch (Exception cleanupError)
+                {
+                    AppExceptionHandler.LogNonFatal(cleanupError,
+                        "Pre-SQL cloud restore temporary staging cleanup failed");
+                }
+            }
         }
     }
 
