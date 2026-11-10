@@ -147,6 +147,33 @@ function Invoke-ActualInstaller {
         foreach ($reason in @('Invalid version number','Invalid database schema version','FMSC_SMS.exe was not found','Installation stopped to prevent an application downgrade')) {
             if (($installerOutput+$installerError).Contains($reason)) { Write-Host ('Installer failure category: '+$reason) }
         }
+        # Public CI reports ONLY allowlisted, non-secret SQL error identifiers
+        # and fixed semantic classifications, never raw installer/SQL text.
+        # Raw details stay in the disposable runner's private log.
+        $sourceLog=Join-Path $live 'Install.log'
+        $sourceText=$installerOutput+"\n"+$installerError
+        if (Test-Path -LiteralPath $sourceLog -PathType Leaf) {
+            $sourceText+="\n"+(Get-Content -LiteralPath $sourceLog -Raw -ErrorAction SilentlyContinue)
+        }
+        $codes=@([regex]::Matches($sourceText,'(?i)\b(?:Msg\s+|SQL error\s*:?\s*)(?<code>[0-9]{4,6})\b') |
+            ForEach-Object { $_.Groups['code'].Value } | Sort-Object -Unique)
+        if ($codes.Count) {
+            Write-Host ('Installer SQL diagnostics: error codes '+($codes -join ', '))
+        }
+        foreach ($item in @(
+            @{ Pattern='(?i)Migration\s+16\s+failed'; Label='Migration 16 rejected' },
+            @{ Pattern='(?i)Migration\s+15\s+failed'; Label='Migration 15 rejected' },
+            @{ Pattern='(?i)Migration\s+[0-9]+\s+failed'; Label='SQL migration rejected' },
+            @{ Pattern='(?i)verified backup.*failed|backup.*VERIFYONLY'; Label='Recovery-backup precondition rejected' },
+            @{ Pattern='(?i)The reviewed admission transport predicate has changed'; Label='Admission policy source drift (51008)' },
+            @{ Pattern='(?i)Unexpected admission procedure header'; Label='Admission procedure-header source drift (51009)' },
+            @{ Pattern='(?i)Required reference catalog bootstrap is incomplete'; Label='First-run reference bootstrap incomplete (51005)' },
+            @{ Pattern='(?i)No such file or directory|Migrations folder'; Label='Missing staged migration input' }
+        )) {
+            if ($sourceText -match $item.Pattern) {
+                Write-Host ('Installer sanitized category: '+$item.Label)
+            }
+        }
     }
     return $p.ExitCode
 }
