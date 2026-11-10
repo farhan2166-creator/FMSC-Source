@@ -76,6 +76,14 @@ Source `Installer/core.ps1:30–31` declares app **1.0.24 / schema 15**, but the
 
 `Pages/Administration/CloudBackupSettingsDialog.cs:79–95` leaves Cancel/close available while async Google/Dropbox authentication or `SaveAsync` is pending. `ToggleProviderAsync:98–120` re-enables/relabels controls in its `finally`; `SaveAsync:177–230` saves settings, awaits Windows task registration, then sets `DialogResult`/closes the form. There is no dialog `FormClosing` busy guard in this class or its `ApplicationWindowForm` base. Closing the dialog during these awaits can allow a discarded dialog to finish persisting settings or update disposed controls. Prevent closure while a state-changing operation is active or implement explicit cancellation and lifetime-safe continuation handling.
 
+
+### DSA-13 — A truly schema-only school lacks first-run reference/bootstrap data
+**High conditional clean-start blocker / accepted-template assumption; not reproduced through GUI.**
+
+This is a distinct gap from the counter fixed in migration 15. `Tests/LifecycleSqlChecks/Fixture.cs:35–55` inserts Administrator and Accountant roles, inserts missing entries from the permission catalog, and only then invokes `BootstrapFirstAdministrator`. `Tests/AdministrationSqlChecks/FirstRunChecks.sql:4–8` explicitly requires an Administrator role and exactly 28 permission records **before** trying the first administrator. The baseline schema-only test setup `Tests/LifecycleSqlChecks/Baseline/Initialize.sql:7–18` separately inserts `BillingAutomationState(StateId=1)` and says the operational singleton is normally supplied by the **owner's baseline snapshot**. The Windows installer acceptance `Tools/RunDisposableWindowsInstall.ps1:447–455,510–530` publishes an empty schema, verifies installation headlessly, then creates a fictional Administrator **directly with SQL**, not through the normal first-run wizard.
+
+Therefore, the **approved seeded owner snapshot** and a truly *data-free* schema are different supported conditions; the latter is not proved capable of first login/ongoing billing. A schema-only database without its Administrator role cannot satisfy the documented first-run test precondition, while absent permission catalog or billing singleton can invalidate later flows. First reproduce on a disposable schema-only copy with no manual role/permission/singleton inserts, then specify an official versioned idempotent seed policy if a genuinely blank installation is to be supported. Do not automatically initialize real school records, replace approved snapshots, or invent migrations without review.
+
 ## Whole-repository automated evidence — first audit CI run
 
 **Review PR:** [#161](https://github.com/farhan2166-creator/FMSC-Source/pull/161) (draft, no app/SQL production changes).
