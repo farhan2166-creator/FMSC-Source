@@ -521,11 +521,22 @@ IF (SELECT COUNT(*) FROM sys.database_files WHERE physical_name IN
         Assert-Level3Database
         Sql 'FMSC_DB' @'
 SET NOCOUNT ON;
-INSERT dbo.Roles(RoleName,Description) VALUES(N'Administrator',N'Synthetic installation acceptance');
-DECLARE @Role int=SCOPE_IDENTITY();
-INSERT dbo.Users(Username,RoleId,MustChangePassword) VALUES(N'level3_install_fixture',@Role,1);
-DECLARE @User int=SCOPE_IDENTITY();
-INSERT dbo.UserRoles(UserId,RoleId) VALUES(@User,@Role);
+-- Schema 16 must have initialized immutable reference data. Use the
+-- same first-administrator stored procedure as the shipped setup wizard,
+-- rather than inserting conflicting reference roles/user memberships.
+IF (SELECT COUNT(*) FROM dbo.Roles WHERE RoleName=N'Administrator')<>1
+ OR (SELECT COUNT(*) FROM dbo.Permissions)<>31
+ OR (SELECT COUNT(*) FROM dbo.BillingAutomationState WHERE StateId=1)<>1
+    THROW 51013,'First-run reference data was not prepared by migrations.',1;
+DECLARE @Hash varbinary(64)=CONVERT(varbinary(64),REPLICATE('H',64)),
+        @Salt varbinary(32)=CONVERT(varbinary(32),REPLICATE('S',32));
+EXEC dbo.BootstrapFirstAdministrator
+    @Username=N'level3_install_fixture', @PasswordHash=@Hash, @PasswordSalt=@Salt;
+DECLARE @User int=(SELECT UserId FROM dbo.Users WHERE Username=N'level3_install_fixture');
+IF @User IS NULL
+ OR NOT EXISTS(SELECT 1 FROM dbo.UserRoles U JOIN dbo.Roles R ON R.RoleId=U.RoleId
+               WHERE U.UserId=@User AND R.RoleName=N'Administrator')
+    THROW 51014,'First-run administrator bootstrap did not grant the required role.',1;
 INSERT dbo.SchoolProfile(SchoolProfileId,SchoolName,CreatedAt,UpdatedAt,CreatedByUserId,UpdatedByUserId)
 VALUES(1,N'Fictional Level 3 Install School',SYSUTCDATETIME(),SYSUTCDATETIME(),@User,@User);
 '@ | Out-Null
