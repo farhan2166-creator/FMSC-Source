@@ -230,6 +230,13 @@ internal static class CloudBackupTransport
         string access, CancellationToken token)
     {
         string destination = "/" + name;
+        // Dropbox's content_hash is independently computed by the provider.
+        // Reconcile a previous successful commit whose HTTP response was lost
+        // before attempting add/autorename=false again.
+        string contentHash = CloudDropboxIntegrity.ComputeContentHash(path);
+        var existing = await ReconcileDropboxUploadAsync(
+            access, destination, name, sha, createdUtc, length, contentHash, token);
+        if (existing is not null) return existing;
         JsonDocument? metadata = null;
         if (length <= 140 * 1024 * 1024)
         {
@@ -282,11 +289,39 @@ internal static class CloudBackupTransport
         using (metadata)
         {
             string id = GetString(metadata.RootElement, "id");
-            if (id.Length == 0 || ParseSize(metadata.RootElement) != length)
-                throw new IOException("Dropbox returned an incomplete backup upload receipt.");
+            CloudDropboxIntegrity.RequireMatchingMetadata(
+                metadata.RootElement, name, length, contentHash);
             return new CloudRemoteBackup(CloudProvider.Dropbox, id, name, sha, createdUtc,
                 ParseUtc(GetString(metadata.RootElement, "server_modified")), length);
         }
+    }
+
+    private static async Task<CloudRemoteBackup?> ReconcileDropboxUploadAsync(
+        string access, string destination, string name, string packageSha256,
+        DateTime createdUtc, long length, string localContentHash,
+        CancellationToken token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            "https://api.dropboxapi.com/2/files/get_metadata");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
+        request.Content = new StringContent(JsonSerializer.Serialize(new { path = destination }),
+            Encoding.UTF8, "application/json");
+        using var response = await Http.SendAsync(request, token);
+        if (response.StatusCode == HttpStatusCode.Conflict)
+        {
+            using var error = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
+            if (CloudDropboxIntegrity.IsPathNotFound(error.RootElement))
+                return null;
+        }
+        RequireSuccess(response, "Dropbox backup lookup");
+        using var metadata = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
+        // If another file occupies this name, refuse rather than overwrite it
+        // or incorrectly marking our queued ciphertext as delivered.
+        CloudDropboxIntegrity.RequireMatchingMetadata(
+            metadata.RootElement, name, length, localContentHash);
+        return new CloudRemoteBackup(CloudProvider.Dropbox,
+            GetString(metadata.RootElement, "id"), name, packageSha256, createdUtc,
+            ParseUtc(GetString(metadata.RootElement, "server_modified")), length);
     }
 
     private static async Task<IReadOnlyList<CloudRemoteBackup>> DropboxListAsync(
