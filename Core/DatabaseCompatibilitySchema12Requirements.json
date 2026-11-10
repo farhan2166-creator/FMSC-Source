@@ -294,7 +294,7 @@
       "objectName": "SaveSchoolProfileDetails",
       "name": "@SchoolName",
       "type": "nvarchar",
-      "maxLength": 600,
+      "maxLength": 400,
       "precision": 0,
       "scale": 0,
       "isOutput": false
@@ -314,7 +314,7 @@
       "objectName": "SaveSchoolProfileDetails",
       "name": "@City",
       "type": "nvarchar",
-      "maxLength": 400,
+      "maxLength": 200,
       "precision": 0,
       "scale": 0,
       "isOutput": false
@@ -324,7 +324,7 @@
       "objectName": "SaveSchoolProfileDetails",
       "name": "@ContactNumber",
       "type": "nvarchar",
-      "maxLength": 600,
+      "maxLength": 300,
       "precision": 0,
       "scale": 0,
       "isOutput": false
@@ -334,7 +334,7 @@
       "objectName": "SaveSchoolProfileDetails",
       "name": "@Email",
       "type": "nvarchar",
-      "maxLength": 500,
+      "maxLength": 300,
       "precision": 0,
       "scale": 0,
       "isOutput": false
