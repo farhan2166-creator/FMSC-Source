@@ -99,6 +99,37 @@ BEGIN
     END;
 END;
 
+-- DSA-14: the ordinary/default admission path must not demand a
+-- transport-only rate from a child who does not use transport. The real
+-- Quick Registration caller also sends its explicit selected-fee list.
+-- Preserve the full reviewed admission writer: change only the one guard
+-- predicate, and refuse drift rather than guessing at SQL dependencies.
+DECLARE @AdmitDefinition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.AdmitStudent',N'P'));
+IF @AdmitDefinition IS NULL
+    THROW 51000,'Admission procedure definition unavailable for reviewed transport guard.',1;
+SET @AdmitDefinition=REPLACE(@AdmitDefinition,NCHAR(13),N'');
+DECLARE @OldTransportGuard nvarchar(200)=N'WHERE  FT.IsMandatory = 1
+           AND NOT EXISTS';
+DECLARE @NewTransportGuard nvarchar(280)=N'WHERE  FT.IsMandatory = 1
+           AND (@UsesTransport=1 OR FT.IsTransportLinked=0)
+           AND NOT EXISTS';
+IF CHARINDEX(@OldTransportGuard,@AdmitDefinition)=0
+ OR CHARINDEX(@OldTransportGuard,@AdmitDefinition,
+              CHARINDEX(@OldTransportGuard,@AdmitDefinition)+LEN(@OldTransportGuard))>0
+ OR CHARINDEX(N'@UsesTransport',@AdmitDefinition)=0
+ OR CHARINDEX(N'@UseSelectedFeeTypes',@AdmitDefinition)=0
+    THROW 51000,'The reviewed admission transport predicate has changed; inspect before migrating.',1;
+SET @AdmitDefinition=REPLACE(@AdmitDefinition,@OldTransportGuard,@NewTransportGuard);
+SET @AdmitDefinition=LTRIM(@AdmitDefinition);
+DECLARE @ProcedureKeywordPos int=CHARINDEX(N'PROCEDURE',UPPER(@AdmitDefinition));
+IF @ProcedureKeywordPos<7 OR @ProcedureKeywordPos>70
+ OR (LEFT(UPPER(@AdmitDefinition),6)<>N'CREATE' AND LEFT(UPPER(@AdmitDefinition),5)<>N'ALTER')
+    THROW 51000,'Unexpected admission procedure header; refuse unreviewed alteration.',1;
+-- ALTER PROCEDURE must be the first statement of its dynamic batch.
+SET @AdmitDefinition=N'ALTER PROCEDURE'+SUBSTRING(
+    @AdmitDefinition,@ProcedureKeywordPos+LEN(N'PROCEDURE'),LEN(@AdmitDefinition));
+EXEC sys.sp_executesql @AdmitDefinition;
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'16',SYSDATETIME(),SUSER_SNAME(),
-       N'Idempotent role, permission and billing singleton bootstrap for empty school');
+       N'Initialize empty-school reference prerequisites and align optional transport admission policy');
