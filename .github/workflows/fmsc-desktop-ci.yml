@@ -6,6 +6,11 @@ on:
   pull_request:
     paths:
       - 'Core/Updates/**'
+      - 'Core/DatabaseCompatibility*'
+      - 'Core/CommunicationPreparedMessages.cs'
+      - 'Core/CommunicationRecipientResolver.cs'
+      - 'Core/CertificateLetterhead.cs'
+      - 'Core/CertificateSignature.cs'
       - 'Services/Backup/**'
       - 'Tests/CloudBackupCryptoChecks/**'
       - 'Pages/Administration/BackupRestorePage.cs'
@@ -126,6 +131,12 @@ jobs:
             & dotnet run --project Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release --no-build -- $suite
             if ($LASTEXITCODE -ne 0) { throw "$suite failed with exit code $LASTEXITCODE" }
           }
+
+      - name: Audit Windows acceptance — certificate paper modes, signatures and schema-12 manifest
+        shell: pwsh
+        run: |
+          dotnet run --project Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release --no-build -- --report-captions
+          if ($LASTEXITCODE -ne 0) { throw 'Certificate PDF, signature and schema-12 contract acceptance failed.' }
 
       - name: Retain the dashboard report review PDF
         # Fictional fixture data only. These files use the production export
