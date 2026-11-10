@@ -2,6 +2,11 @@
 
 The **latest approved business policy** is maintained in [Business Decisions](../Docs/BUSINESS_DECISIONS.md), not in dated audit reports. Historical audit reports record findings at their original source revisions; they do not override the current policy.
 
+## Current deep audit (10 November 2026)
+
+- [Deep source, SQL and Windows UI audit](Reviews/FMSC_DEEP_SOURCE_SQL_UI_AUDIT_2026-11-10.md) — pinned source findings, severity and reproduction boundaries.
+- [Read-only inventory scanner](Tools/deep_source_scan.py) — enumerates every checked-out C# file, schema-only test DACPAC procedure, migrations, and Windows UI class candidates. Its output is **not** a live desktop acceptance certificate.
+
 ## Numbered audit guides
 
 - [Status And Scope](01_STATUS_AND_SCOPE.md)
