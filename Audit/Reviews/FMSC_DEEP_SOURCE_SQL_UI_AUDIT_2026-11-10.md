@@ -130,6 +130,10 @@ The baseline DACPAC is schema 1 and cannot alone certify current schema-15 post-
 
 **Interpretation:** Complete **file inventory** and multiple real Windows/SQL test jobs are achieved. Complete **semantic reasoning over every source file / stored procedure** and **end-to-end GUI operator execution** are not achieved by those jobs; these remain explicit verification gates and must not be reported as passes.
 
+## Per-file traceability
+
+The [immutable file index](../Inventories/FMSC_FILE_INVENTORY_2026-11-10.csv) records every one of the 751 C# files and 45 `.sql` files from the pinned Source commit, including Git blob SHA and byte count. The audit workflow's [full static findings artifact](https://github.com/farhan2166-creator/FMSC-Source/actions/runs/42819134734) additionally lists per-file content hash/line counts, all 265 record-free baseline SQL procedure names with structural properties and all 115 UI class candidates. A listed file means scanned and inventoried, **not** that its semantics or every clickable state passed runtime testing.
+
 ## Coverage boundary and follow-up
 
 The above issues are independent of prior audit history. A source file inventory, source-code inspection, successful synthetic CI, and static SQL/schema analysis must never be presented as an exhaustive interactive Windows/operator verification. The remaining coverage items are: enumerate every C# file and stored procedure, inspect SQL definitions in the schema-only DACPAC (not only object manifest signatures), reconcile every navigation destination with UI permissions and save/restore path, run clean Windows LocalDB first-install/first-payment and recovery scenarios, verify financial reversals/refunds and cross-campus isolation, and validate real Google/Dropbox behavior with disposable accounts. Mark each executed scenario with actual reproducible logs, timestamps, and reviewed commit SHA.
