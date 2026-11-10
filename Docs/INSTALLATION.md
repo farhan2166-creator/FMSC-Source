@@ -12,7 +12,7 @@ FMSC_SMS/                 Published self-contained app and resources
   UpdateSupport/Tools/     SqlCmd/ and LocalDb/ bundles with integrity manifests
   UpdateSupport/           Shared tool resolver, catalog and recovery support
 Database/                 You provide FMSC_DB.mdf and FMSC_DB_log.ldf for a fresh install
-Tools/                    Signed Microsoft SqlLocalDB.msi and verified sqlcmd.exe
+Tools/                    Signed Microsoft vc_redist.x64.exe and SqlLocalDB.msi; verified sqlcmd.exe
 Migrations/               Empty at first-production schema 1; future numbered upgrades begin at 2.sql
 FMSC.Setup.exe             Native Windows GUI entry point for new installs
 Install FMSC_SMS.bat        Compatibility shortcut to FMSC.Setup.exe
@@ -25,7 +25,7 @@ SHA256SUMS.txt            Package content hashes
 **Update dependencies:** The approved x64 build packages the complete pinned
 MinGit runtime (Git plus OpenSSH) with the application, alongside the self-contained
 .NET runtime. Windows PATH and a separate Git installation are not required for
-private update checks. The complete installer also packages SQL LocalDB and sqlcmd in its
+private update checks. The complete installer also packages Microsoft Visual C++ v14 x64, SQL LocalDB and sqlcmd in its
 top-level Tools folder. Installation retains all three verified tool bundles in
 `%ProgramData%\FMSC_Updater\MaintenanceTools`, protected against ordinary-user
 modification. The original extracted setup folder can be deleted after successful
@@ -38,9 +38,9 @@ single `git.exe` into the installation.
 ## Preparing tools for local or workflow publishing
 
 Local publishing defaults to the owner's adjacent `../Tools` folder containing
-`MinGit/`, `sqlcmd.exe` and `SqlLocalDB.msi`. The publish target verifies and reuses
+`MinGit/`, `sqlcmd.exe`, `SqlLocalDB.msi` and `vc_redist.x64.exe`. The publish target verifies and reuses
 these files without downloading. On first preparation, existing Git/sqlcmd versions
-must match `Installer/ToolCatalog.json`; the MSI must have a valid Microsoft signature.
+must match `Installer/ToolCatalog.json`; both Microsoft installer files must have valid Authenticode signatures.
 The preparer records complete file hashes and refuses later corruption. Keep the
 generated `FMSC.ToolIntegrity.json` files with the cached bundles.
 
@@ -84,6 +84,8 @@ The installer checks `Migrations` for top-level `*.sql` files. An empty or missi
 5. After successful installation, launch the application under the intended operator account; verify connection, login, schema compatibility, a read-only student search, a report preview, and permitted user actions.
 
 The app expects `FMSC_DB` under `C:\ProgramData\FMSC_Database` and uses `(localdb)\MSSQLLocalDB` by default. The **original** approved first-production baseline was application 1.0.0 / database schema 1. The current source at this review has application **1.0.3 / schema 3**, with migrations `2.sql` and `3.sql`. Verify the actual installer version and database schema from the exact new release artifact before a fresh install; never assume the historical baseline is the current required version. See [first-release baseline](FIRST_RELEASE_BASELINE.md).
+
+On a fresh PC, setup checks the installed Microsoft Visual C++ v14 x64 runtime. When version 14.30 or later is missing, it runs the included, Microsoft-signed redistributable silently with a diagnostic log, before SQL Server 2022 LocalDB. An already suitable runtime is skipped. A restart-required code stops installation safely; restart Windows and rerun setup. Logs are stored under `C:\ProgramData\FMSC_Database` as `VcRedist-*.log`.
 
 If silent LocalDB installation fails (for example, MSI code 1603), the setup dialog offers a Yes/No choice to open Microsoft's official installer wizard and reports a verbose log under `C:\ProgramData\FMSC_Database` . A failed/cancelled wizard or restart-required result stops installation safely. Code 1603 alone does not identify the underlying MSI problem; retain the verbose log for diagnosis. An immediate `SQL Server LocalDB installation failed. MSI exit code: 1603` message without this fallback belongs to the older installer: verify the artifact's source commit before retrying.
 
