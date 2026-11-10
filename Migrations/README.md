@@ -1,6 +1,6 @@
 # Production database migrations
 
-**Current source target (10 November 2026): FMSC application 1.0.23, database schema 14.** The committed consecutive production migration chain is `2.sql`–`14.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
+**Current source target (10 November 2026): FMSC application 1.0.24, database schema 15.** The committed consecutive production migration chain is `2.sql`–`15.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
 
 **Historical starting point:** The first production release used application **1.0.0**, database **1**.
 The schema-1 baseline contains the complete original production schema.
@@ -37,7 +37,7 @@ communication module, when present, gets a permission-checked contact-linking
 procedure plus pre-send consent revalidation. No messages send automatically and
 the migration does not install the optional module.
 
-Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed **2.sql–14.sql** production chain where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts. See [the historical baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
+Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed **2.sql–15.sql** production chain where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts. See [the historical baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
 
 # Apply migrations without the installer
 
@@ -174,3 +174,22 @@ then re-run **Setup Readiness**. Class fee rates remain separately configured.
 The disposable Lifecycle SQL fixture verifies the same save path used by the
 editor, including the missing-mandatory readiness warning, its resolution,
 transport-linked round-trip and a legacy caller that omits new parameters.
+
+
+## Schema 15 — First admission on a fresh or restored empty database
+
+Migration `15.sql` requires schema 14 and initializes the missing singleton
+`dbo.AdmissionNumberCounter` (`CounterId=1`) without requiring the operator
+to run SQL. An empty school starts with `LastNumber=0`, so the normal admission
+writer allocates admission number 1. Existing counter values are left untouched.
+If the counter has disappeared from a populated database, the migration
+conservatively derives the largest numeric prefix from existing official
+admission numbers; ambiguous or out-of-range numbers cause the migration to
+abort rather than risk duplicate numbering. A verified backup and transactional
+rollback are managed by the installer before this migration.
+
+The disposable SQL lifecycle tests now assert the seed exists before any
+fixture overrides it, submit real first and second admissions through
+`dbo.AdmitStudent`, verify 1/2 and counter progression, then roll back the
+test transaction. Only after these checks does the fixture set the historical
+test reference counter to 1000. No changes to the Admissions UI are needed.

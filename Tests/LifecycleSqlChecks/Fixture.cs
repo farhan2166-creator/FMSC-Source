@@ -14,7 +14,10 @@ internal sealed class Fixture
         // The runner publishes baseline 1, then applies any future numbered migrations.
         if (Convert.ToString(Sql.Scalar("SELECT TOP(1) VersionNumber FROM dbo.DatabaseVersion ORDER BY VersionId DESC;")) != DatabaseHelper.RequiredDatabaseSchemaVersion)
             throw new InvalidOperationException("Initialize the owned baseline fixture and apply any future migrations before seeding reference data.");
-        Sql.Query("INSERT dbo.AdmissionNumberCounter(CounterId,LastNumber) VALUES(1,1000);");
+        // A true schema-only school must already have its first admission counter
+        // through migration 15. Do not hide a missing initializer by seeding here.
+        if (Sql.Count("SELECT COUNT(*) FROM dbo.AdmissionNumberCounter WHERE CounterId=1 AND LastNumber=0;") != 1)
+            throw new InvalidOperationException("Fresh schema migration did not initialize admission counter 1 to zero.");
         // DacFx round-trips this property as varchar. Repair ONLY this disposable fixture's identity/type.
         Sql.Query("DECLARE @Scope uniqueidentifier=NEWID(); EXEC sys.sp_updateextendedproperty @name=N'FMSC_QuickRegistrationScope',@value=@Scope;");
         try { using var c = DatabaseHelper.GetConnection(); c.Open(); DatabaseCompatibility.Validate(c); }
