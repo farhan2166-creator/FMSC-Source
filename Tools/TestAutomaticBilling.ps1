@@ -255,7 +255,7 @@ COMMIT;
  Check (($lines.Tables[0].Select("AdmissionId=5 AND Amount=0")).Count -eq 1) 'An included free child is shown as a zero-payable receipt line without a fake payment.'
  $header=Query 'EXEC dbo.GetFeeReceiptGroup @UserId=1,@ReceiptNumber=@Receipt;' @{'@Receipt'=$receipt}
  Check ($header.Tables[0].Rows[0].StudentCount -eq 2) 'Family receipt count includes the explicitly selected free child.'
- [void](Query @'
+ $accountantSql=@'
 IF (SELECT COUNT(*) FROM dbo.Roles WHERE RoleName=N'Accountant')<>1
  OR NOT EXISTS(SELECT 1 FROM dbo.Permissions WHERE PermissionCode=N'Fees.Collect')
  OR NOT EXISTS(SELECT 1 FROM dbo.Permissions WHERE PermissionCode=N'Fees.View')
@@ -272,7 +272,8 @@ WHERE R.RoleName=N'Accountant'
   AND P.PermissionCode IN(N'Fees.Collect',N'Fees.View')
   AND NOT EXISTS(SELECT 1 FROM dbo.RolePermissions RP
                  WHERE RP.RoleId=R.RoleId AND RP.PermissionId=P.PermissionId);
-'@)
+'@
+ [void](Query $accountantSql)
  $creditBeforeAccountant=Number 'SELECT SUM(Amount) FROM dbo.StudentCreditEntries WHERE AdmissionId=2;'
  [void](Query "DECLARE @R uniqueidentifier=NEWID(); EXEC dbo.ProcessStudentCredit @UserId=2,@AdmissionId=2,@Action=N'Refund',@Amount=500,@RequestId=@R,@Reason=N'Fictional accountant credit refund';")
  Check ((Number 'SELECT SUM(Amount) FROM dbo.StudentCreditEntries WHERE AdmissionId=2;') -eq ($creditBeforeAccountant-500)) 'Accountant can refund unused credit with existing collection authority.'
