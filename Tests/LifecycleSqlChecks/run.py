@@ -357,7 +357,12 @@ def main():
             report["scenarios"] += [{"name": s["Name"], "result": s["Result"], "assertions": s["Assertions"], "seconds": s["Seconds"],
                 "assertion": s.get("Assertion"), "category": s.get("Category"), "sqlError": s.get("SqlError")} for s in data["scenarios"]]
         if result.returncode:
-            raise RuntimeError("Lifecycle runner reported failed or blocked scenarios; inspect the sanitized assertions.")
+            # Capture only synthetic schema *metadata* labels, not child SQL,
+            # connection strings or data rows (all raw output remains private).
+            labels = re.findall(r"^SCHEMA_CONTRACT_FAIL: ([A-Za-z0-9 .()/-]{1,120})\s*$",
+                                result.stdout + result.stderr, re.MULTILINE)
+            hint = ("; Synthetic schema contract: " + labels[-1]) if labels else ""
+            raise RuntimeError("Lifecycle runner reported failed or blocked scenarios; inspect the sanitized assertions." + hint)
 
     def existing(project, suffix, mode=None):
         provision(suffix)
