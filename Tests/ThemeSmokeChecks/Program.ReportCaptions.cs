@@ -11,7 +11,7 @@ internal static partial class Program
 
         // Verify that the production startup validator loads the newest
         // structural requirements, not merely that numbered SQL files exist.
-        var compatibilityType = typeof(DatabaseHelper).Assembly.GetType(
+        var compatibilityType = typeof(CertificateUi).Assembly.GetType(
             "FMSC_SMS.Core.DatabaseCompatibility")!;
         var manifests = (Lazy<string[]>)compatibilityType.GetField("Requirements",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!;
