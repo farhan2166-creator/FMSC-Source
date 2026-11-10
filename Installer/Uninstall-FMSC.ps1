@@ -138,7 +138,12 @@ function Get-FmscDeletionRoots {
         if ($item.PSChildName -notmatch '^S-1-5-21-(?:\d+-){3}\d+$') { continue }
         $property = Get-ItemProperty -LiteralPath $item.PSPath -Name ProfileImagePath -ErrorAction Stop
         $profile = [Environment]::ExpandEnvironmentVariables([string]$property.ProfileImagePath)
-        if (-not (Test-Path -LiteralPath $profile -PathType Container)) { continue }
+        # Only local user profiles on the FMSC system drive. Never remove
+        # roaming/network profile shares, drive redirections or unexpected roots.
+        if ([string]::IsNullOrWhiteSpace($profile) -or $profile.StartsWith('\\')) { continue }
+        $profile = [IO.Path]::GetFullPath($profile)
+        if (-not $profile.StartsWith('C:\Users\',[StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $profile -PathType Container)) { continue }
         foreach ($relative in @('AppData\Local\FMSC','AppData\Local\FMSC_SMS',
             'AppData\Roaming\FMSC','AppData\Roaming\FMSC_SMS')) {
             $path = Join-Path $profile $relative
@@ -172,6 +177,14 @@ function New-FmscStage {
         $owner = (Get-Acl -LiteralPath $StageBase).GetOwner([Security.Principal.SecurityIdentifier]).Value
         if ($owner -notin @('S-1-5-18','S-1-5-32-544')) {
             throw 'Uninstall staging is not administrator-owned. Cleanup stopped.'
+        }
+        $acl = Get-Acl -LiteralPath $StageBase
+        foreach ($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {
+            if ($rule.AccessControlType -eq 'Allow' -and
+                $rule.IdentityReference.Value -notin @('S-1-5-18','S-1-5-32-544') -and
+                ([int]$rule.FileSystemRights -band 0xD0156)) {
+                throw 'Uninstall staging is writable by a non-administrator. Cleanup stopped.'
+            }
         }
     } else {
         New-Item -ItemType Directory -Path $StageBase -ErrorAction Stop | Out-Null
@@ -266,6 +279,12 @@ function Show-FmscUninstallWindow {
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox = $false
     $form.Font = New-Object Drawing.Font('Segoe UI',10)
+    try {
+        $iconFile = Join-Path $AppDirectory 'FMSC.Uninstall.exe'
+        if (Test-Path -LiteralPath $iconFile -PathType Leaf) {
+            $form.Icon = [Drawing.Icon]::ExtractAssociatedIcon($iconFile)
+        }
+    } catch { } # Branding must never affect uninstall safety.
     $form.BackColor = [Drawing.Color]::FromArgb(246,248,251)
     $heading = New-Object Windows.Forms.Label
     $heading.SetBounds(26,24,620,42)
@@ -326,6 +345,7 @@ function Show-FmscUninstallWindow {
     [Windows.Forms.Application]::Run($form)
     $form.Dispose()
 }
+try {
 if (-not (Test-FmscAdministrator)) { throw 'Run FMSC.Uninstall.exe with administrator approval.' }
 if (-not $Execute) {
     $staged = New-FmscStage
@@ -350,4 +370,12 @@ try {
 } finally {
     # The script has been parsed by PowerShell; the staging copy is disposable.
     try { Remove-Item -LiteralPath $PSScriptRoot -Recurse -Force -ErrorAction Stop } catch { }
+}
+} catch {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [Windows.Forms.MessageBox]::Show($_.Exception.Message,
+            'FMSC Uninstall Stopped','OK','Error') | Out-Null
+    } catch { }
+    exit 1
 }
