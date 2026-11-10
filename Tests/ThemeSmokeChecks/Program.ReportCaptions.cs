@@ -8,6 +8,34 @@ internal static partial class Program
     private static void CheckReportCaptions(string[]? selectedReports = null)
     {
         string output=Path.GetFullPath("artifacts/report-captions");Directory.CreateDirectory(output);
+
+        // Verify that the production startup validator loads the newest
+        // structural requirements, not merely that numbered SQL files exist.
+        var compatibilityType = typeof(DatabaseHelper).Assembly.GetType(
+            "FMSC_SMS.Core.DatabaseCompatibility")!;
+        var manifests = (Lazy<string[]>)compatibilityType.GetField("Requirements",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!;
+        using(var requirements = System.Text.Json.JsonDocument.Parse(manifests.Value.Last()))
+        {
+            var root = requirements.RootElement;
+            var objects = root.GetProperty("objects").EnumerateArray().ToArray();
+            var columns = root.GetProperty("columns").EnumerateArray().ToArray();
+            bool HasObject(string objectName) => objects.Any(item=>
+                item.GetProperty("name").GetString()==objectName);
+            bool HasColumn(string table,string name) => columns.Any(item=>
+                item.GetProperty("objectName").GetString()==table
+                && item.GetProperty("name").GetString()==name);
+            Check(manifests.Value.Length==3
+                && HasObject("AdministratorRecoveryHost")
+                && HasObject("AdministratorRecoveryEvents")
+                && HasObject("SaveSchoolCertificateSignature")
+                && HasObject("GetSchoolCertificateSignature")
+                && HasObject("GetPrintedCertificateSignature")
+                && HasColumn("SchoolProfile","PrintPrincipalSignature")
+                && HasColumn("SchoolProfile","PrincipalSignatureImage"),
+                "Production startup contract enforces schema-11 signature and schema-12 recovery structures.");
+        }
+
         using var profile=new DataTable();profile.Columns.Add("SchoolName");
         var school=profile.Rows.Add("Fictional School");
         foreach(string name in selectedReports ?? new[]{"AdmissionForm","ClassMarksSheet","ClassAttendanceSheet",
