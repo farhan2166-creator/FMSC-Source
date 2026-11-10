@@ -7,7 +7,7 @@ SET XACT_ABORT ON;
 
 IF ISNULL((SELECT TOP (1) TRY_CONVERT(int,VersionNumber)
     FROM dbo.DatabaseVersion ORDER BY VersionId DESC),0) <> 15
-    THROW 51000,'Clean-school reference initialization requires schema 15.',1;
+    THROW 51001,'Clean-school reference initialization requires schema 15.',1;
 IF OBJECT_ID(N'dbo.Users',N'U') IS NULL
  OR OBJECT_ID(N'dbo.Students',N'U') IS NULL
  OR OBJECT_ID(N'dbo.Roles',N'U') IS NULL
@@ -15,7 +15,7 @@ IF OBJECT_ID(N'dbo.Users',N'U') IS NULL
  OR OBJECT_ID(N'dbo.BillingAutomationState',N'U') IS NULL
  OR OBJECT_ID(N'dbo.BootstrapFirstAdministrator',N'P') IS NULL
  OR OBJECT_ID(N'dbo.GetFirstRunStatus',N'P') IS NULL
-    THROW 51000,'Required bootstrap reference schema is missing; inspect before upgrading.',1;
+    THROW 51002,'Required bootstrap reference schema is missing; inspect before upgrading.',1;
 
 -- Existing schools are unchanged. The first-admin wizard still owns user
 -- creation; this migration creates no credentials, accounts, role membership
@@ -25,9 +25,9 @@ BEGIN
     -- No users alongside populated school records indicates damaged access
     -- state, not an authorized new school; do not silently reopen bootstrap.
     IF EXISTS (SELECT 1 FROM dbo.Students)
-        THROW 51000,'Students exist but no users do. Recovery requires review; no new administrator was created.',1;
+        THROW 51003,'Students exist but no users do. Recovery requires review; no new administrator was created.',1;
     IF EXISTS (SELECT PermissionCode FROM dbo.Permissions GROUP BY PermissionCode HAVING COUNT(*) > 1)
-        THROW 51000,'Duplicate permission codes prevent safe bootstrap.',1;
+        THROW 51004,'Duplicate permission codes prevent safe bootstrap.',1;
 
     IF NOT EXISTS(SELECT 1 FROM dbo.Roles WITH(UPDLOCK,HOLDLOCK)
                   WHERE RoleName=N'Administrator')
@@ -87,13 +87,13 @@ BEGIN
                                WHERE P.PermissionCode=C.Code))
        OR NOT EXISTS(SELECT 1 FROM dbo.Roles WHERE RoleName=N'Administrator')
        OR NOT EXISTS(SELECT 1 FROM dbo.Roles WHERE RoleName=N'Accountant')
-        THROW 51000,'Required reference catalog bootstrap is incomplete.',1;
+        THROW 51005,'Required reference catalog bootstrap is incomplete.',1;
 
     IF NOT EXISTS(SELECT 1 FROM dbo.BillingAutomationState WITH(UPDLOCK,HOLDLOCK)
                   WHERE StateId=1)
     BEGIN
         IF EXISTS(SELECT 1 FROM dbo.BillingAutomationState)
-            THROW 51000,'Unexpected billing state prevents safe singleton initialization.',1;
+            THROW 51006,'Unexpected billing state prevents safe singleton initialization.',1;
         INSERT dbo.BillingAutomationState(StateId,StartMonth)
         VALUES(1,DATEFROMPARTS(YEAR(GETDATE()),MONTH(GETDATE()),1));
     END;
@@ -106,7 +106,7 @@ END;
 -- predicate, and refuse drift rather than guessing at SQL dependencies.
 DECLARE @AdmitDefinition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.AdmitStudent',N'P'));
 IF @AdmitDefinition IS NULL
-    THROW 51000,'Admission procedure definition unavailable for reviewed transport guard.',1;
+    THROW 51007,'Admission procedure definition unavailable for reviewed transport guard.',1;
 SET @AdmitDefinition=REPLACE(@AdmitDefinition,NCHAR(13),N'');
 DECLARE @OldTransportGuard nvarchar(200)=N'WHERE  FT.IsMandatory = 1
            AND NOT EXISTS';
@@ -118,13 +118,13 @@ IF CHARINDEX(@OldTransportGuard,@AdmitDefinition)=0
               CHARINDEX(@OldTransportGuard,@AdmitDefinition)+LEN(@OldTransportGuard))>0
  OR CHARINDEX(N'@UsesTransport',@AdmitDefinition)=0
  OR CHARINDEX(N'@UseSelectedFeeTypes',@AdmitDefinition)=0
-    THROW 51000,'The reviewed admission transport predicate has changed; inspect before migrating.',1;
+    THROW 51008,'The reviewed admission transport predicate has changed; inspect before migrating.',1;
 SET @AdmitDefinition=REPLACE(@AdmitDefinition,@OldTransportGuard,@NewTransportGuard);
 SET @AdmitDefinition=LTRIM(@AdmitDefinition);
 DECLARE @ProcedureKeywordPos int=CHARINDEX(N'PROCEDURE',UPPER(@AdmitDefinition));
 IF @ProcedureKeywordPos<7 OR @ProcedureKeywordPos>70
  OR (LEFT(UPPER(@AdmitDefinition),6)<>N'CREATE' AND LEFT(UPPER(@AdmitDefinition),5)<>N'ALTER')
-    THROW 51000,'Unexpected admission procedure header; refuse unreviewed alteration.',1;
+    THROW 51009,'Unexpected admission procedure header; refuse unreviewed alteration.',1;
 -- ALTER PROCEDURE must be the first statement of its dynamic batch.
 SET @AdmitDefinition=N'ALTER PROCEDURE'+SUBSTRING(
     @AdmitDefinition,@ProcedureKeywordPos+LEN(N'PROCEDURE'),LEN(@AdmitDefinition));
