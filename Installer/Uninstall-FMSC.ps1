@@ -130,7 +130,7 @@ function Get-FmscDeletionRoots {
         }
     }
     foreach ($archived in @(Get-ChildItem -LiteralPath 'C:\' -Directory -Force -ErrorAction Stop |
-        Where-Object { $_.Name -match '^FMSC School Management\.(?:staging|rollback)\.archived-\d{8}-\d{6}$' })) {
+        Where-Object { $_.Name -match '^FMSC School Management\.(?:staging|rollback)\.archived-\d{8}-(?:\d{4}|\d{6})$' })) {
         $entries.Add([pscustomobject]@{Label=('Archive-'+$archived.Name.Replace(' ','_'));Path=$archived.FullName})
     }
     $profiles = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
