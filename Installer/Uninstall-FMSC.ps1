@@ -42,7 +42,7 @@ function Get-FmscProtectedFiles {
 }
 function Save-FmscProtectedFiles {
     param([object[]]$Roots,[string]$PreservationDirectory)
-    $inventory = New-Object Collections.Generic.List[object]
+    $inventory = New-Object System.Collections.Generic.List[object]
     foreach ($root in $Roots) {
         $index = 0
         foreach ($file in @(Get-FmscProtectedFiles $root.Path)) {
@@ -118,7 +118,7 @@ function Remove-FmscNonProtectedContents {
 }
 function Get-FmscDeletionRoots {
     # Deliberate allowlist: never scan or delete arbitrary drives or Documents.
-    $entries = New-Object Collections.Generic.List[object]
+    $entries = New-Object System.Collections.Generic.List[object]
     foreach ($pair in @(
         @('Application',$AppDirectory),
         @('Staging',"$AppDirectory.staging"),
@@ -294,7 +294,8 @@ function Show-FmscUninstallWindow {
     $explanation.SetBounds(28,85,620,102)
     $explanation.Text = ('This removes the FMSC application, updater, temporary files, local settings and shortcuts.' +
         [Environment]::NewLine + [Environment]::NewLine +
-        'Your school MDF, LDF and BAK files are preserved. SQL Server LocalDB is not uninstalled.')
+        'Your school MDF, LDF and BAK files are preserved. SQL Server LocalDB is not uninstalled.' +
+        [Environment]::NewLine + 'Encrypted cloud backups may require separately retained recovery keys.')
     $explanation.ForeColor = [Drawing.Color]::FromArgb(50,60,75)
     $script:StatusText = New-Object Windows.Forms.Label
     $script:StatusText.SetBounds(28,212,625,55)
