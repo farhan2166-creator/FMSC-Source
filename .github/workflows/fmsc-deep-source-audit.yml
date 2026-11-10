@@ -1,0 +1,74 @@
+name: '17 - Audit - Deep Source SQL and Windows UI Coverage'
+
+on:
+  pull_request:
+    paths:
+      - 'Audit/Reviews/FMSC_DEEP_SOURCE_SQL_UI_AUDIT_2026-11-10.md'
+      - 'Audit/Tools/deep_source_scan.py'
+      - '.github/workflows/fmsc-deep-source-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fmsc-deep-source-audit-pr
+  cancel-in-progress: true
+
+jobs:
+  full-source-and-sql-inventory:
+    name: Inventory every C# and record-free schema procedure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout reviewed Source revision without credentials
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Generate read-only C# SQL and UI inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Audit/Tools/deep_source_scan.py --out artifacts/deep-source-audit
+
+      - name: Retain source/synthetic schema inventory
+        uses: actions/upload-artifact@v7
+        with:
+          name: fmsc-deep-source-inventory
+          path: |
+            artifacts/deep-source-audit/deep-source-inventory.json
+            artifacts/deep-source-audit/deep-source-summary.md
+          if-no-files-found: error
+          retention-days: 7
+
+  existing-native-windows-ui-contracts:
+    name: Execute existing native WinForms layout and workflow contracts
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout reviewed Source revision without credentials
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Run the existing native WinForms contracts including PDF modes
+        shell: pwsh
+        timeout-minutes: 25
+        run: .\Tools\RunDurableUiContracts.ps1 -IncludePdfReports
+
+  public-disposable-real-windows-sql:
+    name: Exercise public synthetic disposable Windows SQL installation
+    uses: ./.github/workflows/fmsc-disposable-windows-install.yml
+    with:
+      test_scope: complete
+
+# Audit-only: no production school DB, private fixture download, release,
+# upload to FMSC-Updates, change to app logic, or manual printer claim.
+# Generated inventory is candidate discovery, NOT an exhaustive semantic review.
+# Live operator walkthroughs remain separate and must be recorded as untested.
