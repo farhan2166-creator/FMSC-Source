@@ -226,7 +226,7 @@ jobs:
           }
           foreach ($pair in @(
             ,@('out/prerequisites/sqlcmd.exe','UpdateSupport/Tools/SqlCmd/sqlcmd.exe')
-            ,@('out/prerequisites/SqlLocalDB.msi','UpdateSupport/Tools/LocalDb/SqlLocalDB.msi'),
+            ,@('out/prerequisites/SqlLocalDB.msi','UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')
             ,@('out/prerequisites/vc_redist.x64.exe','UpdateSupport/Tools/VcRedist/vc_redist.x64.exe')
           )) {
             $source = Join-Path $env:GITHUB_WORKSPACE $pair[0]
