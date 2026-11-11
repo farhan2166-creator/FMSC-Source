@@ -232,10 +232,16 @@ def main():
             # Only the enumerated synthetic report stages and integer SQL
             # error numbers are eligible for release CI diagnostics.
             report_errors = re.findall(
-                r"^REPORT_SQL_FAIL: (initial fixture|reconciliation and register|outstanding debt|collection receipts) SQL ([0-9]{1,8})\s*$",
+                r"^REPORT_SQL_FAIL: (initial fixture|reconciliation and register|outstanding debt|collection receipts) SQL ([0-9]{1,8}) line ([0-9]{1,8})\s*$",
                 result.stdout + result.stderr, re.MULTILINE)
             report_location = (["Report fixture " + report_errors[-1][0] +
-                " SQL " + report_errors[-1][1]]) if report_errors else []
+                " SQL " + report_errors[-1][1] + " line " + report_errors[-1][2]]) if report_errors else []
+            columns = re.findall(
+                r"^REPORT_COLUMN_FAIL: (reconciliation and register|outstanding debt|collection receipts) "
+                r"([A-Za-z_][A-Za-z0-9_]{0,63})\s*$",
+                result.stdout + result.stderr, re.MULTILINE)
+            report_column = (["Report fixture invalid identifier " + columns[-1][1]
+                + " in " + columns[-1][0]]) if columns else []
             assertion_locations = re.findall(
                 r"^REPORT_ASSERT_FAIL: (reconciliation and register|outstanding debt|collection receipts) "
                 r"(Program\.(?:NewReportSql|DebtSql|CollectionSql)\.cs) ([0-9]{1,5})\s*$",
@@ -243,7 +249,7 @@ def main():
             assertion_location = (["Report fixture " + assertion_locations[-1][0]
                 + " at " + assertion_locations[-1][1] + ":" + assertion_locations[-1][2]]
                 if assertion_locations else [])
-            safe = errors + codes + fixture_error + manifest_error + admin_location + report_location + assertion_location
+            safe = errors + codes + fixture_error + manifest_error + admin_location + report_location + report_column + assertion_location
             raise RuntimeError("Child command failed with exit " + str(result.returncode) +
                                ("; " + " | ".join(safe[-3:]) if safe else ""))
         return result.stdout + result.stderr
