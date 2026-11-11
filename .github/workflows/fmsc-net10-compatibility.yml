@@ -62,7 +62,11 @@ jobs:
       - name: Build application and WinForms smoke suite against .NET 10
         shell: pwsh
         run: |
-          dotnet build Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release
+          # .NET 10's WFO1000 reports design-time serialization metadata
+          # on custom programmatically-built controls. Track it separately;
+          # this *probe only* bypasses that single analyzer to test runtime.
+          # Production framework migration is not approved by this result.
+          dotnet build Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release -p:NoWarn=WFO1000
           if ($LASTEXITCODE -ne 0) { throw 'WinForms/.NET 10 compilation failed.' }
           $app = 'Tests/ThemeSmokeChecks/bin/Release/net10.0-windows/ThemeSmokeChecks.dll'
           if (-not (Test-Path -LiteralPath $app -PathType Leaf)) {
