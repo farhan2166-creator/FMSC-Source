@@ -104,28 +104,38 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         logoPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(46)));
         logoPanel.Controls.Add(logoPreview, 0, 0);
         logoPanel.Controls.Add(logoInfo, 0, 1);
-        var logoButtons = new FlowLayoutPanel {
-            Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty
+        // The logo column can narrow on ordinary laptop screens. Proportional
+        // columns keep all three actions inside the card without a fixed-width
+        // FlowLayoutPanel silently clipping the last button.
+        var logoButtons = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
+            Margin = Padding.Empty, Padding = Padding.Empty
         };
+        logoButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
+        logoButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        logoButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+        logoButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var chooseLogo = new ModernButton {
-            Text = "Choose Logo…", Width = AppScale.Scale(128),
-            Height = AppMetrics.InputControlHeight, ThemeRole = UiDesignSystem.Actions.Secondary
+            Text = "Choose Logo…", Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Sm, 0),
+            ThemeRole = UiDesignSystem.Actions.Secondary
         };
         var saveLogo = new ModernButton {
-            Text = "Save Logo", Width = AppScale.Scale(114),
-            Height = AppMetrics.InputControlHeight, ThemeRole = UiDesignSystem.Actions.Secondary
+            Text = "Save Logo", Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Sm, 0),
+            ThemeRole = UiDesignSystem.Actions.Secondary
         };
         var removeLogo = new ModernButton {
-            Text = "Remove Logo", Width = AppScale.Scale(128),
-            Height = AppMetrics.InputControlHeight, ThemeRole = UiDesignSystem.Actions.Secondary
+            Text = "Remove Logo", Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            ThemeRole = UiDesignSystem.Actions.Secondary
         };
         chooseLogo.Click += async (_, _) => await ChooseLogoAsync();
         saveLogo.Click += (_, _) => SaveLogo();
         removeLogo.Click += (_, _) => RemoveLogo();
-        logoButtons.Controls.Add(chooseLogo);
-        logoButtons.Controls.Add(saveLogo);
-        logoButtons.Controls.Add(removeLogo);
+        logoButtons.Controls.Add(chooseLogo, 0, 0);
+        logoButtons.Controls.Add(saveLogo, 1, 0);
+        logoButtons.Controls.Add(removeLogo, 2, 0);
         logoPanel.Controls.Add(logoButtons, 0, 2);
         logoCard.Content.Controls.Add(logoPanel);
         var feePolicyCard =
@@ -226,38 +236,40 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         signatureCard.Content.Controls.Add(signatureFields);
 
         int gap = UiDesignSystem.Spacing.Md;
-        var root =
-            new TableLayoutPanel {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 4,
-                Margin = Padding.Empty,
-                Padding = Padding.Empty
-            };
+        // Two independent columns, not a row span across mixed absolute and
+        // percent rows. The former row-span metadata was correct but WinForms
+        // visually stopped the logo at the fee-policy row on some sizes.
+        var root = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+            Margin = Padding.Empty, Padding = Padding.Empty
+        };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(3) + gap));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1) + guidanceHeight + gap));
-        // The signature retains only the height required for one small preview,
-        // its print toggle and the horizontal action row.
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var leftColumn = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4,
+            Margin = new Padding(0, 0, gap, 0), Padding = Padding.Empty
+        };
+        leftColumn.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        leftColumn.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(3) + gap));
+        leftColumn.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1) + guidanceHeight + gap));
         int signatureRowHeight = signatureCard.Header.Height +
             signatureCard.Padding.Vertical + signatureCard.Content.Padding.Vertical +
             Math.Max(AppScale.Scale(78),
                 AppMetrics.TextHeight(AppTheme.NormalFont) +
                 AppMetrics.InputControlHeight + AppScale.Scale(9));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, signatureRowHeight));
-        // The logo uses the entire right column, including any extra height
-        // available below the compact signature card.
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        details.Margin = new Padding(0, 0, gap, gap);
-        feePolicyCard.Margin = new Padding(0, 0, gap, gap);
-        signatureCard.Margin = new Padding(0, 0, gap, 0);
+        leftColumn.RowStyles.Add(new RowStyle(SizeType.Absolute, signatureRowHeight));
+        leftColumn.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        details.Margin = new Padding(0, 0, 0, gap);
+        feePolicyCard.Margin = new Padding(0, 0, 0, gap);
+        signatureCard.Margin = Padding.Empty;
         logoCard.Margin = Padding.Empty;
-        root.Controls.Add(details, 0, 0);
-        root.Controls.Add(feePolicyCard, 0, 1);
-        root.Controls.Add(signatureCard, 0, 2);
+        leftColumn.Controls.Add(details, 0, 0);
+        leftColumn.Controls.Add(feePolicyCard, 0, 1);
+        leftColumn.Controls.Add(signatureCard, 0, 2);
+        root.Controls.Add(leftColumn, 0, 0);
         root.Controls.Add(logoCard, 1, 0);
-        root.SetRowSpan(logoCard, 4);
         SetContent(
             root,
             "Save school details separately. Logo and principal signature each have their own Save and Remove buttons.");
