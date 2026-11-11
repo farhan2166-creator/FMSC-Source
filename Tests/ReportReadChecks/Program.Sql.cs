@@ -108,6 +108,18 @@ internal static partial class Program
             Console.Error.WriteLine($"REPORT_SQL_FAIL: {sqlStage} SQL {ex.Number}");
             throw;
         }
+        catch(Exception ex)
+        {
+            // Only report the fixed synthetic fixture filename and source line,
+            // not its assertion text, SQL query, credentials or row values.
+            string[] allowed={"Program.NewReportSql.cs","Program.DebtSql.cs","Program.CollectionSql.cs"};
+            var location=new System.Diagnostics.StackTrace(ex,true).GetFrames()?
+                .Select(frame => (File:Path.GetFileName(frame.GetFileName()),Line:frame.GetFileLineNumber()))
+                .FirstOrDefault(frame=>allowed.Contains(frame.File) && frame.Line>0);
+            if(location is { Line: > 0 })
+                Console.Error.WriteLine($"REPORT_ASSERT_FAIL: {sqlStage} {location.Value.File} {location.Value.Line}");
+            throw;
+        }
         finally { SqlConnection.ClearAllPools();Execute(master,$"ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}];"); }
     }
 }
