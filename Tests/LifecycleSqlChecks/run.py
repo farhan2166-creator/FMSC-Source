@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PROJECT = Path(__file__).resolve().parent
 IMAGE = "mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090"
 LABEL = "fmsc.level1.owner"
-STAGES = ["Environment and tooling", "Database provisioning", "Lifecycle SQL", "Quick Registration SQL", "Mutation SQL", "Administration SQL", "Portable regressions", "Performance checks", "Cleanup"]
+STAGES = ["Environment and tooling", "Database provisioning", "Lifecycle SQL", "Quick Registration SQL", "Mutation SQL", "Administration SQL", "Financial report SQL", "Portable regressions", "Performance checks", "Cleanup"]
 
 
 def verify_baseline():
@@ -201,8 +201,9 @@ def main():
             if args.diagnostics:
                 args.diagnostics.parent.mkdir(parents=True, exist_ok=True)
                 diagnostic = (result.stdout + result.stderr).replace(secret, "[REDACTED]")
-                if env.get("FMSC_AUDIT_CONNECTION"):
-                    diagnostic = diagnostic.replace(env["FMSC_AUDIT_CONNECTION"], "[CONNECTION REDACTED]")
+                for key in ("FMSC_AUDIT_CONNECTION","FMSC_REPORT_TEST_CONNECTION"):
+                    if env.get(key):
+                        diagnostic = diagnostic.replace(env[key], "[CONNECTION REDACTED]")
                 args.diagnostics.write_text(diagnostic)
                 args.diagnostics.chmod(0o600)
             errors = re.findall(r"(?:error (?:CS|NETSDK|MSB|SQL)[0-9]+[^\r\n]*|Unhandled exception\. [^:]+)", result.stdout + result.stderr)
@@ -228,9 +229,29 @@ def main():
             admin_lines = re.findall(r"Tests[/\\]AdministrationSqlChecks[/\\]Program\.cs:line (\d+)",
                                      result.stdout + result.stderr)
             admin_location = ["Administration fixture source line " + admin_lines[-1]] if admin_lines else []
+            # Only the enumerated synthetic report stages and integer SQL
+            # error numbers are eligible for release CI diagnostics.
+            report_errors = re.findall(
+                r"^REPORT_SQL_FAIL: (initial fixture|reconciliation and register|outstanding debt|collection receipts) SQL ([0-9]{1,8}) line ([0-9]{1,8})\s*$",
+                result.stdout + result.stderr, re.MULTILINE)
+            report_location = (["Report fixture " + report_errors[-1][0] +
+                " SQL " + report_errors[-1][1] + " line " + report_errors[-1][2]]) if report_errors else []
+            columns = re.findall(
+                r"^REPORT_COLUMN_FAIL: (reconciliation and register|outstanding debt|collection receipts) "
+                r"([A-Za-z_][A-Za-z0-9_]{0,63})\s*$",
+                result.stdout + result.stderr, re.MULTILINE)
+            report_column = (["Report fixture invalid identifier " + columns[-1][1]
+                + " in " + columns[-1][0]]) if columns else []
+            assertion_locations = re.findall(
+                r"^REPORT_ASSERT_FAIL: (reconciliation and register|outstanding debt|collection receipts) "
+                r"(Program\.(?:NewReportSql|DebtSql|CollectionSql)\.cs) ([0-9]{1,5})\s*$",
+                result.stdout + result.stderr, re.MULTILINE)
+            assertion_location = (["Report fixture " + assertion_locations[-1][0]
+                + " at " + assertion_locations[-1][1] + ":" + assertion_locations[-1][2]]
+                if assertion_locations else [])
+            safe = errors + codes + fixture_error + manifest_error + admin_location + report_location + report_column + assertion_location
             raise RuntimeError("Child command failed with exit " + str(result.returncode) +
-                               ("; " + " | ".join((errors + codes + fixture_error + manifest_error + admin_location)[-3:])
-                                if errors or codes or fixture_error or manifest_error or admin_location else ""))
+                               ("; " + " | ".join(safe[-3:]) if safe else ""))
         return result.stdout + result.stderr
 
     def stage(name, action):
@@ -389,7 +410,7 @@ def main():
             verify_baseline()
             if not args.sqlpackage:
                 execute([args.dotnet, "tool", "restore", "--tool-manifest", str(PROJECT / ".config/dotnet-tools.json")], timeout=300)
-            for project in ["LifecycleSqlChecks", "QuickRegistrationSqlChecks", "MutationSqlChecks", "AdministrationSqlChecks", "AuditFixChecks", "PerformanceChecks"]:
+            for project in ["LifecycleSqlChecks", "QuickRegistrationSqlChecks", "MutationSqlChecks", "AdministrationSqlChecks", "ReportReadChecks", "AuditFixChecks", "PerformanceChecks"]:
                 execute([args.dotnet, "build", str(ROOT / "Tests" / project / (project + ".csproj")), "-c", "Release"], timeout=300)
         stage("Environment and tooling", tooling)
         verify_baseline()
@@ -433,6 +454,24 @@ def main():
             ("Administration SQL", "AdministrationSqlChecks", "Administration", None)]:
             count = stage(label, lambda p=project, s=suffix, m=mode: existing(p, s, m))
             report["scenarios"][-1]["assertions"] = count
+        def financial_report_sql():
+            # This suite creates/drops only its own GUID-named report database.
+            # Never pass a school database or a non-loopback SQL endpoint.
+            env["FMSC_REPORT_TEST_CONNECTION"] = (
+                f"Server=127.0.0.1,{port};Initial Catalog=master;User ID=sa;"
+                f"Password={secret};Encrypt=False;TrustServerCertificate=True;Connect Timeout=20")
+            try:
+                result = execute([args.dotnet, "run", "--project",
+                    str(ROOT / "Tests" / "ReportReadChecks" / "ReportReadChecks.csproj"),
+                    "-c", "Release", "--no-build", "--", "--sql"], timeout=240)
+            finally:
+                env.pop("FMSC_REPORT_TEST_CONNECTION", None)
+            totals = re.findall(r"PASS:\s+(\d+)\s+focused report data", result)
+            if len(totals) != 1:
+                raise RuntimeError("Executable financial report SQL acceptance did not report its assertion count.")
+            return int(totals[0])
+        count = stage("Financial report SQL", financial_report_sql)
+        report["scenarios"][-1]["assertions"] = count
         if args.level3:
             stage("Level 3 database provisioning", lambda: provision("Reliability"))
             stage("Level 3 SQL reliability", lambda: run_lifecycle(["--level3"], "reliability.json"))

@@ -28,17 +28,12 @@ internal static partial class Program
         string collectionMigration=File.ReadAllText(Path.Combine(folder.FullName,"Tests","LifecycleSqlChecks","Baseline","Sql","GetCollectionsAndReceiptsReport.sql"));
         new TSql160Parser(true).Parse(new StringReader(collectionMigration),out var collectionErrors);
         Check(collectionErrors.Count==0,"Baseline collections procedure parses: "+string.Join("; ",collectionErrors.Select(e=>e.Message)));
-        Check(collectionMigration.Contains("[__ReceiptStudents]")&&collectionMigration.Contains("A.__ReceiptSnapshot")&&!collectionMigration.Contains("THEN N'Mixed'"),"Collections exposes roster metadata and actual distinct methods");
+        // Keep non-executing syntax validation fast. Financial meaning, family
+        // membership, due buckets, actual payment methods and private roster
+        // metadata are verified by CheckDebtSql / CheckCollectionSql against
+        // an owned disposable SQL Server database in mandatory SQL CI.
         new TSql160Parser(true).Parse(new StringReader(migration),out var migrationErrors);
         Check(migrationErrors.Count==0,"Baseline outstanding procedure parses as SQL Server syntax: "+string.Join("; ",migrationErrors.Select(e=>e.Message)));
-        Check(migration.Contains("LEFT JOIN dbo.FamilyMembers") && migration.Contains("CASE WHEN F.FamilyId IS NULL THEN M.AdmissionId END"),
-            "Family debt retains and separately groups students without family links");
-        Check(System.Text.RegularExpressions.Regex.Matches(migration,@"\[Due Date Missing\]").Count==3,
-            "All three debt views expose missing-date money instead of losing it from the split");
-        Check(migration.Contains("DueDate < @AsOfDate") && migration.Contains("DueDate = @AsOfDate") && migration.Contains("DueDate > @AsOfDate"),
-            "Debt reader separates overdue, due today and future charges");
-        Check(System.Text.RegularExpressions.Regex.Matches(migration,@"FatherName \[__StudentFatherName\], Gender \[__StudentGender\]").Count==2,
-            "Student and charge debt views return private recorded parent/gender metadata");
         // Verify against the application's committed production SQL contract.
         // The root DACPAC is solely an optional owner inspection artifact.
         using var contract=JsonDocument.Parse(File.ReadAllText(Path.Combine(folder.FullName,"Core","DatabaseCompatibilityRequirements.json")));

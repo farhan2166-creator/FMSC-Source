@@ -7,6 +7,7 @@ on:
     paths:
       - 'Migrations/**'
       - 'Tests/LifecycleSqlChecks/**'
+      - 'Tests/ReportReadChecks/**'
       - 'Tests/Level3Checks/**'
       - 'Pages/Students/Admissions/**'
       - 'DatabaseHelper.cs'
