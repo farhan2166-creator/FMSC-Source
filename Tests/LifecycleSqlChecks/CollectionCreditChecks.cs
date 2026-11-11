@@ -5,6 +5,12 @@ internal static class CollectionCreditChecks
 {
     internal static async Task Run(Fixture f, Report report)
     {
+        // Bind the reporting projection to the actually migrated SQL schema;
+        // TOP (0) checks column availability without reading real school data.
+        // This is the mandatory live-SQL counterpart to ReportReadChecks' fast
+        // structural contract and replaces the pinned historic DACPAC probe.
+        report.Check(Sql.Count("SELECT COUNT(*) FROM (SELECT TOP (0) AdmissionId, Amount, CreatedAt FROM dbo.StudentCreditEntries) AS CurrentLedger")==0,
+            "Current migrated credit ledger exposes admission, amount and activity timestamp");
         var student = Sql.Proc("AdmitStudent", f.AdmissionArgs("Credit settlement example", current:true)).Rows[0];
         int admission=Convert.ToInt32(student["AdmissionId"]), enrollment=Convert.ToInt32(student["EnrollmentId"]);
         var sibling = Sql.Proc("AdmitStudent", f.AdmissionArgs("Sibling settlement example", admission, current:true)).Rows[0];
