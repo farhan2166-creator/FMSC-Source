@@ -106,6 +106,9 @@ public sealed class FeeTypesPage : MasterPage
             deleteBlockedProcedure:
                 "GetFeeTypeDeleteBlockedIds", initialize: initialize)
     {
+        // Both switches form one row directly below Description, starting at
+        // the description input rather than repeating captions on the left.
+        PlaceBooleanOptionsBelow("Description", "IsMandatory", "IsTransportLinked");
     }
     /// <summary>Formats the complete fee-type result without another database read.</summary>
     protected override DataTable ShapeRecords(DataTable table)
