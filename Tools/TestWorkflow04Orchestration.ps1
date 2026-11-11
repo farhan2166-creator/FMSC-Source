@@ -124,32 +124,48 @@ $accepted = @(
     @{ Source='1.0.22'; Feed='1.0.21'; Release='1.0.22'; Bump=$false },
     @{ Source='1.0.24'; Feed='1.0.21'; Release='1.0.24'; Bump=$false },
     @{ Source='1.0.99'; Feed='1.0.21'; Release='1.0.99'; Bump=$false },
-    @{ Source='1.0.25'; Feed='1.0.24'; Release='1.0.25'; Bump=$false }
+    @{ Source='1.0.25'; Feed='1.0.24'; Release='1.0.25'; Bump=$false },
+    # The exact owner-entered version makes the next minor/major transition safe.
+    @{ Source='1.1.0'; Feed='1.0.99'; Release='1.1.0'; Bump=$false; Approved='1.1.0' },
+    @{ Source='1.2.0'; Feed='1.1.27'; Release='1.2.0'; Bump=$false; Approved='1.2.0' },
+    @{ Source='2.0.0'; Feed='1.9.25'; Release='2.0.0'; Bump=$false; Approved='2.0.0' }
 )
 foreach ($case in $accepted) {
-    $decision=Resolve-FmscWorkflow04Version -SourceVersion $case.Source -PublishedVersion $case.Feed
+    $approved=if ($case.ContainsKey('Approved')) { $case.Approved } else { '' }
+    $decision=Resolve-FmscWorkflow04Version -SourceVersion $case.Source -PublishedVersion $case.Feed -ApprovedTransitionVersion $approved
     Check ($decision.ReleaseVersion -ceq $case.Release -and
         $decision.RequiresBump -eq $case.Bump) "Incorrect release preparation for $($case.Feed) -> $($case.Source)."
 }
 $refused = @(
     @{ Source='1.0.20'; Feed='1.0.21' }, # downgrade
     @{ Source='1.0.23'; Feed='1.0.24' }, # previously published source is now stale
-    @{ Source='1.1.0'; Feed='1.0.21' }, # different minor
-    @{ Source='2.0.1'; Feed='1.0.21' }, # different major
-    @{ Source='0.9.99'; Feed='1.0.21' }, # older release line
+    @{ Source='1.1.0'; Feed='1.0.21' }, # transition never implicitly authorized
+    @{ Source='1.1.0'; Feed='1.0.21'; Approved='1.2.0' }, # wrong approval
+    @{ Source='1.1.1'; Feed='1.0.21'; Approved='1.1.1' }, # new line must start at patch zero
+    @{ Source='1.2.0'; Feed='1.0.21'; Approved='1.2.0' }, # skipped minor
+    @{ Source='2.1.0'; Feed='1.9.25'; Approved='2.1.0' }, # major must start at minor zero
+    @{ Source='3.0.0'; Feed='1.9.25'; Approved='3.0.0' }, # skipped major
+    @{ Source='2.0.1'; Feed='1.0.21'; Approved='2.0.1' }, # nonzero major patch
+    @{ Source='0.9.99'; Feed='1.0.21'; Approved='0.9.99' }, # older line
+    @{ Source='1.0.22'; Feed='1.0.21'; Approved='1.0.22' }, # stale authorization for patch
+    @{ Source='1.0.21'; Feed='1.0.21'; Approved='1.1.0' }, # approval cannot auto-bump a different line
     @{ Source='1.0.021'; Feed='1.0.21' }, # noncanonical
     @{ Source='1.0.bad'; Feed='1.0.21' }, # malformed source
     @{ Source='1.0.24'; Feed='1.0.bad' }, # malformed feed
     @{ Source='1.0.2147483647'; Feed='1.0.2147483647' } # patch overflow
 )
 foreach ($case in $refused) {
+    $approved=if ($case.ContainsKey('Approved')) { $case.Approved } else { '' }
     $rejected=$false
     try {
-        $null=Resolve-FmscWorkflow04Version -SourceVersion $case.Source -PublishedVersion $case.Feed
+        $null=Resolve-FmscWorkflow04Version -SourceVersion $case.Source -PublishedVersion $case.Feed -ApprovedTransitionVersion $approved
     } catch { $rejected=$true }
-    Check $rejected "Unsafe version change accepted: $($case.Feed) -> $($case.Source)."
+    Check $rejected "Unsafe version change accepted: $($case.Feed) -> $($case.Source) with approval '$approved'."
 }
 
+Check ($workflow.Contains('approved_version_transition:') -and
+    $workflow.Contains('inputs.approved_version_transition') -and
+    $prep.Contains('-ApprovedTransitionVersion $env:FMSC_WORKFLOW04_APPROVED_VERSION')) 'Owner approved transition is not forwarded to the tested version policy.'
 Check ($prep.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and $prep.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Release secrets are not checked before version commit.'
 Check ($dispatch.Contains('fmsc/sandbox-mdf-ldf/v2') -and $dispatch.Contains('previous_status_id=') -and $dispatch.Contains("ref='main'") -and $dispatch.Contains('source_sha=$SourceSha')) 'Dispatch lacks pinned commit/status baseline.'
 $gate=Get-Content (Join-Path $root 'Tools/AssertSandboxPublicationGate.ps1') -Raw
