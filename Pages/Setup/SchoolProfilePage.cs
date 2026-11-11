@@ -55,7 +55,10 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         Disposed += (_, _) => contactValidator.Dispose();
         SchoolContactInput.AttachPhone(contactNumber, () => contactValidator);
         SchoolContactInput.AttachEmail(email, () => contactValidator);
-        AddAction(UiText.Actions.Save, (_, _) => Save(), "Success");
+        var saveDetailsButton = AddAction(UiText.Actions.Save, (_, _) => Save(), "Success");
+        // Ctrl+S always saves the school details, even when focus is inside the
+        // independently saved logo or signature section.
+        SetSaveShortcut(saveDetailsButton);
         AddAction(UiText.Actions.Reload, (_, _) => LoadProfile());
         UseToolbar();
         var details =
@@ -161,72 +164,100 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         feePolicyFields.Controls.Add(cutoffGuidance, 0, 1);
         feePolicyFields.SetColumnSpan(cutoffGuidance, 2);
         feePolicyCard.Content.Controls.Add(feePolicyFields);
-        var signatureCard = HumanUi.Card("Principal Signature",
-            "Optional image for certificates. When turned off, the existing blank signature line remains.");
+        // Keep certificate signature management compact: the three independent
+        // image actions share one horizontal row rather than overflowing a
+        // fixed-height vertical stack on shorter windows.
+        var signatureCard = HumanUi.Card("Principal Signature");
+        const string signatureHelp =
+            "Optional image for certificates. When turned off, the existing blank signature line remains.";
+        SetToolTip(signaturePreview, signatureHelp);
+        SetToolTip(printSignature, signatureHelp);
         var signatureFields = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+            Margin = Padding.Empty, Padding = Padding.Empty
+        };
+        signatureFields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(142)));
+        signatureFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        signatureFields.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        signaturePreview.Margin = new Padding(0, 0, UiDesignSystem.Spacing.Md, 0);
+        signatureFields.Controls.Add(signaturePreview, 0, 0);
+
+        var signatureEditor = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2,
+            Margin = Padding.Empty, Padding = Padding.Empty
+        };
+        signatureEditor.RowStyles.Add(new RowStyle(
+            SizeType.Absolute, AppMetrics.TextHeight(AppTheme.NormalFont) + AppScale.Scale(7)));
+        signatureEditor.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        printSignature.Margin = Padding.Empty;
+        signatureEditor.Controls.Add(printSignature, 0, 0);
+
+        var signatureButtons = new TableLayoutPanel {
             Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
             Margin = Padding.Empty, Padding = Padding.Empty
         };
-        signatureFields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(190)));
-        signatureFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        signatureFields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(194)));
-        signatureFields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(118)));
-        signatureFields.Controls.Add(signaturePreview, 0, 0);
-        signatureFields.Controls.Add(printSignature, 1, 0);
-        var signatureButtons = new FlowLayoutPanel {
-            Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown,
-            WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty
-        };
+        signatureButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        signatureButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 31));
+        signatureButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 31));
+        signatureButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var chooseSignature = new ModernButton {
-            Text = "Choose Signature…", Width = AppScale.Scale(180),
-            Height = AppMetrics.InputControlHeight, ThemeRole = UiDesignSystem.Actions.Secondary
+            Text = "Choose Signature…", Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Sm, 0),
+            ThemeRole = UiDesignSystem.Actions.Secondary
         };
         var saveSignature = new ModernButton {
-            Text = "Save Signature", Width = AppScale.Scale(180),
-            Height = AppMetrics.InputControlHeight, ThemeRole = UiDesignSystem.Actions.Secondary
+            Text = "Save Signature", Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Sm, 0),
+            ThemeRole = UiDesignSystem.Actions.Secondary
         };
         var removeSignature = new ModernButton {
-            Text = "Remove Signature", Width = AppScale.Scale(180),
-            Height = AppMetrics.InputControlHeight, ThemeRole = UiDesignSystem.Actions.Secondary
+            Text = "Remove Signature", Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            ThemeRole = UiDesignSystem.Actions.Secondary
         };
         chooseSignature.Click += async (_, _) => await ChooseSignatureAsync();
         saveSignature.Click += (_, _) => SaveSignature();
         removeSignature.Click += (_, _) => RemoveSignature();
-        signatureButtons.Controls.Add(chooseSignature);
-        signatureButtons.Controls.Add(saveSignature);
-        signatureButtons.Controls.Add(removeSignature);
-        signatureFields.Controls.Add(signatureButtons, 2, 0);
+        signatureButtons.Controls.Add(chooseSignature, 0, 0);
+        signatureButtons.Controls.Add(saveSignature, 1, 0);
+        signatureButtons.Controls.Add(removeSignature, 2, 0);
+        signatureEditor.Controls.Add(signatureButtons, 0, 1);
+        signatureFields.Controls.Add(signatureEditor, 1, 0);
         signatureCard.Content.Controls.Add(signatureFields);
-        /* Preserve the existing School Identity, Fee Policy and Logo layout. */
 
         int gap = UiDesignSystem.Spacing.Md;
         var root =
             new TableLayoutPanel {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount = 3,
-                Margin = new Padding(0),
-                Padding = new Padding(0)
+                RowCount = 4,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
             };
-        root.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Percent, 62));
-        root.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Percent, 38));
-        root.RowStyles.Add(
-            new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(3) + gap));
-        root.RowStyles.Add(
-            new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1) + guidanceHeight));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(173)));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(3) + gap));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1) + guidanceHeight + gap));
+        // The signature retains only the height required for one small preview,
+        // its print toggle and the horizontal action row.
+        int signatureRowHeight = signatureCard.Header.Height +
+            signatureCard.Padding.Vertical + signatureCard.Content.Padding.Vertical +
+            Math.Max(AppScale.Scale(78),
+                AppMetrics.TextHeight(AppTheme.NormalFont) +
+                AppMetrics.InputControlHeight + AppScale.Scale(9));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, signatureRowHeight));
+        // The logo uses the entire right column, including any extra height
+        // available below the compact signature card.
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         details.Margin = new Padding(0, 0, gap, gap);
-        feePolicyCard.Margin = new Padding(0, 0, gap, 0);
-        logoCard.Margin = new Padding(0);
+        feePolicyCard.Margin = new Padding(0, 0, gap, gap);
+        signatureCard.Margin = new Padding(0, 0, gap, 0);
+        logoCard.Margin = Padding.Empty;
         root.Controls.Add(details, 0, 0);
         root.Controls.Add(feePolicyCard, 0, 1);
-        root.Controls.Add(logoCard, 1, 0);
-        root.SetRowSpan(logoCard, 2);
-        signatureCard.Margin = new Padding(0);
         root.Controls.Add(signatureCard, 0, 2);
-        root.SetColumnSpan(signatureCard, 2);
+        root.Controls.Add(logoCard, 1, 0);
+        root.SetRowSpan(logoCard, 4);
         SetContent(
             root,
             "Save school details separately. Logo and principal signature each have their own Save and Remove buttons.");
