@@ -11,6 +11,8 @@ internal static partial class Program
         // Isolate this receipt scenario without changing production tables.
         Execute(connection,"""
             UPDATE dbo.FeePayments SET Status=N'FixtureOnly' WHERE FeePaymentId<10;
+            ALTER TABLE dbo.FeePaymentAllocations
+                ADD FeePaymentAllocationId bigint IDENTITY(1,1);
             ALTER TABLE dbo.FeePayments ADD
                 EnrollmentId int NULL, ReceiptNumber nvarchar(50) NULL,
                 CreatedAt datetime2 NULL, PaymentMethod nvarchar(40) NULL,
@@ -103,6 +105,11 @@ internal static partial class Program
                 && s.GetProperty("Gender").GetString()=="Male"),
                 "Authorized receipt roster includes actual recorded parent, gender and placement");
         }
+        using var details=Report("Detailed Transactions");
+        Check(details.Rows.Count==6
+            && details.AsEnumerable().Sum(r=>r.Field<decimal>("Collection Amount"))==345m
+            && details.AsEnumerable().Sum(r=>r.Field<decimal>("Credit Applied"))==50m,
+            "Transaction details retain all six signed entries without multiplying receipt or credit totals");
         using var campusOnly=Report(campus:1);
         Check(campusOnly.Rows.Count==1
             && campusOnly.Rows[0].Field<string>("Receipt / Reference")=="FR-TEST-001"
