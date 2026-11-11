@@ -21,7 +21,9 @@ PACKAGE = "Verify and package Windows x64"
 
 def retry_filter():
     yaml = WORKFLOW.read_text(encoding="utf-8")
-    marker = re.search(r"""if ! jq -e '(.*?)' <<<"\$jobs" >/dev/null; then""",
+    # A different jq guard checks the source/main commit comparison above.
+    # Match one complete shell-quoted expression, not text between two jq calls.
+    marker = re.search(r"""if ! jq -e '([^']*)' <<<"\$jobs" >/dev/null; then""",
                        yaml, re.DOTALL)
     if not marker:
         raise AssertionError("Missing fail-closed job evidence check in retry workflow")
