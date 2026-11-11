@@ -186,8 +186,8 @@ The school's **SSH authorization key is separate** and is still required.
 3. Complete field acceptance of reconnect/resume under actual network disruption.
    Verified chunk caching, bounded retries, live transfer figures and a determinate
    download bar are implemented and covered by fault-injection tests. Close cancels
-   preparation and preserves verified chunks. Remind Me Later dismisses this manual
-   check (it does not schedule a notification).
+   preparation and preserves verified chunks. The single centered Close button
+   dismisses this manual check (it does not schedule a notification).
 4. Complete disposable Windows/LocalDB acceptance of the connected installer
    handoff, including actual pre-migration backup, migration and rollback recovery.
 5. Accept the guarded manual publisher described below against the private
@@ -408,7 +408,7 @@ request, and launches the installer only after the dashboard accepts closure.
 Cancelled confirmation or closure clears the pending update; ordinary later
 closure cannot start it. The work guard runs once and duplicate requests are
 suppressed. The dialog now separates version/download status, optional computer
-access details and dismissal actions. A focused SQL-free WinForms suite reproduces
+access details and a single centered dismissal action. A focused SQL-free WinForms suite reproduces
 the owned-window close path and tests exactly one inert installer callback.
 
 The owner has approved merging the source after these corrections. Further package

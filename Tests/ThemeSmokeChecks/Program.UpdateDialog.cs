@@ -11,7 +11,7 @@ internal static partial class Program
         ModernButton Find(Control root, string text) => Descendants(root).OfType<ModernButton>().Single(b => b.Text == text);
         foreach (bool enrolled in new[] { false, true })
         {
-            foreach (string action in new[] { "Close", "Remind Me Later" })
+            foreach (string action in new[] { "Close" })
             {
                 using var parent = new Form(); parent.Show();
                 using var dialog = new UpdateConnectionForm(() => (enrolled, enrolled ? "ssh-rsa fictional-public-key" : ""),
@@ -34,9 +34,16 @@ internal static partial class Program
                     Check(Find(dialog, "Check for Updates").Enabled && !panel.Visible,
                         "Only a successfully verified Git connection enables update checking");
                 }
-                var access = Find(dialog, "Computer access").Parent!;
-                Check(Math.Abs(access.Left + access.Width / 2 - access.Parent!.ClientSize.Width / 2) <= 2,
-                    "Computer access button and status are centered as one group");
+                var accessButton = Find(dialog, enrolled ? "Computer Authorized" : "Authorize This Computer");
+                Check(Math.Abs(accessButton.PointToScreen(new Point(accessButton.Width / 2, 0)).X -
+                    dialog.PointToScreen(new Point(dialog.ClientSize.Width / 2, 0)).X) <= 2,
+                    "The sole computer-authorization control is centered");
+                Check(!Descendants(dialog).OfType<ModernButton>().Any(b => b.Text == "Remind Me Later") &&
+                    Descendants(dialog).OfType<ModernButton>().Count(b => b.Text == "Close") == 1,
+                    "Only one centered Close action is present");
+                Check(!Descendants(dialog).OfType<Label>().Any(label => label.Text is
+                    "Computer authorized" or "Computer key ready" or "Approval not verified" or "Authorization required"),
+                    "Computer access status is explained by its own button, not a duplicate label");
                 var checkButton = Find(dialog, "Check for Updates");
                 var center = checkButton.PointToScreen(new Point(checkButton.Width / 2, 0)).X;
                 Check(Math.Abs(center - dialog.PointToScreen(new Point(dialog.ClientSize.Width / 2, 0)).X) <= 2,
@@ -45,9 +52,9 @@ internal static partial class Program
                     label.Text is "Installed version" or "Latest published version" or "Not checked" or "Check for Updates")
                     .All(label => label.TextAlign == ContentAlignment.MiddleCenter),
                     "Heading and version labels use centered text");
-                Find(dialog, "Computer access").PerformClick(); Application.DoEvents(); CheckScreenCenter();
-                Check(panel.Visible, "Computer access always shows pending key details");
-                Find(dialog, "Computer access").PerformClick(); Application.DoEvents(); CheckScreenCenter();
+                accessButton.PerformClick(); Application.DoEvents(); CheckScreenCenter();
+                Check(panel.Visible, "Pending key details remain visible and authorized details can expand");
+                accessButton.PerformClick(); Application.DoEvents(); CheckScreenCenter();
                 Check(panel.Visible == !enrolled, "Only approved computers may collapse their key details");
                 var viewport = Descendants(dialog).OfType<ResponsiveViewport>().Single();
                 Check(!viewport.HorizontalScroll.Visible && !viewport.VerticalScroll.Visible,
@@ -81,11 +88,12 @@ internal static partial class Program
         {
             parent.Show(); dialog.Show(parent); Application.DoEvents();
             var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(dialog)!;
-            Find(dialog, "Computer access").PerformClick(); Application.DoEvents();
+            Find(dialog, "Authorize This Computer").PerformClick(); Application.DoEvents();
             Check(panel.Visible, "Computer access cannot hide the enrollment form before a key exists");
             Find(dialog, "Generate key").PerformClick(); Application.DoEvents();
             var key = (TextBox)typeof(UpdateConnectionForm).GetField("_publicKey", fields)!.GetValue(dialog)!;
             Check(key.Text == "ssh-rsa synthetic-pending-key" && panel.Visible &&
+                  Find(dialog, "Computer Key Ready").Enabled &&
                   Find(dialog, "Copy public key").Enabled && Find(dialog, "Verify access").Enabled,
                 "Generating a key leaves it visible and copyable while approval is pending");
             Check(!Find(dialog, "Check for Updates").Enabled,
