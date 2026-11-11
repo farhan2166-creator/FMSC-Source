@@ -66,11 +66,17 @@ function Assert-EmbeddedDatabaseContract([string]$Db) {
     $source=Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibility.cs') -Raw
     $match=[regex]::Match($source,'(?s)using var command = new SqlCommand\("""\s*(.*?)\s*""", connection\)')
     if (-not $match.Success) { throw 'Cannot locate production structural SQL compatibility query.' }
-    $requirements=@(
-        (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilityRequirements.json') -Raw)
-        (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilitySchema10Requirements.json') -Raw)
-        (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilitySchema12Requirements.json') -Raw)
-    )
+    # Discover every authoritative schema contract; never name historical
+    # schema numbers here and risk silently skipping a future manifest.
+    $contractFiles=@(Get-ChildItem -LiteralPath (Join-Path $project 'Core') -File `
+        -Filter 'DatabaseCompatibility*Requirements.json' | Sort-Object Name)
+    if (-not ($contractFiles | Where-Object { $_.Name -ceq 'DatabaseCompatibilityRequirements.json' }) -or
+        @($contractFiles | Where-Object {
+            $_.Name -cnotmatch '^DatabaseCompatibility(Requirements|Schema[1-9][0-9]*Requirements)\.json$'
+        }).Count -gt 0) {
+        throw 'Missing or incorrectly named database compatibility contract.'
+    }
+    $requirements=@($contractFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw })
     $cn=[System.Data.SqlClient.SqlConnection]::new("Data Source=$script:instance;Initial Catalog=$Db;Integrated Security=True;Encrypt=False")
     try {
         $cn.Open()

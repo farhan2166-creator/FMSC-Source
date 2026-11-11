@@ -10,9 +10,7 @@ on:
       - 'Tests/Level3Checks/**'
       - 'Pages/Students/Admissions/**'
       - 'DatabaseHelper.cs'
-      - 'Core/DatabaseCompatibilityRequirements.json'
-      - 'Core/DatabaseCompatibilitySchema10Requirements.json'
-      - 'Core/DatabaseCompatibilitySchema12Requirements.json'
+      - 'Core/DatabaseCompatibility*Requirements.json'
       - 'Core/DatabaseCompatibility.cs'
       - '.github/workflows/fmsc-lifecycle-sql-ci.yml'
 permissions:
