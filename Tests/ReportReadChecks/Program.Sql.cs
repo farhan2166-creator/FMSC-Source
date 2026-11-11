@@ -29,6 +29,7 @@ internal static partial class Program
             throw new InvalidOperationException("SQL fixture refuses non-local servers and any catalog other than master.");
         string database="Fmsc_ReportReadChecks_"+Guid.NewGuid().ToString("N");
         using var master=new SqlConnection(builder.ConnectionString);master.Open();Execute(master,$"CREATE DATABASE [{database}];");
+        string sqlStage="initial fixture";
         try
         {
             builder.InitialCatalog=database;
@@ -93,9 +94,19 @@ internal static partial class Program
             Check(denied,"Credit query enforces fee viewing in addition to report viewing");
             denied=false;try{Read(connection,ConcessionSummaryData.Query,user:0);}catch(SqlException){denied=true;}
             Check(denied,"Concession query enforces report permission");
+            sqlStage="reconciliation and register";
             CheckNewSql(connection);
+            sqlStage="outstanding debt";
             CheckDebtSql(connection);
+            sqlStage="collection receipts";
             CheckCollectionSql(connection);
+        }
+        catch(SqlException ex)
+        {
+            // Public CI may retain only an allowlisted stage and numeric SQL
+            // error. No connection string, SQL text or student rows are logged.
+            Console.Error.WriteLine($"REPORT_SQL_FAIL: {sqlStage} SQL {ex.Number}");
+            throw;
         }
         finally { SqlConnection.ClearAllPools();Execute(master,$"ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}];"); }
     }
