@@ -111,10 +111,16 @@ internal static partial class Program
                 Rectangle logoBounds=logoCard.RectangleToScreen(logoCard.ClientRectangle);
                 Rectangle detailsBounds=detailsCard.RectangleToScreen(detailsCard.ClientRectangle);
                 Rectangle signatureBounds=signatureCard.RectangleToScreen(signatureCard.ClientRectangle);
-                Check(logoBounds.Top<=detailsBounds.Top+2 &&
-                    logoBounds.Bottom>=signatureBounds.Bottom-2 &&
-                    logoPreview.Height>signaturePreview.Height,
-                    $"School Profile logo bounds at {width}: logo={logoBounds}, details={detailsBounds}, signature={signatureBounds}, imageHeights={logoPreview.Height}/{signaturePreview.Height}");
+                // At a short window height, the left-hand fields may extend
+                // below the viewport. The logo must fill its actual visible
+                // column, not an imaginary height based on offscreen controls.
+                Rectangle columnBounds=logoCard.Parent!.RectangleToScreen(
+                    logoCard.Parent.ClientRectangle);
+                Check(logoBounds.Top<=columnBounds.Top+2 &&
+                    logoBounds.Bottom>=columnBounds.Bottom-2 &&
+                    logoPreview.Height>signaturePreview.Height &&
+                    signatureCard.Height<detailsCard.Height,
+                    $"School Profile visible column at {width}: logo={logoBounds}, container={columnBounds}, details={detailsBounds}, signature={signatureBounds}, imageHeights={logoPreview.Height}/{signaturePreview.Height}");
 
                 foreach(var (card,buttons) in new[]{
                     (Card:logoCard,Buttons:logoButtons),
