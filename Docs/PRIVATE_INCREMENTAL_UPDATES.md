@@ -28,7 +28,8 @@
   replacement, or database migrations while the school works.
 - Before sign-in, a database/application schema version mismatch in either
   direction opens the existing updater inside the same startup window. The user
-  manually checks the private repository; no automatic network check or
+  manually checks the private repository; only a saved-key authorization probe
+  (not a release check or download) may run on dialog opening, and no automatic
   installation occurs. Closing the updater returns to connection guidance with
   **Open Updates** when the database is older, or **Update Application** when
   the database is newer, replacing the ineffective Reconnect/Restart options.
