@@ -30,6 +30,7 @@ on:
       - 'Tools/ReleaseProbeAcceptance.ps1'
       - 'Tools/VerifyInstalledFmscRelease.ps1'
       - 'Tools/PrepareWorkflow04Release.ps1'
+      - 'Tools/AssertWorkflow04MigrationInventory.ps1'
       - 'Tools/ResolveWorkflow04Version.ps1'
       - 'Tools/ResolveFmscGitHubRepository.ps1'
       - 'Tools/TestGitHubRepositoryIdentity.ps1'

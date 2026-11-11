@@ -6,7 +6,7 @@ $prep=Get-Content (Join-Path $root 'Tools/PrepareWorkflow04Release.ps1') -Raw
 $dispatch=Get-Content (Join-Path $root 'Tools/DispatchSandboxAcceptance.ps1') -Raw
 $wait=Get-Content (Join-Path $root 'Tools/WaitForSandboxAttestation.ps1') -Raw
 function Check([bool]$Pass,[string]$Failure) { if (-not $Pass) { throw "Workflow04 regression: $Failure" } }
-foreach ($name in @('PrepareWorkflow04Release.ps1','ResolveWorkflow04Version.ps1','DispatchSandboxAcceptance.ps1','WaitForSandboxAttestation.ps1','AssertSandboxPublicationGate.ps1')) {
+foreach ($name in @('PrepareWorkflow04Release.ps1','AssertWorkflow04MigrationInventory.ps1','ResolveWorkflow04Version.ps1','DispatchSandboxAcceptance.ps1','WaitForSandboxAttestation.ps1','AssertSandboxPublicationGate.ps1')) {
     $tokens=$null;$errors=$null
     $null=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root ('Tools/'+$name)),[ref]$tokens,[ref]$errors)
     Check (@($errors).Count -eq 0) "PowerShell parser errors in $name."
@@ -31,7 +31,62 @@ Check ([regex]::Matches($core,$appPattern).Count -eq 1 -and
     [regex]::Matches($core,$schemaPattern).Count -eq 1) 'Current installer version assignments are not uniquely detectable.'
 Check ([regex]::Match($core,$appPattern).Groups[1].Value -match '^[0-9]+\.[0-9]+\.[0-9]+$') 'Current app version is invalid.'
 Check ([int][regex]::Match($core,$schemaPattern).Groups[1].Value -ge 7) 'Schema is below frozen private schema-7 baseline.'
-Check ($prep.Contains('Missing consecutive migration') -and $prep.Contains('outside the declared target schema')) 'Migration inventory fail-closed preflight missing.'
+# Verify migration safety by executing the current inventory validator
+# against throwaway file sets. Never demand yesterday's error-message wording,
+# fixture count or schema number.
+. (Join-Path $root 'Tools/AssertWorkflow04MigrationInventory.ps1')
+$astTokens=$null;$astErrors=$null
+$prepAst=[Management.Automation.Language.Parser]::ParseInput($prep,[ref]$astTokens,[ref]$astErrors)
+$invocations=@($prepAst.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.CommandAst] -and
+    $node.GetCommandName() -ceq 'Assert-FmscWorkflow04MigrationInventory'
+},$true))
+Check ($invocations.Count -eq 1) 'Release preparation must actually call the tested migration inventory policy.'
+$scratch=Join-Path ([IO.Path]::GetTempPath()) ('fmsc-w04-migration-inventory-'+[guid]::NewGuid().ToString('N'))
+$null=New-Item -Path $scratch -ItemType Directory -Force
+function Assert-MigrationOutcome {
+    param([string]$Case,[bool]$Expected,[int]$Schema,[string]$Directory)
+    $passed=$true
+    try { Assert-FmscWorkflow04MigrationInventory -TargetSchema $Schema -Directory $Directory }
+    catch { $passed=$false }
+    Check ($passed -eq $Expected) "Migration inventory behavior: $Case."
+}
+try {
+    $base=Join-Path $scratch 'base'
+    $null=New-Item -Path $base -ItemType Directory
+    foreach($v in 2..7) {
+        Set-Content -LiteralPath (Join-Path $base "$v.sql") -Value '-- inert migration fixture'
+    }
+    Assert-MigrationOutcome 'complete historical upgrade remains supported' $true 7 $base
+    Assert-MigrationOutcome 'missing migration directory must refuse' $false 7 (Join-Path $scratch 'missing')
+    Assert-MigrationOutcome 'retirement-only schema cannot release' $false 8 $base
+
+    $newTarget=[Math]::Min(9999,[Math]::Max(9,([int][regex]::Match($core,$schemaPattern).Groups[1].Value+3)))
+    $forward=Join-Path $scratch 'future'
+    $null=New-Item -Path $forward -ItemType Directory
+    foreach($v in 2..$newTarget) {
+        Set-Content -LiteralPath (Join-Path $forward "$v.sql") -Value '-- inert future migration'
+    }
+    Assert-MigrationOutcome 'complete future schema releases are accepted without pinned ceiling' $true $newTarget $forward
+    Assert-MigrationOutcome 'unexpected future migration must refuse older target' $false ($newTarget-1) $forward
+    Remove-Item -LiteralPath (Join-Path $forward '5.sql')
+    Assert-MigrationOutcome 'missing intermediate migration must block' $false $newTarget $forward
+    Set-Content -LiteralPath (Join-Path $forward '5.sql') -Value '-- inert restored migration'
+    Set-Content -LiteralPath (Join-Path $forward '05.sql') -Value '-- malformed number'
+    Assert-MigrationOutcome 'noncanonical migration filenames must block' $false $newTarget $forward
+    Remove-Item -LiteralPath (Join-Path $forward '05.sql')
+    Set-Content -LiteralPath (Join-Path $forward 'notes.sql') -Value '-- not a migration'
+    Assert-MigrationOutcome 'unexpected SQL file must block' $false $newTarget $forward
+    Remove-Item -LiteralPath (Join-Path $forward 'notes.sql')
+    Assert-MigrationOutcome 'restored valid chain remains accepted' $true $newTarget $forward
+    $actualSchema=[int][regex]::Match($core,$schemaPattern).Groups[1].Value
+    Assert-MigrationOutcome 'checked-in migration inventory matches current installer schema' $true $actualSchema (Join-Path $root 'Migrations')
+}
+finally {
+    Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Check ($prep.Contains('channel/stable.json') -and $prep.Contains('Installer/core.ps1') -and
     $prep.Contains('refs/heads/main') -and $prep.Contains('Reusing pending')) 'Preparation must use feed version and preserve retryability.'
 
@@ -79,7 +134,9 @@ Check ($gate.Contains('fmsc/sandbox-mdf-ldf/v2') -and
     $gate.Contains('$targetSchema') -and
     $gate.Contains('commits/$SourceSha/statuses') -and
     -not $gate.Contains('expectedDescription')) 'Publication gate must validate the checked-out schema and exact commit, not fixed fixture descriptions.'
-Check ($prep.Contains('$targetSchema -ne 8') -and $gate.Contains('$targetSchema -eq 8')) 'Retirement-only schema 8 must be blocked by both release preparation and the final gate.'
+# Preparation's schema-8 rule is covered by the executed synthetic scenarios above.
+# Final publication independently retains its reviewed retirement-only guard.
+Check ($gate.Contains('$targetSchema -eq 8')) 'Final publication still blocks retirement-only schema 8.'
 Check ($wait.Contains('$PreviousStatusId') -and $wait.Contains('fmsc/sandbox-mdf-ldf/v2') -and
     $wait.Contains('AssertSandboxPublicationGate.ps1')) 'Wait accepts old or untrusted private status.'
 Check (-not $wait.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and -not $wait.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Sensitive tokens leaked into polling job.'
