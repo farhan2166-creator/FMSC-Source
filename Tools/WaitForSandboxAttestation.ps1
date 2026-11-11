@@ -35,8 +35,9 @@ $records=@(Get-FmscGitHubCommitStatuses -Uri "$api/commits/$SourceSha/statuses?p
                 throw "New private SQL/installer/chaos acceptance returned $($attestation.state); publishing blocked."
             }
         } else {
-            # The existing strict gate verifies creator, exact description, Source
-            # HEAD, trusted private Sandbox run URL and newest context semantics.
+            # The strict gate verifies creator, current Source HEAD, trusted
+            # Sandbox run URL and newest context; descriptive text is not
+            # a source-side fixture or test-file dependency.
             # PowerShell script failures throw under ErrorActionPreference=Stop.
             # LASTEXITCODE applies to native programs, not this script.
             & (Join-Path $PSScriptRoot 'AssertSandboxPublicationGate.ps1') -SourceSha $SourceSha
