@@ -36,6 +36,8 @@ on:
       - 'Tools/DispatchSandboxAcceptance.ps1'
       - 'Tools/WaitForSandboxAttestation.ps1'
       - 'Tools/TestWorkflow04Orchestration.ps1'
+      - 'Tools/test_workflow04_retry_guard.py'
+      - '.github/workflows/fmsc-workflow04-auto-retry.yml'
       - '.github/workflows/fmsc-windows-download.yml'
       - '.github/workflows/fmsc-desktop-ci.yml'
   push:
