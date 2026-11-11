@@ -30,7 +30,6 @@ internal static partial class Program
                 if (enrolled)
                 {
                     // Explicit live verification is what transitions to the existing compact update view.
-                    using var unused = new CancellationTokenSource();
                     Find(dialog, "Verify access").PerformClick(); Application.DoEvents();
                     Check(Find(dialog, "Check for Updates").Enabled && !panel.Visible,
                         "Only a successfully verified Git connection enables update checking");
