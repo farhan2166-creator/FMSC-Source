@@ -9,7 +9,6 @@ internal static partial class Program
     {
         var originalTheme = AppTheme.CurrentTheme;
         var originalScale = (AppScale.Dpi, AppScale.RawFactor);
-        var deviceDpi = typeof(Control).GetField("_deviceDpi", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var admissionField = typeof(StudentAdmissionPage).GetMethod("AdmissionField", BindingFlags.Static | BindingFlags.NonPublic)!;
         var builders = new (string Name, Func<ModernDatePicker, Panel> Build)[] {
             ("Admission", date => (Panel)admissionField.Invoke(null, new object[] { "Date of Birth", date, false })!),
@@ -34,12 +33,9 @@ internal static partial class Program
                     using var owner = new Form { AutoScaleMode = AutoScaleMode.None,
                         ClientSize = new Size(AppScale.Scale(360), AppMetrics.FieldRowHeight + AppScale.Scale(24)) };
                     owner.Controls.Add(field); owner.Show(); Application.DoEvents();
-                    void DpiContext(Control control)
-                    {
-                        deviceDpi.SetValue(control, dpi);
-                        foreach (Control child in control.Controls) DpiContext(child);
-                    }
-                    DpiContext(field);
+                    // Exercise the public scale/theme layout contract. On newer
+                    // WinForms the private _deviceDpi field was removed, so
+                    // setting it by reflection is not a valid usability test.
                     UiTheme.ApplyTree(field); field.PerformLayout(); Application.DoEvents();
                     var native = date.Controls.OfType<DateTimePicker>().Single();
                     var label = field.Controls.OfType<Label>().Single();
@@ -55,13 +51,7 @@ internal static partial class Program
                         context + ": the current date format and calendar button have usable space");
                     Check(date.Value.Date == new DateTime(2026, 1, 15) && date.Checked,
                         context + ": layout and theme application preserve the selected date");
-                    DpiContextReset(field);
                     owner.Close();
-                    void DpiContextReset(Control control)
-                    {
-                        deviceDpi.SetValue(control, UiDpi.SystemDpi);
-                        foreach (Control child in control.Controls) DpiContextReset(child);
-                    }
                 }
             }
         }

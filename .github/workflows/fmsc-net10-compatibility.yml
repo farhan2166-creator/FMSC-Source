@@ -1,0 +1,108 @@
+name: '13 - Review - .NET 10 LTS Desktop Compatibility (no release)'
+
+# Deliberately auxiliary: only its own edits or an owner's manual dispatch
+# run this probe. A failed experimental target never blocks a valid .NET 8
+# production release. No deploy, source version bump, SQL or feed writes.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/fmsc-net10-compatibility.yml'
+      - 'Tools/TestPublishPowerShell.ps1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fmsc-net10-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop-compatibility:
+    name: .NET 10 WinForms, RDLC, exports and synthetic self-contained publish
+    runs-on: windows-2022
+    timeout-minutes: 55
+    steps:
+      - name: Check out exact candidate with no stored credentials
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install supported .NET 10 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Retarget only the disposable CI checkout to .NET 10
+        shell: pwsh
+        run: |
+          # Command-line-only TFM overrides are insufficient for NuGet restore
+          # with project references. Modify checked-out project XML in this
+          # throwaway runner; never commit a framework change to Source.
+          $targets = @{
+            'FMSC_SMS.csproj' = 'net10.0-windows'
+            # The publish profile also pins the production TFM. Retarget it
+            # only inside this disposable checkout so restore and publish
+            # agree; never change the checked-in production profile.
+            'Properties/PublishProfiles/PortableRelease.pubxml' = 'net10.0-windows'
+            'Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj' = 'net10.0-windows'
+            'Tests/ReportReadChecks/ReportReadChecks.csproj' = 'net10.0'
+            'Tests/ReportRdlcChecks/ReportRdlcChecks.csproj' = 'net10.0'
+            'Tools/UpdatePackages/UpdatePackages.csproj' = 'net10.0'
+          }
+          foreach ($relative in $targets.Keys) {
+            $path = (Resolve-Path -LiteralPath $relative).Path
+            $doc = New-Object Xml.XmlDocument
+            $doc.PreserveWhitespace = $true
+            $doc.Load($path)
+            $nodes = @($doc.SelectNodes('/Project/PropertyGroup/TargetFramework'))
+            if ($nodes.Count -ne 1 -or $nodes[0].InnerText -notin @('net8.0','net8.0-windows')) {
+              throw "Cannot safely retarget $relative in disposable test checkout."
+            }
+            $nodes[0].InnerText = $targets[$relative]
+            $doc.Save($path)
+          }
+
+      - name: Build application and WinForms smoke suite against .NET 10
+        shell: pwsh
+        run: |
+          # .NET 10's WFO1000 reports design-time serialization metadata
+          # on custom programmatically-built controls. Track it separately;
+          # this *probe only* bypasses that single analyzer to test runtime.
+          # Production framework migration is not approved by this result.
+          dotnet build Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release -p:NoWarn=WFO1000
+          if ($LASTEXITCODE -ne 0) { throw 'WinForms/.NET 10 compilation failed.' }
+          $app = 'Tests/ThemeSmokeChecks/bin/Release/net10.0-windows/ThemeSmokeChecks.dll'
+          if (-not (Test-Path -LiteralPath $app -PathType Leaf)) {
+            throw 'Smoke DLL not built for .NET 10. A fallback to the production framework is not valid evidence.'
+          }
+
+      - name: Run actual .NET 10 WinForms, ReportViewerCore, PDF, update and permission contracts
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          $dll = 'Tests/ThemeSmokeChecks/bin/Release/net10.0-windows/ThemeSmokeChecks.dll'
+          foreach ($mode in @(
+            '--communication-workflow', '--report-captions', '--report-student-identity',
+            '--certificate-pdf-review', '--update-dialog', '--post-fix'
+          )) {
+            & dotnet $dll $mode
+            if ($LASTEXITCODE -ne 0) { throw ".NET 10 compatibility failed for $mode." }
+          }
+          dotnet run --project Tests/ReportReadChecks/ReportReadChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw '.NET 10 financial report projection failed.' }
+          dotnet run --project Tests/ReportRdlcChecks/ReportRdlcChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw '.NET 10 RDLC expression engine failed.' }
+          dotnet run --project Tools/UpdatePackages/UpdatePackages.csproj -c Release -p:TargetFramework=net10.0 -- --self-test
+          if ($LASTEXITCODE -ne 0) { throw '.NET 10 update manifest/package behavior failed.' }
+
+      - name: Validate win-x64 self-contained .NET 10 portable publish with synthetic tools only
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          .\Tools\TestPublishPowerShell.ps1 -ProbeTargetFramework 'net10.0-windows'
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic .NET 10 self-contained setup/update packaging failed.' }
+
+# The real .NET 8 production target, signed SQL/MSI prerequisites and verified
+# Source SHA release gate remain unchanged. This non-release probe is not proof
+# of a clean-machine SQL/installer/updater acceptance or production migration.

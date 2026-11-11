@@ -1,7 +1,14 @@
 # Exercise the full PortableRelease publish from PowerShell 7 in a disposable
 # directory. Its prerequisite is a readability fixture, not a real MSI; this
 # output is never uploaded/installed. No SQL connection or school data is used.
-param([string]$ProjectDirectory = (Split-Path $PSScriptRoot -Parent))
+param(
+    [string]$ProjectDirectory = (Split-Path $PSScriptRoot -Parent),
+    # Optional, never used for real publication. Default stays production TFM.
+    [string]$ProbeTargetFramework = ''
+)
+if ($ProbeTargetFramework -and $ProbeTargetFramework -cne 'net10.0-windows') {
+    throw 'The optional compatibility probe only supports net10.0-windows.'
+}
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 if (-not $IsWindows -or $PSVersionTable.PSVersion.Major -lt 7) {
@@ -48,12 +55,17 @@ try {
         Set-Content -LiteralPath (Join-Path $folder '999999.sql') -Value '-- retired output fixture'
         Set-Content -LiteralPath (Join-Path $folder 'retained.txt') -Value 'preserve unrelated output'
     }
+    # The opt-in compatibility probe tracks WFO1000 design-time metadata
+    # separately. Never alter production's default compiler diagnostics.
+    $tfmOverride = if ($ProbeTargetFramework) {
+        @("-p:TargetFramework=$ProbeTargetFramework",'-p:NoWarn=WFO1000')
+    } else { @() }
     $output = & dotnet publish (Join-Path $ProjectDirectory 'FMSC_SMS.csproj') `
         -c Release -r win-x64 --self-contained true -p:PublishProfile=PortableRelease `
         "-p:PublishDir=$application/" "-p:ReleaseRoot=$release/" `
         "-p:LocalDbMsiPath=$prerequisite" "-p:VcRedistPath=$redist" "-p:DeploymentDatabaseDirectory=$database" `
         "-p:BundledGitDirectory=$transport" "-p:BundledSqlCmdPath=$sqlCmd" `
-        -p:FmscSyntheticPublishFixture=true -p:PublishSingleFile=false -p:PublishTrimmed=false 2>&1
+        -p:FmscSyntheticPublishFixture=true -p:PublishSingleFile=false -p:PublishTrimmed=false @tfmOverride 2>&1
     $code = $LASTEXITCODE
     if ($code -ne 0) {
         throw "Full PortableRelease publish failed from PowerShell 7:`n$($output -join "`n")"
@@ -64,6 +76,13 @@ try {
     }
     if ($env:PSModulePath -ne (Join-Path $PSHOME 'Modules')) {
         throw 'Validation changed the parent PowerShell module path.'
+    }
+    if ($ProbeTargetFramework) {
+        $runtimeOptions = (Get-Content -LiteralPath (Join-Path $application 'FMSC_SMS.runtimeconfig.json') -Raw | ConvertFrom-Json).runtimeOptions
+        $expectedRuntime = $ProbeTargetFramework.Replace('-windows','')
+        if ($runtimeOptions.tfm -cne $expectedRuntime) {
+            throw "Synthetic self-contained publish targets $($runtimeOptions.tfm), not $expectedRuntime."
+        }
     }
     foreach ($relative in @('FMSC_SMS/FMSC_SMS.exe', 'FMSC_SMS/FMSC_SMS.dll',
         'FMSC_SMS/FMSC_SMS.deps.json', 'FMSC_SMS/FMSC_SMS.runtimeconfig.json',
