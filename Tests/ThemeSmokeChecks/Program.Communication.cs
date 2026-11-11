@@ -190,12 +190,18 @@ internal static partial class Program
         setStep.Invoke(page, new object[] { 4 });
         Application.DoEvents();
         Rectangle settingsBounds = settingsCard.Content.RectangleToScreen(settingsCard.Content.ClientRectangle);
-        Check(settingsCard.Visible && settingsActions.All(button => {
+        var actionGeometry = settingsActions.Select(button => {
             Rectangle bounds = button.RectangleToScreen(button.ClientRectangle);
             Rectangle exposed = Rectangle.Intersect(bounds, settingsBounds);
-            return button.Visible && button.Width > 0 && button.Height > 0
+            bool usable = button.Visible && button.Width > 0 && button.Height > 0
                 && exposed.Width >= button.Width - 2 && exposed.Height >= button.Height - 2;
-        }), "Communication Settings keeps manual and template actions visible without clipping");
+            return (button, bounds, exposed, usable);
+        }).ToArray();
+        Check(settingsCard.Visible && actionGeometry.All(item => item.usable),
+            "Communication Settings actions must be visible, or scrollable into view. Content="
+            + settingsBounds + "; actions=" + string.Join("; ", actionGeometry.Select(item =>
+                item.button.Text + " bounds=" + item.bounds + " exposed=" + item.exposed
+                + " visible=" + item.button.Visible + " usable=" + item.usable)));
         setStep.Invoke(page, new object[] { 0 });
         Application.DoEvents();
         // The production formatter is internal: exercise it through reflection
