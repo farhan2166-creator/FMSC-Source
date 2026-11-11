@@ -359,7 +359,7 @@ internal static class SnapshotTests
         // yield the same SHA when tests execute in the same second).
         GitSnapshotPublisher.Git(stale, "config", "user.name", "Competing owner");
         try { GitSnapshotPublisher.Publish(stale, published, remote); throw new Exception("Concurrent publication accepted."); }
-        catch (IOException) { }
+        catch (Exception error) when (error is IOException or InvalidDataException) { }
         Require(GitSnapshotPublisher.Git(remote, "rev-parse", "main").Trim() == winnerHead,
             "Rejected concurrent publication must leave the winning feed intact.");
         Require(GitSnapshotPublisher.Git(remote, "rev-list", "--count", "main").Trim() == "1",
