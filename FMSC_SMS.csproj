@@ -156,6 +156,8 @@
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
 		<Content Include="Assets\FMSC_Logo_Circular.ico" CopyToOutputDirectory="PreserveNewest" />
+		<!-- The setup/update header renders this PNG directly; do not rely on ICO conversion. -->
+		<Content Include="Assets\FMSC_Logo_Circular.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 		<Content Include="Assets\FMSC_Logo_Rectangular.png" CopyToOutputDirectory="PreserveNewest" />
 		<Content Include="Assets\header.png" CopyToOutputDirectory="PreserveNewest" />
 		<Content Include="Assets\promotion.png">
