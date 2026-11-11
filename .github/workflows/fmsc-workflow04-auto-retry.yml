@@ -82,15 +82,26 @@ jobs:
             fi
           fi
 
-          # Never automatically retry a publication step which ran and might
-          # have committed to the private feed before a connection was lost.
+          # Automatic retries are permitted only while the publication-capable
+          # PACKAGE JOB has not executed at all. GitHub step captions are not
+          # security identities: a harmless rename must never hide a publication
+          # attempt. Unknown jobs, incomplete API pagination, ambiguous steps,
+          # or a started package job all refuse the retry.
           jobs="$(gh api "$api/actions/runs/$RUN_ID/attempts/$EVENT_ATTEMPT/jobs?per_page=100")"
-          if jq -e '
-              [.jobs[]?.steps[]? |
-                select(.name == "Verify and atomically publish approved update") |
-                select(.conclusion != "skipped")] | length > 0
+          if ! jq -e '
+              (.jobs | type) == "array" and
+              (.total_count | type) == "number" and
+              .total_count == (.jobs | length) and
+              ([.jobs[].name] | sort) == ([
+                "Preflight, prepare or reuse next patch-version Source commit",
+                "Require NEW private SQL, real installer and chaos acceptance",
+                "Verify and package Windows x64"
+              ] | sort) and
+              (all(.jobs[] | select(.name == "Verify and package Windows x64");
+                .conclusion == "skipped" and
+                ((.steps // []) | all(.[]; .conclusion == "skipped"))))
             ' <<<"$jobs" >/dev/null; then
-            echo 'No retry: publication was attempted; manual feed-state review is required.'
+            echo 'No retry: package execution is possible or job evidence is incomplete; review private feed and run manually.'
             exit 0
           fi
 
