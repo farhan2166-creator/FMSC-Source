@@ -6,6 +6,7 @@ $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$false
 . (Join-Path $PSScriptRoot 'ResolveFmscGitHubRepository.ps1')
 . (Join-Path $PSScriptRoot 'ResolveWorkflow04Version.ps1')
+. (Join-Path $PSScriptRoot 'ReadWorkflow04SourceVersions.ps1')
 Assert-FmscWorkflowIdentity -Repository Source -RequireOwnerActor
 function Require([bool]$Ok,[string]$Reason) { if (-not $Ok) { throw "Workflow 04 refused: $Reason" } }
 Require ($env:GITHUB_ACTIONS -ceq 'true' -and
@@ -34,18 +35,17 @@ Require ($LASTEXITCODE -eq 0 -and $origin -in @(
 
 $corePath=Join-Path (Get-Location).Path 'Installer/core.ps1'
 $core=[IO.File]::ReadAllText($corePath)
-$appMatch=[regex]::Match($core,'(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$')
-$dbMatch=[regex]::Match($core,'(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
-Require ($appMatch.Success -and $dbMatch.Success) 'Current application/schema versions could not be resolved from Installer/core.ps1.'
+$sourceVersions=Read-FmscWorkflow04SourceVersions -InstallerText $core
+$appMatch=$sourceVersions.AppMatch
+$targetSchema=$sourceVersions.Schema
 # Frozen schema-3/7 private fixtures remain unchanged. Sandbox uses copies
 # and upgrades them through the declared production migration target.
-$targetSchema=[int]$dbMatch.Groups[1].Value
 # Validate the complete current source migration chain, without fixed release
 # version numbers or assumptions about prior Sandbox fixture file names.
 . (Join-Path $PSScriptRoot 'AssertWorkflow04MigrationInventory.ps1')
 $migrationsDir=Join-Path (Get-Location).Path 'Migrations'
 Assert-FmscWorkflow04MigrationInventory -TargetSchema $targetSchema -Directory $migrationsDir
-$current=$appMatch.Groups[1].Value
+$current=$sourceVersions.AppVersion
 $release=$current
 $releaseSha=$checkout
 $bumped=$false
@@ -67,7 +67,7 @@ if ($publish) {
     if ($decision.RequiresBump) {
         $nextVersion=$decision.ReleaseVersion
         # Preserve CRLF/other source lines and change only one exact assignment.
-        Require ([regex]::Matches($core,'(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$').Count -eq 1) 'Ambiguous installer application-version assignment.'
+        # The unique assignment was verified by the shared release parser.
         $revised=$core.Remove($appMatch.Groups[1].Index,$appMatch.Groups[1].Length).Insert($appMatch.Groups[1].Index,$nextVersion)
         [IO.File]::WriteAllText($corePath,$revised,[Text.UTF8Encoding]::new($false))
         & git add -- Installer/core.ps1
