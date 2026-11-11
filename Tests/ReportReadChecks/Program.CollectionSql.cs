@@ -24,6 +24,10 @@ internal static partial class Program
                 SnapshotJson nvarchar(max));
             CREATE TABLE dbo.CollectionReceiptPayments(
                 CollectionReceiptId int, FeePaymentId bigint);
+            """);
+        // T-SQL resolves INSERT column names when a batch is compiled, before
+        // an ALTER TABLE earlier in the same batch would take effect.
+        Execute(connection,"""
             UPDATE dbo.Students SET Gender=
                 CASE AdmissionId WHEN 1 THEN N'Female' WHEN 2 THEN N'Male' END
                 WHERE AdmissionId IN(1,2);
