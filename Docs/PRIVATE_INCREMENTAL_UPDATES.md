@@ -18,11 +18,18 @@
   access UNCHECKED**. Its private key is stored under
   `%LOCALAPPDATA%\\FMSC\\Updates` sealed by Windows DPAPI CurrentUser.
   Windows login changes/reinstalls may require re-enrollment.
+  A locally generated key is **not** GitHub approval: the computer remains
+  pending with its public key visible and copyable until a real read-only Git
+  session succeeds. **Verify access** can be retried after the owner adds the
+  deploy key; opening the update dialog also retries authorization for a saved
+  key, without reading or downloading any update package. **Check for Updates**
+  remains disabled and guarded until live authorization has succeeded.
 - Account → **Check for Updates** is manual; no automatic program shutdown,
   replacement, or database migrations while the school works.
 - Before sign-in, a database/application schema version mismatch in either
   direction opens the existing updater inside the same startup window. The user
-  manually checks the private repository; no automatic network check or
+  manually checks the private repository; only a saved-key authorization probe
+  (not a release check or download) may run on dialog opening, and no automatic
   installation occurs. Closing the updater returns to connection guidance with
   **Open Updates** when the database is older, or **Update Application** when
   the database is newer, replacing the ineffective Reconnect/Restart options.

@@ -36,8 +36,19 @@ function Assert-SetupHeader([string]$ExpectedText) {
     if ($mode.Count -ne 1 -or $pictures.Count -ne 1 -or
         -not $pictures[0].Image -or
         $pictures[0].SizeMode -ne [Windows.Forms.PictureBoxSizeMode]::Zoom) {
-        throw "Installer header must show $ExpectedText and the existing circular FMSC logo."
+        throw "Installer header must show $ExpectedText and the circular FMSC logo."
     }
+    # An ICO.ToBitmap conversion may produce valid-looking dimensions but
+    # scrambled pixels on Windows. Assert that every setup mode uses the actual
+    # high-resolution PNG instead of a 64px ICO conversion.
+    $logoPath = Join-Path $AppSource 'Assets/FMSC_Logo_Circular.png'
+    $approvedLogo = [Drawing.Image]::FromFile($logoPath)
+    try {
+        if ($pictures[0].Image.Width -ne $approvedLogo.Width -or
+            $pictures[0].Image.Height -ne $approvedLogo.Height) {
+            throw "Installer header did not load the approved full-resolution circular PNG."
+        }
+    } finally { $approvedLogo.Dispose() }
 }
 $script:TestDecision = $null
 $script:launches = 0

@@ -1,5 +1,16 @@
 # Changelog
 
+## Update dialog pending approval / layout — 2026-11-11
+
+- Keep a newly generated computer public key visible and copyable until the owner's
+  read-only GitHub deploy-key approval is verified; generating a local key no
+  longer enables Check for Updates or collapses the enrollment panel.
+- Add explicit **Verify access**, recheck saved keys when opening the dialog,
+  and guard update checking against unverified authorization even when invoked
+  outside normal button interaction.
+- Synchronize responsive viewport limits on compact/expanded transitions to
+  avoid stale scrollbars and inaccessible buttons. Extend Windows UI smoke checks.
+
 ## 1.0.1 — Generic audit retirement
 
 - Apply migration 2 to remove the legacy generic audit tables and routines.
