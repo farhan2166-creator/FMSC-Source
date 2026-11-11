@@ -11,7 +11,7 @@ internal static partial class Program
         ModernButton Find(Control root, string text) => Descendants(root).OfType<ModernButton>().Single(b => b.Text == text);
         foreach (bool enrolled in new[] { false, true })
         {
-            foreach (string action in new[] { "Close", "Remind Me Later" })
+            foreach (string action in new[] { "Close" })
             {
                 using var parent = new Form(); parent.Show();
                 using var dialog = new UpdateConnectionForm(() => (enrolled, enrolled ? "ssh-rsa fictional-public-key" : ""));
@@ -24,10 +24,20 @@ internal static partial class Program
                 CheckScreenCenter();
                 Check(Find(dialog, "Check for Updates").Enabled == enrolled, "Checking requires a prepared computer key");
                 var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(dialog)!;
-                Check(panel.Visible == !enrolled, "Enrolled computers start with compact access details");
-                var access = Find(dialog, "Computer access").Parent!;
-                Check(Math.Abs(access.Left + access.Width / 2 - access.Parent!.ClientSize.Width / 2) <= 2,
-                    "Computer access button and status are centered as one group");
+                Check(!panel.Visible, "Authorization details start collapsed and expand only on request");
+                var accessButton = Find(dialog, enrolled ? "Computer Key Ready" : "Authorize This Computer");
+                var access = accessButton.Parent!;
+                Check(Math.Abs(accessButton.PointToScreen(new Point(accessButton.Width / 2, 0)).X -
+                    dialog.PointToScreen(new Point(dialog.ClientSize.Width / 2, 0)).X) <= 2,
+                    "Single computer-access button is centered");
+                Check(!Descendants(dialog).OfType<ModernButton>().Any(button => button.Text == "Remind Me Later") &&
+                    Descendants(dialog).OfType<ModernButton>().Count(button => button.Text == "Close") == 1,
+                    "Only one Close button is shown; no duplicate reminder/dismissal action");
+                Check(!Descendants(dialog).OfType<Label>().Any(label => label.Text is
+                    "Computer authorized" or "Computer key ready" or "Authorization required"),
+                    "Computer authorization is explained by its button, not by a separate status label");
+                Check(enrolled ? accessButton.Text == "Computer Key Ready" : accessButton.Text == "Authorize This Computer",
+                    "A local key is never presented as confirmed authorization");
                 var checkButton = Find(dialog, "Check for Updates");
                 var center = checkButton.PointToScreen(new Point(checkButton.Width / 2, 0)).X;
                 Check(Math.Abs(center - dialog.PointToScreen(new Point(dialog.ClientSize.Width / 2, 0)).X) <= 2,
@@ -36,8 +46,14 @@ internal static partial class Program
                     label.Text is "Installed version" or "Latest published version" or "Not checked" or "Check for Updates")
                     .All(label => label.TextAlign == ContentAlignment.MiddleCenter),
                     "Heading and version labels use centered text");
-                Find(dialog, "Computer access").PerformClick(); Application.DoEvents(); CheckScreenCenter();
-                Find(dialog, "Computer access").PerformClick(); Application.DoEvents(); CheckScreenCenter();
+                accessButton.PerformClick(); Application.DoEvents(); Check(panel.Visible, "Access button expands details"); CheckScreenCenter();
+                accessButton.PerformClick(); Application.DoEvents(); Check(!panel.Visible, "Access button collapses details"); CheckScreenCenter();
+                if (enrolled)
+                {
+                    typeof(UpdateConnectionForm).GetMethod("MarkComputerAuthorized", fields)!.Invoke(dialog, null);
+                    Check(accessButton.Text == "Computer Authorized",
+                        "An authenticated repository session changes the single button to Computer Authorized");
+                }
                 var buttons = Descendants(dialog).OfType<ModernButton>().Where(b => b.Visible).ToArray();
                 foreach (var button in buttons)
                     Check(button.Right <= button.Parent!.ClientSize.Width && button.Bottom <= button.Parent.ClientSize.Height,
