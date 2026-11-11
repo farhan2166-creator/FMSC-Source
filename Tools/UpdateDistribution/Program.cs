@@ -12,7 +12,7 @@ try
     if (args.Length == 4 && args[0] == "--publish-reviewed" && args[2] == "--expected-parent")
     {
         GitSnapshotPublisher.Publish(args[1], args[3]);
-        Console.WriteLine("Verified snapshot published atomically. No history rewritten.");
+        Console.WriteLine("Verified two-version snapshot published atomically with bounded root history.");
         return;
     }
     if (args.SequenceEqual(new[] { "--self-test" }, StringComparer.Ordinal))
@@ -345,8 +345,8 @@ internal static class SnapshotTests
             File.ReadAllText(Path.Combine(root, "snapshot1", "channel", "stable.json")),
             "Publication must preserve the exact verified metadata bytes without newline conversion.");
         string published = GitSnapshotPublisher.Git(remote, "rev-parse", "main").Trim();
-        Require(published != expected && GitSnapshotPublisher.Git(remote, "rev-parse", "main^").Trim() == expected,
-            "Publication must advance atomically while preserving history.");
+        Require(published != expected && GitSnapshotPublisher.Git(remote, "rev-list", "--count", "main").Trim() == "1",
+            "Publication must advance atomically with no accumulated Git ancestry.");
         string stale = Path.Combine(root, "stale-publication");
         GitSnapshotPublisher.Prepare(Path.Combine(root, "snapshot2"), stale, remote);
         Identity(stale);
@@ -362,6 +362,39 @@ internal static class SnapshotTests
         catch (IOException) { }
         Require(GitSnapshotPublisher.Git(remote, "rev-parse", "main").Trim() == winnerHead,
             "Rejected concurrent publication must leave the winning feed intact.");
+        Require(GitSnapshotPublisher.Git(remote, "rev-list", "--count", "main").Trim() == "1",
+            "Repeated publications must not accumulate historical commits.");
+        string nextPublication = Path.Combine(root, "third-publication");
+        GitSnapshotPublisher.Prepare(Path.Combine(root, "snapshot3"), nextPublication, remote);
+        Identity(nextPublication);
+        GitSnapshotPublisher.Publish(nextPublication, winnerHead, remote);
+        Require(GitSnapshotPublisher.Git(remote, "rev-list", "--count", "main").Trim() == "1",
+            "Third publication must preserve a bounded root history.");
+        string tree = GitSnapshotPublisher.Git(remote, "ls-tree", "-r", "--name-only", "main");
+        Require(!tree.Contains("versions/1.0.0/", StringComparison.Ordinal) &&
+            tree.Contains("versions/1.1.0/update-manifest.json", StringComparison.Ordinal) &&
+            tree.Contains("versions/1.2.0/update-manifest.json", StringComparison.Ordinal),
+            "Published branch must contain exactly the two latest release trees.");
+        // A pre-rotation school still reads the latest full release using its
+        // existing shallow-clone transport, without needing old commit IDs.
+        string school = Path.Combine(root, "school-readonly");
+        GitSnapshotPublisher.Git(root, "clone", "--quiet", "--no-checkout", "--depth=1",
+            "--single-branch", "--branch", "main", remote, school);
+        Require(GitSnapshotPublisher.Git(school, "show", "HEAD:channel/stable.json") ==
+            File.ReadAllText(Path.Combine(root, "snapshot3", "channel", "stable.json")),
+            "Existing shallow-clone clients must discover the newest channel.");
+        string part = UpdateChunks.MakeName("FMSC_SMS-app-full.zip", 1);
+        Require(GitSnapshotPublisher.Git(school, "cat-file", "-s", "HEAD:versions/1.2.0/" + part).Trim() == "512",
+            "Older installed clients must be able to fetch the latest full update.");
+        // History compaction cannot succeed while an extra ref still pins old objects.
+        GitSnapshotPublisher.Git(remote, "tag", "unreviewed-history", "main");
+        try
+        {
+            GitSnapshotPublisher.Prepare(Path.Combine(root, "snapshot3"),
+                Path.Combine(root, "tagged-publication"), remote);
+            throw new Exception("An unreviewed distribution tag was accepted.");
+        }
+        catch (InvalidDataException) { }
         File.WriteAllText(Path.Combine(root, "snapshot2", "unexpected.secret"), "fixture");
         try { DistributionSnapshot.ValidateSnapshot(Path.Combine(root, "snapshot2")); throw new Exception("Unlisted file accepted."); }
         catch (InvalidDataException) { }
