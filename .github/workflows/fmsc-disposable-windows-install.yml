@@ -34,9 +34,12 @@ on:
 permissions:
   contents: read
 
+# A disposable SQL smoke run owns only its ephemeral Windows runner. Different
+# PRs must not queue behind each other; for an updated PR, only its latest commit
+# needs a completed acceptance result. Never cancel manually invoked release runs.
 concurrency:
-  group: fmsc-disposable-windows-install
-  cancel-in-progress: false
+  group: fmsc-disposable-windows-install-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   clean-install:
