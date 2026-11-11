@@ -114,7 +114,7 @@ internal static partial class Program
                 Check(logoBounds.Top<=detailsBounds.Top+2 &&
                     logoBounds.Bottom>=signatureBounds.Bottom-2 &&
                     logoPreview.Height>signaturePreview.Height,
-                    "School Profile logo preview spans the visible school-details and compact-signature area");
+                    $"School Profile logo bounds at {width}: logo={logoBounds}, details={detailsBounds}, signature={signatureBounds}, imageHeights={logoPreview.Height}/{signaturePreview.Height}");
 
                 foreach(var (card,buttons) in new[]{
                     (Card:logoCard,Buttons:logoButtons),
