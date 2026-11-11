@@ -236,7 +236,14 @@ def main():
                 result.stdout + result.stderr, re.MULTILINE)
             report_location = (["Report fixture " + report_errors[-1][0] +
                 " SQL " + report_errors[-1][1]]) if report_errors else []
-            safe = errors + codes + fixture_error + manifest_error + admin_location + report_location
+            assertion_locations = re.findall(
+                r"^REPORT_ASSERT_FAIL: (reconciliation and register|outstanding debt|collection receipts) "
+                r"(Program\\.(?:NewReportSql|DebtSql|CollectionSql)\\.cs) ([0-9]{1,5})\\s*$",
+                result.stdout + result.stderr, re.MULTILINE)
+            assertion_location = (["Report fixture " + assertion_locations[-1][0]
+                + " at " + assertion_locations[-1][1] + ":" + assertion_locations[-1][2]]
+                if assertion_locations else [])
+            safe = errors + codes + fixture_error + manifest_error + admin_location + report_location + assertion_location
             raise RuntimeError("Child command failed with exit " + str(result.returncode) +
                                ("; " + " | ".join(safe[-3:]) if safe else ""))
         return result.stdout + result.stderr
