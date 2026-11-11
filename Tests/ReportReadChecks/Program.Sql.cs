@@ -105,7 +105,17 @@ internal static partial class Program
         {
             // Public CI may retain only an allowlisted stage and numeric SQL
             // error. No connection string, SQL text or student rows are logged.
-            Console.Error.WriteLine($"REPORT_SQL_FAIL: {sqlStage} SQL {ex.Number}");
+            Console.Error.WriteLine($"REPORT_SQL_FAIL: {sqlStage} SQL {ex.Number} line {ex.LineNumber}");
+            if(ex.Number==207)
+            {
+                // SQL 207 is an invalid schema identifier, not a row value.
+                // Emit only a narrowly formatted identifier from this owned
+                // fictional fixture; reject paths, SQL text and user input.
+                var column=System.Text.RegularExpressions.Regex.Match(ex.Message,
+                    @"Invalid column name '([A-Za-z_][A-Za-z0-9_]{0,63})'");
+                if(column.Success)
+                    Console.Error.WriteLine($"REPORT_COLUMN_FAIL: {sqlStage} {column.Groups[1].Value}");
+            }
             throw;
         }
         catch(Exception ex)
