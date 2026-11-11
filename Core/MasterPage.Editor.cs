@@ -127,11 +127,16 @@ public partial class MasterPage
         {
             int row = _editor.RowCount++;
             var firstField = _editorFields[fieldIndex];
-            var rowFields = firstField.Multiline
+            // A field can start its own full-width row without pretending to
+            // be a multiline input. Preserve the preceding field's column
+            // width when an explicit row break follows it.
+            var rowFields = firstField.Multiline || firstField.SpanRow
                 ? new[] { firstField }
                 : _editorFields
                     .Skip(fieldIndex)
                     .Take(columns)
+                    .TakeWhile((field, index) =>
+                        index == 0 || !(field.StartNewRow || field.Multiline || field.SpanRow))
                     .ToArray();
             fieldIndex += rowFields.Length;
             int rowHeight =
@@ -150,7 +155,10 @@ public partial class MasterPage
                     column == rowFields.Length - 1;
                 bool rowIsShort =
                     rowFields.Length < columns;
-                if (isLastFieldInRow && rowIsShort)
+                bool shouldSpan = firstField.Multiline || firstField.SpanRow ||
+                    fieldIndex == _editorFields.Count ||
+                    !_editorFields[fieldIndex].StartNewRow;
+                if (isLastFieldInRow && rowIsShort && shouldSpan)
                 {
                     _editor.SetColumnSpan(
                         fieldControl,
@@ -161,6 +169,78 @@ public partial class MasterPage
         _editor.ResumeLayout(true);
         SizeCatalogEditor();
     }
+    /// <summary>
+    /// Keep related boolean controls on one caption-free row, aligned with the
+    /// input column of another field. The original checkbox instances remain
+    /// in _controls, so data binding, validation and dirty tracking are unchanged.
+    /// </summary>
+    protected void PlaceBooleanOptionsBelow(string anchorKey, params string[] optionKeys)
+    {
+        if (_editor is null ||
+            !_controls.TryGetValue(anchorKey, out var anchor) ||
+            anchor.Parent is not TableLayoutPanel anchorPanel ||
+            optionKeys.Length == 0)
+            throw new InvalidOperationException("The editor checkbox layout requires an existing anchor input.");
+
+        var options = optionKeys.Select(key =>
+        {
+            if (!_controls.TryGetValue(key, out var control) ||
+                control is not ModernCheckBox checkBox ||
+                control.Parent is not TableLayoutPanel fieldPanel ||
+                !_editorFields.Any(item => ReferenceEquals(item.Control, fieldPanel)))
+                throw new InvalidOperationException($"Checkbox field '{key}' was not found in the editor.");
+            return (CheckBox: checkBox, FieldPanel: fieldPanel);
+        }).ToArray();
+
+        var group = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0, 0, 0, EditorFieldGap),
+            Padding = Padding.Empty,
+            TabStop = false
+        };
+        group.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, anchorPanel.ColumnStyles[0].Width));
+        group.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+
+        var choices = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, EditorInputVerticalInset, 0, 0),
+            TabStop = false
+        };
+        foreach (var (checkBox, fieldPanel) in options)
+        {
+            fieldPanel.Controls.Remove(checkBox);
+            _editor.Controls.Remove(fieldPanel);
+            _editorFields.RemoveAll(item => ReferenceEquals(item.Control, fieldPanel));
+            _editorValidationLabels.Remove(checkBox);
+            fieldPanel.Dispose();
+            checkBox.Dock = DockStyle.None;
+            checkBox.Margin = new Padding(0, 0, AppScale.Scale(24), 0);
+            choices.Controls.Add(checkBox);
+        }
+        group.Controls.Add(choices, 1, 0);
+
+        // Match the live caption width, including DPI/font adjustments.
+        anchorPanel.Layout += (_, _) =>
+        {
+            float left = anchorPanel.ColumnStyles[0].Width;
+            if (Math.Abs(group.ColumnStyles[0].Width - left) > 0.5f)
+                group.ColumnStyles[0].Width = left;
+        };
+        int anchorIndex = _editorFields.FindIndex(item =>
+            ReferenceEquals(item.Control, anchorPanel));
+        if (anchorIndex < 0)
+            throw new InvalidOperationException("The checkbox anchor is not in the editor.");
+        _editorFields.Insert(anchorIndex + 1, (group, false, true, true));
+        RebuildEditorColumns(_editor.ColumnCount);
+    }
+
     private Control CreateField(FieldSpec field)
     {
         var panel = new TableLayoutPanel {
