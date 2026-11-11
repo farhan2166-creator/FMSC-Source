@@ -18,8 +18,10 @@ internal static class GitSnapshotPublisher
         Git(workspace, "init", "--quiet");
         Git(workspace, "config", "core.autocrlf", "false");
         Git(workspace, "remote", "add", "origin", remote);
-        Git(workspace, "fetch", "--quiet", "origin", "main");
+        // Fetch only the live tip; historic binary objects are not publication inputs.
+        Git(workspace, "fetch", "--quiet", "--depth=1", "origin", "main");
         string parent = Git(workspace, "rev-parse", "FETCH_HEAD").Trim();
+        RequireExclusiveMainRef(workspace, parent);
         Git(workspace, "checkout", "--quiet", "-b", "publication", parent);
         string pointer = Path.Combine(workspace, "channel", "stable.json");
         if (File.Exists(pointer))
@@ -30,8 +32,14 @@ internal static class GitSnapshotPublisher
             if (next.RootElement.GetProperty("previousVersion").GetString() != oldVersion ||
                 UpdateManifestPolicy.CompareVersions(next.RootElement.GetProperty("latestVersion").GetString()!, oldVersion) <= 0)
                 throw new InvalidDataException("Snapshot must retain the currently published latest version and advance it.");
+            // An existing version is immutable even when its historic Git commit is retired.
+            string manifest = Path.Combine("versions", oldVersion, "update-manifest.json");
+            if (!File.ReadAllBytes(Path.Combine(workspace, manifest)).AsSpan()
+                .SequenceEqual(File.ReadAllBytes(Path.Combine(snapshot, manifest))))
+                throw new InvalidDataException("Publication changed the retained release manifest.");
         }
-        // Work only in the newly created disposable clone. Preserve all remote history.
+        // Prepare only the validated two-version tree in a disposable workspace.
+        // The eventual publication will make a new root commit, not extend old history.
         foreach (string entry in Directory.GetFileSystemEntries(workspace))
         {
             if (Path.GetFileName(entry) == ".git") continue;
@@ -41,17 +49,17 @@ internal static class GitSnapshotPublisher
         Copy(snapshot, workspace);
         DistributionSnapshot.ValidateSnapshot(workspace);
         Git(workspace, "add", "--all");
-        // Bound history growth conservatively. Refuse rather than rewrite history.
-        // count-objects counts compressed packs plus loose objects; the push also
-        // includes newly indexed blobs, so write the tree before measuring.
-        Git(workspace, "write-tree");
-        long bytes = Directory.EnumerateFiles(Path.Combine(workspace, ".git", "objects"), "*", SearchOption.AllDirectories)
-            .Sum(path => new FileInfo(path).Length);
+        // Measure only retained release files. The fetched, obsolete Git objects
+        // are not part of the new root commit and must not block safe releases.
+        string tree = Git(workspace, "write-tree").Trim();
+        long bytes = SnapshotBytes(workspace);
         if (bytes > 1024L * 1024 * 1024)
-            throw new IOException("Distribution history exceeds the 1 GiB publication budget. Review archival/rotation with the owner; history was not rewritten.");
+            throw new IOException("The latest two verified release snapshots exceed the 1 GiB publication budget.");
         File.WriteAllText(Path.Combine(workspace, ".git", "fmsc-expected-parent"), parent);
+        File.WriteAllText(Path.Combine(workspace, ".git", "fmsc-expected-tree"), tree);
         return Git(workspace, "diff", "--cached", "--name-status") + "\nExpected remote main: " + parent +
-            "\nStored Git objects: " + bytes + " bytes. No push performed.";
+            "\nVerified snapshot tree: " + tree +
+            "\nRetained release files: " + bytes + " bytes. Root-history rotation prepared; no push performed.";
     }
 
     internal static void Publish(string workspace, string expectedParent, string? remote = null)
@@ -61,16 +69,50 @@ internal static class GitSnapshotPublisher
             File.ReadAllText(Path.Combine(workspace, ".git", "fmsc-expected-parent")) != expectedParent ||
             Git(workspace, "rev-parse", "HEAD").Trim() != expectedParent)
             throw new InvalidDataException("Publication does not match the reviewed remote and parent.");
+        RequireExclusiveMainRef(workspace, expectedParent);
         DistributionSnapshot.ValidateSnapshot(workspace);
-        // Require the exact reviewed index and working tree; no hidden changes.
+        // Do not publish worktree changes, hidden files or a modified staged index.
         Git(workspace, "diff", "--exit-code");
         if (Git(workspace, "ls-files", "--others", "--exclude-standard").Length != 0)
             throw new InvalidDataException("Unreviewed files in publication workspace.");
-        Git(workspace, "commit", "-m", "Publish verified FMSC update snapshot");
-        // A normal fast-forward push updates one ref atomically. Concurrent owner
-        // publication is rejected by Git; never force and never expose partial files.
+        string reviewedTree = File.ReadAllText(Path.Combine(workspace, ".git", "fmsc-expected-tree")).Trim();
+        string currentTree = Git(workspace, "write-tree").Trim();
+        if (reviewedTree != currentTree)
+            throw new InvalidDataException("The staged publication changed since review.");
+        if (SnapshotBytes(workspace) > 1024L * 1024 * 1024)
+            throw new IOException("Retained releases exceed the 1 GiB publication budget.");
+        // A root commit includes only the two-version verified tree; old Git
+        // commits and deleted versions do not remain in the published ancestry.
+        string commit = Git(workspace, "commit-tree", currentTree, "-m",
+            "Publish verified FMSC update snapshot (bounded history)").Trim();
+        if (Git(workspace, "rev-list", "--parents", commit).Trim() != commit)
+            throw new InvalidDataException("Distribution rotation unexpectedly retained Git parents.");
+        // This is a *guarded* non-fast-forward update: --force-with-lease compares
+        // the exact reviewed remote SHA, preventing an overwrite if another
+        // owner has published since preparation. Git updates one ref atomically.
         Git(workspace, "-c", "http.version=HTTP/1.1", "-c", "http.postBuffer=134217728",
-            "push", "origin", "HEAD:refs/heads/main");
+            "push", "--force-with-lease=refs/heads/main:" + expectedParent,
+            "origin", commit + ":refs/heads/main");
+        // Keep the local publication receipt aligned with the now-published SHA.
+        Git(workspace, "update-ref", "refs/heads/publication", commit, expectedParent);
+    }
+
+    private static long SnapshotBytes(string root) =>
+        Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(path => !Path.GetRelativePath(root, path).StartsWith(
+                ".git" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            .Sum(path => new FileInfo(path).Length);
+
+    private static void RequireExclusiveMainRef(string workspace, string expectedMain)
+    {
+        // Another branch or tag would anchor retired release objects indefinitely.
+        string[] refs = Git(workspace, "ls-remote", "--heads", "--tags", "origin")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        string[] main = refs.Length == 1 ? refs[0].Trim().Split('\t') : Array.Empty<string>();
+        if (main.Length != 2 || main[1] != "refs/heads/main" ||
+            !string.Equals(main[0], expectedMain, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(
+                "History rotation requires exactly one remote branch (main), no tags, and the reviewed main commit.");
     }
 
     private static void Copy(string source, string destination)

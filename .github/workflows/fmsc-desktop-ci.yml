@@ -26,6 +26,8 @@ on:
       - 'FMSC_SMS.csproj'
       - 'Tools/PrepareBundledGit.ps1'
       - 'Tools/TestPublishPowerShell.ps1'
+      - 'Tools/UpdateDistribution/**'
+      - 'Tools/PublishPrivateUpdate.ps1'
       - 'Tools/TestInstallerMigrations.ps1'
       - 'Tools/ReleaseProbeAcceptance.ps1'
       - 'Tools/VerifyInstalledFmscRelease.ps1'
