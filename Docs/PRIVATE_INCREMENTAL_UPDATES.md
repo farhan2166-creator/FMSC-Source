@@ -265,7 +265,8 @@ again immediately before the publisher uses its separate credential.
 Missing acceptance, failed chaos, stale Source SHA, invalid status,
 unavailable dependencies, missing secrets or failed packaging blocks
 publication. Git distribution is changed only by the publisher's final
-non-forced, checked fast-forward commit. **One click is not a distributed
+exact-head, lease-guarded replacement of `FMSC-Updates/main` with the verified
+parentless release snapshot. **One click is not a distributed
 all-or-nothing transaction:** an attempted release may leave its harmless
 Source version-bump commit after a failure, but it does not partially change
 the private school update feed; rerun after correcting the failure.
@@ -349,9 +350,11 @@ reconnect and retry after receiving a stale-object error.
   are excluded from the desktop project, including stale removed signing-tool output.
 - Packaging/preparation regressions: passed (matching delta, older full update,
   corrupted delta full fallback, schema gate, isolated staging).
-- Snapshot/publication regressions: passed against disposable local Git remotes,
-  including two-version retention, no push during review, fast-forward ancestry,
-  competing-publish rejection, corrupt parts and unexpected files.
+- Snapshot/publication regressions (4 November baseline): passed against
+  disposable local Git remotes, including two-version retention, no push during
+  review, competing-publish rejection, corrupt parts and unexpected files.
+  The new parentless-history rotation has its own repeated-release, exclusive-ref,
+  guarded-push and shallow-client regression checks (run in current CI).
 - Windows authorization: 21 checks passed after correcting inherited directory
   permissions. Credential and transient plaintext SSH directories now allow
   only the current Windows user before private key material is written.
