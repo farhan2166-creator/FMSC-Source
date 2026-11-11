@@ -65,7 +65,11 @@ internal static partial class Program
                     "Tab appearance refresh preserves monitor-relative fonts");
                 var tabButtons = Descendants(tabHost).OfType<ModernButton>().ToArray();
                 Check(tabButtons.Length == 2 && tabButtons.All(button => button.Height >= AppMetrics.TextHeight(button.Font) &&
-                    button.Width >= AppMetrics.TextWidth(button.Text, button.Font, 0)), "Tab navigation captions remain readable and clickable");
+                    button.Width >= AppMetrics.TextWidth(button.Text, button.Font, 0)),
+                    "Tab navigation captions remain readable and clickable at synthetic DPI " + dpi +
+                    ", viewport " + available + ": " + string.Join("; ", tabButtons.Select(button =>
+                        button.Text + " size=" + button.Size + " required=" +
+                        AppMetrics.TextWidth(button.Text, button.Font, 0) + " font=" + button.Font.Size)));
                 Check(choice.Width <= choice.MaximumSize.Width && date.Width <= date.MaximumSize.Width,
                     "Fixed-purpose fields retain their font-based width cap on large clients");
                 Check(root.Width >= contentMinimum.Width && root.Height >= contentMinimum.Height, "A small viewport preserves readable content instead of shrinking it");
