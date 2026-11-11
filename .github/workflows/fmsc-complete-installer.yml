@@ -28,7 +28,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
         with:
-          repository: farhan2166-creator/FMSC-Source
+          repository: ${{ format('{0}/FMSC-Source', github.repository_owner) }}
           ref: ${{ inputs.source_sha || github.sha }}
           persist-credentials: false
 
