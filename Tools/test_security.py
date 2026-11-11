@@ -51,6 +51,26 @@ def main():
         result = subprocess.run([args.gitleaks, 'dir', temp, '--config', '.gitleaks.toml', '--redact', '--no-banner'], capture_output=True)
         if result.returncode != 0:
             raise SystemExit('FAIL: scanner rejected the harmless control fixture.')
+    # Verify the reviewed public Dropbox OAuth app key is not confused with
+    # a secret only in its dedicated registration file. The identical key in
+    # any other path must still fail the unmodified Dropbox token rule.
+    import json
+    registration = json.loads((Path(__file__).resolve().parent.parent / 'CloudBackupProviders.json').read_text())
+    public_key = registration.get('DropboxAppKey', '')
+    if public_key:
+        with tempfile.TemporaryDirectory(prefix='fmsc-public-oauth-id-') as temp:
+            folder = Path(temp)
+            allowed = folder / 'CloudBackupProviders.json'
+            allowed.write_text(json.dumps({'DropboxAppKey': public_key}) + '\\n')
+            def scan():
+                return subprocess.run([args.gitleaks, 'dir', temp, '--config',
+                    str((Path(__file__).resolve().parent.parent / '.gitleaks.toml')),
+                    '--redact', '--no-banner'], capture_output=True)
+            if scan().returncode != 0:
+                raise SystemExit('FAIL: public Dropbox OAuth app key was rejected in the exact registration file.')
+            allowed.rename(folder / 'unreviewed-cloud-config.json')
+            if scan().returncode != 1:
+                raise SystemExit('FAIL: Dropbox token scanner was disabled beyond the reviewed registration file.')
     print('PASS: real scanner detected the disposable secret and accepted the clean control.')
 
 
