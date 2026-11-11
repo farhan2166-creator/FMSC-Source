@@ -14,6 +14,30 @@ foreach ($name in @('Test-FmscNoLinks','Get-FmscProtectedFiles','Save-FmscProtec
     if (-not $definition) { throw "Missing uninstall safety function: $name" }
     . ([scriptblock]::Create($definition.Extent.Text))
 }
+# The completion acknowledgement must exit the uninstaller, but a stopped
+# uninstall must leave its error on screen instead of silently closing.
+$uninstallWindow = $ast.Find({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Show-FmscUninstallWindow'
+},$true)
+if (-not $uninstallWindow) { throw 'Missing standalone uninstaller window.' }
+$completed = @($uninstallWindow.Body.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+        $node.Left.Extent.Text -ceq '$uninstallSucceeded' -and
+        $node.Right.Extent.Text -ceq '$true'
+},$true))
+$closeAfterSuccess = @($uninstallWindow.Body.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.IfStatementAst] -and
+        $node.Clauses.Count -eq 1 -and
+        $node.Clauses[0].Item1.Extent.Text.Trim() -ceq '$uninstallSucceeded' -and
+        $node.Clauses[0].Item2.Extent.Text.Contains('$form.Close()')
+},$true))
+if ($completed.Count -ne 1 -or $closeAfterSuccess.Count -ne 1) {
+    throw 'Uninstaller must close automatically only after success acknowledgement.'
+}
 $ProtectExtensions = @('.mdf','.ldf','.bak','.ndf','.bacpac','.dacpac','.fmscbackup')
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('FMSC-Uninstall-Disposable-'+[Guid]::NewGuid().ToString('N'))
 try {
@@ -80,6 +104,7 @@ try {
         (Get-FileHash -LiteralPath $savedBak.Target).Hash -cne $originalBackup.Hash) {
         throw 'Protected database and backup copies were not retained byte-for-byte.'
     }
+    Write-Host 'PASS: successful uninstalls close the window after acknowledgement; failure remains visible.'
     Write-Host 'PASS: uninstall engine parses, preserves SQL/backup bytes and refuses new or changed files.'
     Write-Host 'PASS: removable FMSC folders/logs can be cleared without deleting school data or unrelated files.'
 } finally {

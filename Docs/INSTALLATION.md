@@ -104,7 +104,7 @@ The in-app updater launches the verified **UpdateSupport/FMSC.Setup.exe** from i
 
 ## Uninstalling FMSC while retaining school data
 
-Close all FMSC windows and complete any pending update/recovery. In Windows **Settings → Apps → Installed apps**, select **FMSC School Management → Uninstall**. You can also double-click **FMSC.Uninstall.exe** inside `C:\FMSC School Management` or in the complete installer folder. Approve UAC, review the independent uninstall confirmation window and select **Uninstall**. Cancel makes no changes.
+Close all FMSC windows and complete any pending update/recovery. In Windows **Settings → Apps → Installed apps**, select **FMSC School Management → Uninstall**. You can also double-click **FMSC.Uninstall.exe** inside `C:\FMSC School Management` or in the complete installer folder. Approve UAC, review the independent uninstall confirmation window and select **Uninstall**. Cancel makes no changes. After a successful uninstall, acknowledge the completion message; the uninstaller window then closes automatically. If uninstall fails, the window stays open to show the error.
 
 The uninstaller removes the installed application, staged/rollback application versions, updater and maintained tool bundles, FMSC per-Windows-profile local caches/settings, the FMSC desktop shortcut and the Windows uninstall entry. It does not uninstall SQL Server LocalDB or the shared Visual C++ runtime, run SQL migrations, detach the database, or delete files outside its allowlisted FMSC folders. It stops if the application is open or an update/recovery is unfinished.
 

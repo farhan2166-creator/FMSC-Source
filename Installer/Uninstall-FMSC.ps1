@@ -321,14 +321,15 @@ function Show-FmscUninstallWindow {
         $start.Enabled = $false
         $close.Enabled = $false
         $form.ControlBox = $false
+        $uninstallSucceeded = $false
         try {
             Invoke-FmscUninstall
             $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(20,132,70)
-            $close.Text = 'Close'
             [Windows.Forms.MessageBox]::Show($form,
                 'FMSC has been uninstalled. Database files and backups were retained.' +
                 [Environment]::NewLine + $DataDirectory,
                 'FMSC Uninstall Complete','OK','Information') | Out-Null
+            $uninstallSucceeded = $true
         } catch {
             $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(171,57,57)
             $script:StatusText.Text = 'Uninstall stopped: ' + $_.Exception.Message
@@ -340,6 +341,9 @@ function Show-FmscUninstallWindow {
         } finally {
             $close.Enabled = $true
             $form.ControlBox = $true
+            # The completion message is the final step of a successful uninstall.
+            # Close the GUI automatically after acknowledgement; keep errors visible.
+            if ($uninstallSucceeded) { $form.Close() }
         }
     })
     $form.Controls.AddRange(@($heading,$explanation,$script:StatusText,$start,$close))
