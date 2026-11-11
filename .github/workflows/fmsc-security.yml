@@ -49,5 +49,8 @@ jobs:
       - name: Verify detection using disposable dummy fixtures
         run: python Tools/test_security.py --gitleaks "$RUNNER_TEMP/gitleaks/gitleaks"
 
+      - name: Verify Workflow 04 retries refuse ambiguous publication attempts
+        run: FMSC_REQUIRE_JQ=1 python Tools/test_workflow04_retry_guard.py
+
       - name: Scan source history and forbidden file names
         run: python Tools/check_security.py --gitleaks "$RUNNER_TEMP/gitleaks/gitleaks"
