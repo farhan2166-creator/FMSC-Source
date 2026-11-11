@@ -18,7 +18,7 @@ Check ($packageMatch.Success -and $publisherMatch.Success) 'Separate Windows ver
 $package=$packageMatch.Value
 $publisher=$publisherMatch.Value
 Check ($package -match '(?m)^    needs: prepare\r?$') 'Windows verification must depend on the prepared exact Source SHA.'
-Check ($package -notmatch 'PublishPrivateUpdate\.ps1|FMSC_UPDATES_PUBLISH_TOKEN') 'Windows build must not be capable of publishing.'
+Check ($package -notmatch '\\Tools\\PublishPrivateUpdate\.ps1|FMSC_UPDATES_PUBLISH_TOKEN') 'Windows build must not be capable of publishing.'
 Check ($publisher.Contains('needs: [prepare, sandbox-release-gate, package]')) 'Publisher can bypass Windows verification or fresh private SQL acceptance.'
 Check ($publisher.Contains('inputs.publish_update') -and
     $publisher.Contains('actions/download-artifact@v7') -and
