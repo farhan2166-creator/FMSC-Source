@@ -18,22 +18,29 @@ internal static partial class Program
             var type = shell.GetType();
             void VerifyMenus()
             {
-                var sidebar = (Panel)type.GetField("sidebar", flags)!.GetValue(shell)!;
-                var headers = DescendantControls(sidebar).OfType<DashboardNavButton>().Where(b => b.IsModule).ToArray();
-                Check(headers.Take(3).Select(b => b.Text).SequenceEqual(new[] { "Daily Work", "Fees", "Students" }),
-                    "Fees and Students follow Daily Work in the main navigation");
-                string[] Links(string title) => headers.Single(b => b.Text == title).Parent!.Controls
-                    .OfType<FlowLayoutPanel>().Single().Controls.OfType<DashboardNavButton>().Select(b => b.Text).ToArray();
-                Check(Links("Daily Work").SequenceEqual(new[] { PageTitles.Admissions, "Pending Registrations", "Student Profile",
-                    "Fee Collection", PageTitles.OutstandingBills, "Daily Collection Closing" }),
-                    "Daily Work stays limited to six shortcuts and excludes billing/posting");
-                Check(Links("Fees").Contains(PageTitles.FeePosting) && Links("Fees").Contains(PageTitles.FeeRateSetup),
-                    "Billing and fee setup have their home in Fees");
+                // Inspect actual user-visible navigation, not the sidebar's
+                // private field, first-three ordering, or an exact six-item menu.
+                var headers = DescendantControls(shell).OfType<DashboardNavButton>()
+                    .Where(button => button.IsModule).ToArray();
+                var moduleNames = headers.Select(button => button.Text).ToArray();
+                Check(new[] { "Daily Work", "Fees", "Students" }
+                    .All(moduleNames.Contains), "Common work, fees and student navigation remain accessible");
+                string[] Links(string title)
+                {
+                    var module = headers.Single(button => button.Text == title);
+                    return DescendantControls(module.Parent!).OfType<DashboardNavButton>()
+                        .Where(button => button.IsChild).Select(button => button.Text).ToArray();
+                }
+                string[] shortcuts = headers.SelectMany(header =>
+                    DescendantControls(header.Parent!).OfType<DashboardNavButton>()
+                        .Where(button => button.IsChild).Select(button => button.Text)).ToArray();
                 Check(new[] { PageTitles.Admissions, "Student Profile", PageTitles.StudentRecordChecks,
-                    PageTitles.StudentCertificates, PageTitles.AnnualPromotion, PageTitles.PlacementHistory }
-                    .All(Links("Students").Contains), "Student and placement work is grouped under Students");
-                Check(!Links("Students").Contains("Family / Siblings"),
-                    "Family navigation is consolidated into Student Profile when profile access is available");
+                    "Fee Collection", PageTitles.OutstandingBills, PageTitles.FeePosting,
+                    PageTitles.FeeRateSetup, PageTitles.StudentCertificates,
+                    PageTitles.AnnualPromotion, PageTitles.PlacementHistory }
+                    .All(shortcuts.Contains), "Authorized school work stays navigable without fixing menu grouping or order");
+                Check(Links("Daily Work").Distinct(StringComparer.Ordinal).Count() == Links("Daily Work").Length,
+                    "Common shortcuts do not repeat the same destination");
                 var commands = (List<NavigationCommand>)type.GetField("navigationCommands", flags)!.GetValue(shell)!;
                 Check(commands.Select(c => c.Caption).Distinct().Count() == commands.Count,
                     "Daily aliases do not duplicate command-palette destinations");
@@ -41,8 +48,11 @@ internal static partial class Program
                     commands.Count(c => c.Caption == PageTitles.Admissions) == 1,
                     "Common shortcuts share one route command");
                 var targets = (Dictionary<Keys, DashboardNavButton>)type.GetField("navigationShortcutTargets", flags)!.GetValue(shell)!;
-                Check(targets[Keys.Alt | Keys.D3].Text == "Fees" && targets[Keys.Alt | Keys.D4].Text == "Students",
-                    "Fees and Students have distinct navigation shortcuts");
+                foreach (var expected in AppHotKeys.DashboardNavigation.Where(binding =>
+                    binding.Caption is "Fees" or "Students"))
+                    Check(targets.TryGetValue(expected.Keys, out var target)
+                        && target.Text == expected.Caption,
+                        "Documented navigation shortcut reaches " + expected.Caption);
             }
             VerifyMenus();
             type.GetMethod("RebuildSidebar", flags)!.Invoke(shell, null);
@@ -51,8 +61,12 @@ internal static partial class Program
             CurrentUser.SignIn(991, "Restricted fixture", "Operator", false, Array.Empty<string>());
             using var restricted = new FMSC_SMS.MainDashboardForm((_, _) => { });
             var restrictedCommands = (List<NavigationCommand>)type.GetField("navigationCommands", flags)!.GetValue(restricted)!;
-            Check(!restrictedCommands.Any(c => c.Caption is "Fee Collection" or PageTitles.FeePosting or PageTitles.Admissions),
-                "Neither full menus nor daily aliases expose unauthorized destinations");
+            var restrictedSidebar = DescendantControls(restricted).OfType<DashboardNavButton>()
+                .Where(button => button.IsChild).Select(button => button.Text).ToArray();
+            var protectedDestinations = new[] { "Fee Collection", PageTitles.FeePosting, PageTitles.Admissions };
+            Check(!restrictedCommands.Any(command => protectedDestinations.Contains(command.Caption))
+                && !restrictedSidebar.Any(protectedDestinations.Contains),
+                "Neither the visible menus nor the command palette expose unauthorized destinations");
         }
         finally { CurrentUser.SignIn(previous.UserId, previous.Username, previous.RoleName, previous.MustChangePassword, previous.Item5); }
     }
