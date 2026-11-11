@@ -401,7 +401,7 @@ request, and launches the installer only after the dashboard accepts closure.
 Cancelled confirmation or closure clears the pending update; ordinary later
 closure cannot start it. The work guard runs once and duplicate requests are
 suppressed. The dialog now separates version/download status, optional computer
-access details and dismissal actions. A focused SQL-free WinForms suite reproduces
+access details and a single centered dismissal action. A focused SQL-free WinForms suite reproduces
 the owned-window close path and tests exactly one inert installer callback.
 
 The owner has approved merging the source after these corrections. Further package
