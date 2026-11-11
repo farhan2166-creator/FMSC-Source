@@ -52,9 +52,9 @@ Assert-VersionParse 'duplicate source version rejected' ($sample+"`n"+'$AppVersi
 Assert-VersionParse 'duplicate schema target rejected' ($sample+"`n"+'$DatabaseVersion = ''43''') $false
 Assert-VersionParse 'missing version rejected' '$DatabaseVersion = ''42''' $false
 Assert-VersionParse 'invalid version rejected' ($sample.Replace('1.2.37','1.02.37')) $false
-Assert-VersionParse 'leading-zero schema rejected' ($sample.Replace("''42''","''042''")) $false
-Assert-VersionParse 'zero schema rejected' ($sample.Replace("''42''","''0''")) $false
-Assert-VersionParse 'overflow schema rejected' ($sample.Replace("''42''","''2147483648''")) $false
+Assert-VersionParse 'leading-zero schema rejected' ($sample.Replace("'42'","'042'")) $false
+Assert-VersionParse 'zero schema rejected' ($sample.Replace("'42'","'0'")) $false
+Assert-VersionParse 'overflow schema rejected' ($sample.Replace("'42'","'2147483648'")) $false
 # Verify migration safety by executing the current inventory validator
 # against throwaway file sets. Never demand yesterday's error-message wording,
 # fixture count or schema number.
