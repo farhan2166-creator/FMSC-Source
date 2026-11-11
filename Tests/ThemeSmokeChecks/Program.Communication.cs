@@ -133,9 +133,11 @@ internal static partial class Program
         using var page = (Control)Activator.CreateInstance(type,
             BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { false }, null)!;
         var audience = (ModernComboBox)type.GetField("audience", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        Check(audience.Items.Count == 7 && audience.Items[0]!.ToString() == "Entire school"
-            && audience.Items[1]!.ToString() == "Campus" && audience.Items[2]!.ToString() == "Class",
-            "Communication target defaults to automatic school-wide audience and offers bulk campus/class");
+        var audienceOptions = audience.Items.Cast<object>().Select(item => item.ToString()).ToArray();
+        Check(audience.SelectedItem?.ToString() == "Entire school"
+            && audienceOptions.Contains("Campus") && audienceOptions.Contains("Class")
+            && audienceOptions.Distinct().Count() == audienceOptions.Length,
+            "Communication defaults to whole-school audience and offers distinct bulk campus/class targets");
         var send = (ModernButton)type.GetField("confirm", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var templates = (ModernComboBox)type.GetField("templateChoice",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
@@ -143,17 +145,21 @@ internal static partial class Program
             && templates.Items.Cast<object>().Any(item => item.ToString() == "School announcement"),
             "Composition offers a built-in prepared notice without entering Settings");
         var channelChoice = (ModernComboBox)type.GetField("channel", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        Check(channelChoice.SelectedIndex == 1 && channelChoice.Items[1]!.ToString()!.Contains("manual", StringComparison.OrdinalIgnoreCase)
-            && channelChoice.Items[0]!.ToString()!.Contains("unavailable", StringComparison.OrdinalIgnoreCase),
-            "Communication starts with the only approved manual WhatsApp option, not unavailable SMS");
-        var cards = (List<HumanCard>)type.GetField("cards", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        Check(cards.Count == 5, "The workflow uses three message steps plus History and Settings");
-        var settingsLayout = cards[4].Content.Controls.OfType<TableLayoutPanel>().Single();
-        Check(settingsLayout.RowCount == 6
-            && settingsLayout.GetControlFromPosition(0, 4) is FlowLayoutPanel
-            && settingsLayout.GetControlFromPosition(0, 5) is FlowLayoutPanel,
-            "Settings has separate unclipped manual-WhatsApp and template actions");
+        Check(channelChoice.SelectedItem?.ToString()?.Contains("manual", StringComparison.OrdinalIgnoreCase) == true
+            && channelChoice.Items.Cast<object>().Any(item => item.ToString()?.Contains("unavailable", StringComparison.OrdinalIgnoreCase) == true),
+            "Communication starts with approved manual WhatsApp rather than unavailable SMS");
+        // Discover the controls the user interacts with, not private card-list
+        // indices, a particular number of cards, or template-action row numbers.
+        var targetCard = Descendants(page).OfType<HumanCard>()
+            .Single(card => Descendants(card).Contains(audience));
         var manualActivation = (ModernButton)type.GetField("enableFreeWhatsAppButton", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        var settingsCard = Descendants(page).OfType<HumanCard>()
+            .Single(card => Descendants(card).Contains(manualActivation));
+        var settingsActions = Descendants(settingsCard).OfType<ModernButton>().ToArray();
+        Check(Descendants(settingsCard).OfType<DataGridView>().Count() >= 2
+            && settingsActions.Contains(manualActivation)
+            && settingsActions.Count(button => button != manualActivation) >= 2,
+            "Settings provides manual WhatsApp and independent template management without fixing layout rows");
         var decorate = type.GetMethod("PrepareSettingsForDisplay", BindingFlags.Instance | BindingFlags.NonPublic)!;
         using var modeRows = new DataTable();
         modeRows.Columns.Add("Channel", typeof(string));
@@ -177,6 +183,20 @@ internal static partial class Program
         using var host = new Form { ClientSize = new Size(1200, 780), ShowInTaskbar = false };
         host.Controls.Add(page);
         host.Show();
+        Application.DoEvents();
+        // Render the Settings workspace to verify user-visible, unclipped
+        // actions without freezing its internal panel or row structure.
+        var setStep = type.GetMethod("SetStep", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        setStep.Invoke(page, new object[] { 4 });
+        Application.DoEvents();
+        Rectangle settingsBounds = settingsCard.Content.RectangleToScreen(settingsCard.Content.ClientRectangle);
+        Check(settingsCard.Visible && settingsActions.All(button => {
+            Rectangle bounds = button.RectangleToScreen(button.ClientRectangle);
+            Rectangle exposed = Rectangle.Intersect(bounds, settingsBounds);
+            return button.Visible && button.Width > 0 && button.Height > 0
+                && exposed.Width >= button.Width - 2 && exposed.Height >= button.Height - 2;
+        }), "Communication Settings keeps manual and template actions visible without clipping");
+        setStep.Invoke(page, new object[] { 0 });
         Application.DoEvents();
         // The production formatter is internal: exercise it through reflection
         // without weakening accessibility or exposing student data to tests.
@@ -242,7 +262,6 @@ internal static partial class Program
         catch (TargetInvocationException ex) when (ex.InnerException is ArgumentException)
         { unknownFieldRejected = true; }
         Check(unknownFieldRejected, "Prepared messages reject unknown record fields");
-        var targetCard = cards[0];
         var audienceField = audience.Parent!;
         Rectangle visibleInput = Rectangle.Intersect(
             audience.RectangleToScreen(audience.ClientRectangle),
@@ -258,28 +277,32 @@ internal static partial class Program
         var staffPanel = (Control)type.GetField("staffField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         Check(!campusPanel.Visible && !classPanel.Visible && !studentPanel.Visible && !staffPanel.Visible,
             "Entire-school audience needs no extra pickers");
-        audience.SelectedIndex = 1; Application.DoEvents();
+        void ChooseAudience(string caption)
+        {
+            int index = Array.IndexOf(audienceOptions, caption);
+            Check(index >= 0, "Communication includes the " + caption + " audience");
+            audience.SelectedIndex = index;
+            Application.DoEvents();
+        }
+        ChooseAudience("Campus");
         Check(campusPanel.Visible && !classPanel.Visible && campusPanel.Top > audienceField.Top,
             "Campus audience visibly adds the campus selector below Send to");
-        audience.SelectedIndex = 2; Application.DoEvents();
+        ChooseAudience("Class");
         Check(campusPanel.Visible && classPanel.Visible && classPanel.Top > campusPanel.Top,
             "Class audience visibly adds campus and class selectors in order");
-        audience.SelectedIndex = 4; Application.DoEvents();
+        ChooseAudience("One student");
         Check(studentPanel.Visible && !campusPanel.Visible && !classPanel.Visible,
             "Individual audience displays the existing student picker");
-        audience.SelectedIndex = 6; Application.DoEvents();
+        ChooseAudience("One staff member");
         Check(staffPanel.Visible && !studentPanel.Visible,
             "Staff audience displays the existing staff picker");
-        audience.SelectedIndex = 0; Application.DoEvents();
+        ChooseAudience("Entire school");
         Check(audience.Visible && !campusPanel.Visible && !classPanel.Visible
             && !studentPanel.Visible && !staffPanel.Visible,
             "Switching back to entire school keeps the selector visible and collapses optional fields");
-        var selectRow = (TableLayoutPanel)type.GetField("targetFieldsLayout",
-            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        Check(selectRow.GetControlFromPosition(0, 5) is Panel
-            && selectRow.GetControlFromPosition(0, 6) is Panel
-            && selectRow.GetControlFromPosition(0, 7) is Panel,
-            "Audience, prepared template and message editing share the first step");
+        Check(Descendants(targetCard).Contains(templates)
+            && Descendants(targetCard).OfType<ModernTextBox>().Any(),
+            "Audience, prepared templates and message editing are reachable in the composition step");
         host.Close();
     }
 }
