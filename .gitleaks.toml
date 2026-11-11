@@ -45,14 +45,14 @@ paths = ['''^Audit/Inventories/FMSC_FILE_INVENTORY_2026-11-10\.csv$''']
 regexTarget = "secret"
 regexes = ['''^[0-9a-f]{40}$''']
 
-# Dropbox's PUBLIC OAuth app key (not a token or client secret) has the
-# same syntax as the generic Dropbox token heuristic. Exempt only this
-# publisher-registered value, only in the packaged provider-ID file, and
-# only for the Dropbox token rule. All other findings must still fail CI.
+# Dropbox's PUBLIC OAuth app key is not a token or client secret. The
+# default Dropbox rule matches the surrounding field name as well as the key.
+# Only allow this exact publisher-controlled registration line, under this
+# exact rule in the dedicated provider registration file.
 [[allowlists]]
-description = "Exact public FMSC Dropbox OAuth app key in provider registration only"
+description = "Only the registered public FMSC Dropbox OAuth App key"
 targetRules = ["dropbox-api-token"]
 condition = "AND"
 paths = ['''(?:^|/)CloudBackupProviders\.json$''']
-regexTarget = "secret"
-regexes = ['''^0adfv6ob4m6pxca$''']
+regexTarget = "line"
+regexes = ['''"DropboxAppKey"\s*:\s*"0adfv6ob4m6pxca"''']
