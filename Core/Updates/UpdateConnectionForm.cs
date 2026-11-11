@@ -25,7 +25,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
     private bool _installRequested;
     private readonly Label _latestVersion;
     private readonly Label _downloadDetails;
-    private readonly Label _accessStatus;
+    private readonly ModernButton _accessButton;
     private readonly Panel _authorizationPanel;
     private readonly ProgressBar _progress;
     private readonly Label _transferStats;
@@ -87,11 +87,8 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         _downloadDetails = new Label { Text = "Check for an approved update when you are ready.", AutoSize = true,
             Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.MutedText };
         summary.Controls.Add(_downloadDetails, 0, 2); summary.SetColumnSpan(_downloadDetails, 2);
-        var access = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = false, Margin = Padding.Empty };
-        var accessButton = Button("Computer access", 150, "Secondary");
-        _accessStatus = new Label { AutoSize = true, ForeColor = AppTheme.MutedText, Margin = new Padding(8, 10, 0, 0) };
-        access.Controls.AddRange(new Control[] { accessButton, _accessStatus });
+        // One centered control carries the current computer-access state; no separate status label.
+        _accessButton = Button("Authorize This Computer", 230, "Secondary");
         _authorizationPanel = new Panel { Dock = DockStyle.Top, Height = AppScale.S(175), Margin = new Padding(0, 8, 0, 8) };
         var enrollment = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
         enrollment.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.S(48)));
@@ -110,7 +107,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         keyActions.Controls.AddRange(new Control[] { _generate, _copy });
         enrollment.Controls.Add(CenteredRow(keyActions), 0, 2);
         _authorizationPanel.Controls.Add(enrollment);
-        accessButton.Click += (_, _) => {
+        _accessButton.Click += (_, _) => {
             _authorizationPanel.Visible = !_authorizationPanel.Visible;
             SetContentSize(_authorizationPanel.Visible);
         };
@@ -132,10 +129,9 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
                 if (!IsDisposed && !Disposing) { _installRequested = false; _install.Enabled = _prepared is not null; }
             }
         };
-        var later = Button("Remind Me Later", 160, "Secondary");
-        var close = Button("Close", 100, "Secondary");
-        // This is a modeless window: DialogResult alone never closes it.
-        later.Click += (_, _) => Close();
+        // Both former dismissal actions only called Close(); neither scheduled a reminder.
+        // Keep one clear button and preserve modeless-window cancellation behavior.
+        var close = Button("Close", 140, "Secondary");
         close.Click += (_, _) => Close();
         _generate.Click += (_, _) => GenerateKey();
         _copy.Click += (_, _) => {
@@ -152,15 +148,12 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         // Only the action relevant to the current state is shown in this slot.
         updateActions.Controls.AddRange(new Control[] { _check, _download, _install });
         _download.Visible = _install.Visible = false;
-        var dismissActions = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = false, Margin = Padding.Empty };
-        dismissActions.Controls.AddRange(new Control[] { later, close });
         actions.Controls.Add(CenteredRow(updateActions), 0, 0);
-        var dismissRow = CenteredRow(dismissActions);
+        var dismissRow = CenteredRow(close);
         dismissRow.Margin = new Padding(0, AppScale.S(8), 0, 0);
         actions.Controls.Add(dismissRow, 0, 1);
         content.Controls.Add(heading, 0, 0); content.Controls.Add(summary, 0, 1);
-        content.Controls.Add(CenteredRow(access), 0, 2); content.Controls.Add(_authorizationPanel, 0, 3);
+        content.Controls.Add(CenteredRow(_accessButton), 0, 2); content.Controls.Add(_authorizationPanel, 0, 3);
         content.Controls.Add(_status, 0, 4); content.Controls.Add(_progress, 0, 5);
         content.Controls.Add(_transferStats, 0, 6); content.Controls.Add(actions, 0, 7);
         Controls.Add(content);
@@ -271,9 +264,11 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _generate.Visible = !state.Enrolled;
             _check.Enabled = _copy.Enabled = state.Enrolled;
             _publicKey.Text = state.PublicKey;
-            _authorizationPanel.Visible = !state.Enrolled;
-            SetContentSize(!state.Enrolled);
-            _accessStatus.Text = state.Enrolled ? "Computer key ready" : "Authorization required";
+            // A locally generated SSH key is not proof that the owner approved it.
+            // Only a successful authenticated Git session may show "Computer Authorized".
+            _accessButton.Text = state.Enrolled ? "Computer Key Ready" : "Authorize This Computer";
+            _authorizationPanel.Visible = false;
+            SetContentSize(false);
             _status.Text = state.Enrolled ? "Select Check for Updates to contact the private update repository." :
                 "Authorize this computer before checking for updates.";
             int applicationSchema = int.Parse(DatabaseHelper.RequiredDatabaseSchemaVersion);
@@ -295,6 +290,9 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _copy.Enabled = false;
             _check.Enabled = false;
             _hasAuthorization = false;
+            _accessButton.Text = "Authorization Unavailable";
+            _authorizationPanel.Visible = false;
+            SetContentSize(false);
             _status.Text = "This Windows user's protected authorization could not be read. " +
                 "Contact the software owner; no key was replaced. " + error.GetType().Name;
         }
@@ -320,6 +318,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         SetContentSize(_authorizationPanel.Visible);
         _check.Enabled = false;
         _generate.Enabled = false;
+        _accessButton.Text = _hasAuthorization ? "Computer Key Ready" : "Authorize This Computer";
         SetDownloadActionVisible(false);
         _download.Text = "Download Update";
         _release = null;
@@ -336,11 +335,13 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
                 return;
             }
             await using var session = await UpdateGitSession.OpenAsync(_lifetime.Token);
+            if (IsDisposed || Disposing) return;
+            // OpenAsync clones the private distribution using this computer's SSH key.
+            _accessButton.Text = "Computer Authorized";
             if (!await session.HasStableFeedAsync(_lifetime.Token))
             {
                 _status.Text = "No approved FMSC release is published on this update channel yet. " +
                     "Unpublished development changes are not available to install. Ask your administrator for a compatible published release.";
-                _accessStatus.Text = "Computer authorized";
                 _latestVersion.Text = "No release published";
                 return;
             }
@@ -352,7 +353,6 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             if (release.Manifest.RequiredDatabaseSchema < _installedSchema)
             {
                 _latestVersion.Text = release.Manifest.Version;
-                _accessStatus.Text = "Computer authorized";
                 _status.Text = $"No compatible application update is published. Your database uses schema {_installedSchema}, " +
                     $"but the latest published application (version {release.Manifest.Version}) supports schema {release.Manifest.RequiredDatabaseSchema}. " +
                     "Ask your administrator for a release that supports your database. Do not downgrade or replace your school data.";
@@ -363,7 +363,6 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             if (IsDisposed || Disposing) return;
             _release = release;
             _latestVersion.Text = release.Manifest.Version;
-            _accessStatus.Text = "Computer authorized";
             var archive = _method == UpdateDownloadChoice.Incremental ? release.Manifest.Incremental! : release.Manifest.Full;
             _status.Text = "Latest published version: " + release.Manifest.Version + "\n" +
                 (_method == UpdateDownloadChoice.NotNewer
