@@ -44,7 +44,8 @@ try {
     $env:GIT_TERMINAL_PROMPT = '0'
     $remote = (Resolve-FmscGitHubRepository -Repository Updates -Token $env:FMSC_UPDATES_PUBLISH_TOKEN).HttpsRemote
     $previous = Join-Path $work 'previous'
-    Invoke-Checked 'git' @('clone','--quiet','--branch','main','--single-branch',$remote,$previous)
+    # Read only the current published two-version tree, not retired Git ancestry.
+    Invoke-Checked 'git' @('clone','--quiet','--depth=1','--branch','main','--single-branch',$remote,$previous)
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $app 'FMSC_SMS.dll')).ProductVersion.Split('+')[0]
     $installer = Get-Content -LiteralPath (Join-Path $app 'UpdateSupport/core.ps1') -Raw
     $schemaMatch = [regex]::Match($installer, '(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
