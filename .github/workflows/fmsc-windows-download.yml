@@ -95,23 +95,17 @@ jobs:
         run: ./Tools/AssertSandboxPublicationGate.ps1 -SourceSha '${{ needs.prepare.outputs.release_sha }}'
   package:
     name: Verify and package Windows x64
-    needs: [prepare, sandbox-release-gate]
+    needs: prepare
+    # Windows build and private Sandbox acceptance verify the same prepared SHA in parallel.
+    # The build job cannot access the private publication credential.
+    outputs:
+      inventory_sha256: ${{ steps.fingerprint.outputs.inventory_sha256 }}
     if: github.ref == 'refs/heads/main' && github.repository_id == '1412760928' && github.repository_owner_id == '316891609'
     runs-on: windows-2022
     timeout-minutes: 90
 
     steps:
-      - name: Check owner publication credential
-        if: inputs.publish_update
-        shell: pwsh
-        env:
-          FMSC_UPDATES_PUBLISH_TOKEN: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
-        run: |
-          if (-not $env:FMSC_UPDATES_PUBLISH_TOKEN) {
-            throw 'One-time setup required: add FMSC_UPDATES_PUBLISH_TOKEN with Contents read/write access to FMSC-Updates only.'
-          }
-
-      - name: Checkout exact Sandbox-approved Source SHA
+      - name: Checkout exact prepared Source SHA
         uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.release_sha }}
@@ -188,6 +182,7 @@ jobs:
           & .\Tools\TestUpdateCleanup.ps1
           & .\Tools\TestUpdateRecovery.ps1
           & .\Tools\TestPublishPrivateUpdate.ps1
+          & .\Tools\TestWorkflow04Artifact.ps1
           & .\Tools\TestGitHubRepositoryIdentity.ps1
           & .\Tools\TestSandboxPublicationGate.ps1
 
@@ -281,6 +276,16 @@ jobs:
 
       # Source is public: this contains only the current source-built application.
       # Private feed history/snapshots and credentials must never be artifacts here.
+      - name: Fingerprint complete candidate artifact inventory
+        id: fingerprint
+        shell: pwsh
+        run: |
+          $inventory = Join-Path $env:GITHUB_WORKSPACE 'out/windows-x64-app/SHA256SUMS.txt'
+          if (-not (Test-Path -LiteralPath $inventory -PathType Leaf)) { throw 'Missing build inventory.' }
+          $digest = (Get-FileHash -LiteralPath $inventory -Algorithm SHA256).Hash.ToLowerInvariant()
+          "inventory_sha256=$digest" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # A candidate can be transferred before Sandbox acceptance, but is not a release.
       - name: Upload Windows application ZIP
         uses: actions/upload-artifact@v7
         with:
@@ -289,17 +294,75 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  publish:
+    name: Publish approved private update
+    # Publish only after both independent verification jobs succeed.
+    needs: [prepare, sandbox-release-gate, package]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.repository_id == '1412760928' &&
+      github.repository_owner_id == '316891609' &&
+      inputs.publish_update
+    runs-on: windows-2022
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      statuses: read
+    steps:
+      - name: Check owner publication credential
+        shell: pwsh
+        env:
+          FMSC_UPDATES_PUBLISH_TOKEN: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
+        run: |
+          if (-not $env:FMSC_UPDATES_PUBLISH_TOKEN) {
+            throw 'One-time setup required: add FMSC_UPDATES_PUBLISH_TOKEN with Contents read/write access to FMSC-Updates only.'
+          }
+
+      - name: Checkout exact Sandbox-approved Source SHA
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
+          persist-credentials: false
+
+      - name: Install .NET 8 SDK for verified packaging tools
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download candidate artifact from this run
+        uses: actions/download-artifact@v7
+        with:
+          name: FMSC_SMS-Windows-x64-app-only-${{ github.run_number }}
+          path: out/windows-x64-app
+
+      - name: Verify downloaded candidate and exact approved identity
+        shell: pwsh
+        env:
+          INVENTORY_SHA256: ${{ needs.package.outputs.inventory_sha256 }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+          RELEASE_SCHEMA: ${{ needs.prepare.outputs.release_schema }}
+        run: |
+          $checkout = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $checkout -cne $env:RELEASE_SHA) {
+            throw 'Publisher checked out the wrong release commit.'
+          }
+          .\Tools\AssertWorkflow04Artifact.ps1 -ApplicationDirectory (Join-Path $env:GITHUB_WORKSPACE 'out/windows-x64-app') -InventorySha256 $env:INVENTORY_SHA256 -ExpectedSourceSha $env:RELEASE_SHA -ExpectedVersion $env:RELEASE_VERSION -ExpectedSchema ([int]$env:RELEASE_SCHEMA)
+
       - name: Verify and atomically publish approved update
-        if: inputs.publish_update
         shell: pwsh
         timeout-minutes: 25
         env:
           FMSC_UPDATES_PUBLISH_TOKEN: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
         run: |
-          # Recheck the main SHA and the latest signed-off status just before
-          # publication; a failed or revoked run must not reuse old approval.
-          .\Tools\AssertSandboxPublicationGate.ps1 -SourceSha '${{ needs.prepare.outputs.release_sha }}'
-          .\Tools\PublishPrivateUpdate.ps1 `
-            -ApplicationDirectory (Join-Path $env:GITHUB_WORKSPACE 'out/windows-x64-app') `
-            -WorkDirectory (Join-Path $env:RUNNER_TEMP ('fmsc-publication-' + [Guid]::NewGuid().ToString('N')))
+          # Recheck live Source/main and latest private Sandbox attestation
+          # immediately before changing the private update feed.
+          .\Tools\AssertSandboxPublicationGate.ps1 -SourceSha $env:RELEASE_SHA
+          $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/vnd.github+json' }
+          $main = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/branches/main" -Headers $headers
+          if ($main.commit.sha -cne $env:RELEASE_SHA) {
+            throw 'Source/main changed after the approved build; publication refused.'
+          }
+          .\Tools\PublishPrivateUpdate.ps1 -ApplicationDirectory (Join-Path $env:GITHUB_WORKSPACE 'out/windows-x64-app') -WorkDirectory (Join-Path $env:RUNNER_TEMP ('fmsc-publication-' + [Guid]::NewGuid().ToString('N')))
