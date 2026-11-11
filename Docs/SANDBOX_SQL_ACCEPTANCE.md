@@ -2,17 +2,18 @@
 
 ## Immutable fixture baselines
 
-Private `farhan2166-creator/FMSC-Sandbox` retains exact synthetic-only SQL
-LocalDB pairs extracted once, pinned at commit
-`5a8c5130c9d7b76552bb73a753cd44c4d192d2d0`:
+Private `farhan2166-creator/FMSC-Sandbox` owns synthetic SQL LocalDB
+baselines. Its acceptance workflow selects and verifies an immutable
+fixture revision against its own manifest; **Source does not pin a
+fixture commit or a fixture hash**. The current Sandbox matrix covers:
 
 | Baseline | Permanent files | Acceptance |
 | --- | --- | --- |
 | schema 3 | `Database/v3/FMSC_DB.mdf`, `Database/v3/FMSC_DB_log.ldf` | Apply consecutive migrations 4 through the declared target, verify full contract, then test actual installer |
 | schema 7 | `Database/v7/FMSC_DB.mdf`, `Database/v7/FMSC_DB_log.ldf` | Apply consecutive migrations 8 through the target when present, verify full contract, then test actual installer |
 
-Check the pinned checkout's original SHA-256/size values against
-`Tests/manifest.json`. Never attach or change the checked-in MDF/LDF:
+Sandbox checks the selected checkout's SHA-256/size values against
+its own fixture manifest. Never attach or change the checked-in MDF/LDF:
 **all writes, migrations, extended-property adjustments, and installer
 operations must run against independent disposable copies**. Verify empty
 student/user tables and a dedicated synthetic ownership marker; perform
@@ -64,12 +65,16 @@ not be recreated as workflow dependencies.
    schema-3/7 SQL, real-installer, and chaos jobs. It verifies that
    Source/main still points to the tested SHA, then writes
    `fmsc/sandbox-mdf-ldf/v2` success to that exact Source commit,
-   with a schema-specific description (frozen v3/v7 to target vN).
-   On a failed or incomplete job, no success is granted.
+   with human-readable diagnostics describing the tested schema and
+   fixture revision. On a failed or incomplete job, no success is granted.
+   Fixture revisions and test suites may change within Sandbox without
+   changing Source release authorization code.
 5. **Workflow 04** waits for a **NEW** attestation posted after its
    dispatch (not an old success for a previous attempt). It verifies
    exact Source main, latest status, expected attestor creator,
-   description and Sandbox run URL. Only then does it package the
+   stable status context and trusted Sandbox run URL. Status descriptions,
+   file names and fixture hashes are **not** release-gate inputs.
+   Only then does it package the
    **same checked-out Source SHA**, run its build/regressions, and
    recheck the trusted status immediately before the atomic fast-forward
    publication to private `FMSC-Updates`. Missing/failing/stale
@@ -77,8 +82,8 @@ not be recreated as workflow dependencies.
 
 **Ordinary database release:** update application/SQL, create the next
 numbered migration, update the **single** required schema assignment in
-`Installer/core.ps1`, and press Workflow 04. The fixtures, Sandbox workflow matrix and chaos target require
-no manual edits for a routine schema increment. An application-only release
+`Installer/core.ps1`, and press Workflow 04. The Sandbox fixture selection, workflow matrix and chaos target require
+no Source-side edits for a routine schema increment. An application-only release
 leaves the schema unchanged. Incompatible SQL, migration gaps, schema
 mismatches or failed rollback tests stop the publication.
 
