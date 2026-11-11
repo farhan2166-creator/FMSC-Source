@@ -32,6 +32,9 @@ internal static partial class Program
         var folder=new DirectoryInfo(AppContext.BaseDirectory);
         while(folder is not null && !File.Exists(Path.Combine(folder.FullName,"Core","DatabaseCompatibilityRequirements.json")))folder=folder.Parent;
         string sql=File.ReadAllText(Path.Combine(folder!.FullName,"Tests","LifecycleSqlChecks","Baseline","Sql","GetOutstandingAndAgingReport.sql"));
+        // Private report identity must reflect persisted student records, not
+        // an exact stored-procedure SELECT clause or its formatting.
+        Execute(connection,"UPDATE dbo.Students SET FatherName=N'Parent of Three', Gender=N'Female' WHERE AdmissionId=3;");
         Execute(connection,"BEGIN TRANSACTION;");
         try
         {
@@ -49,6 +52,16 @@ internal static partial class Program
                 && rows.AsEnumerable().Sum(r=>r.Field<decimal>("Due Today"))==100m
                 && rows.AsEnumerable().Sum(r=>r.Field<decimal>("Not Yet Due"))==200m
                 && rows.AsEnumerable().Sum(r=>r.Field<decimal>("Due Date Missing"))==50m,view+": due-status boundaries reconcile exactly");
+            if (view is "Charges" or "Students")
+            {
+                Check(rows.Columns.Contains("__StudentFatherName")
+                    && rows.Columns.Contains("__StudentGender"),
+                    view+": private recorded parent/gender metadata is available to authorized renderers");
+                Check(rows.AsEnumerable().Any(r=>r.Field<string>("Student")=="Three"
+                    && r.Field<string>("__StudentFatherName")=="Parent of Three"
+                    && r.Field<string>("__StudentGender")=="Female"),
+                    view+": report metadata matches the actual student's saved parent/gender");
+            }
             if(view=="Families")Check(rows.Rows.Count==4,"Separate standalone groups retain both unlinked students");
         }
         using var scoped=Read(connection,"EXEC dbo.GetOutstandingAndAgingReport @UserId,N'Families',@CampusId,@AcademicYearId,@ClassId,@SectionId,@AsOfDate;",campus:1);
