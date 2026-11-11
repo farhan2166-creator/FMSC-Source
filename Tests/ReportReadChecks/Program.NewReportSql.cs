@@ -51,7 +51,7 @@ internal static partial class Program
             ("ProvisionalCertificates","ProvisionalCertificateId",false,"CertificateDate"),("RegularLecturerCertificates","RegularLecturerCertificateId",true,"CertificateDate"),
             ("BankAccountOpeningCertificates","BankAccountOpeningCertificateId",true,"CertificateDate") })
         {
-            Execute(connection,$"CREATE TABLE dbo.{table}({key} int PRIMARY KEY,{(staff ? "StaffId" : "AdmissionId")} int,{(staff ? "StaffName" : "StudentName")} nvarchar(100),CertificateNumber nvarchar(50),{date} date,CreatedAt datetime2,CreatedByUserId int,CollectedAt datetime2 NULL,CollectedBy nvarchar(200) NULL{(table=="LeaveCertificates" ? ",CertificateType nvarchar(20)" : "")});");
+            Execute(connection,$"CREATE TABLE dbo.{table}({key} int PRIMARY KEY,{(staff ? "StaffId" : "AdmissionId")} int,{(staff ? "StaffName" : "StudentName")} nvarchar(100),CertificateNumber nvarchar(50),{date} date,CreatedAt datetime2,CreatedByUserId int{(table=="LeaveCertificates" ? ",CertificateType nvarchar(20)" : "")});");
             Execute(connection,$"INSERT dbo.{table}({key},{(staff ? "StaffId" : "AdmissionId")},{(staff ? "StaffName" : "StudentName")},CertificateNumber,{date},CreatedAt,CreatedByUserId{(table=="LeaveCertificates" ? ",CertificateType" : "")}) VALUES(1,1,N'Saved snapshot',N'TEST-2026-0001','2020-01-01','2026-10-22 13:45',1{(table=="LeaveCertificates" ? ",N'School'" : "")});");
         }
         Execute(connection,"INSERT dbo.LeaveCertificates(LeaveRecordId,AdmissionId,StudentName,CertificateNumber,LeaveDate,CreatedAt,CreatedByUserId,CertificateType) VALUES(2,2,N'Saved college snapshot',N'CL-2026-0001','2026-10-01','2026-10-22',1,N'College');");
@@ -98,6 +98,10 @@ internal static partial class Program
         Check(register.AsEnumerable().Any(r=>r.Field<string>("Recipient")=="Issued character snapshot")
             && register.AsEnumerable().Any(r=>r.Field<string>("Recipient")=="College leaving snapshot"),
             "Actual certificate register uses preserved issue snapshots rather than mutable source names");
+        Check(register.AsEnumerable().Where(r=>r.Field<string>("Entry")=="Saved record only")
+            .All(r=>r.Field<string>("Collection")=="Not tracked" && r.IsNull("Collected On")
+                && r.IsNull("Collected By")),
+            "Untracked saved certificates are never represented as issued, awaiting collection or collected");
         var counts=CertificateIssueRegisterData.Totals(register);
         Check((int)counts.Rows[0]["Logged issues"]==6 && (int)counts.Rows[0]["Saved records only"]==6 && (int)counts.Rows[0]["Awaiting collection"]==5,"SQL register counts logged issues separately from untracked saved records");
         Check(register.AsEnumerable().Any(r=>r.Field<string>("Certificate No.")=="Record #1"),"SQL preserves older records with no certificate number without inventing an issued number");
