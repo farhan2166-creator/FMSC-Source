@@ -24,7 +24,7 @@ internal static partial class Program
                 "Student Data Review includes existing-student setup for an administrator");
             Check(!admission.IsHandleCreated, "Admission route inspection starts no SQL loaders");
             using var consentPage = new StudentAdmissionPage(false);
-            var consent = (ComboBox)typeof(StudentAdmissionPage).GetField("schoolMessagesConsent",flags)!.GetValue(consentPage)!;
+            var consent = (ModernComboBox)typeof(StudentAdmissionPage).GetField("schoolMessagesConsent",flags)!.GetValue(consentPage)!;
             typeof(StudentAdmissionPage).GetField("loadedSchoolMessageConsent",flags)!.SetValue(consentPage,true);
             consent.SelectedIndex = 0;
             var validate = typeof(StudentAdmissionPage).GetMethod("ValidateAdmissionInline",flags)!;
