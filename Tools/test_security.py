@@ -61,7 +61,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix='fmsc-public-oauth-id-') as temp:
             folder = Path(temp)
             allowed = folder / 'CloudBackupProviders.json'
-            allowed.write_text(json.dumps({'DropboxAppKey': public_key}) + '\\n')
+            allowed.write_text(json.dumps({'DropboxAppKey': public_key}) + '\n')
             def scan():
                 return subprocess.run([args.gitleaks, 'dir', temp, '--config',
                     str((Path(__file__).resolve().parent.parent / '.gitleaks.toml')),
