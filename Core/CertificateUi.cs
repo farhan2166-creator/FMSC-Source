@@ -197,7 +197,8 @@ internal static class CertificateUi
         var selectedMode = CertificateLetterhead.PreferredMode(reportPath);
         DataRow? school = null;
         bool schoolLoaded = false;
-        using var signatureSettings = DatabaseHelper.QueryUser("GetPrintedCertificateSignature");
+        using var signatureSettings = DatabaseHelper.QueryUser("GetPrintedCertificateSignature",
+            DatabaseHelper.Bit("@ForLeaving", CertificateLetterhead.UsesPreprintedPad(reportPath)));
         var signature = signatureSettings.Rows.Count > 0 ? signatureSettings.Rows[0] : null;
         bool printSignature = signature is not null
             && signature["PrintPrincipalSignature"] is not DBNull

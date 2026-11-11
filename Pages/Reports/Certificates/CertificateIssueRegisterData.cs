@@ -61,17 +61,18 @@ internal static class CertificateIssueRegisterData
         bool regular=table=="RegularStudentCertificates";
         bool birth=table=="DateOfBirthCertificates";
         string content=character||leave||birth?"P":regular?"I":"C";
-        // Certificates without an issue table are saved records, not presumed
-        // issued documents. Never claim they await collection or reference
-        // issue-only collection columns on their source tables.
-        string hasIssue=tracked ? "I.IssuedAt IS NOT NULL" : "1=0";
+        // Sports/NOC/Provisional track each copy and collection on the source
+        // row. Staff certificates have no collection workflow.
+        bool rowCopy=!tracked && !staff;
+        string collectionSource=tracked ? "I" : "C";
+        string hasIssue=tracked ? "I.IssuedAt IS NOT NULL" : rowCopy ? "1=1" : "1=0";
         string activity=tracked ? "COALESCE(I.IssuedAt,C.CreatedAt)" : "C.CreatedAt";
         string recordedBy=tracked ? "COALESCE(I.IssuedByUserId,C.CreatedByUserId)" : "C.CreatedByUserId";
-        string collection=tracked
-            ? $"CASE WHEN NOT ({hasIssue}) THEN N'Not tracked' WHEN I.CollectedAt IS NULL THEN N'Not Collected' ELSE N'Collected' END"
+        string collection=tracked || rowCopy
+            ? $"CASE WHEN NOT ({hasIssue}) THEN N'Not tracked' WHEN {collectionSource}.CollectedAt IS NULL THEN N'Not Collected' ELSE N'Collected' END"
             : "N'Not tracked'";
-        string collectedAt=tracked ? "I.CollectedAt" : "CAST(NULL AS datetime2)";
-        string collectedBy=tracked ? "I.CollectedBy" : "CAST(NULL AS nvarchar(200))";
+        string collectedAt=tracked || rowCopy ? $"{collectionSource}.CollectedAt" : "CAST(NULL AS datetime2)";
+        string collectedBy=tracked || rowCopy ? $"{collectionSource}.CollectedBy" : "CAST(NULL AS nvarchar(200))";
         string issueId=tracked ? regular?"I.RegularStudentCertificateIssueId":$"I.{(leave ? "Leave" : character ? "Character" : "DateOfBirth")}CertificateIssueId" : "CAST(NULL AS int)";
         return $"""
             SELECT {type} CertificateType,C.{key} RecordId,{issueId} IssueId,

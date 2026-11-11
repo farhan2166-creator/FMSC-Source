@@ -23,6 +23,17 @@ internal static partial class Program
                 "Record Issues / History", "Possible Duplicates", "Existing Student Setup" }),
                 "Student Data Review includes existing-student setup for an administrator");
             Check(!admission.IsHandleCreated, "Admission route inspection starts no SQL loaders");
+            using var consentPage = new StudentAdmissionPage(false);
+            var consent = (ComboBox)typeof(StudentAdmissionPage).GetField("schoolMessagesConsent",flags)!.GetValue(consentPage)!;
+            typeof(StudentAdmissionPage).GetField("loadedSchoolMessageConsent",flags)!.SetValue(consentPage,true);
+            consent.SelectedIndex = 0;
+            var validate = typeof(StudentAdmissionPage).GetMethod("ValidateAdmissionInline",flags)!;
+            validate.Invoke(consentPage,new object[]{false,false});
+            var validator = (FormValidator)typeof(StudentAdmissionPage).GetField("admissionValidator",flags)!.GetValue(consentPage)!;
+            Check(validator.IsMarked(consent), "A recorded school-message choice cannot silently be saved as Not recorded");
+            consent.SelectedIndex = 2;
+            validate.Invoke(consentPage,new object[]{false,false});
+            Check(!validator.IsMarked(consent), "An explicit No remains a valid withdrawal choice");
 
             var data = new DataSet();
             var summary = data.Tables.Add();

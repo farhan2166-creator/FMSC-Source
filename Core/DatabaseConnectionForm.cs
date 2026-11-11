@@ -314,7 +314,7 @@ internal sealed class DatabaseConnectionView : UserControl
                 _canRepair = false;
                 _repair.Visible = false;
                 _status.Text = "Windows restart required";
-                _message.Text = "SQL Server LocalDB was installed. Restart Windows, then open FMSC again.";
+                _message.Text = "A SQL prerequisite was installed or repaired. Restart Windows, then open FMSC again to finish SQL repair.";
             }
             else if (result == 0)
             { SetBusy(false); await ConnectAsync(false); }

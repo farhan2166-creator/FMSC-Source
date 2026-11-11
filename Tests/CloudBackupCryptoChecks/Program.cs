@@ -1,6 +1,9 @@
 using FMSC_SMS.Services.Backup;
 using System.Security.Cryptography;
 
+await ReleaseReviewChecks.RunAsync();
+if (args.SequenceEqual(new[] { "--release-review" })) return;
+
 string root = Path.Combine(Path.GetTempPath(), "FMSC-CloudCryptoChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try

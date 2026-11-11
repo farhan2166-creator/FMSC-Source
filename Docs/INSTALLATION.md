@@ -158,3 +158,15 @@ The app-only ZIP is **not** a fresh-install package. The full-installer workflow
   clean Windows PC. If Windows lacks components required by SQL Server 2022,
   its signed LocalDB MSI may refuse installation; inspect the MSI log rather
   than installing unverified extras or touching the school database.
+
+### SQL dependency repair
+
+The connection screen's SQL dependency repair checks the shared VC++ v14 x64 runtime
+before repairing LocalDB. It restores verified retained tooling or obtains the approved
+replacement when necessary. A damaged registered runtime receives a repair attempt;
+a pending Windows restart stops the sequence before LocalDB setup. This operation
+never runs FMSC database migrations or replaces the school's MDF/LDF files.
+
+Uninstall removes the exact per-Windows-user FMSC cloud-backup scheduled tasks only
+when their action points to the installed FMSC executable and scheduled-backup command.
+An unexpected action is retained and stops cleanup for review; unrelated tasks are untouched.

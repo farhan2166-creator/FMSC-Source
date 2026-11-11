@@ -30,6 +30,7 @@ internal static class CloudBackupCoordinator
         public string PackageFile { get; set; } = "";
         public DateTime SqlCreatedUtc { get; set; }
         public string GoogleDriveId { get; set; } = "";
+        public string GoogleDriveUploadId { get; set; } = "";
         public string DropboxId { get; set; } = "";
         // Missing properties in old journal JSON default false.
         public bool GoogleDrivePruned { get; set; }
@@ -264,7 +265,8 @@ internal static class CloudBackupCoordinator
     {
         if (!CloudBackupOAuth.IsConnected(provider))
             throw new InvalidOperationException(provider + " account is not connected.");
-        CloudRemoteBackup copy = await CloudBackupTransport.UploadAsync(provider, p.PackageFile, p.SqlCreatedUtc, token);
+        CloudRemoteBackup copy = await CloudBackupTransport.UploadAsync(provider, p.PackageFile, p.SqlCreatedUtc, token,
+            p.GoogleDriveUploadId, id => { p.GoogleDriveUploadId = id; SavePending(p); });
         if (!string.Equals(copy.PackageSha256, p.Sha256, StringComparison.OrdinalIgnoreCase) ||
             copy.Size != p.Size)
             throw new IOException(provider + " did not confirm an intact encrypted upload.");

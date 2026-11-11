@@ -42,6 +42,8 @@ internal static class CloudBackupSchedulePolicy
                 if (due > localNow) due = due.AddDays(-1);
                 break;
             case CloudBackupFrequency.Every12Hours:
+                // Consider the second occurrence today as well as missed runs.
+                if (due.AddHours(12) <= localNow) due = due.AddHours(12);
                 if (due > localNow) due = due.AddHours(-12);
                 if (due > localNow) due = due.AddHours(-12);
                 break;

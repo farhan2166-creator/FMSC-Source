@@ -112,3 +112,5 @@ try {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 }
+
+& (Join-Path $PSScriptRoot 'TestUninstallTasks.ps1')

@@ -16,6 +16,15 @@ internal static class SqlDependencyRepair
         string package = Path.Combine(folder, "SqlLocalDB.msi");
         try
         {
+            // SQL 2022's prerequisite applies to repair as well as first setup.
+            int prerequisite = await SqlPrerequisiteRepair.EnsureVcRuntimeAsync(HasSupportedVcRuntime, async action =>
+            {
+                progress.Report("Checking the Microsoft Visual C++ SQL prerequisite...");
+                var runtime = await MaintenanceTools.EnsureAsync("VcRedist");
+                await VerifySignatureAsync(runtime.File);
+                return await RunElevatedAsync(runtime.File, action, "/passive", "/norestart");
+            });
+            if (prerequisite == 3010) return prerequisite;
             progress.Report("Checking FMSC's retained SQL repair tools...");
             var retained = await MaintenanceTools.EnsureAsync("LocalDb");
             File.Copy(retained.File, package, overwrite: false);
@@ -47,6 +56,28 @@ internal static class SqlDependencyRepair
                 AppExceptionHandler.LogNonFatal(fallbackException2, "SqlDependencyRepair: UnauthorizedAccessException recovery");
             }
         }
+    }
+
+    internal static bool HasSupportedVcRuntime()
+    {
+        foreach (string name in new[] { "vcruntime140.dll", "msvcp140.dll" })
+        {
+            string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), name);
+            if (!File.Exists(file)) return false;
+            var version = FileVersionInfo.GetVersionInfo(file);
+            if (version.FileMajorPart < 14 || (version.FileMajorPart == 14 && version.FileMinorPart < 30))
+                return false;
+        }
+        return true;
+    }
+
+    private static async Task<int> RunElevatedAsync(string executable, params string[] arguments)
+    {
+        var start = new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas" };
+        foreach (string argument in arguments) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start) ?? throw new IOException("Windows could not start prerequisite repair.");
+        await process.WaitForExitAsync();
+        return process.ExitCode;
     }
 
     internal static async Task VerifySignatureAsync(string package)

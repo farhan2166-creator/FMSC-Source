@@ -91,3 +91,9 @@ do not allow a school to connect an unregistered service.
 
 This draft cannot be certified as production ready without real provider
 registrations and Windows SQL restore tests, even if all source CI is green.
+
+Google Drive uploads reserve and journal their remote file ID before creating a
+file. Retries verify that exact remote file's identity, size and server checksum;
+a lost completion response cannot cause a second file to be created. Older queued
+packages are first reconciled against matching existing files. Size parsing accepts
+Drive's string-encoded int64 metadata as well as Dropbox's numeric metadata.

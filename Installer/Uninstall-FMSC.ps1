@@ -214,6 +214,22 @@ function Write-FmscUninstallStatus {
     param([string]$Message)
     if ($script:StatusText) { $script:StatusText.Text = $Message; [Windows.Forms.Application]::DoEvents() }
 }
+# Remove only our exact per-user backup tasks, never similarly named school jobs.
+function Remove-FmscCloudBackupTasks {
+    $scheduler = New-Object -ComObject 'Schedule.Service'
+    $scheduler.Connect()
+    $folder = $scheduler.GetFolder('\')
+    foreach ($task in @($folder.GetTasks(1))) {
+        if ($task.Name -notmatch '^FMSC Cloud Backup S-1-5-21-(?:[0-9]+-){3}[0-9]+$') { continue }
+        $actions = @($task.Definition.Actions)
+        if ($actions.Count -ne 1 -or $actions[0].Type -ne 0 -or
+            $actions[0].Path.Trim('"') -ine (Join-Path $AppDirectory 'FMSC_SMS.exe') -or
+            $actions[0].Arguments.Trim() -cne '--cloud-backup-scheduled') {
+            throw 'An FMSC-named scheduled task has an unexpected action. Uninstall stopped for review.'
+        }
+        $folder.DeleteTask($task.Name, 0)
+    }
+}
 function Invoke-FmscUninstall {
     $mutex = New-Object Threading.Mutex($false,'Global\FMSCInstallerActivation')
     $held = $false
@@ -230,6 +246,9 @@ function Invoke-FmscUninstall {
             '-' + [guid]::NewGuid().ToString('N'))
         $protected = @(Save-FmscProtectedFiles -Roots $roots -PreservationDirectory $preserved)
         Assert-FmscProtectedCopies -Roots $roots -Records $protected
+        Remove-FmscCloudBackupTasks
+        # Deleting the tasks prevents new runs; refuse any backup that started meanwhile.
+        Assert-FmscUninstallReady
         Write-FmscUninstallStatus 'Removing application, updater and temporary files...'
         foreach ($root in $roots) {
             Test-FmscNoLinks $root.Path

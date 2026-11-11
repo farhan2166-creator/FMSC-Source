@@ -12,7 +12,7 @@ internal static class MaintenanceTools
 
     internal static async Task<Tool> EnsureAsync(string name, CancellationToken token = default)
     {
-        if (name is not ("Git" or "SqlCmd" or "LocalDb"))
+        if (name is not ("Git" or "SqlCmd" or "LocalDb" or "VcRedist"))
             throw new ArgumentOutOfRangeException(nameof(name));
 
         string script = Path.Combine(AppContext.BaseDirectory, "UpdateSupport", "MaintenanceTools.ps1");

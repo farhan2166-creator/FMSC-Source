@@ -19,6 +19,9 @@ internal static class Program
             return Task.CompletedTask;
         });
         if (ready)
+            ready = await Evidence.Stage("Certificate signature print authority",
+                () => CertificatePrintAuthorityChecks.Run(fixture!, Evidence));
+        if (ready)
             ready = await Evidence.Stage("Fresh-school fee type policy and Setup Readiness",
                 () => { FeeSetupBootstrapChecks.Run(fixture!, Evidence); return Task.CompletedTask; });
         if (ready)

@@ -72,6 +72,9 @@ internal static partial class Program
             ("BankAccountOpeningCertificates","BankAccountOpeningCertificateId",true,"CertificateDate") })
             foreach(string field in new[] {key,date,"CertificateNumber","CreatedAt","CreatedByUserId",staff ? "StaffId" : "AdmissionId",staff ? "StaffName" : "StudentName"})
                 Check(columns.Contains($"[dbo].[{table}].[{field}]"),$"Production SQL contract contains register source {table}.{field}");
+        foreach(string table in new[]{"SportsCertificates","NoObjectionCertificates","ProvisionalCertificates"})
+            foreach(string field in new[]{"CollectedAt","CollectedBy"})
+                Check(columns.Contains($"[dbo].[{table}].[{field}]"),$"Row-tracked certificate collection contract includes {table}.{field}");
         foreach(var (table,key,record) in new[] { ("CharacterCertificateIssues","CharacterCertificateIssueId","CertificateRecordId"),
             ("DateOfBirthCertificateIssues","DateOfBirthCertificateIssueId","CertificateRecordId"),("LeaveCertificateIssues","LeaveCertificateIssueId","LeaveRecordId") })
             foreach(string field in new[] {key,record,"IssuedAt","IssuedByUserId","CollectedAt","CollectedBy"})

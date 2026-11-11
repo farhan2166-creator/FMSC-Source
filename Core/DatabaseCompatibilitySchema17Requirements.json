@@ -1,0 +1,14 @@
+{
+  "parameters": [
+    {
+      "schema": "dbo",
+      "objectName": "GetPrintedCertificateSignature",
+      "name": "@ForLeaving",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isOutput": false
+    }
+  ]
+}
