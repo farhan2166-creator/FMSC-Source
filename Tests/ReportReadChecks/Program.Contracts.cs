@@ -1,6 +1,4 @@
 using System.Text.Json;
-using System.IO.Compression;
-using System.Xml.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using FMSC_SMS.Pages.Reports.Finance;
 using FMSC_SMS.Pages.Reports.Certificates;
@@ -40,26 +38,15 @@ internal static partial class Program
         var columns=contract.RootElement.GetProperty("columns").EnumerateArray()
             .Select(e=>$"[{e.GetProperty("schema").GetString()}].[{e.GetProperty("objectName").GetString()}].[{e.GetProperty("name").GetString()}]")
             .ToHashSet(StringComparer.Ordinal);
-        // The structural production contract deliberately lists selected column checks,
-        // not every baseline column. The three legacy credit-ledger fields are verified
-        // against the pinned data-free SQL model rather than pretending the manifest
-        // lists columns it has never required.
-        string baselinePackagePath=Path.Combine(folder.FullName,"Tests","LifecycleSqlChecks","Baseline","schema.dacpac");
-        using var baselinePackage=ZipFile.OpenRead(baselinePackagePath);
-        using var baselineModelStream=(baselinePackage.GetEntry("model.xml")
-            ?? throw new InvalidDataException("Pinned baseline DACPAC lacks model.xml.")).Open();
-        var baselineColumnNames=XDocument.Load(baselineModelStream)
-            .Descendants()
-            .Where(e=>e.Name.LocalName=="Element" && e.Attribute("Type")?.Value=="SqlSimpleColumn")
-            .Select(e=>e.Attribute("Name")?.Value)
-            .Where(name=>name is not null)
-            .ToHashSet(StringComparer.Ordinal);
+        // The production manifest intentionally lists selected columns, not
+        // every legacy field. The current StudentCreditEntries projection is
+        // now checked against a real migrated database by mandatory
+        // LifecycleSqlChecks/CollectionCreditChecks, not a frozen DACPAC here.
         Check(contract.RootElement.GetProperty("objects").EnumerateArray().Any(e=>
             e.GetProperty("schema").GetString()=="dbo" && e.GetProperty("name").GetString()=="StudentCreditEntries"),
             "Production structural contract includes the credit ledger table");
 
         var required=new Dictionary<string,string[]> {
-            ["StudentCreditEntries"]=new[]{"AdmissionId","Amount","CreatedAt"},
             ["Students"]=new[]{"AdmissionId","AdmissionNumber","QuickReference","StudentName","FatherName","Gender","Status"},
             ["Families"]=new[]{"FamilyId","FamilyCode"},["FamilyMembers"]=new[]{"AdmissionId","FamilyId"},
             ["Enrollments"]=new[]{"AdmissionId","EnrollmentId","EnrollmentDate","LeavingDate","Status","ClassSectionId","AcademicYearId","BillingStartDate"},
@@ -74,9 +61,7 @@ internal static partial class Program
         foreach(var (table,fields) in required)foreach(string field in fields)
         {
             string fullName=$"[dbo].[{table}].[{field}]";
-            bool inStructuralContract=columns.Contains(fullName);
-            bool inPinnedBaseline=table=="StudentCreditEntries" && baselineColumnNames.Contains(fullName);
-            Check(inStructuralContract || inPinnedBaseline,
+            Check(columns.Contains(fullName),
                 $"Production schema evidence includes {table}.{field}");
         }
         foreach(var (table,key,staff,date) in new[] {
