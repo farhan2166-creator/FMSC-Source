@@ -395,7 +395,19 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         templateActions.Controls.Add(addTemplate);
         templateActions.Controls.Add(editTemplate);
         tables.Controls.Add(templateActions, 0, 5);
-        card.Content.Controls.Add(tables);
+        // Settings can be shorter than these data grids and action rows on
+        // ordinary laptop windows. Keep the action sizes usable, but make
+        // the entire surface scrollable instead of clipping the final row.
+        int requiredHeight = tables.Padding.Vertical + tables.RowStyles.Cast<RowStyle>()
+            .Sum(row => (int)Math.Ceiling(row.Height));
+        tables.Dock = DockStyle.Top;
+        tables.Height = requiredHeight;
+        var scroller = new Panel {
+            Dock = DockStyle.Fill, AutoScroll = true,
+            Padding = Padding.Empty, Margin = Padding.Empty
+        };
+        scroller.Controls.Add(tables);
+        card.Content.Controls.Add(scroller);
         return card;
     }
 
