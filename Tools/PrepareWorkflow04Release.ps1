@@ -63,7 +63,8 @@ if ($publish) {
     $channel=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($stable.content -replace '\s','')))) | ConvertFrom-Json
     Require ($channel.format -ceq 'fmsc-git-updates/v1' -and
         $channel.latestVersion -cmatch '^[0-9]+\.[0-9]+\.[0-9]+$') 'Published channel is not the expected stable semantic version.'
-    $decision=Resolve-FmscWorkflow04Version -SourceVersion $current -PublishedVersion $channel.latestVersion
+    $decision=Resolve-FmscWorkflow04Version -SourceVersion $current -PublishedVersion $channel.latestVersion `
+        -ApprovedTransitionVersion $env:FMSC_WORKFLOW04_APPROVED_VERSION
     if ($decision.RequiresBump) {
         $nextVersion=$decision.ReleaseVersion
         # Preserve CRLF/other source lines and change only one exact assignment.

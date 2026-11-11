@@ -8,6 +8,11 @@ on:
         required: true
         type: boolean
         default: true
+      approved_version_transition:
+        description: 'For a deliberate major/minor upgrade only: enter the exact new X.Y.0 source version (otherwise leave blank)'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
   group: fmsc-owner-private-update-publication
@@ -43,6 +48,7 @@ jobs:
           FMSC_UPDATES_PUBLISH_TOKEN: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
           FMSC_SANDBOX_DISPATCH_TOKEN: ${{ secrets.FMSC_SANDBOX_DISPATCH_TOKEN }}
           FMSC_WORKFLOW04_PUBLISH: ${{ inputs.publish_update }}
+          FMSC_WORKFLOW04_APPROVED_VERSION: ${{ inputs.approved_version_transition }}
         run: ./Tools/PrepareWorkflow04Release.ps1
 
   sandbox-release-gate:
