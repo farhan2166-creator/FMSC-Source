@@ -232,7 +232,7 @@ def main():
             # Only the enumerated synthetic report stages and integer SQL
             # error numbers are eligible for release CI diagnostics.
             report_errors = re.findall(
-                r"^REPORT_SQL_FAIL: (initial fixture|reconciliation and register|outstanding debt|collection receipts) SQL ([0-9]{1,8})\\s*$",
+                r"^REPORT_SQL_FAIL: (initial fixture|reconciliation and register|outstanding debt|collection receipts) SQL ([0-9]{1,8})\s*$",
                 result.stdout + result.stderr, re.MULTILINE)
             report_location = (["Report fixture " + report_errors[-1][0] +
                 " SQL " + report_errors[-1][1]]) if report_errors else []
