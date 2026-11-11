@@ -16,6 +16,7 @@ on:
       - 'Installer/**'
       - 'DatabaseHelper.cs'
       - 'Core/DatabaseCompatibility.cs'
+      - 'Core/DatabaseCompatibility*Requirements.json'
       - 'Services/Communication/Schema.sql'
       - 'Tests/LifecycleSqlChecks/Baseline/**'
       - 'Tools/RunDisposableWindowsInstall.ps1'
