@@ -53,7 +53,11 @@ try {
         Set-Content -LiteralPath (Join-Path $folder '999999.sql') -Value '-- retired output fixture'
         Set-Content -LiteralPath (Join-Path $folder 'retained.txt') -Value 'preserve unrelated output'
     }
-    $tfmOverride = if ($ProbeTargetFramework) { @("-p:TargetFramework=$ProbeTargetFramework") } else { @() }
+    # The opt-in compatibility probe tracks WFO1000 design-time metadata
+    # separately. Never alter production's default compiler diagnostics.
+    $tfmOverride = if ($ProbeTargetFramework) {
+        @("-p:TargetFramework=$ProbeTargetFramework",'-p:NoWarn=WFO1000')
+    } else { @() }
     $output = & dotnet publish (Join-Path $ProjectDirectory 'FMSC_SMS.csproj') `
         -c Release -r win-x64 --self-contained true -p:PublishProfile=PortableRelease `
         "-p:PublishDir=$application/" "-p:ReleaseRoot=$release/" `
