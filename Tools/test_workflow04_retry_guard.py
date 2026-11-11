@@ -17,6 +17,7 @@ WORKFLOW = ROOT / ".github/workflows/fmsc-workflow04-auto-retry.yml"
 SAFE = "Preflight, prepare or reuse next patch-version Source commit"
 GATE = "Require NEW private SQL, real installer and chaos acceptance"
 PACKAGE = "Verify and package Windows x64"
+PUBLISH = "Publish approved private update"
 
 
 def retry_filter():
@@ -32,13 +33,15 @@ def retry_filter():
 
 def response():
     return {
-        "total_count": 3,
+        "total_count": 4,
         "jobs": [
             {"name": SAFE, "status": "completed", "conclusion": "failure",
              "steps": [{"name": "Owner preflight", "conclusion": "failure"}]},
             {"name": GATE, "status": "completed", "conclusion": "skipped",
              "steps": []},
             {"name": PACKAGE, "status": "completed", "conclusion": "skipped",
+             "steps": []},
+            {"name": PUBLISH, "status": "completed", "conclusion": "skipped",
              "steps": []},
         ]
     }
@@ -72,16 +75,30 @@ class Workflow04SafeRetryTests(unittest.TestCase):
         candidate["jobs"][1]["steps"] = [{"name": "Sandbox acceptance failed", "conclusion": "failure"}]
         self.assertTrue(self.allowed(candidate), "Safe Sandbox-gate failures remain retryable")
 
-    def test_refuse_any_possible_package_execution(self):
+    def test_safe_retry_after_nonpublishing_package_failure(self):
+        candidate = response()
+        candidate["jobs"][0]["conclusion"] = "success"
+        candidate["jobs"][2]["conclusion"] = "failure"
+        candidate["jobs"][2]["steps"] = [
+            {"name": "Build verification failed", "conclusion": "failure"}]
+        self.assertTrue(self.allowed(candidate),
+                        "A failing build before publisher execution must remain retryable")
+        candidate["jobs"][2]["conclusion"] = "success"
+        candidate["jobs"][2]["steps"][0]["conclusion"] = "success"
+        candidate["jobs"][1]["conclusion"] = "failure"
+        self.assertTrue(self.allowed(candidate),
+                        "A completed package cannot authorize publication or block safe retry")
+
+    def test_refuse_any_possible_publisher_execution(self):
         for conclusion in ("success", "failure", "cancelled", None):
             with self.subTest(conclusion=conclusion):
                 candidate = response()
-                candidate["jobs"][2]["conclusion"] = conclusion
-                candidate["jobs"][2]["steps"] = [
+                candidate["jobs"][3]["conclusion"] = conclusion
+                candidate["jobs"][3]["steps"] = [
                     {"name": "Completely renamed publication", "conclusion": conclusion}]
                 self.assertFalse(self.allowed(candidate))
         candidate = response()
-        candidate["jobs"][2]["steps"] = [
+        candidate["jobs"][3]["steps"] = [
             {"name": "Renamed publisher", "conclusion": "success"}]
         self.assertFalse(self.allowed(candidate),
                          "A skipped job with an executed step is contradictory, not approval")
@@ -90,9 +107,9 @@ class Workflow04SafeRetryTests(unittest.TestCase):
         for mutate in (
             lambda v: v.pop("jobs"),
             lambda v: v.pop("total_count"),
-            lambda v: v.update(total_count=4),
+            lambda v: v.update(total_count=5),
             lambda v: v["jobs"].pop(),
-            lambda v: v["jobs"][2].update(name="New publication job label"),
+            lambda v: v["jobs"][3].update(name="New publication job label"),
             lambda v: v["jobs"].append({"name": "Extra potentially publishing job",
                                         "conclusion": "failure"}),
             lambda v: v["jobs"][1].update(name=v["jobs"][0]["name"]),
