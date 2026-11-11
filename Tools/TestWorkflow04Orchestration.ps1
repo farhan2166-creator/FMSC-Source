@@ -6,7 +6,7 @@ $prep=Get-Content (Join-Path $root 'Tools/PrepareWorkflow04Release.ps1') -Raw
 $dispatch=Get-Content (Join-Path $root 'Tools/DispatchSandboxAcceptance.ps1') -Raw
 $wait=Get-Content (Join-Path $root 'Tools/WaitForSandboxAttestation.ps1') -Raw
 function Check([bool]$Pass,[string]$Failure) { if (-not $Pass) { throw "Workflow04 regression: $Failure" } }
-foreach ($name in @('PrepareWorkflow04Release.ps1','AssertWorkflow04MigrationInventory.ps1','ResolveWorkflow04Version.ps1','DispatchSandboxAcceptance.ps1','WaitForSandboxAttestation.ps1','AssertSandboxPublicationGate.ps1')) {
+foreach ($name in @('PrepareWorkflow04Release.ps1','AssertWorkflow04MigrationInventory.ps1','ResolveWorkflow04Version.ps1','ReadWorkflow04SourceVersions.ps1','DispatchSandboxAcceptance.ps1','WaitForSandboxAttestation.ps1','AssertSandboxPublicationGate.ps1')) {
     $tokens=$null;$errors=$null
     $null=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root ('Tools/'+$name)),[ref]$tokens,[ref]$errors)
     Check (@($errors).Count -eq 0) "PowerShell parser errors in $name."
@@ -19,18 +19,42 @@ Check ($workflow.Contains('AssertSandboxPublicationGate.ps1 -SourceSha') -and $w
 Check ($workflow.IndexOf('  prepare:') -gt 0 -and
     $workflow.IndexOf('  prepare:') -lt $workflow.IndexOf('  sandbox-release-gate:') -and
     $workflow.IndexOf('  sandbox-release-gate:') -lt $workflow.IndexOf('  package:')) 'Release job dependency order is unsafe.'
-# Release version parsing must match the literal "$AppVersion" and
-# "$DatabaseVersion" variables in the existing installer.
+# Execute exactly the parser Workflow 04 uses, with synthetic installer
+# values. A refactor of regex formatting or whitespace must not itself block
+# releases; invalid, duplicated or noncanonical assignments still do.
+. (Join-Path $root 'Tools/ReadWorkflow04SourceVersions.ps1')
 $core=Get-Content -LiteralPath (Join-Path $root 'Installer/core.ps1') -Raw
-$appPattern='(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$'
-$schemaPattern='(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$'
-$appParserMarker='[regex]::Match($core,'+[char]39+'(?m)^\'+[char]36+'AppVersion'
-$schemaParserMarker='[regex]::Match($core,'+[char]39+'(?m)^\'+[char]36+'DatabaseVersion'
-Check ($prep.Contains($appParserMarker) -and $prep.Contains($schemaParserMarker)) 'Parser must use literal-dollar version matching.'
-Check ([regex]::Matches($core,$appPattern).Count -eq 1 -and
-    [regex]::Matches($core,$schemaPattern).Count -eq 1) 'Current installer version assignments are not uniquely detectable.'
-Check ([regex]::Match($core,$appPattern).Groups[1].Value -match '^[0-9]+\.[0-9]+\.[0-9]+$') 'Current app version is invalid.'
-Check ([int][regex]::Match($core,$schemaPattern).Groups[1].Value -ge 7) 'Schema is below frozen private schema-7 baseline.'
+$actual=Read-FmscWorkflow04SourceVersions -InstallerText $core
+Check ($actual.AppVersion -match '^[0-9]+\.[0-9]+\.[0-9]+$') 'Current app version is invalid.'
+Check ($actual.Schema -ge 7) 'Current schema is below the supported private upgrade baseline.'
+$parserAstTokens=$null;$parserAstErrors=$null
+$prepParserAst=[Management.Automation.Language.Parser]::ParseInput($prep,[ref]$parserAstTokens,[ref]$parserAstErrors)
+$readers=@($prepParserAst.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.CommandAst] -and
+    $node.GetCommandName() -ceq 'Read-FmscWorkflow04SourceVersions'
+},$true))
+Check ($readers.Count -eq 1) 'Release preparation must call the tested version parser.'
+function Assert-VersionParse {
+    param([string]$Case,[string]$Text,[bool]$Expected)
+    $passed=$true
+    try { $null=Read-FmscWorkflow04SourceVersions -InstallerText $Text }
+    catch { $passed=$false }
+    Check ($passed -eq $Expected) "Release version parser behavior: $Case."
+}
+$sample=@(
+    '$AppVersion = ''1.2.37'''
+    '$DatabaseVersion = ''42'''
+) -join "`n"
+Assert-VersionParse 'valid future source line' $sample $true
+Assert-VersionParse 'whitespace-independent valid source' ($sample -replace ' = ','  =  ') $true
+Assert-VersionParse 'duplicate source version rejected' ($sample+"`n"+'$AppVersion = ''1.2.38''') $false
+Assert-VersionParse 'duplicate schema target rejected' ($sample+"`n"+'$DatabaseVersion = ''43''') $false
+Assert-VersionParse 'missing version rejected' '$DatabaseVersion = ''42''' $false
+Assert-VersionParse 'invalid version rejected' ($sample.Replace('1.2.37','1.02.37')) $false
+Assert-VersionParse 'leading-zero schema rejected' ($sample.Replace("''42''","''042''")) $false
+Assert-VersionParse 'zero schema rejected' ($sample.Replace("''42''","''0''")) $false
+Assert-VersionParse 'overflow schema rejected' ($sample.Replace("''42''","''2147483648''")) $false
 # Verify migration safety by executing the current inventory validator
 # against throwaway file sets. Never demand yesterday's error-message wording,
 # fixture count or schema number.
@@ -62,7 +86,7 @@ try {
     Assert-MigrationOutcome 'missing migration directory must refuse' $false 7 (Join-Path $scratch 'missing')
     Assert-MigrationOutcome 'retirement-only schema cannot release' $false 8 $base
 
-    $newTarget=[Math]::Min(9999,[Math]::Max(9,([int][regex]::Match($core,$schemaPattern).Groups[1].Value+3)))
+    $newTarget=[Math]::Min(9999,[Math]::Max(9,($actual.Schema+3)))
     $forward=Join-Path $scratch 'future'
     $null=New-Item -Path $forward -ItemType Directory
     foreach($v in 2..$newTarget) {
@@ -80,7 +104,7 @@ try {
     Assert-MigrationOutcome 'unexpected SQL file must block' $false $newTarget $forward
     Remove-Item -LiteralPath (Join-Path $forward 'notes.sql')
     Assert-MigrationOutcome 'restored valid chain remains accepted' $true $newTarget $forward
-    $actualSchema=[int][regex]::Match($core,$schemaPattern).Groups[1].Value
+    $actualSchema=$actual.Schema
     Assert-MigrationOutcome 'checked-in migration inventory matches current installer schema' $true $actualSchema (Join-Path $root 'Migrations')
 }
 finally {
