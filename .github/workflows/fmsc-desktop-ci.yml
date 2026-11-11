@@ -190,6 +190,10 @@ jobs:
         shell: powershell
         run: .\Tools\TestInstallerMigrations.ps1
 
+      - name: Verify standalone uninstaller protects data (synthetic)
+        shell: powershell
+        run: .\Tools\TestStandaloneUninstall.ps1
+
       - name: Verify normal launcher creates no PowerShell console
         shell: powershell
         run: .\Tools\TestWindowlessLauncher.ps1

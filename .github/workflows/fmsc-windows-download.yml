@@ -173,6 +173,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows Git key/transport checks failed.' }
           & .\Tools\TestOfflineSqlPrerequisites.ps1
           & .\Tools\TestPreparedUpdate.ps1
+          & .\Tools\TestStandaloneUninstall.ps1
           & .\Tools\TestWindowlessLauncher.ps1
           & .\Tools\TestInstallerMigrations.ps1
           & .\Tools\TestUpdateCleanup.ps1
@@ -207,6 +208,8 @@ jobs:
               'UpdateTransport/cmd/git.exe', 'UpdateTransport/usr/bin/ssh.exe',
               'UpdateTransport/COPYING-GIT.txt',
               'UpdateTransport/THIRD_PARTY_NOTICES.txt',
+              'FMSC.Uninstall.exe',
+              'UpdateSupport/Uninstall-FMSC.ps1',
               'UpdateSupport/Tools/SqlCmd/sqlcmd.exe',
               'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
               'UpdateSupport/Tools/VcRedist/vc_redist.x64.exe',
