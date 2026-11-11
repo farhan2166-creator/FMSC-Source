@@ -195,25 +195,26 @@ function Open-UpdateWindow {
     $header = New-Object Windows.Forms.Panel
     $header.SetBounds(0,0,$clientWidth,138)
     $header.BackColor = [Drawing.Color]::White
-    # The circular FMSC icon is already embedded in FMSC.Setup.exe. Use it
-    # directly rather than a separate asset or placeholder letter.
+    # WinForms can display scrambled pixels when converting PNG-compressed ICO
+    # entries with Icon.ToBitmap(). Use the approved circular PNG for the header
+    # and reserve the embedded ICO for the native window/taskbar icon.
     $mark = New-Object Windows.Forms.PictureBox
     $mark.SetBounds(30,38,54,54)
     $mark.SizeMode = [Windows.Forms.PictureBoxSizeMode]::Zoom
     $mark.BackColor = [Drawing.Color]::White
-    # The packaged circular ICO has higher-resolution sizes than some EXE
-    # icon extractors return. Fall back to the verified launcher's icon.
     foreach ($logoRoot in @($AppSource, $AppDir)) {
         if ([string]::IsNullOrWhiteSpace([string]$logoRoot)) { continue }
         try {
-            $logoPath = Join-Path $logoRoot 'Assets\FMSC_Logo_Circular.ico'
+            $logoPath = Join-Path $logoRoot 'Assets\FMSC_Logo_Circular.png'
             if (-not (Test-Path -LiteralPath $logoPath -PathType Leaf)) { continue }
-            $logoIcon = [Drawing.Icon]::new($logoPath, [Drawing.Size]::new(64,64))
-            try { $mark.Image = $logoIcon.ToBitmap() }
-            finally { $logoIcon.Dispose() }
+            # Clone before closing the file so the setup payload can be moved or
+            # cleaned without holding a lock on the artwork.
+            $logoImage = [Drawing.Image]::FromFile($logoPath)
+            try { $mark.Image = [Drawing.Bitmap]::new($logoImage) }
+            finally { $logoImage.Dispose() }
             break
         } catch {
-            # Branding is optional during recovery; never block installation.
+            # Branding is cosmetic during recovery; never block installation.
         }
     }
     if (-not $mark.Image -and $brandIcon) { $mark.Image = $brandIcon.ToBitmap() }
