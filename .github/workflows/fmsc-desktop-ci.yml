@@ -110,6 +110,9 @@ jobs:
       - name: Compile native WinForms smoke checks
         run: dotnet build Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release
 
+      - name: Verify all current SQL compatibility contracts are embedded
+        run: dotnet run --project Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release --no-build -- --compatibility-contract-inventory
+
       - name: Verify maintenance tool lifecycle without downloads or SQL
         shell: pwsh
         run: .\Tools\TestMaintenanceTools.ps1
