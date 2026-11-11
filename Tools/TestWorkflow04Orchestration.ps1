@@ -74,8 +74,11 @@ foreach ($case in $refused) {
 Check ($prep.Contains('FMSC_SANDBOX_DISPATCH_TOKEN') -and $prep.Contains('FMSC_UPDATES_PUBLISH_TOKEN')) 'Release secrets are not checked before version commit.'
 Check ($dispatch.Contains('fmsc/sandbox-mdf-ldf/v2') -and $dispatch.Contains('previous_status_id=') -and $dispatch.Contains("ref='main'") -and $dispatch.Contains('source_sha=$SourceSha')) 'Dispatch lacks pinned commit/status baseline.'
 $gate=Get-Content (Join-Path $root 'Tools/AssertSandboxPublicationGate.ps1') -Raw
-Check ($gate.Contains('fmsc/sandbox-mdf-ldf/v2') -and $gate.Contains('expectedDescription') -and
-    $gate.Contains('targetSchema')) 'Publication gate is not bound to the declared migration target.'
+Check ($gate.Contains('fmsc/sandbox-mdf-ldf/v2') -and
+    $gate.Contains('Installer/core.ps1') -and
+    $gate.Contains('$targetSchema') -and
+    $gate.Contains('commits/$SourceSha/statuses') -and
+    -not $gate.Contains('expectedDescription')) 'Publication gate must validate the checked-out schema and exact commit, not fixed fixture descriptions.'
 Check ($prep.Contains('$targetSchema -ne 8') -and $gate.Contains('$targetSchema -eq 8')) 'Retirement-only schema 8 must be blocked by both release preparation and the final gate.'
 Check ($wait.Contains('$PreviousStatusId') -and $wait.Contains('fmsc/sandbox-mdf-ldf/v2') -and
     $wait.Contains('AssertSandboxPublicationGate.ps1')) 'Wait accepts old or untrusted private status.'
