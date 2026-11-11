@@ -229,9 +229,16 @@ def main():
             admin_lines = re.findall(r"Tests[/\\]AdministrationSqlChecks[/\\]Program\.cs:line (\d+)",
                                      result.stdout + result.stderr)
             admin_location = ["Administration fixture source line " + admin_lines[-1]] if admin_lines else []
+            # Only the enumerated synthetic report stages and integer SQL
+            # error numbers are eligible for release CI diagnostics.
+            report_errors = re.findall(
+                r"^REPORT_SQL_FAIL: (initial fixture|reconciliation and register|outstanding debt|collection receipts) SQL ([0-9]{1,8})\\s*$",
+                result.stdout + result.stderr, re.MULTILINE)
+            report_location = (["Report fixture " + report_errors[-1][0] +
+                " SQL " + report_errors[-1][1]]) if report_errors else []
+            safe = errors + codes + fixture_error + manifest_error + admin_location + report_location
             raise RuntimeError("Child command failed with exit " + str(result.returncode) +
-                               ("; " + " | ".join((errors + codes + fixture_error + manifest_error + admin_location)[-3:])
-                                if errors or codes or fixture_error or manifest_error or admin_location else ""))
+                               ("; " + " | ".join(safe[-3:]) if safe else ""))
         return result.stdout + result.stderr
 
     def stage(name, action):
