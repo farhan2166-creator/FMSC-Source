@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using System.Text.RegularExpressions;
 
 namespace FMSC_SMS.Core;
 
@@ -7,11 +8,29 @@ namespace FMSC_SMS.Core;
 // Baseline labels never bypass the complete structural compatibility contract.
 internal static class DatabaseCompatibility
 {
-    private static readonly Lazy<string[]> Requirements = new(() => new[]
+    // All current schema contracts are included by the project wildcard.
+    // A new DatabaseCompatibilitySchemaNNRequirements.json becomes part of
+    // every validation automatically; older names are not a release ceiling.
+    private const string RequirementsPrefix = "FMSC_SMS.Core.DatabaseCompatibility";
+    private const string BaseRequirements = RequirementsPrefix + "Requirements.json";
+    private static readonly Lazy<string[]> Requirements = new(() =>
     {
-        LoadRequirements("FMSC_SMS.Core.DatabaseCompatibilityRequirements.json"),
-        LoadRequirements("FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json"),
-        LoadRequirements("FMSC_SMS.Core.DatabaseCompatibilitySchema12Requirements.json")
+        var names = typeof(DatabaseCompatibility).Assembly.GetManifestResourceNames()
+            .Where(name => name.StartsWith(RequirementsPrefix, StringComparison.Ordinal) &&
+                           name.EndsWith("Requirements.json", StringComparison.Ordinal))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        if (!names.Contains(BaseRequirements, StringComparer.Ordinal) ||
+            names.Any(name => name != BaseRequirements &&
+                !Regex.IsMatch(name,
+                    @"^FMSC_SMS\.Core\.DatabaseCompatibilitySchema[1-9][0-9]*Requirements\.json$")))
+        {
+            throw new DatabaseCompatibilityException(new(
+                DatabaseCompatibilityIssue.ApplicationDefinition,
+                DatabaseHelper.RequiredDatabaseSchemaVersion,
+                Details: "The application's database compatibility resource inventory is missing or incorrectly named."));
+        }
+        return names.Select(LoadRequirements).ToArray();
     });
 
     private static string LoadRequirements(string resourceName)
