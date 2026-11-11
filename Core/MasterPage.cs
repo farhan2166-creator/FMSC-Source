@@ -141,7 +141,7 @@ public partial class MasterPage : V2Page, IUnsavedChanges, IBusyPage
     private readonly string? _recordIdColumn;
     private bool _updatingGridBoolean;
     private bool _gridLayoutPending;
-    private readonly List<(Control Control, bool Multiline)> _editorFields = new();
+    private readonly List<(Control Control, bool Multiline, bool StartNewRow, bool SpanRow)> _editorFields = new();
     /// <summary>The editor values as they were when the record was loaded, cleared or saved.</summary>
     private readonly MasterEditorChangeTracker _changeTracker;
     private bool IsSetupForm => GetType().Namespace?.StartsWith("FMSC_SMS.Pages.Setup", StringComparison.Ordinal) == true;
@@ -331,7 +331,7 @@ public partial class MasterPage : V2Page, IUnsavedChanges, IBusyPage
                 Control fieldControl =
                     CreateField(rowFields[column]);
                 _editorFields.Add(
-                    (fieldControl, rowFields[column].Multiline));
+                    (fieldControl, rowFields[column].Multiline, false, false));
                 editor.Controls.Add(
                     fieldControl,
                     column,
