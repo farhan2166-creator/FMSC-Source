@@ -179,8 +179,8 @@ The school's **SSH authorization key is separate** and is still required.
 3. Complete field acceptance of reconnect/resume under actual network disruption.
    Verified chunk caching, bounded retries, live transfer figures and a determinate
    download bar are implemented and covered by fault-injection tests. Close cancels
-   preparation and preserves verified chunks. Remind Me Later dismisses this manual
-   check (it does not schedule a notification).
+   preparation and preserves verified chunks. The single centered Close button
+   dismisses this manual check (it does not schedule a notification).
 4. Complete disposable Windows/LocalDB acceptance of the connected installer
    handoff, including actual pre-migration backup, migration and rollback recovery.
 5. Accept the guarded manual publisher described below against the private
