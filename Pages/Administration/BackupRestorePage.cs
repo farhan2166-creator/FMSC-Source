@@ -143,6 +143,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         backupCard.Content.Controls.Add(localOnlyNotice);
         void FitBackupNotice()
         {
+            if (backupCard.Content.ClientSize.Width <= 0)
+                return;
             int textWidth = Math.Max(1, backupCard.Content.ClientSize.Width -
                 backupCard.Content.Padding.Horizontal - AppMetrics.SpacingLg -
                 SystemInformation.VerticalScrollBarWidth);
