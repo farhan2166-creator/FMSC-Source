@@ -111,7 +111,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                    "Keep verified backups both locally and off this computer."
         };
         var backupFields = new TableLayoutPanel {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
+            Height = AppMetrics.FieldRowHeight + 2 * AppMetrics.ButtonRowHeight + AppMetrics.SpacingXs,
             ColumnCount = 1,
             RowCount = 3,
             Padding = new Padding(2, 4, 2, 0)
@@ -135,23 +136,60 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             canRestore ? CreateActionRow(cloudSettingsButton!, cloudBackupButton!)
                        : CreateActionRow(cloudBackupButton!),
             0, 2);
+        // Each upper card can scroll independently when the available half-height
+        // is smaller than its actions and warnings (compact windows / high DPI).
+        backupCard.Content.AutoScroll = true;
         backupCard.Content.Controls.Add(backupFields);
         backupCard.Content.Controls.Add(localOnlyNotice);
+        void FitBackupNotice()
+        {
+            int textWidth = Math.Max(1, backupCard.Content.ClientSize.Width -
+                backupCard.Content.Padding.Horizontal - AppMetrics.SpacingLg -
+                SystemInformation.VerticalScrollBarWidth);
+            int textHeight = TextRenderer.MeasureText(
+                localOnlyNotice.Text, localOnlyNotice.Font,
+                new Size(textWidth, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl).Height;
+            localOnlyNotice.Height = Math.Max(
+                AppMetrics.TextHeight(localOnlyNotice.Font),
+                textHeight + AppMetrics.SpacingSm);
+            backupCard.Content.AutoScrollMinSize = new Size(
+                0, localOnlyNotice.Height + backupFields.Height +
+                   backupCard.Content.Padding.Vertical);
+        }
+        backupCard.Content.SizeChanged += (_, _) => FitBackupNotice();
+
+        // 50% actions above, 50% backup history / recorded file paths below.
+        // The upper half is itself split evenly between Backup and Restore.
         var root = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = canRestore ? 3 : 2
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute,
-            AppMetrics.FieldCardHeight(1) + 2 * AppMetrics.ButtonRowHeight + localOnlyNotice.Height));
-        root.Controls.Add(backupCard, 0, 0);
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        var upper = new TableLayoutPanel {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 0, 0, AppMetrics.SpacingXs)
+        };
+        upper.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        upper.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        upper.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        backupCard.Margin = new Padding(0, 0, canRestore ? AppMetrics.SpacingXs : 0, 0);
+        upper.Controls.Add(backupCard, 0, 0);
         if (canRestore)
         {
             var restoreCard = HumanUi.Card(
                 "Restore",
                 "Replace current school data with a saved backup. Newer records will be replaced.");
             var restoreFields = new TableLayoutPanel {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
                 ColumnCount = 1,
                 RowCount = 4,
                 Padding = new Padding(2, 4, 2, 0)
@@ -211,14 +249,14 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 2);
             restoreFields.Controls.Add(
                 CreateActionRow(cloudChooseRestoreButton!), 0, 3);
+            restoreFields.Height = AppMetrics.FieldRowHeight +
+                restoreStatusHeight + 2 * AppMetrics.ButtonRowHeight + AppMetrics.SpacingXs;
+            restoreCard.Content.AutoScroll = true;
             restoreCard.Content.Controls.Add(restoreFields);
-            root.RowStyles.Add(
-                new RowStyle(
-                    SizeType.Absolute,
-                    AppMetrics.FieldCardHeight(1) +
-                    2 * AppMetrics.ButtonRowHeight +
-                    restoreStatusHeight));
-            root.Controls.Add(restoreCard, 0, 1);
+            restoreCard.Content.AutoScrollMinSize = new Size(
+                0, restoreFields.Height + restoreCard.Content.Padding.Vertical);
+            restoreCard.Margin = new Padding(AppMetrics.SpacingXs, 0, 0, 0);
+            upper.Controls.Add(restoreCard, 1, 0);
             /* No selected file means unverified, not valid. */
             ShowRestoreFileStatus(RestoreFileState.None, null);
         }
@@ -226,9 +264,13 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             "Backup & Restore History",
             "Every backup and restore operation performed from this application.");
         historyCard.Content.Controls.Add(Grid);
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.Controls.Add(historyCard, 0, canRestore ? 2 : 1);
+        historyCard.Margin = new Padding(0, AppMetrics.SpacingXs, 0, 0);
+        if (!canRestore)
+            upper.SetColumnSpan(backupCard, 2);
+        root.Controls.Add(upper, 0, 0);
+        root.Controls.Add(historyCard, 0, 1);
         SetContent(root);
+        FitBackupNotice();
         LoadBackupFolder();
         /* Keep history-dependent actions disabled until loading succeeds. */
         CloseHistoryDependentActions();
