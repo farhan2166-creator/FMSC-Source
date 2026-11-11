@@ -42,6 +42,13 @@ public class ApplicationWindowForm : Form
         }
     }
     protected void SetSaveShortcut(ModernButton button) => saveShortcutController.SetSaveButton(button);
+    protected void SetResponsiveContentMinimum(Size requestedDialogClientSize)
+    {
+        if (viewport is null) return;
+        // The custom caption occupies client space but is outside the scrolling content.
+        viewport.SetContentMinimum(new Size(requestedDialogClientSize.Width,
+            Math.Max(0, requestedDialogClientSize.Height - (caption?.Height ?? 0))));
+    }
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         if (PageActionShortcutController.ActiveContent(this).Controller.TryHandle(keyData))
