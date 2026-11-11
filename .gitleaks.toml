@@ -53,6 +53,9 @@ regexes = ['''^[0-9a-f]{40}$''']
 description = "Exact public FMSC Dropbox OAuth app key in provider registration only"
 targetRules = ["dropbox-api-token"]
 condition = "AND"
-paths = ['''^CloudBackupProviders\.json$''']
+paths = ['''(?:^|/)CloudBackupProviders\.json
+regexTarget = "secret"
+regexes = ['''^0adfv6ob4m6pxca$''']
+'']
 regexTarget = "secret"
 regexes = ['''^0adfv6ob4m6pxca$''']
