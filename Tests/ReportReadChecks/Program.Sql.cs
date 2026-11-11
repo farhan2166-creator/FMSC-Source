@@ -113,7 +113,14 @@ internal static partial class Program
                 // fictional fixture; reject paths, SQL text and user input.
                 var column=System.Text.RegularExpressions.Regex.Match(ex.Message,
                     @"Invalid column name '([A-Za-z_][A-Za-z0-9_]{0,63})'");
-                if(column.Success)
+                var allowedIdentifiers=new HashSet<string>(StringComparer.Ordinal) {
+                    "RegistrationNumber","AdmissionNumberBase","AdmissionNumberSuffix",
+                    "GrossAmount","ChargeDate","DueDate","FeeSort","CampusSort","ClassSort",
+                    "SectionSort","StudentName","FatherName","Gender","ClassName",
+                    "SectionName","FeeTypeName","FeeTypeId","PaidAmount","Outstanding",
+                    "BillingChargeId","Status","EnrollmentId","DisplayOrder"
+                };
+                if(column.Success && allowedIdentifiers.Contains(column.Groups[1].Value))
                     Console.Error.WriteLine($"REPORT_COLUMN_FAIL: {sqlStage} {column.Groups[1].Value}");
             }
             throw;
