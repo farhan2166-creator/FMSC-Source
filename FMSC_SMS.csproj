@@ -193,9 +193,8 @@
 		<None Remove="Assets\students.png" />
 	</ItemGroup>
 	<ItemGroup>
-		<EmbeddedResource Include="Core\DatabaseCompatibilityRequirements.json" />
-		<EmbeddedResource Include="Core\DatabaseCompatibilitySchema10Requirements.json" />
-		<EmbeddedResource Include="Core\DatabaseCompatibilitySchema12Requirements.json" />
+		<!-- Include every current/future schema contract; no fixed schema-specific list. -->
+		<EmbeddedResource Include="Core\DatabaseCompatibility*Requirements.json" />
 		<EmbeddedResource Include="Core\PermissionCatalog.json" LogicalName="FMSC_SMS.Core.PermissionCatalog.json" />
 		<EmbeddedResource Include="Pages\Students\Admissions\PlacementCorrection.sql" />
 		<EmbeddedResource Include="Pages\Students\Admissions\MissingPlacementWindows.sql" />
