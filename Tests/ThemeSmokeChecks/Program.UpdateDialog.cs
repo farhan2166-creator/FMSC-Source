@@ -14,7 +14,8 @@ internal static partial class Program
             foreach (string action in new[] { "Close", "Remind Me Later" })
             {
                 using var parent = new Form(); parent.Show();
-                using var dialog = new UpdateConnectionForm(() => (enrolled, enrolled ? "ssh-rsa fictional-public-key" : ""));
+                using var dialog = new UpdateConnectionForm(() => (enrolled, enrolled ? "ssh-rsa fictional-public-key" : ""),
+                    networkAvailable: () => true, verifyAuthorization: _ => Task.CompletedTask);
                 dialog.Show(parent); Application.DoEvents();
                 var area = Screen.FromControl(parent).WorkingArea;
                 void CheckScreenCenter() => Check(
@@ -22,9 +23,18 @@ internal static partial class Program
                     Math.Abs(dialog.Top + dialog.Height / 2 - (area.Top + area.Height / 2)) <= 2,
                     "Update window is centered on the owner's screen, including after access details change");
                 CheckScreenCenter();
-                Check(Find(dialog, "Check for Updates").Enabled == enrolled, "Checking requires a prepared computer key");
+                Check(!Find(dialog, "Check for Updates").Enabled,
+                    "A locally generated key is not proof of GitHub authorization");
                 var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(dialog)!;
-                Check(panel.Visible == !enrolled, "Enrolled computers start with compact access details");
+                Check(panel.Visible, "Unverified computers keep their public-key controls visible");
+                if (enrolled)
+                {
+                    // Explicit live verification is what transitions to the existing compact update view.
+                    using var unused = new CancellationTokenSource();
+                    Find(dialog, "Verify access").PerformClick(); Application.DoEvents();
+                    Check(Find(dialog, "Check for Updates").Enabled && !panel.Visible,
+                        "Only a successfully verified Git connection enables update checking");
+                }
                 var access = Find(dialog, "Computer access").Parent!;
                 Check(Math.Abs(access.Left + access.Width / 2 - access.Parent!.ClientSize.Width / 2) <= 2,
                     "Computer access button and status are centered as one group");
@@ -37,7 +47,12 @@ internal static partial class Program
                     .All(label => label.TextAlign == ContentAlignment.MiddleCenter),
                     "Heading and version labels use centered text");
                 Find(dialog, "Computer access").PerformClick(); Application.DoEvents(); CheckScreenCenter();
+                Check(panel.Visible, "Computer access always shows pending key details");
                 Find(dialog, "Computer access").PerformClick(); Application.DoEvents(); CheckScreenCenter();
+                Check(panel.Visible == !enrolled, "Only approved computers may collapse their key details");
+                var viewport = Descendants(dialog).OfType<ResponsiveViewport>().Single();
+                Check(!viewport.HorizontalScroll.Visible && !viewport.VerticalScroll.Visible,
+                    "Switching computer access details must not leave obsolete viewport scrollbars");
                 var buttons = Descendants(dialog).OfType<ModernButton>().Where(b => b.Visible).ToArray();
                 foreach (var button in buttons)
                     Check(button.Right <= button.Parent!.ClientSize.Width && button.Bottom <= button.Parent.ClientSize.Height,
@@ -53,6 +68,40 @@ internal static partial class Program
                 Find(dialog, action).PerformClick(); Application.DoEvents();
                 Check(dialog.IsDisposed && !dialog.Visible, action + " actually closes a modeless update window");
             }
+        }
+        // Reproduce the reported Generate key -> hidden textbox / enabled check failure
+        // without touching the real Windows user's protected SSH credential.
+        bool keyGenerated = false;
+        int deniedChecks = 0;
+        using (var parent = new Form())
+        using (var dialog = new UpdateConnectionForm(
+            () => (keyGenerated, keyGenerated ? "ssh-rsa synthetic-pending-key" : ""),
+            networkAvailable: () => true,
+            verifyAuthorization: _ => { deniedChecks++; return Task.FromException(new IOException("Approval pending")); },
+            generateEnrollment: () => { keyGenerated = true; return "ssh-rsa synthetic-pending-key"; }))
+        {
+            parent.Show(); dialog.Show(parent); Application.DoEvents();
+            var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(dialog)!;
+            Find(dialog, "Computer access").PerformClick(); Application.DoEvents();
+            Check(panel.Visible, "Computer access cannot hide the enrollment form before a key exists");
+            Find(dialog, "Generate key").PerformClick(); Application.DoEvents();
+            var key = (TextBox)typeof(UpdateConnectionForm).GetField("_publicKey", fields)!.GetValue(dialog)!;
+            Check(key.Text == "ssh-rsa synthetic-pending-key" && panel.Visible &&
+                  Find(dialog, "Copy public key").Enabled && Find(dialog, "Verify access").Enabled,
+                "Generating a key leaves it visible and copyable while approval is pending");
+            Check(!Find(dialog, "Check for Updates").Enabled,
+                "Generating a local private key never enables an update check");
+            Find(dialog, "Verify access").PerformClick(); Application.DoEvents();
+            Check(deniedChecks == 1 && panel.Visible && !Find(dialog, "Check for Updates").Enabled,
+                "Denied GitHub authorization keeps the public key visible and updates blocked");
+            var checkMethod = typeof(UpdateConnectionForm).GetMethod("CheckNowAsync", fields)!;
+            ((Task)checkMethod.Invoke(dialog, null)!).GetAwaiter().GetResult();
+            Check(deniedChecks == 1 && !Find(dialog, "Check for Updates").Enabled &&
+                  Descendants(dialog).OfType<Label>().Any(label => label.Text.Contains("Verify computer access")),
+                "Even a direct update check call refuses an unverified local key");
+            var viewport = Descendants(dialog).OfType<ResponsiveViewport>().Single();
+            Check(!viewport.HorizontalScroll.Visible && !viewport.VerticalScroll.Visible,
+                "Generate-key and rejected-authorization states do not introduce scrollbars");
         }
         var prepared = new PreparedUpdate("1.2.0", "unused-stage", "unused-metadata", UpdateDownloadChoice.Full, false);
         foreach (string phase in new[] { "Prepared", "Migrating", "Activating", "Verified", "Completed", "Aborted" })
