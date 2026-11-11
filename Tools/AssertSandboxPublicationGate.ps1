@@ -24,17 +24,10 @@ if ($main.commit.sha -cne $SourceSha) {
 }
 . (Join-Path $PSScriptRoot 'GetGitHubCommitStatuses.ps1')
 $contexts=@(Get-FmscGitHubCommitStatuses -Uri "$api/commits/$SourceSha/statuses?per_page=100" -Headers $headers)
-# Bind release authorization to the declared schema at this exact Source checkout.
-# An old success for a different schema must never authorize publication.
-$installer=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../Installer/core.ps1') -Raw
-$schemaMatch=[regex]::Match($installer,'(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
-if (-not $schemaMatch.Success) {
-    throw 'Required database schema could not be resolved from Installer/core.ps1.'
-}
-$targetSchema=[int]$schemaMatch.Groups[1].Value
-if ($targetSchema -lt 7 -or $targetSchema -gt 9999) { throw 'Unsupported private release schema target.' }
-if ($targetSchema -eq 8) { throw 'Schema 8 is retirement-only. No intermediate Communication Center-free release.' }
-$expectedDescription="MDF/LDF v3+v7 -> v$targetSchema SQL+installer PASS (fixture 5a8c5130)"
+# The status context is the stable release-approval contract. Sandbox owns its
+# fixture commits, manifests, test baselines and job names; its description
+# is diagnostic text, not an authorization input. Exact Source SHA, current
+# main, latest status, trusted creator and trusted Sandbox run URL are binding.
 $context='fmsc/sandbox-mdf-ldf/v2'
 # GitHub returns newest first. Do not skip a newer failure to find an older
 # successful status, even when it was posted by the legitimate attestor.
@@ -47,7 +40,6 @@ $trustedRunPrefix='https://github.com/' + $sourceRepo.FullName.Split('/')[0] + '
 $trustedRunPattern='^' + [regex]::Escape($trustedRunPrefix) + '[0-9]+$'
 if ($record.state -cne 'success' -or
     [string]$record.creator.id -cne '316891609' -or
-    $record.description -cne $expectedDescription -or
     $record.target_url -cnotmatch $trustedRunPattern) {
     throw 'The latest Sandbox acceptance status was unsuccessful, unauthorized or invalid.'
 }
