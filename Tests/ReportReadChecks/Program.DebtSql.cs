@@ -5,10 +5,13 @@ internal static partial class Program
     // Invoked only by --sql inside the runner's owned disposable database.
     private static void CheckDebtSql(SqlConnection connection)
     {
+        // SQL Server compiles a batch before executing its ALTER TABLE clauses.
+        // Add DueDate in its own batch so subsequent UPDATE/INSERT statements
+        // bind the new column without a false SQL 207 failure.
+        Execute(connection,"ALTER TABLE dbo.BillingCharges ADD DueDate date NULL;");
         Execute(connection,"""
             ALTER TABLE dbo.Students ADD RegistrationNumber nvarchar(50),AdmissionNumberBase bigint,AdmissionNumberSuffix nvarchar(20);
             ALTER TABLE dbo.FeeTypes ADD DisplayOrder int NOT NULL DEFAULT(1);
-            ALTER TABLE dbo.BillingCharges ADD DueDate date NULL;
             UPDATE dbo.BillingCharges SET DueDate='2026-10-01';
             UPDATE dbo.BillingCharges SET DueDate='2026-11-01' WHERE BillingChargeId=3;
             INSERT dbo.Enrollments(EnrollmentId,AdmissionId,AcademicYearId,ClassSectionId,Status,EnrollmentDate,BillingStartDate)
