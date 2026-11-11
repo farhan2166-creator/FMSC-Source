@@ -6,19 +6,33 @@ $prep=Get-Content (Join-Path $root 'Tools/PrepareWorkflow04Release.ps1') -Raw
 $dispatch=Get-Content (Join-Path $root 'Tools/DispatchSandboxAcceptance.ps1') -Raw
 $wait=Get-Content (Join-Path $root 'Tools/WaitForSandboxAttestation.ps1') -Raw
 function Check([bool]$Pass,[string]$Failure) { if (-not $Pass) { throw "Workflow04 regression: $Failure" } }
-foreach ($name in @('PrepareWorkflow04Release.ps1','AssertWorkflow04MigrationInventory.ps1','ResolveWorkflow04Version.ps1','ReadWorkflow04SourceVersions.ps1','DispatchSandboxAcceptance.ps1','WaitForSandboxAttestation.ps1','AssertSandboxPublicationGate.ps1')) {
+foreach ($name in @('PrepareWorkflow04Release.ps1','AssertWorkflow04MigrationInventory.ps1','ResolveWorkflow04Version.ps1','ReadWorkflow04SourceVersions.ps1','DispatchSandboxAcceptance.ps1','WaitForSandboxAttestation.ps1','AssertSandboxPublicationGate.ps1','AssertWorkflow04Artifact.ps1')) {
     $tokens=$null;$errors=$null
     $null=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root ('Tools/'+$name)),[ref]$tokens,[ref]$errors)
     Check (@($errors).Count -eq 0) "PowerShell parser errors in $name."
 }
 Check ($workflow -match '(?m)^\s+default: true\s*$') 'Owner publication is not the default.'
-Check ($workflow.Contains('needs: [prepare, sandbox-release-gate]')) 'Package can bypass preparation or private SQL acceptance.'
+$packageMatch=[regex]::Match($workflow,'(?ms)^  package:\r?\n(.*?)(?=^  publish:\r?\n|\z)')
+$publisherMatch=[regex]::Match($workflow,'(?ms)^  publish:\r?\n(.*)\z')
+Check ($packageMatch.Success -and $publisherMatch.Success) 'Separate Windows verification and publication jobs are required.'
+$package=$packageMatch.Value
+$publisher=$publisherMatch.Value
+Check ($package -match '(?m)^    needs: prepare\r?$') 'Windows verification must depend on the prepared exact Source SHA.'
+Check ($package -notmatch '\\Tools\\PublishPrivateUpdate\.ps1|FMSC_UPDATES_PUBLISH_TOKEN') 'Windows build must not be capable of publishing.'
+Check ($publisher.Contains('needs: [prepare, sandbox-release-gate, package]')) 'Publisher can bypass Windows verification or fresh private SQL acceptance.'
+Check ($publisher.Contains('inputs.publish_update') -and
+    $publisher.Contains('actions/download-artifact@v7') -and
+    $publisher.Contains('needs.package.outputs.inventory_sha256') -and
+    $publisher.Contains('AssertWorkflow04Artifact.ps1')) 'Publisher must verify the producing job artifact and exact release identity.'
+Check ($publisher.IndexOf('AssertWorkflow04Artifact.ps1') -lt $publisher.IndexOf('PublishPrivateUpdate.ps1') -and
+    $publisher.IndexOf('AssertSandboxPublicationGate.ps1') -lt $publisher.IndexOf('PublishPrivateUpdate.ps1')) 'Publisher must independently reverify artifact and private Sandbox attestation before publication.'
 Check ($workflow.Contains('ref: ') -and $workflow.Contains('needs.prepare.outputs.release_sha')) 'Release checkout must use the prepared SHA.'
 Check ($workflow.Contains('DispatchSandboxAcceptance.ps1') -and $workflow.Contains('WaitForSandboxAttestation.ps1')) 'Private Sandbox dispatch/wait is absent.'
 Check ($workflow.Contains('AssertSandboxPublicationGate.ps1 -SourceSha') -and $workflow.Contains('PublishPrivateUpdate.ps1')) 'No final trusted status recheck before publication.'
 Check ($workflow.IndexOf('  prepare:') -gt 0 -and
     $workflow.IndexOf('  prepare:') -lt $workflow.IndexOf('  sandbox-release-gate:') -and
-    $workflow.IndexOf('  sandbox-release-gate:') -lt $workflow.IndexOf('  package:')) 'Release job dependency order is unsafe.'
+    $workflow.IndexOf('  sandbox-release-gate:') -lt $workflow.IndexOf('  package:') -and
+    $workflow.IndexOf('  package:') -lt $workflow.IndexOf('  publish:')) 'Release job declaration order is unsafe.'
 # Execute exactly the parser Workflow 04 uses, with synthetic installer
 # values. A refactor of regex formatting or whitespace must not itself block
 # releases; invalid, duplicated or noncanonical assignments still do.
@@ -212,4 +226,5 @@ try {
     Remove-Variable mockStatusRecords -Scope Script -ErrorAction SilentlyContinue
 }
 
-Write-Output 'PASS: one-click exact-commit release preparation, private chaos acceptance and final atomic publication wiring.'
+& (Join-Path $root 'Tools/TestWorkflow04Artifact.ps1')
+Write-Output 'PASS: parallel Windows/Sandbox verification, exact-commit artifact integrity and atomic publication wiring.'
