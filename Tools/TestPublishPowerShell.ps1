@@ -6,7 +6,9 @@ param(
     # Optional, never used for real publication. Default stays production TFM.
     [string]$ProbeTargetFramework = ''
 )
-if ($ProbeTargetFramework -and $ProbeTargetFramework -notmatch '^net[0-9]+\.[0-9]+-windows
+if ($ProbeTargetFramework -and $ProbeTargetFramework -cne 'net10.0-windows') {
+    throw 'The optional compatibility probe only supports net10.0-windows.'
+}
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 if (-not $IsWindows -or $PSVersionTable.PSVersion.Major -lt 7) {
