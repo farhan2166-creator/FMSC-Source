@@ -238,7 +238,7 @@ def main():
                 " SQL " + report_errors[-1][1]]) if report_errors else []
             assertion_locations = re.findall(
                 r"^REPORT_ASSERT_FAIL: (reconciliation and register|outstanding debt|collection receipts) "
-                r"(Program\\.(?:NewReportSql|DebtSql|CollectionSql)\\.cs) ([0-9]{1,5})\\s*$",
+                r"(Program\.(?:NewReportSql|DebtSql|CollectionSql)\.cs) ([0-9]{1,5})\s*$",
                 result.stdout + result.stderr, re.MULTILINE)
             assertion_location = (["Report fixture " + assertion_locations[-1][0]
                 + " at " + assertion_locations[-1][1] + ":" + assertion_locations[-1][2]]
