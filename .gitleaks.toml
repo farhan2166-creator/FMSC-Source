@@ -51,7 +51,7 @@ regexes = ['''^[0-9a-f]{40}$''']
 # exact rule in the dedicated provider registration file.
 [[allowlists]]
 description = "Only the registered public FMSC Dropbox OAuth App key"
-targetRules = ["dropbox-api-token"]
+targetRules = ["dropbox-api-token", "generic-api-key"]
 condition = "AND"
 paths = ['''(?:^|/)CloudBackupProviders\.json$''']
 regexTarget = "line"
