@@ -61,6 +61,31 @@ internal static partial class Program
             Execute(connection,$"CREATE TABLE dbo.{table}({key} int PRIMARY KEY,{record} int,IssuedAt datetime2,IssuedByUserId int,CollectedAt datetime2,CollectedBy nvarchar(200){(leave ? ",IssueType nvarchar(50)" : "")});");
             Execute(connection,$"INSERT dbo.{table} VALUES(1,1,'2026-10-22 14:30',1,NULL,NULL{(leave ? ",N'Original'" : "")});");
         }
+        // The live register reads the immutable issue snapshots and regular
+        // student issue log, not the original editable certificate records.
+        // Model their *current* contracts in this disposable SQL fixture.
+        Execute(connection,"""
+            CREATE TABLE dbo.CharacterCertificateIssueSnapshots (
+                CharacterCertificateIssueId int PRIMARY KEY,StudentName nvarchar(100),
+                CertificateDate date,ExamType nvarchar(60),CorrectionReason nvarchar(100));
+            CREATE TABLE dbo.DateOfBirthCertificateIssueSnapshots (
+                DateOfBirthCertificateIssueId int PRIMARY KEY,StudentName nvarchar(100),CertificateDate date);
+            CREATE TABLE dbo.LeaveCertificateIssueSnapshots (
+                LeaveCertificateIssueId int PRIMARY KEY,StudentName nvarchar(100),LeaveDate date);
+            CREATE TABLE dbo.RegularStudentCertificateIssues (
+                RegularStudentCertificateIssueId int PRIMARY KEY,RegularStudentCertificateId int,
+                StudentName nvarchar(100),CertificateDate date,IssuedAt datetime2,
+                IssuedByUserId int,CollectedAt datetime2,CollectedBy nvarchar(200));
+            INSERT dbo.CharacterCertificateIssueSnapshots VALUES
+                (1,N'Issued character snapshot','2020-01-01',N'School',NULL),
+                (2,N'Reissued character snapshot','2020-01-01',N'School',NULL);
+            INSERT dbo.DateOfBirthCertificateIssueSnapshots VALUES
+                (1,N'Issued birth snapshot','2020-01-01');
+            INSERT dbo.LeaveCertificateIssueSnapshots VALUES
+                (1,N'Issued leaving snapshot','2020-01-01'),
+                (2,N'Duplicate leaving snapshot','2020-01-01'),
+                (3,N'College leaving snapshot','2026-10-01');
+            """);
         Execute(connection,"""
             UPDATE dbo.CharacterCertificateIssues SET CollectedAt='2026-10-22 15:00',CollectedBy=N'Parent' WHERE CharacterCertificateIssueId=1;
             INSERT dbo.CharacterCertificateIssues VALUES(2,1,'2026-10-23 10:00',1,NULL,NULL);
@@ -70,6 +95,9 @@ internal static partial class Program
         string query=CertificateIssueRegisterData.BuildQuery(true,true);
         using var register=Read(connection,query);
         Check(register.Rows.Count==12 && register.AsEnumerable().Select(r=>r.Field<string>("Certificate Type")).Distinct().Count()==10,"SQL register consolidates all ten types and keeps repeated issues");
+        Check(register.AsEnumerable().Any(r=>r.Field<string>("Recipient")=="Issued character snapshot")
+            && register.AsEnumerable().Any(r=>r.Field<string>("Recipient")=="College leaving snapshot"),
+            "Actual certificate register uses preserved issue snapshots rather than mutable source names");
         var counts=CertificateIssueRegisterData.Totals(register);
         Check((int)counts.Rows[0]["Logged issues"]==6 && (int)counts.Rows[0]["Saved records only"]==6 && (int)counts.Rows[0]["Awaiting collection"]==5,"SQL register counts logged issues separately from untracked saved records");
         Check(register.AsEnumerable().Any(r=>r.Field<string>("Certificate No.")=="Record #1"),"SQL preserves older records with no certificate number without inventing an issued number");
