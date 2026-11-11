@@ -254,6 +254,8 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         bytes >= 1024 ? $"{bytes / 1024:0.0} KB" : $"{bytes:0} B";
     private static string DurationText(TimeSpan span) => span.TotalHours >= 1 ?
         $"{(int)span.TotalHours}:{span.Minutes:00}:{span.Seconds:00}" : $"{(int)span.TotalMinutes:00}:{span.Seconds:00}";
+    private void MarkComputerAuthorized() => _accessButton.Text = "Computer Authorized";
+
     private void RefreshAuthorization()
     {
         try
@@ -337,7 +339,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             await using var session = await UpdateGitSession.OpenAsync(_lifetime.Token);
             if (IsDisposed || Disposing) return;
             // OpenAsync clones the private distribution using this computer's SSH key.
-            _accessButton.Text = "Computer Authorized";
+            MarkComputerAuthorized();
             if (!await session.HasStableFeedAsync(_lifetime.Token))
             {
                 _status.Text = "No approved FMSC release is published on this update channel yet. " +
