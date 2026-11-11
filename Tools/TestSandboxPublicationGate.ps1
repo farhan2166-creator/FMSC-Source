@@ -4,11 +4,9 @@ $ErrorActionPreference='Stop'
 $gate=Join-Path $PSScriptRoot 'AssertSandboxPublicationGate.ps1'
 $sha='0123456789abcdef0123456789abcdef01234567'
 $otherSha='fedcba9876543210fedcba9876543210fedcba98'
-$installer=Get-Content (Join-Path $PSScriptRoot '../Installer/core.ps1') -Raw
-$match=[regex]::Match($installer,'(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
-if (-not $match.Success) { throw 'No schema to test acceptance contract.' }
-$targetSchema=[int]$match.Groups[1].Value
-$expectedDescription="MDF/LDF v3+v7 -> v$targetSchema SQL+installer PASS (fixture 5a8c5130)"
+# Description is deliberately NOT an authorization contract. Fixtures and
+# test coverage belong to Sandbox and may evolve without a Source release fix.
+$exampleDescription='MDF/LDF acceptance PASS (fixture changed by Sandbox)'
 $global:__FmscMockLogin='future-renamed-owner'
 $owner=$global:__FmscMockLogin
 $original=@{}
@@ -44,7 +42,7 @@ function New-Status {
     param(
         [string]$State='success',
         [string]$CreatorId='316891609',
-        [string]$Description=$script:expectedDescription,
+        [string]$Description=$script:exampleDescription,
         [string]$Url=('https://github.com/'+$global:__FmscMockLogin+'/FMSC-Sandbox/actions/runs/42368731562')
     )
     return [pscustomobject]@{
@@ -76,10 +74,12 @@ try {
     Assert-Outcome 'newest failure defeats older success' $false
     $global:__FmscMockStatuses=@(New-Status -CreatorId '1')
     Assert-Outcome 'untrusted creator numeric ID blocks' $false
-    $global:__FmscMockStatuses=@(New-Status -Description 'forged acceptance')
-    Assert-Outcome 'incorrect exact acceptance description blocks' $false
-    $global:__FmscMockStatuses=@(New-Status -Description "MDF/LDF v3+v7 -> v$($targetSchema+1) SQL+installer PASS (fixture 5a8c5130)")
-    Assert-Outcome 'old schema acceptance blocks' $false
+    $global:__FmscMockStatuses=@(New-Status -State 'pending')
+    Assert-Outcome 'pending acceptance cannot authorize release' $false
+    $global:__FmscMockStatuses=@(New-Status -Description 'Sandbox changed its immutable fixture pin and tests')
+    Assert-Outcome 'new fixture description does not block exact-commit approval' $true
+    $global:__FmscMockStatuses=@(New-Status -Description 'Sandbox acceptance suite evolved; commit still approved')
+    Assert-Outcome 'test suite description is informational, not a release gate' $true
     $global:__FmscMockStatuses=@(New-Status)
     $global:__FmscMockStatuses[0].context='fmsc/sandbox-mdf-ldf/v1'
     Assert-Outcome 'legacy context blocks' $false
@@ -111,7 +111,7 @@ try {
     Assert-Outcome 'missing token blocks' $false
     $env:GITHUB_TOKEN='offline-synthetic-only'
     $global:__FmscMockStatuses=@((New-Status),(New-Status -State 'failure'))
-    Assert-Outcome 'renamed owner and exact current acceptance work without old login' ($targetSchema -ne 8)
+    Assert-Outcome 'renamed owner and exact current acceptance work without old login' $true
 }
 finally {
     foreach ($key in $original.Keys) { [Environment]::SetEnvironmentVariable($key,$original[$key]) }
