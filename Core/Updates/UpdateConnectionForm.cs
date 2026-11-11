@@ -62,7 +62,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             UpdateDeviceKey.IsEnrolled ? UpdateDeviceKey.GetPublicKey() : ""));
         _autoVerifyOnOpen = authorization is null;
         _verifyAuthorization = verifyAuthorization ?? VerifyLiveAuthorizationAsync;
-        _generateEnrollment = generateEnrollment ?? UpdateDeviceKey.GenerateEnrollment;
+        _generateEnrollment = generateEnrollment ?? (() => UpdateDeviceKey.GenerateEnrollment());
         Text = "FMSC — Check for Updates";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
