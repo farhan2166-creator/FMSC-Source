@@ -2,7 +2,7 @@
 
 **Release candidate commit:** `________________`  
 **Application version:** `________________`  
-**Required DB schema version:** `________________`. Verify the application-required version and `Installer/core.ps1` match at the candidate commit. As of 8 November 2026 the current source/installer specifies **application 1.0.16 / schema 10**; schema 1 is the historical baseline, not the active target. See [production migrations](../Migrations/README.md).
+**Required DB schema version:** `________________`. Read the actual application version (`$AppVersion`) and database schema target (`$DatabaseVersion`) from `Installer/core.ps1` at the exact candidate commit. Confirm the compiled application's requirement agrees. **Do not copy a version or schema target from a dated audit or previous release.** Schema 1 is a historical baseline, not a default current target. See [production migrations](../Migrations/README.md).
 **Reviewer and test date:** `________________`  
 **Windows account / OS / target hardware:** `________________`
 
@@ -28,7 +28,7 @@
 
 - [ ] [Complete installer workflow](../.github/workflows/fmsc-complete-installer.yml) finished **successfully** at the same SHA.
 - [ ] Downloaded database-free Actions artifact and recorded URL, run ID and checksum.
-- [ ] Package contains `FMSC_SMS/`, `Install FMSC_SMS.bat`, `core.ps1`, `Tools/SqlLocalDB.msi`, `Tools/sqlcmd.exe`, the applicable versioned `Migrations/` folder, required app resources, readme and communication deployment guide. For the current source **1.0.16/schema 10**, the committed production chain contains **2.sql through 10.sql**. The installer applies only pending numbers for the attached database. Confirm every required intermediate migration is present and verify the supported source/target versions; **never replay retired pre-baseline development migrations**.
+- [ ] Package contains `FMSC_SMS/`, `Install FMSC_SMS.bat`, `core.ps1`, approved offline dependency tools, the applicable `Migrations/` folder and required application resources. Derive the migration target from **this release candidate**: the production chain must contain each numbered migration from `2.sql` through `$DatabaseVersion.sql`, without gaps or out-of-range files. The installer applies only pending versions for its verified input database. **Never replay retired pre-baseline development migrations**.
 - [ ] Copied installer and numbered SQL files match the source commit; copied-helper migration discovery/version tests passed. The staged application's files also pass source-to-staging SHA-256 checks before activation (Audit 02). Start a new workflow run for new source rather than rerunning an older run.
 - [ ] Microsoft LocalDB MSI signature and pinned sqlcmd digest were verified by the workflow; double-check source of prerequisites if changed.
 - [ ] DB snapshot is **not** included in Actions. The owner locally supplies matching **detached** `FMSC_DB.mdf` and `FMSC_DB_log.ldf` only for fresh-install validation.
@@ -37,7 +37,7 @@
 ### Exact-source release and installed-binary provenance (Audit Issue 04)
 
 - [ ] Record the **exact Source commit used by Workflow 04**, its successful gated run, and the matching private Updates manifest; do **not** substitute the current `main` SHA if it has advanced.
-- [ ] Compare the installed `FMSC_SMS.exe` SHA-256 to the independently verified published manifest (not just `1.0.16` ProductVersion); use [the read-only local probe](../Tools/VerifyInstalledFmscRelease.ps1) and retain its safe version/hash/status lines privately.
+- [ ] Compare the installed `FMSC_SMS.exe` SHA-256 and any present `BUILD_INFO.txt` against the **trusted private publication manifest for this exact release SHA**, not merely its ProductVersion. The pinned [1.0.16 installed-release probe](../Tools/VerifyInstalledFmscRelease.ps1) is retained for **historical audit only**; it must not be used as a current-release acceptance gate. Record safe hash, provenance and verification results privately.
 - [ ] Confirm the running Windows process points to that same installed executable and the active LocalDB schema equals the release requirement. Run the application's read-only installation compatibility check only on a trusted matching EXE.
 - [ ] Verify Communication Center visible controls and permissions in the **actual installed UI**; exercise chat handoff only on a disposable synthetic database with test destinations. Opening a chat or reporting a send is not provider delivery.
 - [ ] Record the local operator's acceptance; until then the installed-device result is **PENDING**, even if CI and private publication succeeded. A published source SHA that predates later fixes does **not** prove those fixes are installed.
@@ -49,7 +49,7 @@
 - [ ] Existing schema version upgraded with correct migration order using a restored **disposable clone**; original data and recovery scope preserved.
 - [ ] Verified pre-migration backup and rollback/recovery scenario tested.
 - [ ] App startup and full schema compatibility check pass after install/upgrade.
-- [ ] Communication Center: confirm that `8.sql` deliberately retires `comm` and old `dbo.StudentGuardianCommunication` data **without archiving/importing it** (approved owner decision); preserve unrelated student/staff/finance records. Confirm `9.sql` creates disabled `msg` messaging and explicit Admission consent, `10.sql` adds the provider-neutral/manual WhatsApp handoff, and the schema-10 runtime structure check passes. Test manual one-chat-at-a-time open, pause, opt-out, consent and operator-report behavior on a disposable clone. Never interpret a chat link or operator report as provider-verified delivery; SMTP, Meta Cloud API and automatic sends remain disabled.
+- [ ] When Communication Center or its migrations change, validate **current candidate behavior** against the supported channel, consent, permissions and delivery-status contracts on a disposable database. Historical migrations `8.sql`–`10.sql` remain covered as required by actual upgrade paths, but are **not a fixed UI or schema-10 release target** for later versions. Never interpret a chat handoff or operator report as provider-verified delivery, and do not enable any transport without explicit approved implementation and acceptance.
 - [ ] Deliberately invalid, newer, missing and mismatched database/prerequisite scenarios refuse unsafe installation.
 
 ## 5. School workflow acceptance
