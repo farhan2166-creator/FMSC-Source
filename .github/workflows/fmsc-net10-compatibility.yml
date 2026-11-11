@@ -41,6 +41,10 @@ jobs:
           # throwaway runner; never commit a framework change to Source.
           $targets = @{
             'FMSC_SMS.csproj' = 'net10.0-windows'
+            # The publish profile also pins the production TFM. Retarget it
+            # only inside this disposable checkout so restore and publish
+            # agree; never change the checked-in production profile.
+            'Properties/PublishProfiles/PortableRelease.pubxml' = 'net10.0-windows'
             'Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj' = 'net10.0-windows'
             'Tests/ReportReadChecks/ReportReadChecks.csproj' = 'net10.0'
             'Tests/ReportRdlcChecks/ReportRdlcChecks.csproj' = 'net10.0'
