@@ -189,19 +189,27 @@ internal static partial class Program
         var setStep = type.GetMethod("SetStep", BindingFlags.Instance | BindingFlags.NonPublic)!;
         setStep.Invoke(page, new object[] { 4 });
         Application.DoEvents();
-        Rectangle settingsBounds = settingsCard.Content.RectangleToScreen(settingsCard.Content.ClientRectangle);
-        var actionGeometry = settingsActions.Select(button => {
+        var settingsScroller = Descendants(settingsCard).OfType<ScrollableControl>()
+            .SingleOrDefault(control => control.AutoScroll);
+        Check(settingsCard.Visible && settingsScroller is not null,
+            "Communication Settings has a scrollable workspace for smaller windows");
+        // Test the action a user can reach, not that every action shares one
+        // row or simultaneously fits into a short viewport.
+        foreach (var button in settingsActions)
+        {
+            settingsScroller!.ScrollControlIntoView(button);
+            Application.DoEvents();
             Rectangle bounds = button.RectangleToScreen(button.ClientRectangle);
-            Rectangle exposed = Rectangle.Intersect(bounds, settingsBounds);
-            bool usable = button.Visible && button.Width > 0 && button.Height > 0
-                && exposed.Width >= button.Width - 2 && exposed.Height >= button.Height - 2;
-            return (button, bounds, exposed, usable);
-        }).ToArray();
-        Check(settingsCard.Visible && actionGeometry.All(item => item.usable),
-            "Communication Settings actions must be visible, or scrollable into view. Content="
-            + settingsBounds + "; actions=" + string.Join("; ", actionGeometry.Select(item =>
-                item.button.Text + " bounds=" + item.bounds + " exposed=" + item.exposed
-                + " visible=" + item.button.Visible + " usable=" + item.usable)));
+            Rectangle visibleContent = Rectangle.Intersect(
+                settingsCard.Content.RectangleToScreen(settingsCard.Content.ClientRectangle),
+                settingsScroller.RectangleToScreen(settingsScroller.ClientRectangle));
+            Rectangle exposed = Rectangle.Intersect(bounds, visibleContent);
+            Check(button.Visible && button.Width > 0 && button.Height > 0
+                && exposed.Width >= button.Width - 2 && exposed.Height >= button.Height - 2,
+                "Communication Settings action is reachable without clipping: "
+                + button.Text + "; bounds=" + bounds + "; exposed=" + exposed
+                + "; viewport=" + visibleContent);
+        }
         setStep.Invoke(page, new object[] { 0 });
         Application.DoEvents();
         // The production formatter is internal: exercise it through reflection
