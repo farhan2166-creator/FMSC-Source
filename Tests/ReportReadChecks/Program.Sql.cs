@@ -95,6 +95,7 @@ internal static partial class Program
             Check(denied,"Concession query enforces report permission");
             CheckNewSql(connection);
             CheckDebtSql(connection);
+            CheckCollectionSql(connection);
         }
         finally { SqlConnection.ClearAllPools();Execute(master,$"ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}];"); }
     }
