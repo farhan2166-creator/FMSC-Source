@@ -189,7 +189,7 @@ internal static partial class Program
         var setStep = type.GetMethod("SetStep", BindingFlags.Instance | BindingFlags.NonPublic)!;
         setStep.Invoke(page, new object[] { 4 });
         Application.DoEvents();
-        var settingsScroller = Descendants(settingsCard).OfType<ScrollableControl>()
+        var settingsScroller = settingsCard.Content.Controls.OfType<ScrollableControl>()
             .SingleOrDefault(control => control.AutoScroll);
         Check(settingsCard.Visible && settingsScroller is not null,
             "Communication Settings has a scrollable workspace for smaller windows");
