@@ -3,6 +3,7 @@ using FMSC_SMS.Core;
 using FMSC_SMS.Pages.Finance.Collection;
 using FMSC_SMS.Pages.Reports.Students;
 using FMSC_SMS.Pages.Security;
+using FMSC_SMS.Pages.Setup;
 
 internal static partial class Program
 {
@@ -67,6 +68,27 @@ internal static partial class Program
             Target(students,Keys.Control|Keys.M,"Rename View");
             Target(students,Keys.Control|Keys.T,"Reset Filters");
             Target(students,Keys.Alt|Keys.C,"Clear Filters");
+            using var profile=new SchoolProfilePage(false);
+            Target(profile,Keys.Control|Keys.S,"Save");
+            var explicitSchoolSave=typeof(PageActionShortcutController)
+                .GetField("explicitSaveButton",flags)!.GetValue(profile.ShortcutController) as ModernButton;
+            Check(explicitSchoolSave is {Text:"Save"},
+                "School Profile Ctrl+S is explicitly bound to school information, not independent image saves");
+            var profileSurface=(Panel)typeof(V2Page).GetField("_content",flags)!.GetValue(profile)!;
+            var profileLayout=profileSurface.Controls.OfType<TableLayoutPanel>().Single();
+            var logoCard=profileLayout.GetControlFromPosition(1,0) as HumanCard;
+            var signatureCard=profileLayout.GetControlFromPosition(0,2) as HumanCard;
+            Check(logoCard is not null && signatureCard is not null &&
+                profileLayout.GetRowSpan(logoCard)==profileLayout.RowCount &&
+                profileLayout.RowStyles[^1].SizeType==SizeType.Percent,
+                "School Profile logo fills the entire right column while excess height remains available");
+            var signatureFields=signatureCard?.Content.Controls.OfType<TableLayoutPanel>().SingleOrDefault();
+            var signatureEditor=signatureFields?.Controls.OfType<TableLayoutPanel>().SingleOrDefault();
+            var signatureButtons=signatureEditor?.Controls.OfType<TableLayoutPanel>().SingleOrDefault();
+            Check(signatureButtons is {ColumnCount:3,RowCount:1} &&
+                signatureButtons.Controls.OfType<ModernButton>().Count()==3 &&
+                profileLayout.RowStyles[2].SizeType==SizeType.Absolute,
+                "Principal signature stays compact and exposes all three actions in one horizontal row");
             Check(!students.IsHandleCreated && !bills.IsHandleCreated,"Real-page shortcut coverage does not start database initialization");
         }
         finally {CurrentUser.SignIn(previousUser.UserId,previousUser.Username,previousUser.RoleName,previousUser.MustChangePassword,previousUser.Grants);}
