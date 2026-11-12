@@ -181,30 +181,53 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
     private async Task ListCloudAsync()
     {
         if (busy || !IsCloud) return;
-        CloudProvider provider = SelectedProvider;
+        CloudProvider preferred = SelectedProvider;
         SetBusy(true);
         try
         {
-            status.Text = "Checking " + provider + " for encrypted FMSC backups…";
-            var copies = await CloudBackupTransport.ListAsync(provider);
+            status.Text = "Checking connected cloud accounts for encrypted FMSC backups…";
+            var copies = new List<CloudRemoteBackup>();
+            var warnings = new List<string>();
+            foreach (CloudProvider provider in new[] { preferred,
+                         preferred == CloudProvider.GoogleDrive ? CloudProvider.Dropbox : CloudProvider.GoogleDrive })
+            {
+                if (!CloudBackupOAuth.IsConnected(provider)) continue;
+                try { copies.AddRange(await CloudBackupTransport.ListAsync(provider)); }
+                catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or
+                    UnauthorizedAccessException or InvalidOperationException)
+                {
+                    AppExceptionHandler.LogNonFatal(ex, "Replacement computer provider discovery");
+                    warnings.Add(provider + " could not be checked; reconnect and retry.");
+                }
+            }
             if (IsDisposed) return;
             available.Items.Clear();
-            foreach (var copy in copies.OrderByDescending(x => x.SqlBackupCreatedUtc))
-                available.Items.Add(new RecoverySelection(copy));
-            status.Text = copies.Count == 0
-                ? "No FMSC cloud backup files were found in this account."
-                : copies.Count + " cloud copy/copies found. Choose the recovery point to verify.";
+            var groups = copies.GroupBy(x => (x.PackageSha256.ToLowerInvariant(),
+                    x.SqlBackupCreatedUtc.Ticks))
+                .OrderByDescending(g => g.First().SqlBackupCreatedUtc);
+            foreach (var group in groups)
+            {
+                var eligible = group.OrderBy(x => x.Provider == preferred ? 0 : 1)
+                    .DistinctBy(x => (x.Provider, x.RemoteId)).ToArray();
+                available.Items.Add(new RecoverySelection(eligible));
+            }
+            status.Text = available.Items.Count == 0
+                ? "No FMSC cloud backups could be confirmed. " + string.Join(" ", warnings)
+                : available.Items.Count + " recovery point(s) found. Select a point; cloud copies are verified again before recovery. " +
+                    string.Join(" ", warnings);
             if (available.Items.Count > 0) available.SelectedIndex = 0;
         }
         catch (Exception error) { ReportError(error); }
         finally { SetBusy(false); }
     }
 
-    private sealed record RecoverySelection(CloudRemoteBackup Backup)
+    private sealed record RecoverySelection(IReadOnlyList<CloudRemoteBackup> Copies)
     {
+        internal CloudRemoteBackup Backup => Copies[0];
         public override string ToString() =>
             Backup.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt") +
-            "   —   " + Backup.Provider + "   (date provisional until verified)";
+            "   —   " + string.Join(" + ", Copies.Select(x => x.Provider).Distinct()) +
+            "   (date provisional until verified)";
     }
 
     private async Task RecoverAsync()
@@ -212,11 +235,13 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
         if (busy) return;
         string? local = null;
         CloudRemoteBackup? remote = null;
+        IReadOnlyList<CloudRemoteBackup> alternatives = Array.Empty<CloudRemoteBackup>();
         if (IsCloud)
         {
             if (available.SelectedItem is not RecoverySelection selection)
             { status.Text = "Choose a cloud recovery point first."; return; }
             remote = selection.Backup;
+            alternatives = selection.Copies;
             if (passphrase.Text.Length < 12)
             { status.Text = "Enter the existing school recovery passphrase."; return; }
         }
@@ -248,7 +273,7 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
                     if (update.Detail.Length > 0)
                         diagnostics.AppendText(DateTime.Now.ToString("HH:mm:ss") + "  " +
                             update.Display + ": " + update.Detail + Environment.NewLine);
-                }));
+                }), alternatives: alternatives);
             if (IsDisposed) return;
             password.Clear();
             passphrase.Clear();
