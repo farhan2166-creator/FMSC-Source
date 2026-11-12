@@ -19,9 +19,11 @@ internal static class CloudBackupCoordinator
     private static readonly string Root = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FMSC", "CloudBackups");
     private static readonly string Queue = Path.Combine(Root, "queue");
+    private static readonly string Staging = Path.Combine(Root, "staging");
     private static readonly string Journal = Path.Combine(Root, "journal");
     private static readonly string ScheduleState = Path.Combine(Root, "schedule-state.json");
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+    private const int MaximumAutomaticDeliveryAttempts = 4;
 
     private sealed class Pending
     {
@@ -32,6 +34,12 @@ internal static class CloudBackupCoordinator
         public string GoogleDriveId { get; set; } = "";
         public string GoogleDriveUploadId { get; set; } = "";
         public string DropboxId { get; set; } = "";
+        // Old journals intentionally deserialize as unverified; they remain
+        // discoverable without being incorrectly called recovery-tested.
+        public bool GoogleRecoveryVerified { get; set; }
+        public bool DropboxRecoveryVerified { get; set; }
+        public int GoogleDeliveryAttempts { get; set; }
+        public int DropboxDeliveryAttempts { get; set; }
         // Missing properties in old journal JSON default false.
         public bool GoogleDrivePruned { get; set; }
         public bool DropboxPruned { get; set; }
@@ -49,9 +57,10 @@ internal static class CloudBackupCoordinator
         settings.Validate();
         if (!scheduled && !CurrentUser.HasPermission("Backup.Create"))
             throw new UnauthorizedAccessException("Creating backups requires Backup.Create permission.");
-        if (!(settings.GoogleDriveEnabled || settings.DropboxEnabled))
-            throw new InvalidOperationException("Enable Google Drive or Dropbox in the existing Backup / Restore settings first.");
-        if (!CloudBackupSettings.HasLocalRecoveryPassphrase)
+        if (!(settings.LocalEnabled || settings.GoogleDriveEnabled || settings.DropboxEnabled))
+            throw new InvalidOperationException("Enable at least one backup destination.");
+        bool needsCloud = settings.GoogleDriveEnabled || settings.DropboxEnabled;
+        if (needsCloud && !CloudBackupSettings.HasLocalRecoveryPassphrase)
             throw new InvalidOperationException("Enroll and independently retain a recovery passphrase before cloud backups can run.");
 
         EnsurePrivateDirectories();
@@ -67,10 +76,11 @@ internal static class CloudBackupCoordinator
                     retryIssues.Count == 0 ? "No scheduled backup is due. Pending uploads are complete."
                         : "Cloud upload is pending retry: " + string.Join("; ", retryIssues), retryIssues.Count > 0));
 
-            string folder = BackupSettings.GetBackupFolder();
-            if (folder.Length == 0) throw new InvalidOperationException("Choose an existing local backup folder before enabling automatic cloud backups.");
+            string folder = settings.LocalEnabled ? BackupSettings.GetBackupFolder() : Staging;
+            if (folder.Length == 0) throw new InvalidOperationException("Choose a local backup folder or disable the local destination in Backup Settings.");
+            Directory.CreateDirectory(folder);
             string bak = DatabaseBackupManager.CreateUniqueBackupPath(folder,
-                "FMSC_CloudAuto_" + DateTime.Now.ToString("yyyy-MM-dd_HHmmss", CultureInfo.InvariantCulture) +
+                "FMSC_Managed_" + DateTime.Now.ToString("yyyy-MM-dd_HHmmss", CultureInfo.InvariantCulture) +
                 "_" + Guid.NewGuid().ToString("N")[..6] + ".bak");
             // The unattended mode has no signed-in FMSC user. It uses Windows
             // integrated SQL rights ONLY after DatabaseHelper validates the
@@ -89,6 +99,14 @@ internal static class CloudBackupCoordinator
             if (info is null || !info.IsForFmscDatabase || info.BackupStartDate == default)
                 throw new InvalidDataException("Verified SQL backup metadata is not readable.");
             DateTime sqlCreated = DateTime.SpecifyKind(info.BackupStartDate, DateTimeKind.Local).ToUniversalTime();
+            if (!needsCloud)
+            {
+                SaveState(new State { LastSuccessfulLocalBackup = DateTimeOffset.Now });
+                await Task.Run(() => PruneLocalManagedBackups(folder, settings.MaximumLocalBackups), token)
+                    .ConfigureAwait(false);
+                return RecordOutcome(new CloudBackupOutcome(true, false, false,
+                    "Verified local SQL backup saved: " + bak));
+            }
             string id = Guid.NewGuid().ToString("N");
             string packaged = Path.Combine(Queue, id + ".fmscbackup");
             // Large encrypted SQL backups must never block the WinForms message pump.
@@ -103,6 +121,14 @@ internal static class CloudBackupCoordinator
                 SqlCreatedUtc = sqlCreated, Size = new FileInfo(packaged).Length
             };
             SavePending(pending);
+            // Cloud-only delivery retains the encrypted retry payload, not a
+            // permanent plaintext local copy. Leave the .bak for diagnosis if
+            // encryption or durable journalling failed before this point.
+            if (!settings.LocalEnabled)
+            {
+                try { File.Delete(bak); }
+                catch (Exception ex) { AppExceptionHandler.LogNonFatal(ex, "Removing transient cloud-only SQL backup"); }
+            }
             // A successful local backup is not re-created just because one
             // provider was temporarily unavailable.
             SaveState(new State { LastSuccessfulLocalBackup = DateTimeOffset.Now });
@@ -119,12 +145,14 @@ internal static class CloudBackupCoordinator
                 catch (Exception ex) { token.ThrowIfCancellationRequested(); issues.Add("Dropbox: " + SafeTransportError(ex)); }
             }
             RemoveFullyDeliveredPayload(pending, settings);
-            await Task.Run(() => PruneLocalAutomaticBackups(folder, settings.MaximumLocalBackups), token)
-                .ConfigureAwait(false);
+            if (settings.LocalEnabled)
+                await Task.Run(() => PruneLocalManagedBackups(folder, settings.MaximumLocalBackups), token)
+                    .ConfigureAwait(false);
             string summary = issues.Count == 0
-                ? "Verified local backup uploaded to the selected cloud destinations."
-                : "Verified local backup succeeded. Cloud upload is pending retry: " + string.Join("; ", issues);
-            return RecordOutcome(new CloudBackupOutcome(true, google, dropbox, summary, issues.Count > 0));
+                ? (settings.LocalEnabled ? "Local backup saved. " : "") + "Encrypted backup uploaded to the selected cloud destinations."
+                : (settings.LocalEnabled ? "Local backup saved. " : "Encrypted backup safely queued. ") +
+                    "Some cloud destinations still require delivery: " + string.Join("; ", issues);
+            return RecordOutcome(new CloudBackupOutcome(settings.LocalEnabled, google, dropbox, summary, issues.Count > 0));
         }
         finally { /* jobLease is disposed on exit, including exceptions */ }
     }
@@ -135,7 +163,8 @@ internal static class CloudBackupCoordinator
         // If the user has not enabled/enrolled the feature, do nothing.
         var settings = CloudBackupSettings.Load();
         if (!settings.AutomaticEnabled) return 0;
-        if (!CloudBackupSettings.HasLocalRecoveryPassphrase) return 2;
+        if ((settings.GoogleDriveEnabled || settings.DropboxEnabled) &&
+            !CloudBackupSettings.HasLocalRecoveryPassphrase) return 2;
         // Never let a scheduled backup race a pending database migration,
         // interrupted update, or installer activation. Unlike the interactive
         // startup guard this probe never opens dialogs or starts recovery.
@@ -192,6 +221,35 @@ internal static class CloudBackupCoordinator
         await RetryPendingUploadsCoreAsync(settings, token).ConfigureAwait(false);
     }
 
+    // Explicit user-controlled retry, separate from creating a new SQL backup.
+    internal static async Task<string> RetryPendingUploadsNowAsync(CancellationToken token = default)
+    {
+        if (!CurrentUser.HasPermission("Backup.Create"))
+            throw new UnauthorizedAccessException("Retrying pending deliveries requires Backup.Create permission.");
+        var settings = CloudBackupSettings.Load();
+        EnsurePrivateDirectories();
+        using var jobLease = CloudBackupJobLock.TryAcquire(Path.Combine(Root, "cloud-job.lock"))
+            ?? throw new InvalidOperationException("Another FMSC backup or upload is already running.");
+        // A deliberate operator retry permits one more attempt even after the
+        // bounded unattended retry budget was exhausted.
+        foreach (var p in ReadPending().Where(p => File.Exists(p.PackageFile)))
+        {
+            p.GoogleDeliveryAttempts = Math.Min(p.GoogleDeliveryAttempts, MaximumAutomaticDeliveryAttempts - 1);
+            p.DropboxDeliveryAttempts = Math.Min(p.DropboxDeliveryAttempts, MaximumAutomaticDeliveryAttempts - 1);
+            SavePending(p);
+        }
+        var issues = await RetryPendingUploadsCoreAsync(settings, token).ConfigureAwait(false);
+        int waiting = ReadPending().Count(p => File.Exists(p.PackageFile) &&
+            (CloudBackupDeliveryPolicy.RequiresRecoveryVerification(settings.GoogleDriveEnabled, p.GoogleRecoveryVerified, p.GoogleDrivePruned) ||
+             CloudBackupDeliveryPolicy.RequiresRecoveryVerification(settings.DropboxEnabled, p.DropboxRecoveryVerified, p.DropboxPruned)));
+        string message = waiting == 0
+            ? "No enabled cloud deliveries are waiting for retry."
+            : waiting + " encrypted backup package(s) still await upload.";
+        if (issues.Count > 0) message += " " + string.Join("; ", issues);
+        RecordOutcome(new CloudBackupOutcome(false, false, false, message, waiting > 0));
+        return message;
+    }
+
     internal static async Task<CloudBrowseResult> BrowseCloudAsync(CancellationToken token = default)
     {
         var inventory = await CloudBackupOperations.BrowseAsync(CloudBackupOAuth.IsConnected,
@@ -200,20 +258,29 @@ internal static class CloudBackupCoordinator
         var known = ReadPending();
         var copies = inventory.Copies.Select(item => new CloudSelection(item, known.Any(p =>
             (item.Provider == CloudProvider.GoogleDrive ? p.GoogleDriveId : p.DropboxId) == item.RemoteId &&
+            (item.Provider == CloudProvider.GoogleDrive ? p.GoogleRecoveryVerified : p.DropboxRecoveryVerified) &&
             string.Equals(p.Sha256, item.PackageSha256, StringComparison.OrdinalIgnoreCase) &&
             (p.SqlCreatedUtc - item.SqlBackupCreatedUtc).Duration() < TimeSpan.FromSeconds(1)))).ToArray();
         return new(copies, inventory.Warnings);
     }
 
     internal static async Task<DatabaseBackupManager.BackupResult> RestoreFromCloudAsync(
-        CloudRemoteBackup source, string recoveryPassphrase, CancellationToken token = default)
+        CloudRemoteBackup source, string recoveryPassphrase,
+        IReadOnlyList<CloudRemoteBackup>? alternatives = null, CancellationToken token = default)
     {
         if (!CurrentUser.HasPermission("Backup.Restore"))
             throw new UnauthorizedAccessException("Restoring a cloud backup requires Backup.Restore permission.");
-        return await CloudRestoreStaging.RestoreAsync(
-            (destination, ct) => DownloadAndCheckAsync(source, destination, ct),
-            recoveryPassphrase,
-            "cloud://" + source.Provider + "/" + Uri.EscapeDataString(source.RemoteId), token);
+        // Never switch backup dates or packages during automatic source fallback.
+        var matching = new[] { source }.Concat(alternatives ?? Array.Empty<CloudRemoteBackup>())
+            .Where(copy => string.Equals(copy.PackageSha256, source.PackageSha256,
+                       StringComparison.OrdinalIgnoreCase) &&
+                   (copy.SqlBackupCreatedUtc - source.SqlBackupCreatedUtc).Duration() < TimeSpan.FromSeconds(1))
+            .DistinctBy(copy => (copy.Provider, copy.RemoteId)).ToArray();
+        var candidates = matching.Select(copy => new CloudRestoreStaging.DownloadCandidate(
+            (destination, ct) => DownloadAndCheckAsync(copy, destination, ct),
+            "cloud://" + copy.Provider + "/" + Uri.EscapeDataString(copy.RemoteId),
+            copy.Provider.ToString())).ToArray();
+        return await CloudRestoreStaging.RestoreWithFallbackAsync(candidates, recoveryPassphrase, token);
     }
 
     private static async Task DownloadAndCheckAsync(CloudRemoteBackup source, string destination, CancellationToken token)
@@ -232,17 +299,35 @@ internal static class CloudBackupCoordinator
         foreach (var pending in ReadPending().Where(p => File.Exists(p.PackageFile)))
         {
             token.ThrowIfCancellationRequested();
-            if (CloudBackupDeliveryPolicy.RequiresUpload(
-                settings.GoogleDriveEnabled, pending.GoogleDriveId, pending.GoogleDrivePruned))
+            if (CloudBackupDeliveryPolicy.RequiresRecoveryVerification(settings.GoogleDriveEnabled, pending.GoogleRecoveryVerified, pending.GoogleDrivePruned))
             {
-                try { await UploadOneAsync(pending, CloudProvider.GoogleDrive, settings, token); }
-                catch (Exception ex) { token.ThrowIfCancellationRequested(); issues.Add("Google Drive: " + SafeTransportError(ex)); AppExceptionHandler.LogNonFatal(ex, "Retrying Google Drive encrypted backup upload"); }
+                if (pending.GoogleDeliveryAttempts >= MaximumAutomaticDeliveryAttempts)
+                    issues.Add("Google Drive: automatic retries exhausted; use Retry Pending Uploads.");
+                else
+                {
+                    try { await UploadOneAsync(pending, CloudProvider.GoogleDrive, settings, token); }
+                    catch (Exception ex)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        issues.Add("Google Drive: " + SafeTransportError(ex));
+                        AppExceptionHandler.LogNonFatal(ex, "Retrying Google Drive backup delivery or recovery test");
+                    }
+                }
             }
-            if (CloudBackupDeliveryPolicy.RequiresUpload(
-                settings.DropboxEnabled, pending.DropboxId, pending.DropboxPruned))
+            if (CloudBackupDeliveryPolicy.RequiresRecoveryVerification(settings.DropboxEnabled, pending.DropboxRecoveryVerified, pending.DropboxPruned))
             {
-                try { await UploadOneAsync(pending, CloudProvider.Dropbox, settings, token); }
-                catch (Exception ex) { token.ThrowIfCancellationRequested(); issues.Add("Dropbox: " + SafeTransportError(ex)); AppExceptionHandler.LogNonFatal(ex, "Retrying Dropbox encrypted backup upload"); }
+                if (pending.DropboxDeliveryAttempts >= MaximumAutomaticDeliveryAttempts)
+                    issues.Add("Dropbox: automatic retries exhausted; use Retry Pending Uploads.");
+                else
+                {
+                    try { await UploadOneAsync(pending, CloudProvider.Dropbox, settings, token); }
+                    catch (Exception ex)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        issues.Add("Dropbox: " + SafeTransportError(ex));
+                        AppExceptionHandler.LogNonFatal(ex, "Retrying Dropbox backup delivery or recovery test");
+                    }
+                }
             }
             RemoveFullyDeliveredPayload(pending, settings);
         }
@@ -254,6 +339,9 @@ internal static class CloudBackupCoordinator
     {
         if (!CloudBackupOAuth.IsConnected(provider))
             throw new InvalidOperationException(provider + " account is not connected.");
+        if (provider == CloudProvider.GoogleDrive) p.GoogleDeliveryAttempts++;
+        else p.DropboxDeliveryAttempts++;
+        SavePending(p);
         CloudRemoteBackup copy = await CloudBackupTransport.UploadAsync(provider, p.PackageFile, p.SqlCreatedUtc, token,
             p.GoogleDriveUploadId, id => { p.GoogleDriveUploadId = id; SavePending(p); });
         if (!string.Equals(copy.PackageSha256, p.Sha256, StringComparison.OrdinalIgnoreCase) ||
@@ -269,7 +357,16 @@ internal static class CloudBackupCoordinator
             p.DropboxId = copy.RemoteId;
             p.DropboxPruned = false;
         }
-        SavePending(p); // commit this provider result before touching the next provider
+        SavePending(p); // commit the upload receipt before recovery testing
+        // A provider's upload receipt is NOT evidence that the remote package
+        // can be decrypted and restored. Test the actual downloaded remote bytes
+        // with an isolated SQL restore before any retention is allowed.
+        await CloudRestoreStaging.VerifyRemoteCopyAsync(
+            (destination, ct) => DownloadAndCheckAsync(copy, destination, ct),
+            CloudBackupSettings.OpenRecoveryPassphrase(), p.SqlCreatedUtc, token);
+        if (provider == CloudProvider.GoogleDrive) p.GoogleRecoveryVerified = true;
+        else p.DropboxRecoveryVerified = true;
+        SavePending(p);
         try { await PruneRemoteAsync(provider, settings, p.Sha256, token); }
         catch (Exception ex) { AppExceptionHandler.LogNonFatal(ex, "Cloud retention failed after successful upload"); }
         return true;
@@ -281,6 +378,7 @@ internal static class CloudBackupCoordinator
         int limit = provider == CloudProvider.GoogleDrive
             ? settings.MaximumGoogleDriveBackups : settings.MaximumDropboxBackups;
         var known = ReadPending().Where(p =>
+            (provider == CloudProvider.GoogleDrive ? p.GoogleRecoveryVerified : p.DropboxRecoveryVerified) &&
             (provider == CloudProvider.GoogleDrive ? p.GoogleDriveId : p.DropboxId).Length > 0).ToArray();
         var cloud = await CloudBackupTransport.ListAsync(provider, token);
         var copies = known.Select(p =>
@@ -316,24 +414,25 @@ internal static class CloudBackupCoordinator
 
     private static void RemoveFullyDeliveredPayload(Pending p, CloudBackupOptions settings)
     {
-        if (CloudBackupDeliveryPolicy.HasCompletedProvider(
-                settings.GoogleDriveEnabled, p.GoogleDriveId, p.GoogleDrivePruned) &&
-            CloudBackupDeliveryPolicy.HasCompletedProvider(
-                settings.DropboxEnabled, p.DropboxId, p.DropboxPruned) &&
+        if (CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(
+                settings.GoogleDriveEnabled, p.GoogleRecoveryVerified, p.GoogleDrivePruned,
+                settings.DropboxEnabled, p.DropboxRecoveryVerified, p.DropboxPruned) &&
             File.Exists(p.PackageFile))
             File.Delete(p.PackageFile);
         // Keep the small journal: it proves what we uploaded and protects
         // retention decisions even after the queued ciphertext is cleaned up.
     }
 
-    private static void PruneLocalAutomaticBackups(string folder, int limit)
+    private static void PruneLocalManagedBackups(string folder, int limit)
     {
         if (limit < 1) throw new ArgumentOutOfRangeException(nameof(limit));
         // Local file creation/modified times can change when a .bak is copied.
         // Retention chronology, like Restore, is based on the actual SQL
         // backup header. Files with unreadable headers are retained for review.
         var valid = new List<(FileInfo File, DateTime SqlCreated)>();
-        foreach (FileInfo file in new DirectoryInfo(folder).EnumerateFiles("FMSC_CloudAuto_*.bak"))
+        // Only prune newly managed files. Existing manual, pre-restore and
+        // historical FMSC_CloudAuto backups remain protected during migration.
+        foreach (FileInfo file in new DirectoryInfo(folder).EnumerateFiles("FMSC_Managed_*.bak"))
         {
             var info = DatabaseBackupManager.GetBackupInfo(file.FullName);
             if (info?.IsForFmscDatabase == true && info.BackupStartDate != default)
@@ -443,9 +542,10 @@ internal static class CloudBackupCoordinator
         Directory.CreateDirectory(Root);
         Directory.CreateDirectory(Journal);
         Directory.CreateDirectory(Queue);
+        Directory.CreateDirectory(Staging);
         var user = WindowsIdentity.GetCurrent().User
             ?? throw new UnauthorizedAccessException("Cannot identify scheduled backup owner.");
-        foreach (string path in new[] { Root, Journal, Queue })
+        foreach (string path in new[] { Root, Journal, Queue, Staging })
         {
             var acl = new DirectorySecurity();
             acl.SetOwner(user);
@@ -458,5 +558,5 @@ internal static class CloudBackupCoordinator
     }
     private static string SafeTransportError(Exception ex) =>
         ex is HttpRequestException ? ex.Message : ex is InvalidOperationException ? ex.Message :
-            "Upload failed; the encrypted package has been kept for retry.";
+            "Cloud delivery or recovery verification failed; the encrypted package has been retained for retry.";
 }
