@@ -118,7 +118,10 @@ internal static class CloudBackupCoordinator
             // fixed, attached local DB path, identity and schema. Manual mode
             // keeps using the existing permission-checked backup service.
             progress?.Report(new BackupProgressUpdate("Creating SQL backup", "Generating one backup for all enabled destinations."));
-            if (scheduled)
+            // A cloud-only .bak is transient staging, not a local recovery
+            // destination. Do not record it as a successful permanent local
+            // backup that immediately appears 'Missing' after secure cleanup.
+            if (scheduled || !settings.LocalEnabled)
                 await Task.Run(() => CreateValidatedSqlBackupHeadless(bak), token);
             else
             {
