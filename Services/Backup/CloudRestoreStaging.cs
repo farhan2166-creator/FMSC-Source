@@ -32,7 +32,8 @@ internal static class CloudRestoreStaging
     /// </summary>
     internal static async Task<DatabaseBackupManager.BackupResult> RestoreWithFallbackAsync(
         IReadOnlyList<DownloadCandidate> candidates, string recoveryPassphrase,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<BackupProgressUpdate>? progress = null)
     {
         if (candidates.Count == 0)
             return new DatabaseBackupManager.BackupResult {
@@ -57,12 +58,15 @@ internal static class CloudRestoreStaging
                         "Preserve recovery evidence before clearing CloudRestoreStaging.");
                 Directory.CreateDirectory(folder);
                 RestrictToCurrentWindowsUser(folder);
+                progress?.Report(new BackupProgressUpdate("Downloading encrypted backup", "Source " + candidate.Label));
                 await candidate.Download(cloudPackage, cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!File.Exists(cloudPackage) || new FileInfo(cloudPackage).Length == 0)
                     throw new InvalidDataException("The cloud download was incomplete or empty.");
+                progress?.Report(new BackupProgressUpdate("Decrypting downloaded backup", "Authenticating the complete encrypted package."));
                 await Task.Run(() => CloudBackupCrypto.Decrypt(cloudPackage, bak, recoveryPassphrase),
                     cancellationToken).ConfigureAwait(false);
+                progress?.Report(new BackupProgressUpdate("Validating SQL backup header", "Checking the authenticated backup identity."));
                 var info = DatabaseBackupManager.GetBackupInfo(bak);
                 if (info is null || !info.IsForFmscDatabase)
                     throw new InvalidDataException("The downloaded file is not a readable FMSC SQL backup.");
@@ -80,7 +84,12 @@ internal static class CloudRestoreStaging
                 // No second candidate is considered after this line, even if
                 // SQL's preflight or mandatory rollback later fails.
                 sqlRestoreStarted = true;
+                progress?.Report(new BackupProgressUpdate("Checking school identity and taking a safety backup",
+                    "No alternate copy will be attempted after SQL restore processing begins."));
+                var stageReporter = new Progress<string>(message =>
+                    progress?.Report(new BackupProgressUpdate(message, "SQL restore security and safety stages.")));
                 var result = await Task.Run(() => DatabaseBackupManager.RestoreBackup(bak,
+                    progress: stageReporter,
                     safetyBackupFolderOverride: safetyFolder,
                     historyPathOverride: candidate.HistoryPath)).ConfigureAwait(false);
                 if (result.Success)
@@ -93,6 +102,7 @@ internal static class CloudRestoreStaging
                             Success = true,
                             Message = result.Message + "\n\nProtected download cleanup needs administrator attention." };
                     }
+                    progress?.Report(new BackupProgressUpdate("Restore completed", "Recovery from " + candidate.Label + " passed SQL verification."));
                     return new DatabaseBackupManager.BackupResult {
                         Success = true, Message = result.Message + "\nRecovered from " + candidate.Label + "." };
                 }
@@ -105,6 +115,8 @@ internal static class CloudRestoreStaging
                     return new DatabaseBackupManager.BackupResult {
                         Success = false, Message = "Cloud SQL restoration failed. No alternate provider was attempted after SQL restoration started. " +
                             DbMessage.UserMessage(ex) };
+                progress?.Report(new BackupProgressUpdate("Source rejected before SQL restore",
+                    DbMessage.UserMessage(ex) + " Trying another copy of the same recovery point if available.", candidate.Label, true));
                 errors.Add(candidate.Label + ": " + DbMessage.UserMessage(ex));
             }
             finally
