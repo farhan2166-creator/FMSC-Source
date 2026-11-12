@@ -14,7 +14,15 @@ internal enum CommunicationAudience
 
 internal sealed record CommunicationTarget(
     CommunicationAudience Audience, int CampusId, int ClassId,
-    int StudentId, int StaffId, string Channel);
+    int StudentId, int StaffId, string Channel)
+{
+    internal string Purpose => Audience switch {
+        CommunicationAudience.OutstandingFees => "FeeReminder",
+        CommunicationAudience.Staff => "Staff",
+        CommunicationAudience.Student or CommunicationAudience.Family => "Individual",
+        _ => "Announcement"
+    };
+}
 
 internal sealed record CommunicationPreviewEntry(
     int RecordId, string RecordName, string Kind, string? PhoneE164,
@@ -22,6 +30,11 @@ internal sealed record CommunicationPreviewEntry(
     string? AdmissionNumber = null, DateTime? AdmissionDate = null)
 {
     internal bool Included => Reason == "Included";
+    internal int? FamilyId { get; init; }
+    // Retain a destination only for eligible duplicate-family aggregation.
+    // Declined, unrecorded, invalid and suppressed rows never expose one.
+    internal string? EligiblePhone { get; init; }
+    internal CommunicationPreparedMessages.Values? PreparedValues { get; init; }
 }
 
 internal sealed class CommunicationPreview
@@ -53,8 +66,9 @@ internal static class CommunicationRecipientResolver
         SELECT S.AdmissionId RecordId, S.StudentName RecordName,
                S.AdmissionNumber, S.AdmissionDate,
                S.ContactNumber, S.SchoolMessageConsent,
-               CONVERT(varchar(8),'Student') Kind, B.Outstanding
+               CONVERT(varchar(8),'Student') Kind, B.Outstanding, FM.FamilyId
         FROM dbo.Students S
+        LEFT JOIN dbo.FamilyMembers FM ON FM.AdmissionId=S.AdmissionId
         OUTER APPLY (
             SELECT TOP (1) E.ClassSectionId, E.Status
             FROM dbo.Enrollments E WHERE E.AdmissionId=S.AdmissionId
@@ -76,6 +90,7 @@ internal static class CommunicationRecipientResolver
             OR (@Audience=N'OutstandingFees' AND E.Status=N'Active'
                 AND (@CampusId=0 OR CCS.CampusId=@CampusId)
                 AND (@ClassId=0 OR CCS.ClassId=@ClassId)
+                AND (@StudentId=0 OR S.AdmissionId=@StudentId)
                 AND B.Outstanding>0)
             OR (@Audience=N'Student' AND S.AdmissionId=@StudentId)
             OR (@Audience=N'Family' AND (
@@ -111,7 +126,7 @@ internal static class CommunicationRecipientResolver
     {
         Validate(target);
         int actor = CurrentUser.UserId;
-        DataTable candidates = target.Audience == CommunicationAudience.Staff
+        using DataTable candidates = target.Audience == CommunicationAudience.Staff
             ? await DatabaseHelper.QuerySqlAsync(StaffCandidateSql,
                 DatabaseHelper.Int("@UserId", actor),
                 DatabaseHelper.Int("@StaffId", target.StaffId))
@@ -127,29 +142,32 @@ internal static class CommunicationRecipientResolver
             EXEC dbo.RequirePermission @UserId, N'Staff.View';
             SELECT PhoneE164 FROM msg.Suppression WHERE Channel=@Channel;
             """;
-        DataTable blocked = await DatabaseHelper.QuerySqlAsync(
+        using DataTable blocked = await DatabaseHelper.QuerySqlAsync(
             target.Audience == CommunicationAudience.Staff ? staffSuppressionSql : SuppressionSql,
             DatabaseHelper.Int("@UserId", actor), DatabaseHelper.P("@Channel", target.Channel));
         if (actor != CurrentUser.UserId)
             throw new InvalidOperationException("The signed-in user changed. Review recipients again.");
-        return BuildPreview(candidates, blocked.AsEnumerable()
+        var preview = BuildPreview(candidates, blocked.AsEnumerable()
             .Select(row => Convert.ToString(row["PhoneE164"]) ?? "")
             .ToHashSet(StringComparer.Ordinal), target.Audience == CommunicationAudience.Staff);
+        return target.Audience == CommunicationAudience.OutstandingFees ? PrepareFeePreview(preview) : preview;
     }
 
     internal static void Validate(CommunicationTarget target)
     {
         if (target.Channel is not ("Sms" or "WhatsApp"))
-            throw new ArgumentException("Choose SMS or WhatsApp.", nameof(target));
+            throw new CommunicationValidationException("Choose SMS or WhatsApp.");
         if (!Enum.IsDefined(target.Audience))
-            throw new ArgumentException("Unknown school message audience.", nameof(target));
+            throw new CommunicationValidationException("Choose a supported school-message audience.");
+        if (target.CampusId < 0 || target.ClassId < 0 || target.StudentId < 0 || target.StaffId < 0)
+            throw new CommunicationValidationException("Choose valid school records and filters.");
         if ((target.Audience == CommunicationAudience.Campus && target.CampusId <= 0)
             || (target.Audience == CommunicationAudience.Class
                 && (target.CampusId <= 0 || target.ClassId <= 0))
             || ((target.Audience is CommunicationAudience.Student or CommunicationAudience.Family)
                 && target.StudentId <= 0)
             || (target.Audience == CommunicationAudience.Staff && target.StaffId <= 0))
-            throw new ArgumentException("Select the required campus, class or school record.", nameof(target));
+            throw new CommunicationValidationException("Select the required campus, class or school record.");
     }
 
     /// <summary>
@@ -164,11 +182,9 @@ internal static class CommunicationRecipientResolver
         foreach (DataRow row in candidates.Rows)
         {
             int id = Convert.ToInt32(row["RecordId"]);
-            string name = Convert.ToString(row["RecordName"]) ?? "";
-            // Historical imports may have an empty name; retain a meaningful
-            // record reference without fabricating a name or destination.
-            if (string.IsNullOrWhiteSpace(name))
-                name = kindName(row) + " #" + id;
+            // Imported blank names use the same visible reference in preview
+            // and live rendering; never manufacture a person's name.
+            string name = DisplayName(kindName(row), id, Convert.ToString(row["RecordName"]));
             string? admissionNumber = candidates.Columns.Contains("AdmissionNumber")
                 && !row.IsNull("AdmissionNumber")
                     ? Convert.ToString(row["AdmissionNumber"]) : null;
@@ -190,10 +206,34 @@ internal static class CommunicationRecipientResolver
             // Never show denied-consent phone numbers in the user-facing preview.
             entries.Add(new CommunicationPreviewEntry(id, name, kind,
                 reason == "Included" ? number : null, reason, balance,
-                admissionNumber, admissionDate));
+                admissionNumber, admissionDate) {
+                EligiblePhone = reason is "Included" or "Duplicate destination" ? number : null,
+                FamilyId = candidates.Columns.Contains("FamilyId") && !row.IsNull("FamilyId")
+                    ? Convert.ToInt32(row["FamilyId"]) : null
+            });
         }
         return new CommunicationPreview(entries);
     }
+
+    internal static CommunicationPreview PrepareFeePreview(CommunicationPreview preview)
+    {
+        // Match the live handoff's family/consent/scope aggregation before the
+        // operator confirms. The TVP still contains one representative per phone.
+        var entries = preview.Entries.Select(selected => {
+            if (!selected.Included) return selected;
+            var group = preview.Entries.Where(row => row.EligiblePhone == selected.EligiblePhone
+                && row.EligiblePhone is not null).Select(row => new CommunicationPreparedMessages.FeeStudent(
+                    row.RecordId, row.RecordName, row.AdmissionNumber, row.Outstanding ?? 0,
+                    selected.FamilyId.HasValue && row.FamilyId == selected.FamilyId) { AdmissionDate = row.AdmissionDate }).ToArray();
+            var values = CommunicationPreparedMessages.AggregateFeeReminder(
+                CommunicationPreparedMessages.FromPreview(selected), group);
+            return selected with { PreparedValues = values };
+        }).ToArray();
+        return new CommunicationPreview(entries);
+    }
+
+    internal static string DisplayName(string kind, int id, string? name) =>
+        string.IsNullOrWhiteSpace(name) ? kind + " #" + id : name.Trim();
 
     private static string kindName(DataRow row)
         => Convert.ToString(row["Kind"]) == "Staff" ? "Staff" : "Student";

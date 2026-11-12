@@ -1,6 +1,6 @@
 # Production database migrations
 
-**Current source target (11 November 2026): FMSC application 1.0.31, database schema 17.** The committed consecutive production migration chain is `2.sql`–`17.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
+**Current source target (12 November 2026): FMSC application 1.0.32, database schema 18.** The committed consecutive production migration chain is `2.sql`–`18.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
 
 **Historical starting point:** The first production release used application **1.0.0**, database **1**.
 The schema-1 baseline contains the complete original production schema.
@@ -37,7 +37,7 @@ communication module, when present, gets a permission-checked contact-linking
 procedure plus pre-send consent revalidation. No messages send automatically and
 the migration does not install the optional module.
 
-Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed **2.sql–16.sql** production chain where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts. See [the historical baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
+Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed **2.sql–18.sql** production chain where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts. See [the historical baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
 
 # Apply migrations without the installer
 
@@ -217,3 +217,14 @@ fees remain required by setup validation. The migration validates the
 original SQL predicate before altering it and aborts on semantic drift.
 Every migration remains subject to the installer's verified backup and
 transactional rollback safety.
+
+## Communication audit corrections — migration 18
+
+Migration 18 retains current message history, consent, school and financial data.
+It aligns SQL mobile validation with Admission, preserves old bulk fee batches
+while enabling explicitly selected-student fee notices, and completes manual
+history when live eligibility excludes the final recipient. `SingleStudentScope`
+defaults to false for existing batches; no old unused picker ID becomes a new
+recipient restriction. The installer still owns the verified backup, exclusive
+migration lock, transaction and application compatibility checks. The schema-18
+contract is embedded in the application; no root DACPAC publish is needed.

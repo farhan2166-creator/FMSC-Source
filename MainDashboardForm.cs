@@ -792,7 +792,7 @@ public sealed class MainDashboardForm : ApplicationWindowForm
         // Sending stays disabled until provider acceptance is complete.
         AddMainNav(flow, "reports.png", "Communication Center", AppTheme.Primary,
             () => new CommunicationCenterPage(),
-            "Communication", "Communication Center", "Communication.View");
+            "Communication", "Communication Center", access: () => CommunicationAccess.CanOpen(CurrentUser.HasPermission));
         // User and role administration lives in the permission-controlled Account menu.
         AddModule(
             flow,
@@ -862,11 +862,10 @@ public sealed class MainDashboardForm : ApplicationWindowForm
         string module,
         string title,
         string? permission = null,
-        Font? fontOverride = null)
+        Font? fontOverride = null, Func<bool>? access = null)
     {
-        if (!string.IsNullOrWhiteSpace(permission) &&
-            !CurrentUser.HasPermission(permission))
-            return;
+        if ((!string.IsNullOrWhiteSpace(permission) && !CurrentUser.HasPermission(permission))
+            || access?.Invoke() == false) return;
         var button = CreateNavButton(
             iconFile,
             text,
@@ -874,8 +873,8 @@ public sealed class MainDashboardForm : ApplicationWindowForm
             false,
             fontOverride);
         var command = RegisterRouteCommand(module, title, text, () => {
-            if (string.IsNullOrWhiteSpace(permission) || CurrentUser.HasPermission(permission))
-                NavigateTo(factory, module, title);
+            if ((string.IsNullOrWhiteSpace(permission) || CurrentUser.HasPermission(permission))
+                && access?.Invoke() != false) NavigateTo(factory, module, title);
         });
         button.Click += (_, _) => command.Execute();
         navTargets[button] = NavKey(module, title);

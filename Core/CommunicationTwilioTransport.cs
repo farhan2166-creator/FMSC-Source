@@ -43,6 +43,10 @@ internal static class CommunicationTwilioTransport
         string recipientE164,string message,HttpClient client,CancellationToken token)
     {
         ValidateCredentials(credential);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(client.Timeout == Timeout.InfiniteTimeSpan || client.Timeout > TimeSpan.FromSeconds(25)
+            ? TimeSpan.FromSeconds(25) : client.Timeout);
+        token = deadline.Token;
         if (recipientE164 is not { Length: 13 } || !recipientE164.StartsWith("+923",StringComparison.Ordinal)
             || !recipientE164.Skip(1).All(char.IsAsciiDigit)
             || string.IsNullOrWhiteSpace(message) || message.Length>1600)
@@ -102,6 +106,10 @@ internal static class CommunicationTwilioTransport
         string sid,HttpClient client,CancellationToken token)
     {
         ValidateCredentials(credential);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(client.Timeout == Timeout.InfiniteTimeSpan || client.Timeout > TimeSpan.FromSeconds(25)
+            ? TimeSpan.FromSeconds(25) : client.Timeout);
+        token = deadline.Token;
         if (!IsSid(sid,"SM") && !IsSid(sid,"MM"))
             throw new ArgumentException("Invalid provider message correlation.",nameof(sid));
         using var request=new HttpRequestMessage(HttpMethod.Get,

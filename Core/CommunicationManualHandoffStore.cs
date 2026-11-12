@@ -11,7 +11,7 @@ internal sealed record CommunicationManualRecipient(
     long RecipientId, string RecordName, string LastFour, string State);
 
 internal sealed record CommunicationManualOpen(
-    bool Allowed, Uri? Link, string? ExclusionCode);
+    bool Allowed, Uri? Link, string? ExclusionCode, string? Message = null);
 
 internal static class CommunicationManualHandoffStore
 {
@@ -49,13 +49,14 @@ internal static class CommunicationManualHandoffStore
             ?? throw new InvalidOperationException("No validated WhatsApp destination.");
         string body=Convert.ToString(row["Body"])
             ?? throw new InvalidOperationException("No reviewed WhatsApp message.");
+        CommunicationPreparedMessages.ValidateFormat(body);
         if (CommunicationPreparedMessages.HasFields(body))
         {
             bool feeAmount = body.Contains("[OutstandingAmount]", StringComparison.Ordinal);
             var fields = await CommunicationPreparedMessages.ReadLiveAsync(recipientId, feeAmount);
             body = CommunicationPreparedMessages.Render(body, fields);
         }
-        return new CommunicationManualOpen(true,BuildClickToChatLink(phone,body),null);
+        return new CommunicationManualOpen(true,BuildClickToChatLink(phone,body),null,body);
     }
 
     internal static Task MarkAsync(long recipientId,string result)

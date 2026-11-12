@@ -1,4 +1,4 @@
-# Communication Center — schema 10 and manual WhatsApp Business
+# Communication Center — manual WhatsApp Business
 
 The original `comm` module and `dbo.StudentGuardianCommunication` are retired by
 `Migrations/8.sql`. The owner approved deletion of their **old data even when
@@ -82,7 +82,7 @@ source**; publication and local executable installation are separate steps.
 
 Migration 10 updates the database but does **not** replace the installed FMSC executable. The manual handoff UI is in the merged source; an installation still running 1.0.15 will not show the new controls until a validated later application build is installed. Do not publish a new update merely because SQL migration 10 succeeded.
 
-In the new WinForms build, open **Communication Center** from the dashboard (requires `Communication.View`). The only operational option in Compose is **WhatsApp Business (manual)**; SMS and Email provider delivery remain unavailable. An administrator with `Communication.Configure` opens **Settings** and chooses **Use Free WhatsApp**; the button then reads **Free WhatsApp Active** rather than offering a second activation. **Pause WhatsApp** disables new chat openings, and the same settings button changes to **Resume Free WhatsApp** while paused. Sending operators additionally need `Communication.Send` plus the corresponding `Students.View` / `Staff.View` and `Fees.View` for fee notices. Use Preview, then Confirm to open one chat at a time; **History > Resume Manual WhatsApp** restores unfinished work. No button sends automatically.
+In the new WinForms build, open **Communication Center** from the dashboard. Composing requires `Communication.Send` and source-record access; `Communication.View` grants History, and `Communication.Configure` grants Settings. Each can open its permitted view independently. The only operational option in Compose is **WhatsApp Business (manual)**; SMS and Email provider delivery remain unavailable. An administrator with `Communication.Configure` opens **Settings** and chooses **Use Free WhatsApp**; the button then reads **Free WhatsApp Active** rather than offering a second activation. **Pause WhatsApp** disables new chat openings, and the same settings button changes to **Resume Free WhatsApp** while paused. Sending operators additionally need `Communication.Send` plus the corresponding `Students.View` / `Staff.View` and `Fees.View` for fee notices. Use Preview, then Confirm to open one chat at a time; **History > Resume Manual WhatsApp** restores unfinished work. No button sends automatically.
 
 For local acceptance, first confirm which executable Windows is actually running, and use synthetic destinations in a disposable copy of the database. See `COMMUNICATION_MANUAL_WHATSAPP_ACCEPTANCE.md`.
 
@@ -92,3 +92,42 @@ that batch elsewhere. A process crash releases the exclusive handle; the recorde
 recipient states remain available through History. This does not verify WhatsApp delivery.
 A saved Admission Yes/No cannot be reset to “Not recorded” by an unrelated details save;
 choose an explicit Yes or No when changing a recorded choice.
+
+## Audit corrections and optional record entry — schema 18
+
+Admission offers **Message Student** for a saved record. Fee Collection offers it
+under **Student Fees**, targeting only the currently selected main student, not
+checked siblings. Both open this same centre in a modal window. They do not save,
+reload or reset the parent form, record consent, queue a message, or send anything
+on return. Existing Admission Yes remains authoritative; No/unrecorded consent
+excludes the destination. No duplicate consent step is introduced.
+
+Campus/class audiences resolve automatically; individual/family selection uses
+the established StudentPicker and saved FamilyMembers links. Outstanding-fee
+previews and handoffs use current `GetFeeChargeBalance` values, sum only eligible
+in-scope children sharing a verified family and destination, and refuse unrelated
+shared contacts. A single-student fee notice never expands to siblings. A family
+with different admission dates cannot use a single `[AdmissionDate]` value.
+
+Preview shows a scrollable complete message for each selected eligible recipient.
+Fields are checked before confirmation and refreshed before handoff. If records
+change after preview, the chat contains the newly checked values shown in the
+handoff window; it is still the operator's responsibility to review and press
+Send. An external launch is not a send. A failed launch cannot enable **I Sent
+It** in that window; a saved Opened row remains a prepared/unverified state that
+can be reopened. Skipped and live-excluded recipients count in history without
+provider delivery evidence. Pending SQL operations block conflicting navigation.
+
+Only `[StudentName]`, `[AdmissionNumber]`, `[AdmissionDate]` and
+`[OutstandingAmount]` are supported. Outstanding amount requires the outstanding
+fee audience. Unsupported or incomplete fields produce editable guidance.
+Template edits refresh the composer; unavailable Email/SMS profiles remain
+unavailable and editing never silently changes a saved channel.
+
+Migration 18 adds a `SingleStudentScope` flag: historical bulk fee batches keep
+their meaning even if the old UI stored an unused picker ID. Current confirmations
+opt into selected-student scope deliberately. It also aligns SQL and Admission
+phone validation and corrects manual exclusion completion/counts, preserving
+current records. Use the guarded numbered migration chain, never a root DACPAC
+publish over school data. See the independent
+[audit and validation evidence](../Audit/Reviews/FMSC_COMMUNICATION_CENTER_AUDIT_2026-11-12.md).

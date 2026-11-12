@@ -43,6 +43,7 @@ internal static partial class Program
         if (args.Contains("--communication-workflow"))
         {
             CheckCommunicationWorkflow();
+            CheckCommunicationAudit();
             Console.WriteLine($"PASS: {checks} automatic school recipient, consent and no-send checks.");
             return;
         }
@@ -161,6 +162,7 @@ internal static partial class Program
             CheckSelectiveWorkspaceGuards();
             CheckAdmissionActions();
             CheckCommunicationWorkflow();
+            CheckCommunicationAudit();
             Console.WriteLine($"PASS: {checks} navigation recovery, palette dispatch, permission, busy/draft and admission-action checks (no database connection).");
             return;
         }

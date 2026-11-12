@@ -273,8 +273,8 @@ internal static partial class Program
         Check(rejectedMissingBalance, "Fee reminder refuses missing or settled balance rather than displaying a fake amount");
         bool unknownFieldRejected = false;
         try { RenderFormat("Hello [PrivateSqlField]", Details(1250.50m)); }
-        catch (TargetInvocationException ex) when (ex.InnerException is ArgumentException)
-        { unknownFieldRejected = true; }
+        catch (TargetInvocationException ex) when (ex.InnerException is CommunicationValidationException error)
+        { unknownFieldRejected = DbMessage.UserMessage(error).Contains("[PrivateSqlField]"); }
         Check(unknownFieldRejected, "Prepared messages reject unknown record fields");
         var audienceField = audience.Parent!;
         Rectangle visibleInput = Rectangle.Intersect(

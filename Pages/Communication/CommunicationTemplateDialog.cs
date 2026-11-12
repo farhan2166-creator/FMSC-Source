@@ -12,7 +12,8 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
 
     internal string TemplateName => name.Text.Trim();
     internal string Body => body.Text.Trim();
-    internal string Channel => channel.Text;
+    private sealed record ChannelChoice(string Code, string Label) { public override string ToString() => Label; }
+    internal string Channel => (channel.SelectedItem as ChannelChoice)?.Code ?? "WhatsApp";
     internal string Purpose => purpose.Text;
     internal bool Active => active.Checked;
 
@@ -27,10 +28,13 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
         ClientSize=new Size(AppScale.Scale(650),AppScale.Scale(525));
         MinimumSize=ClientSize;
         BackColor=AppTheme.PageBackground;
-        channel.Items.AddRange(new object[]{"Sms","WhatsApp"});
+        channel.Items.AddRange(new object[] {
+            new ChannelChoice("Sms", "SMS (sending unavailable)"),
+            new ChannelChoice("WhatsApp", "WhatsApp Business (manual)"),
+            new ChannelChoice("Email", "Email (sending unavailable)") });
         purpose.Items.AddRange(new object[]{"Announcement","FeeReminder","Individual","Staff"});
         name.Text=nameValue;body.Text=bodyValue;active.Checked=isActive;
-        channel.SelectedItem=channelValue;
+        channel.SelectedItem=channel.Items.Cast<ChannelChoice>().FirstOrDefault(choice => choice.Code==channelValue);
         if(channel.SelectedIndex<0)channel.SelectedIndex=0;
         purpose.SelectedItem=purposeValue;
         if(purpose.SelectedIndex<0)purpose.SelectedIndex=0;
@@ -49,6 +53,12 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
                 ModernMessageDialog.Show(this,
                     "Provide a name and a complete message. Use supported prepared fields in [FieldName] format, not {{...}}.",
                     "Message Template",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+                return;
+            }
+            try { CommunicationPreparedMessages.ValidateFormat(Body, Purpose); }
+            catch (CommunicationValidationException ex)
+            {
+                ModernMessageDialog.Show(this, ex.Message, "Message Template", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             DialogResult=DialogResult.OK;

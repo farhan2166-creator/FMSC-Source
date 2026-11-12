@@ -28,13 +28,8 @@ internal static class CommunicationBatchStore
             throw new ArgumentException("A message of at most 1600 characters is required.", nameof(message));
         if (preview.Included == 0)
             throw new InvalidOperationException("No eligible recipients remain.");
-        string purpose = target.Audience switch
-        {
-            CommunicationAudience.OutstandingFees => "FeeReminder",
-            CommunicationAudience.Staff => "Staff",
-            CommunicationAudience.Student or CommunicationAudience.Family => "Individual",
-            _ => "Announcement"
-        };
+        string purpose = target.Purpose;
+        CommunicationPreparedMessages.ValidateFormat(message, purpose);
         // TVP contains the exact eligible preview, never excluded or declined
         // records, and is checked again by SQL against authoritative Admissions.
         using var destinations = new DataTable();
