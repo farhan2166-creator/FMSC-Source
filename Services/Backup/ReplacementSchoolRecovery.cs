@@ -117,7 +117,7 @@ internal static class ReplacementSchoolRecovery
         string administratorUsername, string administratorPassword,
         IProgress<BackupProgressUpdate>? progress = null,
         CancellationToken token = default,
-        IReadOnlyList<CloudRemoteBackup>? alternatives = null
+        IReadOnlyList<CloudRemoteBackup>? alternatives = null)
     {
         if ((localBak is null) == (remote is null))
             throw new ArgumentException("Select exactly one local or cloud recovery source.");
