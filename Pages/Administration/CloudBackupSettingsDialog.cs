@@ -19,8 +19,12 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         Format = DateTimePickerFormat.Custom, CustomFormat = "hh:mm tt", ShowUpDown = true, Width = 160
     };
     private readonly NumericUpDown localMax = Limit(), googleMax = Limit(), dropboxMax = Limit();
+    private readonly NumericUpDown maximumQueueMb = new() { Minimum = 512, Maximum = 1048576,
+        Increment = 512, ThousandsSeparator = true, Width = 140 };
     private readonly ModernButton driveConnect = ActionButton("Connect Google Drive");
+    private readonly ModernButton driveRepair = ActionButton("Verify / Reconnect Drive");
     private readonly ModernButton dropboxConnect = ActionButton("Connect Dropbox");
+    private readonly ModernButton dropboxRepair = ActionButton("Verify / Reconnect Dropbox");
     private readonly Label recoveryStatus = new() { AutoSize = true, ForeColor = AppTheme.MutedText };
     private readonly ModernButton save = ActionButton("Save Backup Settings");
     private readonly ModernButton cancel = ActionButton("Cancel");
@@ -55,6 +59,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         localMax.Value = previous.MaximumLocalBackups;
         googleMax.Value = previous.MaximumGoogleDriveBackups;
         dropboxMax.Value = previous.MaximumDropboxBackups;
+        maximumQueueMb.Value = previous.MaximumPendingQueueMegabytes;
 
         var body = new TableLayoutPanel {
             Dock = DockStyle.Fill, ColumnCount = 2, AutoScroll = true,
@@ -71,9 +76,12 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         AddRow(body, "Google Drive", google);
         AddRow(body, "Google Drive maximum cloud backups", googleMax);
         AddRow(body, "Google Drive account", driveConnect);
+        AddRow(body, "Google Drive connection health", driveRepair);
         AddRow(body, "Dropbox", dropbox);
         AddRow(body, "Dropbox maximum cloud backups", dropboxMax);
+        AddRow(body, "Maximum encrypted queue (MB)", maximumQueueMb);
         AddRow(body, "Dropbox account", dropboxConnect);
+        AddRow(body, "Dropbox connection health", dropboxRepair);
         AddRow(body, "Encryption recovery", passphraseButton);
         AddRow(body, "Recovery status", recoveryStatus);
         var note = new Label {
@@ -102,6 +110,8 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
 
         driveConnect.Click += async (_, _) => await ToggleProviderAsync(CloudProvider.GoogleDrive, driveConnect);
         dropboxConnect.Click += async (_, _) => await ToggleProviderAsync(CloudProvider.Dropbox, dropboxConnect);
+        driveRepair.Click += async (_, _) => await VerifyOrReconnectAsync(CloudProvider.GoogleDrive);
+        dropboxRepair.Click += async (_, _) => await VerifyOrReconnectAsync(CloudProvider.Dropbox);
         passphraseButton.Click += (_, _) => SetRecoveryPassphrase();
         save.Click += async (_, _) => await SaveAsync();
         FormClosing += (_, e) =>
@@ -121,7 +131,9 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         if (operationBusy || IsDisposed || Disposing) return false;
         operationBusy = true;
         driveConnect.Enabled = false;
+        driveRepair.Enabled = false;
         dropboxConnect.Enabled = false;
+        dropboxRepair.Enabled = false;
         save.Enabled = false;
         cancel.Enabled = false;
         passphraseButton.Enabled = false;
@@ -133,7 +145,9 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         operationBusy = false;
         if (IsDisposed || Disposing) return;
         driveConnect.Enabled = true;
+        driveRepair.Enabled = true;
         dropboxConnect.Enabled = true;
+        dropboxRepair.Enabled = true;
         save.Enabled = true;
         cancel.Enabled = true;
         passphraseButton.Enabled = true;
@@ -156,6 +170,51 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "Cloud account", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            if (!IsDisposed && !Disposing) RefreshConnectionState();
+            EndOperation();
+        }
+    }
+
+    private async Task VerifyOrReconnectAsync(CloudProvider provider)
+    {
+        if (!TryBeginOperation()) return;
+        try
+        {
+            bool healthy = false;
+            try
+            {
+                await CloudBackupOAuth.CheckConnectionAsync(provider);
+                healthy = true;
+            }
+            catch (Exception error)
+            {
+                AppExceptionHandler.LogNonFatal(error, provider + " account connection health check failed");
+            }
+            if (healthy)
+            {
+                MessageBox.Show(this, provider + " responded successfully. Its connection is ready.",
+                    "Cloud connection verified", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (MessageBox.Show(this, provider + " authorization needs attention. " +
+                    "Reconnect using the browser? Existing saved credentials will remain until new authorization succeeds.",
+                    "Reconnect cloud backup account", MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+            await CloudBackupOAuth.ReconnectAsync(provider);
+            await CloudBackupOAuth.CheckConnectionAsync(provider);
+            MessageBox.Show(this, provider + " is reconnected and ready.",
+                "Cloud account recovered", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception error)
+        {
+            AppExceptionHandler.LogNonFatal(error, provider + " cloud reconnect failed");
+            MessageBox.Show(this, provider + " could not be reconnected. Other backup destinations are unchanged. " +
+                "Open technical diagnostics or retry when the network is available.",
+                "Cloud account needs attention", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
         {
@@ -231,7 +290,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                 throw new InvalidOperationException("Choose at least one backup destination.");
             if (automatic.Checked && frequency.SelectedIndex == 0)
                 throw new InvalidOperationException("Select a scheduled frequency or disable automatic backup.");
-            if ((automatic.Checked || google.Checked || dropbox.Checked) &&
+            if ((google.Checked || dropbox.Checked) &&
                 !CloudBackupSettings.HasLocalRecoveryPassphrase)
                 throw new InvalidOperationException("Set and independently retain a recovery passphrase first.");
             var newSettings = new CloudBackupOptions {
@@ -243,7 +302,8 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                 WeeklyDay = (DayOfWeek)weeklyDay.SelectedIndex,
                 MaximumLocalBackups = (int)localMax.Value,
                 MaximumGoogleDriveBackups = (int)googleMax.Value,
-                MaximumDropboxBackups = (int)dropboxMax.Value
+                MaximumDropboxBackups = (int)dropboxMax.Value,
+                MaximumPendingQueueMegabytes = (int)maximumQueueMb.Value
             };
             newSettings.Validate();
             if (newSettings.LocalEnabled && BackupSettings.GetBackupFolder().Length == 0)
