@@ -1,4 +1,5 @@
 using FMSC_SMS.Core;
+using FMSC_SMS.Pages.Administration;
 
 internal static partial class Program
 {
@@ -10,14 +11,42 @@ internal static partial class Program
         _ = SingleInstanceStartup.TryActivateWindow(owner.Handle); Application.DoEvents();
         Check(owner.WindowState != FormWindowState.Minimized, "Opening FMSC again restores its existing minimized window");
         using var modal = new Form { Text = "Synthetic active dialog", ShowInTaskbar = false };
-        modal.Shown += (_, _) => {
-            Check(!owner.Enabled && SingleInstanceStartup.ActivationWindow(owner.Handle) == modal.Handle,
-                "Repeated launch targets the active modal dialog instead of its disabled owner");
+        modal.Shown += (_, _) => modal.BeginInvoke((Action)(() => {
+            IntPtr target = SingleInstanceStartup.ActivationWindow(owner.Handle);
+            Check(target == modal.Handle,
+                "Repeated launch targets the active modal dialog; selected owner=" + (target == owner.Handle));
             modal.Close();
-        };
+        }));
         modal.ShowDialog(owner);
         Check(SingleInstanceStartup.ActivationWindow(owner.Handle) == owner.Handle,
             "After closing a dialog, activation returns to the existing main window");
         owner.Close();
+        CheckRestoreRestartRequest();
+    }
+
+    private static void CheckRestoreRestartRequest()
+    {
+        bool previous = FMSC_SMS.Program.ConsumeRestartRequest();
+        try
+        {
+            using var shell = new Form { ShowInTaskbar = false };
+            bool refuse = true;
+            int warnings = 0;
+            shell.FormClosing += (_, e) => e.Cancel = refuse;
+            shell.Show(); Application.DoEvents();
+            BackupRestorePage.RestartApplication(shell, () => warnings++);
+            Check(!shell.IsDisposed && warnings == 1 && !FMSC_SMS.Program.ConsumeRestartRequest(),
+                "A refused restore shutdown schedules no replacement and leaves the current session intact");
+            refuse = false;
+            BackupRestorePage.RestartApplication(shell, () => warnings++);
+            Check(shell.IsDisposed && FMSC_SMS.Program.ConsumeRestartRequest(),
+                "An accepted restore shutdown requests relaunch through the startup lifetime");
+            Check(!FMSC_SMS.Program.ConsumeRestartRequest(), "A restore restart request is consumed once");
+        }
+        finally
+        {
+            FMSC_SMS.Program.ConsumeRestartRequest();
+            if (previous) FMSC_SMS.Program.RequestRestart();
+        }
     }
 }

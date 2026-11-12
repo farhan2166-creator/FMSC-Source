@@ -62,20 +62,25 @@ internal static class SingleInstanceStartup
 
     internal static bool TryActivateWindow(IntPtr window)
     {
-        if (IsIconic(window)) ShowWindow(window, 9); // SW_RESTORE retains the previous maximized state.
+        if (IsIconic(window)) ShowWindowAsync(window, 9); // SW_RESTORE retains the previous maximized state.
         return SetForegroundWindow(ActivationWindow(window));
     }
 
     internal static IntPtr ActivationWindow(IntPtr window)
     {
-        IntPtr popup = GetLastActivePopup(window);
-        return popup != IntPtr.Zero && IsWindowVisible(popup) ? popup : window;
+        for (int depth = 0; depth < 32; depth++)
+        {
+            IntPtr popup = GetLastActivePopup(window);
+            if (popup == IntPtr.Zero || popup == window || !IsWindowVisible(popup)) break;
+            window = popup;
+        }
+        return window;
     }
 
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsIconic(IntPtr window);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ShowWindow(IntPtr window, int command);
+    private static extern bool ShowWindowAsync(IntPtr window, int command);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")]

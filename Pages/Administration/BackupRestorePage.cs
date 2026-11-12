@@ -832,51 +832,32 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 SetBusyState(false);
         }
     }
-    /// <summary>Restart once after restore; if closing is refused, launch nothing and request a manual restart.</summary>
-    static void RestartApplication(Form? shell)
+    /// <summary>Request relaunch after shutdown; never start a second process while this session owns the gate.</summary>
+    internal static void RestartApplication(Form? shell, Action? notifyRefused = null)
     {
-        var exePath = Environment.ProcessPath;
-        if (shell == null || shell.IsDisposed || string.IsNullOrEmpty(exePath))
+        if (shell == null || shell.IsDisposed)
         {
-            try
-            {
-                Application.Restart();
-            }
-            catch (Exception nonFatalException26)
-            {
-                FMSC_SMS.Core.AppExceptionHandler.LogNonFatal(nonFatalException26, "BackupRestorePage: RestartApplication fallback");
-                Application.Exit();
-            }
+            // ApplicationExit occurs only if all windows accept closing.
+            EventHandler request = (_, _) => Program.RequestRestart();
+            Application.ApplicationExit += request;
+            try { Application.Exit(); }
+            finally { Application.ApplicationExit -= request; }
             return;
         }
-        FormClosedEventHandler? launchNewInstance = null;
-        launchNewInstance = (_, _) => {
-            shell.FormClosed -= launchNewInstance;
-            try
-            {
-                System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo(exePath) {
-                        UseShellExecute = true,
-                        WorkingDirectory = AppContext.BaseDirectory
-                    });
-            }
-            catch (Exception nonFatalException27)
-            {
-                FMSC_SMS.Core.AppExceptionHandler.LogNonFatal(nonFatalException27, "BackupRestorePage: RestartApplication fallback");
-                /* The application is closing; the operator can start it again from the shortcut. */
-            }
+        FormClosedEventHandler? requestRestart = null;
+        requestRestart = (_, _) => {
+            shell.FormClosed -= requestRestart;
+            Program.RequestRestart();
         };
-        shell.FormClosed += launchNewInstance;
+        shell.FormClosed += requestRestart;
         shell.Close();
         if (!shell.IsDisposed)
         {
-            /* The close was refused, so the window is still open and no second instance was started. */
-            shell.FormClosed -= launchNewInstance;
-            ModernMessageDialog.ShowInfo(
-                shell,
+            shell.FormClosed -= requestRestart;
+            if (notifyRefused is not null) notifyRefused();
+            else ModernMessageDialog.ShowInfo(shell,
                 "The restore is complete, but FMSC could not close itself. " +
-                "Please close FMSC and open it again.",
-                "Restore Complete");
+                "Please close FMSC and open it again.", "Restore Complete");
         }
     }
     /// <summary>Gate history-dependent actions for the entire read.</summary>
