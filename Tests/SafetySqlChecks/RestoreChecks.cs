@@ -98,6 +98,17 @@ internal static class RestoreChecks
             "A refused second activation did not alter the recovered school.");
         Check(Convert.ToString(Scalar("SELECT Value FROM CurrentSchool.dbo.TestMarker;"))=="Original",
             "Disposable replacement activation did not modify the preserved original school.");
+        string syntheticSafety=PathFor("virgin-template-pre-recovery-safety.bak");
+        Execute("UPDATE FMSC_DB.dbo.TestMarker SET Value=N'Blank';");
+        Execute($"BACKUP DATABASE [FMSC_DB] TO DISK={Quote(syntheticSafety)} WITH COPY_ONLY,CHECKSUM,INIT;");
+        Execute($"RESTORE VERIFYONLY FROM DISK={Quote(syntheticSafety)} WITH CHECKSUM;");
+        Check(File.Exists(syntheticSafety)&&new FileInfo(syntheticSafety).Length>0,
+            "A synthetic first-run template has a verified safety copy before replacement.");
+        ReplacementSqlActivation.RestoreVerifiedBackup(c,good,
+            PathFor("replacement-new.mdf"),PathFor("replacement-new.ldf"),
+            verifiedVirginTemplate:true);
+        Check(Convert.ToString(Scalar("SELECT Value FROM FMSC_DB.dbo.TestMarker;"))=="Original",
+            "Verified virgin-template replacement completed and preserved the recovered SQL data.");
         Console.WriteLine($"PASS: {checks} real SQL backup-identity and replacement activation checks on the isolated instance.");
     }
 }
