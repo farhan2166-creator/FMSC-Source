@@ -206,6 +206,7 @@ internal static class CloudBackupCoordinator
                 {
                     token.ThrowIfCancellationRequested();
                     progress?.Report(new BackupProgressUpdate("Pending retry", SafeTransportError(ex), "Google Drive", true));
+                    AppExceptionHandler.LogNonFatal(ex, "Google Drive delivery or recovery verification pending");
                 }
             }
             if (settings.DropboxEnabled)
@@ -215,6 +216,7 @@ internal static class CloudBackupCoordinator
                 {
                     token.ThrowIfCancellationRequested();
                     progress?.Report(new BackupProgressUpdate("Pending retry", SafeTransportError(ex), "Dropbox", true));
+                    AppExceptionHandler.LogNonFatal(ex, "Dropbox delivery or recovery verification pending");
                 }
             }
             RemoveFullyDeliveredPayload(pending, settings);
@@ -225,7 +227,7 @@ internal static class CloudBackupCoordinator
             var issues = ReadDeliveryIssues(settings);
             string summary = issues.Count == 0
                 ? (settings.LocalEnabled ? "Local backup saved. " : "") + "Encrypted backup uploaded to the selected cloud destinations."
-                : (settings.LocalEnabled ? "Local backup saved. " : "Encrypted backup safely queued. ") +
+                : (settings.LocalEnabled ? "Local backup saved. " : "Cloud backup remains incomplete. ") +
                     "Some cloud destinations still require delivery: " + string.Join("; ", issues);
             progress?.Report(new BackupProgressUpdate(issues.Count == 0 ? "Completed" : "Completed with pending deliveries", summary));
             return RecordOutcome(new CloudBackupOutcome(settings.LocalEnabled, google, dropbox, summary, issues.Count > 0));
@@ -429,8 +431,7 @@ internal static class CloudBackupCoordinator
     private static async Task<List<string>> RetryPendingUploadsCoreAsync(CloudBackupOptions settings, CancellationToken token,
         IProgress<BackupProgressUpdate>? progress = null)
     {
-        var issues = new List<string>();
-        if (!Directory.Exists(Journal)) return issues;
+        if (!Directory.Exists(Journal)) return new List<string>();
         foreach (string id in ReadPending().OrderByDescending(p => p.SqlCreatedUtc).Select(p => p.Id))
         {
             token.ThrowIfCancellationRequested();
@@ -443,30 +444,18 @@ internal static class CloudBackupCoordinator
                 if (!StillRequiresDelivery(p, provider, settings)) continue;
                 bool enabled = provider == CloudProvider.GoogleDrive
                     ? settings.GoogleDriveEnabled : settings.DropboxEnabled;
-                if (!enabled)
-                {
-                    issues.Add(provider + ": pending backup preserved while this destination is disabled.");
-                    continue;
-                }
+                if (!enabled) continue;
                 int attempts = provider == CloudProvider.GoogleDrive
                     ? p.GoogleDeliveryAttempts : p.DropboxDeliveryAttempts;
                 DateTime? next = provider == CloudProvider.GoogleDrive
                     ? p.NextGoogleAttemptUtc : p.NextDropboxAttemptUtc;
-                if (attempts >= MaximumAutomaticDeliveryAttempts)
-                {
-                    issues.Add(provider + ": automatic retries exhausted; use Retry Pending Uploads after correcting the cause.");
-                    continue;
-                }
-                if (!CloudBackupQueuePolicy.RetryIsDue(next, DateTime.UtcNow))
-                {
-                    issues.Add(provider + ": retry is scheduled; encrypted backup is safely queued.");
-                    continue;
-                }
+                if (attempts >= MaximumAutomaticDeliveryAttempts ||
+                    !CloudBackupQueuePolicy.RetryIsDue(next, DateTime.UtcNow)) continue;
                 try { await UploadOneAsync(p, provider, settings, token, progress); }
                 catch (Exception ex)
                 {
                     token.ThrowIfCancellationRequested();
-                    issues.Add(provider + ": " + SafeTransportError(ex));
+                    progress?.Report(new BackupProgressUpdate("Pending retry", SafeTransportError(ex), provider.ToString(), true));
                     BackupActivityJournal.TryRecord("Cloud delivery", provider.ToString(), "Pending retry");
                     AppExceptionHandler.LogNonFatal(ex, "Retrying cloud delivery or recovery verification");
                 }

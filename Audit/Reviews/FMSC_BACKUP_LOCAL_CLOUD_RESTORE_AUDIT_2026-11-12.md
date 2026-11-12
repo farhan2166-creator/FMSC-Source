@@ -390,6 +390,8 @@ mutation is needed for these corrections.
   replacement-activation checks passed. Windows file-sharing enforcement is
   explicitly skipped on Linux and separately checked by native UI regressions.
 - Disposable SQL container cleanup: owner-checked and confirmed.
+- Ten existing lifecycle fixture/cleanup/evidence safeguards: passed.
+- Changed GitHub workflow YAML parses successfully.
 
 Native GitHub Windows and SQL workflow results will be recorded with the PR.
 Real enrolled-PC recovery, real Google/Dropbox sign-in and a real provider

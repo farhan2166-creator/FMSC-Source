@@ -4,8 +4,10 @@ namespace FMSC_SMS.Services.Backup;
 
 // Google Desktop clients require their native client metadata in token requests.
 // This is not a confidential web-app secret and never replaces PKCE or user consent.
-internal sealed record GoogleDesktopRegistration(string ClientId, string ClientSecret)
+internal sealed class GoogleDesktopRegistration(string clientId, string clientSecret)
 {
+    internal string ClientId { get; } = clientId;
+    internal string ClientSecret { get; } = clientSecret;
     internal static GoogleDesktopRegistration Parse(string json, string expectedClientId)
     {
         if (json.Length > 16 * 1024) throw new InvalidDataException("Google Desktop registration is too large.");
