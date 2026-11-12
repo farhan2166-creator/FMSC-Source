@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Services/Backup/CloudBackupOperations.cs" Link="CloudBackupOperations.cs" />
     <Compile Include="../../Core/SqlPrerequisiteRepair.cs" Link="SqlPrerequisiteRepair.cs" />
     <Compile Include="../../Services/Backup/CloudBackupTransport.cs" Link="CloudBackupTransport.cs" />
     <Compile Include="../../Core/CommunicationHandoffLease.cs" Link="CommunicationHandoffLease.cs" />

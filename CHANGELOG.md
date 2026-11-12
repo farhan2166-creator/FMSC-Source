@@ -1,12 +1,20 @@
 # Changelog
 
+## 1.0.31 — Certificate and cloud recovery corrections (schema 17)
+
+- Select the exact saved certificate after backdated or deduplicated creation; refuse to substitute another history row if refresh fails.
+- Include teacher/lecturer and bank certificate collection details and totals in Certificate Issue Register.
+- Time out stalled cloud download bodies and remove partial packages before SQL work.
+- Record pending cloud delivery visibly and return a nonzero scheduled result while uploads remain incomplete.
+- Distinguish failed cloud account listings from empty accounts, retaining available recovery points with warnings.
+
 ## 1.0.30 — Release review corrections (schema 17)
 
 - Correct 12-hour backup scheduling for morning start times; reconcile Google Drive retries by a durably reserved file ID and verified size/checksum.
 - Exclude concurrent handoff windows for the same manual WhatsApp batch on the supported LocalDB host; retain human confirmation and crash-safe resume.
 - Remove only verified FMSC cloud-backup scheduled tasks during uninstall; preserve school files and unrelated tasks.
 - Preserve leaving-certificate print authority for principal signatures (migration 17); retain separate ordinary-certificate print authorization.
-- Report actual Sports/NOC/Provisional collection events; keep genuinely untracked staff records distinct.
+- Report actual Sports/NOC/Provisional collection events. Staff collection reporting was completed in 1.0.31.
 - Reject changing recorded Admission consent to “Not recorded”; explicit Yes/No remains authoritative.
 - Repair or install the VC++ prerequisite before in-app LocalDB repair; stop for restart or an unverified runtime.
 

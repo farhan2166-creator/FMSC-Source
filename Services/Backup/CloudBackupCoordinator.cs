@@ -38,11 +38,11 @@ internal static class CloudBackupCoordinator
         public long Size { get; set; }
     }
     private sealed class State { public DateTimeOffset? LastSuccessfulLocalBackup { get; set; } }
-    internal sealed record BackupOutcome(bool LocalSucceeded, bool GoogleSucceeded,
-        bool DropboxSucceeded, string Message);
+    private sealed record RunStatus(DateTime CheckedUtc, bool UploadsPending, string Message);
+    internal sealed record CloudBrowseResult(IReadOnlyList<CloudSelection> Copies, IReadOnlyList<string> Warnings);
     internal sealed record CloudSelection(CloudRemoteBackup Remote, bool KnownVerifiedUpload);
 
-    internal static async Task<BackupOutcome> CreateAndUploadAsync(
+    internal static async Task<CloudBackupOutcome> CreateAndUploadAsync(
         bool scheduled = false, CancellationToken token = default)
     {
         var settings = CloudBackupSettings.Load();
@@ -61,9 +61,11 @@ internal static class CloudBackupCoordinator
             ?? throw new InvalidOperationException("Another FMSC cloud backup or upload is already running.");
         try
         {
-            await RetryPendingUploadsCoreAsync(settings, token).ConfigureAwait(false);
+            var retryIssues = await RetryPendingUploadsCoreAsync(settings, token).ConfigureAwait(false);
             if (scheduled && !settings.IsDue(DateTimeOffset.Now, LoadState().LastSuccessfulLocalBackup))
-                return new BackupOutcome(false, false, false, "No scheduled backup is due.");
+                return RecordOutcome(new CloudBackupOutcome(false, false, false,
+                    retryIssues.Count == 0 ? "No scheduled backup is due. Pending uploads are complete."
+                        : "Cloud upload is pending retry: " + string.Join("; ", retryIssues), retryIssues.Count > 0));
 
             string folder = BackupSettings.GetBackupFolder();
             if (folder.Length == 0) throw new InvalidOperationException("Choose an existing local backup folder before enabling automatic cloud backups.");
@@ -105,16 +107,16 @@ internal static class CloudBackupCoordinator
             // provider was temporarily unavailable.
             SaveState(new State { LastSuccessfulLocalBackup = DateTimeOffset.Now });
             bool google = false, dropbox = false;
-            var issues = new List<string>();
+            var issues = new List<string>(retryIssues);
             if (settings.GoogleDriveEnabled)
             {
                 try { google = await UploadOneAsync(pending, CloudProvider.GoogleDrive, settings, token); }
-                catch (Exception ex) { issues.Add("Google Drive: " + SafeTransportError(ex)); }
+                catch (Exception ex) { token.ThrowIfCancellationRequested(); issues.Add("Google Drive: " + SafeTransportError(ex)); }
             }
             if (settings.DropboxEnabled)
             {
                 try { dropbox = await UploadOneAsync(pending, CloudProvider.Dropbox, settings, token); }
-                catch (Exception ex) { issues.Add("Dropbox: " + SafeTransportError(ex)); }
+                catch (Exception ex) { token.ThrowIfCancellationRequested(); issues.Add("Dropbox: " + SafeTransportError(ex)); }
             }
             RemoveFullyDeliveredPayload(pending, settings);
             await Task.Run(() => PruneLocalAutomaticBackups(folder, settings.MaximumLocalBackups), token)
@@ -122,7 +124,7 @@ internal static class CloudBackupCoordinator
             string summary = issues.Count == 0
                 ? "Verified local backup uploaded to the selected cloud destinations."
                 : "Verified local backup succeeded. Cloud upload is pending retry: " + string.Join("; ", issues);
-            return new BackupOutcome(true, google, dropbox, summary);
+            return RecordOutcome(new CloudBackupOutcome(true, google, dropbox, summary, issues.Count > 0));
         }
         finally { /* jobLease is disposed on exit, including exceptions */ }
     }
@@ -140,12 +142,14 @@ internal static class CloudBackupCoordinator
         if (!IsUpdaterIdleForBackup()) return 3;
         try
         {
-            await CreateAndUploadAsync(scheduled: true, token);
-            return 0;
+            var outcome = await CreateAndUploadAsync(scheduled: true, token);
+            return CloudBackupOperations.ScheduledExitCode(outcome);
         }
         catch (Exception ex)
         {
             AppExceptionHandler.LogNonFatal(ex, "Unattended encrypted cloud backup failed");
+            try { RecordOutcome(new CloudBackupOutcome(false, false, false, "Cloud backup failed. Check the connection, recovery settings and local backup folder.", true)); }
+            catch (Exception statusError) { AppExceptionHandler.LogNonFatal(statusError, "Could not retain cloud backup failure status"); }
             return 1;
         }
     }
@@ -188,34 +192,17 @@ internal static class CloudBackupCoordinator
         await RetryPendingUploadsCoreAsync(settings, token).ConfigureAwait(false);
     }
 
-    internal static async Task<IReadOnlyList<CloudSelection>> BrowseCloudAsync(CancellationToken token = default)
+    internal static async Task<CloudBrowseResult> BrowseCloudAsync(CancellationToken token = default)
     {
-        var list = new List<CloudSelection>();
-        foreach (var provider in new[] { CloudProvider.GoogleDrive, CloudProvider.Dropbox })
-        {
-            if (!CloudBackupOAuth.IsConnected(provider)) continue;
-            var known = ReadPending().Where(x =>
-                (provider == CloudProvider.GoogleDrive ? x.GoogleDriveId : x.DropboxId).Length > 0).ToArray();
-            try
-            {
-                var remote = await CloudBackupTransport.ListAsync(provider, token);
-                foreach (var item in remote)
-                {
-                    bool isKnown = known.Any(x =>
-                        (provider == CloudProvider.GoogleDrive ? x.GoogleDriveId : x.DropboxId) == item.RemoteId &&
-                        string.Equals(x.Sha256, item.PackageSha256, StringComparison.OrdinalIgnoreCase) &&
-                        (x.SqlCreatedUtc - item.SqlBackupCreatedUtc).Duration() < TimeSpan.FromSeconds(1));
-                    list.Add(new CloudSelection(item, isKnown));
-                }
-            }
-            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or IOException)
-            {
-                // One provider's outage cannot conceal the other provider's
-                // available recovery points.
-                AppExceptionHandler.LogNonFatal(ex, provider + " cloud recovery listing failed");
-            }
-        }
-        return list.OrderByDescending(x => x.Remote.SqlBackupCreatedUtc).ToArray();
+        var inventory = await CloudBackupOperations.BrowseAsync(CloudBackupOAuth.IsConnected,
+            CloudBackupTransport.ListAsync,
+            (provider, ex) => AppExceptionHandler.LogNonFatal(ex, provider + " cloud recovery listing failed"), token);
+        var known = ReadPending();
+        var copies = inventory.Copies.Select(item => new CloudSelection(item, known.Any(p =>
+            (item.Provider == CloudProvider.GoogleDrive ? p.GoogleDriveId : p.DropboxId) == item.RemoteId &&
+            string.Equals(p.Sha256, item.PackageSha256, StringComparison.OrdinalIgnoreCase) &&
+            (p.SqlCreatedUtc - item.SqlBackupCreatedUtc).Duration() < TimeSpan.FromSeconds(1)))).ToArray();
+        return new(copies, inventory.Warnings);
     }
 
     internal static async Task<DatabaseBackupManager.BackupResult> RestoreFromCloudAsync(
@@ -238,9 +225,10 @@ internal static class CloudBackupCoordinator
             throw new InvalidDataException("Cloud backup SHA-256 differs from its recorded package identity.");
     }
 
-    private static async Task RetryPendingUploadsCoreAsync(CloudBackupOptions settings, CancellationToken token)
+    private static async Task<List<string>> RetryPendingUploadsCoreAsync(CloudBackupOptions settings, CancellationToken token)
     {
-        if (!Directory.Exists(Journal)) return;
+        var issues = new List<string>();
+        if (!Directory.Exists(Journal)) return issues;
         foreach (var pending in ReadPending().Where(p => File.Exists(p.PackageFile)))
         {
             token.ThrowIfCancellationRequested();
@@ -248,16 +236,17 @@ internal static class CloudBackupCoordinator
                 settings.GoogleDriveEnabled, pending.GoogleDriveId, pending.GoogleDrivePruned))
             {
                 try { await UploadOneAsync(pending, CloudProvider.GoogleDrive, settings, token); }
-                catch (Exception ex) { AppExceptionHandler.LogNonFatal(ex, "Retrying Google Drive encrypted backup upload"); }
+                catch (Exception ex) { token.ThrowIfCancellationRequested(); issues.Add("Google Drive: " + SafeTransportError(ex)); AppExceptionHandler.LogNonFatal(ex, "Retrying Google Drive encrypted backup upload"); }
             }
             if (CloudBackupDeliveryPolicy.RequiresUpload(
                 settings.DropboxEnabled, pending.DropboxId, pending.DropboxPruned))
             {
                 try { await UploadOneAsync(pending, CloudProvider.Dropbox, settings, token); }
-                catch (Exception ex) { AppExceptionHandler.LogNonFatal(ex, "Retrying Dropbox encrypted backup upload"); }
+                catch (Exception ex) { token.ThrowIfCancellationRequested(); issues.Add("Dropbox: " + SafeTransportError(ex)); AppExceptionHandler.LogNonFatal(ex, "Retrying Dropbox encrypted backup upload"); }
             }
             RemoveFullyDeliveredPayload(pending, settings);
         }
+        return issues;
     }
 
     private static async Task<bool> UploadOneAsync(
@@ -410,6 +399,35 @@ internal static class CloudBackupCoordinator
         AtomicTextFile.Write(Path.Combine(Journal, p.Id + ".json"),
             JsonSerializer.Serialize(p, Json), Encoding.UTF8);
     }
+    private static CloudBackupOutcome RecordOutcome(CloudBackupOutcome outcome)
+    {
+        // Headless tasks have no status bar: retain sanitized delivery status
+        // separately from the successful-local-backup scheduling timestamp.
+        AtomicTextFile.Write(Path.Combine(Root, "last-run.json"),
+            JsonSerializer.Serialize(new RunStatus(DateTime.UtcNow, outcome.UploadsPending, outcome.Message)), Encoding.UTF8);
+        if (outcome.UploadsPending)
+            AppExceptionHandler.LogNonFatal(new IOException(outcome.Message), "Cloud backup delivery pending");
+        return outcome;
+    }
+
+    internal static (string Message, bool Warning) ReadLastRunStatus()
+    {
+        string path = Path.Combine(Root, "last-run.json");
+        if (!File.Exists(path)) return ("", false);
+        try
+        {
+            if (new FileInfo(path).Length > 16384) throw new InvalidDataException("Cloud backup status is too large.");
+            var status = JsonSerializer.Deserialize<RunStatus>(File.ReadAllText(path))
+                ?? throw new InvalidDataException("Cloud backup status is missing.");
+            return ($"Cloud backup checked {status.CheckedUtc.ToLocalTime():dd-MMM-yyyy HH:mm}: {status.Message}", status.UploadsPending);
+        }
+        catch (Exception ex)
+        {
+            AppExceptionHandler.LogNonFatal(ex, "Reading cloud backup delivery status");
+            return ("The last cloud backup status could not be read. Check the backup accounts and retry.", true);
+        }
+    }
+
     private static State LoadState()
     {
         if (!File.Exists(ScheduleState)) return new State();

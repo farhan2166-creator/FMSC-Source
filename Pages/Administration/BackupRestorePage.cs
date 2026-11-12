@@ -12,6 +12,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     ModernButton? cloudChooseRestoreButton;
     CloudBackupCoordinator.CloudSelection? selectedCloud;
     string cloudRecoveryPassphrase = string.Empty;
+    Action? refreshCloudStatus;
     ModernButton? restoreButton;
     ModernButton? locateFileButton;
     bool isBusy;
@@ -160,6 +161,12 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                    backupCard.Content.Padding.Vertical);
         }
         backupCard.Content.SizeChanged += (_, _) => FitBackupNotice();
+        string backupNotice = localOnlyNotice.Text;
+        refreshCloudStatus = () => {
+            var status = CloudBackupCoordinator.ReadLastRunStatus();
+            localOnlyNotice.Text = backupNotice + (status.Message.Length == 0 ? "" : "\n\n" + status.Message);
+            FitBackupNotice();
+        };
 
         // 50% actions above, 50% backup history / recorded file paths below.
         // The upper half is itself split evenly between Backup and Restore.
@@ -476,7 +483,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             SetStatus("Creating encrypted cloud backup…");
             var result = await CloudBackupCoordinator.CreateAndUploadAsync();
             await LoadHistoryAsync();
-            SetStatus(result.Message, !result.GoogleSucceeded && !result.DropboxSucceeded);
+            SetStatus(result.Message, result.UploadsPending);
             if (result.LocalSucceeded)
                 ModernMessageDialog.ShowInfo(FindForm(), result.Message);
         }
@@ -497,13 +504,14 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             SetStatus("Checking available cloud recovery points…");
             var options = await CloudBackupCoordinator.BrowseCloudAsync();
             if (IsDisposed) return;
-            if (options.Count == 0)
+            if (options.Copies.Count == 0)
             {
-                Warn("No cloud backups are available. Check the connected Google Drive and Dropbox accounts.");
+                Warn(options.Warnings.Count > 0 ? string.Join("\n", options.Warnings)
+                    : "No cloud backups are available. Check the connected Google Drive and Dropbox accounts.");
                 return;
             }
             DateTime? newestLocal = await Task.Run(DatabaseBackupManager.GetNewestAvailableLocalBackupUtc);
-            using var dialog = new CloudRestoreSelectionDialog(options, newestLocal);
+            using var dialog = new CloudRestoreSelectionDialog(options.Copies, newestLocal, options.Warnings);
             if (dialog.ShowDialog(FindForm()) != DialogResult.OK ||
                 dialog.SelectedCopy is not { } selected)
                 return;
@@ -874,6 +882,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     /// <summary>Gate history-dependent actions for the entire read.</summary>
     async Task LoadHistoryAsync()
     {
+        refreshCloudStatus?.Invoke();
         int version = ++historyLoadVersion;
         BeginHistoryLoad();
         try

@@ -1,6 +1,6 @@
 # Production database migrations
 
-**Current source target (11 November 2026): FMSC application 1.0.30, database schema 17.** The committed consecutive production migration chain is `2.sql`–`17.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
+**Current source target (11 November 2026): FMSC application 1.0.31, database schema 17.** The committed consecutive production migration chain is `2.sql`–`17.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
 
 **Historical starting point:** The first production release used application **1.0.0**, database **1**.
 The schema-1 baseline contains the complete original production schema.

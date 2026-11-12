@@ -11,7 +11,7 @@ public sealed class NoObjectionCertificatePage : V2Page, IUnsavedChanges, IBusyP
     public bool IsBusy => creatingCertificate;
     public string BusyMessage => "Please wait for the certificate to finish saving.";
     private bool creatingCertificate;
-    private readonly Func<SqlParameter[], Task> writeCertificate;
+    private readonly Func<SqlParameter[], Task<int>> writeCertificate;
     private readonly Func<int, DataTable> readCertificates;
     private HumanCard workspaceDetails = null!;
     private Action<DataRowView?>? workspaceSaved;
@@ -61,11 +61,11 @@ public sealed class NoObjectionCertificatePage : V2Page, IUnsavedChanges, IBusyP
         Width = AppScale.Scale(120)
     };
     public NoObjectionCertificatePage() : this(true) { }
-    internal NoObjectionCertificatePage(bool initialize, Func<SqlParameter[], Task>? writeCertificate = null,
+    internal NoObjectionCertificatePage(bool initialize, Func<SqlParameter[], Task<int>>? writeCertificate = null,
         Func<int, DataTable>? readCertificates = null)
         : base("No Objection Certificate", "Record and print No Objection Certificates (NOC) for students.")
     {
-        this.writeCertificate = writeCertificate ?? (args => DatabaseHelper.ExecuteUserAsync("CreateNoObjectionCertificate", args));
+        this.writeCertificate = writeCertificate ?? (args => ReadSavedCertificateIdAsync("CreateNoObjectionCertificate", "NoObjectionCertificateId", args));
         this.readCertificates = readCertificates ?? (id => DatabaseHelper.QueryUser("GetNoObjectionCertificateRecords", DatabaseHelper.Int("@AdmissionId", id)));
         /* dbo.CreateNoObjectionCertificate has no duplicate guard, and the certificate table has no unique constraint on (AdmissionId, ...). */
         createCertificateButton.Click += async (_, _) => await RunCreateCertificateAsync();
@@ -396,7 +396,7 @@ public sealed class NoObjectionCertificatePage : V2Page, IUnsavedChanges, IBusyP
             createCertificateButton.Enabled = false;
             // awaited so the caller's disabled button covers the whole write. @UserId is passed explicitly and equals CurrentUser.UserId, so ExecuteUserAsync's automatic injection supplies the same value.
             using var hold = BeginBusy(BusyMessage, this);
-            await writeCertificate(new[] {
+            int savedId = await writeCertificate(new[] {
                 DatabaseHelper.P(
                     "@UserId",
                     CurrentUser.UserId),
@@ -404,15 +404,17 @@ public sealed class NoObjectionCertificatePage : V2Page, IUnsavedChanges, IBusyP
                     "@AdmissionId",
                     admissionId),
                 DatabaseHelper.Date("@CertificateDate", certDate) });
-            successMessage =
-                "NOC created successfully.";
+
             /* refresh only when the student this certificate was created for is still the selected one. The success message above stays: the write did happen. */
             if (IsDisposed || student.SelectedId != admissionId)
                 return;
             ClearCertificateFields();
             ClearCertificateSelection();
             LoadCertificates(admissionId);
-            SelectSavedCertificate(0);
+            CertificateRecordOrder.RequireSavedCopy(certificateResults, "NoObjectionCertificateId", savedId);
+            SelectSavedCertificate(savedId);
+            successMessage =
+                "NOC created successfully.";
         }
         catch (Exception ex)
         {

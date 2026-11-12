@@ -18,17 +18,28 @@ internal static partial class Program
             {
                 int writes = 0, reads = 0;
                 SqlParameter[]? submitted = null;
-                var reply = new TaskCompletionSource();
-                Task Write(SqlParameter[] parameters) { writes++; submitted = parameters; return reply.Task; }
-                DataTable Read(int id) { reads++; Check(id == 41, "Reload keeps the submitted student"); return new(); }
+                var reply = new TaskCompletionSource<int>();
+                Task<int> Write(SqlParameter[] parameters) { writes++; submitted = parameters; return reply.Task; }
+                string key = kind == "Sports" ? "SportsCertificateId" : kind == "Provisional" ? "ProvisionalCertificateId" : "NoObjectionCertificateId";
+                DataTable Read(int id)
+                {
+                    reads++; Check(id == 41, "Reload keeps the submitted student");
+                    var rows = new DataTable();
+                    rows.Columns.Add(key, typeof(int)); rows.Columns.Add("CertificateDate", typeof(DateTime));
+                    rows.Columns.Add("OtherSubjects"); rows.Columns.Add("SubjectIds");
+                    rows.Rows.Add(1, DateTime.Today, "English", "");
+                    rows.Rows.Add(2, DateTime.Today.AddDays(-1), "English", "");
+                    return rows;
+                }
                 using Control page = kind switch
                 {
                     "Sports" => new SportsCertificatePage(false, Write, Read),
-                    "Provisional" => new ProvisionalCertificatePage(false, Write, Read),
+                    "Provisional" => new ProvisionalCertificatePage(false, Write, Read, _ => new DataTable()),
                     _ => new NoObjectionCertificatePage(false, Write, Read)
                 };
                 const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
                 var type = page.GetType();
+                page.BindingContext = new BindingContext();
                 T Field<T>(string name) => (T)type.GetField(name, flags)!.GetValue(page)!;
                 object? Call(string name) => type.GetMethod(name, flags)!.Invoke(page, null);
                 var student = Field<StudentPicker>("student");
@@ -72,15 +83,51 @@ internal static partial class Program
                 if (original.Length > 0)
                     Check(Convert.ToString(submitted!.Single(p => p.ParameterName == (kind == "Sports" ? "@Performance" : "@BoardName")).Value) == original,
                         kind + " submitted parameters retain the captured values");
-                reply.SetResult();
+                reply.SetResult(2);
                 PumpUntil(() => pending.IsCompleted, kind + " delayed submission settles");
                 pending.GetAwaiter().GetResult();
                 Check(writes == 1 && reads == 1 && page.Enabled && !((IBusyPage)page).IsBusy,
                     kind + " restores the page only after the original write and refresh finish");
                 var status = (Label)typeof(V2Page).GetField("StatusLabel", flags)!.GetValue(page)!;
                 Check(status.Text.Contains("created successfully"), kind + " completion keeps its explicit save result after controls are restored");
+                string selectedField = kind == "Sports" ? "selectedSportsCertificateId" : kind == "Provisional" ? "selectedProvisionalCertificateId" : "selectedNoObjectionCertificateId";
+                Check(Field<int>(selectedField) == 2, kind + " selects the confirmed backdated save instead of the first date-sorted row");
             }
+            CheckTeacherCertificateSavedIdentity();
         }
         finally { CurrentUser.SignIn(previous.UserId, previous.Username, previous.RoleName, previous.MustChangePassword, previous.Item5); }
+    }
+
+    private static void CheckTeacherCertificateSavedIdentity()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        const string key = "RegularLecturerCertificateId";
+        foreach (int returnedId in new[] { 2, 1 })
+        {
+            var rows = new DataTable();
+            rows.Columns.Add(key, typeof(int)); rows.Columns.Add("CertificateDate", typeof(DateTime));
+            rows.Columns.Add("RoleTitle"); rows.Columns.Add("SubjectTaught");
+            rows.Rows.Add(1, DateTime.Today, "Teacher", "Chemistry");
+            rows.Rows.Add(2, DateTime.Today.AddDays(-1), "Lecturer", "Physics");
+            using var page = new FMSC_SMS.Pages.Staff.Certificates.RegularLecturerCertificatePage(false,
+                _ => { var saved = new DataTable(); saved.Columns.Add(key, typeof(int)); saved.Rows.Add(returnedId); return saved; },
+                _ => rows.Copy());
+            page.BindingContext = new BindingContext();
+            var type = page.GetType();
+            T Field<T>(string name) => (T)type.GetField(name, flags)!.GetValue(page)!;
+            type.GetField("suppressStaffChanged", flags)!.SetValue(page, true);
+            Field<StaffPicker>("staff").SetStaff(41, "Fictional teacher");
+            type.GetField("suppressStaffChanged", flags)!.SetValue(page, false);
+            Field<ModernTextBox>("roleTitle").Text = "Lecturer";
+            Field<ModernTextBox>("subjectTaught").Text = "Physics";
+            Field<ModernDatePicker>("certificateDate").Value = DateTime.Today.AddDays(-1);
+            type.GetMethod("CreateCertificate", flags)!.Invoke(page, null);
+            Check(Field<int>("selectedRegularLecturerCertificateId") == returnedId,
+                "Teacher creation selects the exact returned identity for backdated and deduplicated saves");
+        }
+        bool refused = false;
+        try { CertificateRecordOrder.RequireSavedCopy(new DataTable(), key, 2); }
+        catch (InvalidOperationException ex) { refused = ex.Message.Contains("do not create it again"); }
+        Check(refused, "Missing saved-copy history cannot silently substitute a different certificate or invite duplicate creation");
     }
 }

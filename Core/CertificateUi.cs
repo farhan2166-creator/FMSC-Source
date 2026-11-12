@@ -2,6 +2,19 @@ namespace FMSC_SMS.Core;
 /// <summary>Small shared mechanics used by the certificate screens; certificate-specific business rules stay on their pages.</summary>
 internal static class CertificateUi
 {
+    internal static async Task<int> ReadSavedCertificateIdAsync(string procedure, string key,
+        params Microsoft.Data.SqlClient.SqlParameter[] parameters)
+    {
+        using var saved = await DatabaseHelper.QueryUserAsync(procedure, parameters);
+        return ReadSavedCertificateId(saved, key);
+    }
+
+    internal static int ReadSavedCertificateId(DataTable saved, string key)
+    {
+        if (saved.Rows.Count == 1 && GetInt(saved.Rows[0], key) is > 0 and var id) return id;
+        throw new InvalidOperationException("The certificate save result could not be read. Reload its history before trying again; do not repeat the create action.");
+    }
+
     internal static bool FocusEntry(StudentPicker picker, DataGridView grid, Control firstField) =>
         picker.SelectedId <= 0 ? picker.Focus() : grid.Rows.Count > 0 ? grid.Focus() : FormFlow.FocusFirstInput(firstField);
 

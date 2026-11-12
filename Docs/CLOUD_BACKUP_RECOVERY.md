@@ -97,3 +97,23 @@ file. Retries verify that exact remote file's identity, size and server checksum
 a lost completion response cannot cause a second file to be created. Older queued
 packages are first reconciled against matching existing files. Size parsing accepts
 Drive's string-encoded int64 metadata as well as Dropbox's numeric metadata.
+
+## Delivery and recovery failure handling — 12 November 2026
+
+The scheduled command returns **4** while selected cloud uploads remain pending,
+including retries on a run where no new local backup is due. It returns 0 for a
+healthy completed/no-due run; existing setup/recovery refusal and fatal-error
+codes remain distinct. Local backup success still advances only the local
+schedule timestamp, and failed cloud copies remain queued for retry.
+
+A sanitized `last-run.json` in the per-user FMSC CloudBackups directory records
+checked time and delivery status. Backup / Restore displays this status on entry
+and Refresh History. This does not replace the SQL backup history or prove that
+any untested cloud copy is recoverable.
+
+Cloud recovery listing identifies accounts that could not be checked. Available
+copies from another provider remain selectable with a warning; all-provider
+failure is distinguished from an empty account. Download streaming has a
+**two-minute inactivity deadline** per read/write. Timeout or cancellation
+removes the partial package before SQL restore. Once SQL work begins, its existing
+restore/rollback completion rules still apply.

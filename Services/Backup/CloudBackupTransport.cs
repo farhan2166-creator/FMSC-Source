@@ -48,23 +48,49 @@ internal static class CloudBackupTransport
     {
         if (File.Exists(destination)) throw new IOException("Cloud download staging target already exists.");
         string access = await CloudBackupOAuth.GetAccessTokenAsync(provider, token);
+        using var request = provider == CloudProvider.GoogleDrive
+            ? new HttpRequestMessage(HttpMethod.Get, "https://www.googleapis.com/drive/v3/files/" +
+                Uri.EscapeDataString(remoteId) + "?alt=media")
+            : new HttpRequestMessage(HttpMethod.Post, "https://content.dropboxapi.com/2/files/download");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
+        if (provider == CloudProvider.Dropbox)
+            request.Headers.TryAddWithoutValidation("Dropbox-API-Arg",
+                JsonSerializer.Serialize(new { path = remoteId }));
+        await DownloadToFileAsync(request, destination, token);
+    }
+
+    internal static async Task DownloadToFileAsync(HttpRequestMessage request, string destination,
+        CancellationToken token, HttpClient? client = null, TimeSpan? inactivityTimeout = null)
+    {
+        if (File.Exists(destination)) throw new IOException("Cloud download staging target already exists.");
         string temp = destination + "." + Guid.NewGuid().ToString("N") + ".partial";
         try
         {
-            using var request = provider == CloudProvider.GoogleDrive
-                ? new HttpRequestMessage(HttpMethod.Get, "https://www.googleapis.com/drive/v3/files/" +
-                    Uri.EscapeDataString(remoteId) + "?alt=media")
-                : new HttpRequestMessage(HttpMethod.Post, "https://content.dropboxapi.com/2/files/download");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
-            if (provider == CloudProvider.Dropbox)
-                request.Headers.TryAddWithoutValidation("Dropbox-API-Arg",
-                    JsonSerializer.Serialize(new { path = remoteId }));
-            using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+            using var response = await (client ?? Http).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
             RequireSuccess(response, "Cloud download");
             await using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 await using var cloud = await response.Content.ReadAsStreamAsync(token);
-                await cloud.CopyToAsync(output, token);
+                // HttpClient.Timeout ends when ResponseHeadersRead returns.
+                // Give each streaming read/write its own progress deadline;
+                // cancellation here is still before any SQL restore begins.
+                byte[] buffer = new byte[81920];
+                while (true)
+                {
+                    using var progress = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    progress.CancelAfter(inactivityTimeout ?? TimeSpan.FromMinutes(2));
+                    int count;
+                    try
+                    {
+                        count = await cloud.ReadAsync(buffer.AsMemory(), progress.Token);
+                        if (count > 0) await output.WriteAsync(buffer.AsMemory(0, count), progress.Token);
+                    }
+                    catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                    {
+                        throw new TimeoutException("Cloud download stopped making progress. The incomplete download was discarded; try again when the connection is available.");
+                    }
+                    if (count == 0) break;
+                }
                 await output.FlushAsync(token);
             }
             if (new FileInfo(temp).Length == 0) throw new InvalidDataException("Cloud backup download was empty.");

@@ -61,9 +61,9 @@ internal static class CertificateIssueRegisterData
         bool regular=table=="RegularStudentCertificates";
         bool birth=table=="DateOfBirthCertificates";
         string content=character||leave||birth?"P":regular?"I":"C";
-        // Sports/NOC/Provisional track each copy and collection on the source
-        // row. Staff certificates have no collection workflow.
-        bool rowCopy=!tracked && !staff;
+        // Every source without a separate issue table stores copy/collection
+        // details on its own row, including teacher and bank certificates.
+        bool rowCopy=!tracked;
         string collectionSource=tracked ? "I" : "C";
         string hasIssue=tracked ? "I.IssuedAt IS NOT NULL" : rowCopy ? "1=1" : "1=0";
         string activity=tracked ? "COALESCE(I.IssuedAt,C.CreatedAt)" : "C.CreatedAt";

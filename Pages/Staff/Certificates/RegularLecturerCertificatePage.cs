@@ -1,10 +1,13 @@
 using FMSC_SMS.Core;
+using Microsoft.Data.SqlClient;
 using static FMSC_SMS.Core.CertificateUi;
 namespace FMSC_SMS.Pages.Staff.Certificates;
 public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
 {
     internal override bool FocusEntryField() => CertificateUi.FocusEntry(staff, Grid, certificateDate);
     private readonly StaffPicker staff = new();
+    private readonly Func<SqlParameter[], DataTable> createCertificate;
+    private readonly Func<int, DataTable> readCertificates;
     private readonly CertificateCollectionFlow copyFlow = new("Lecturer");
     private string? _baseline;
     private string Snapshot() => string.Join("\u001f", roleTitle.Text, subjectTaught.Text, certificateDate.Value.Date.ToString("yyyy-MM-dd"));
@@ -46,9 +49,13 @@ public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
         Text = UiText.Actions.Refresh,
         Width = AppScale.Scale(120)
     };
-    public RegularLecturerCertificatePage()
+    public RegularLecturerCertificatePage() : this(true) { }
+    internal RegularLecturerCertificatePage(bool initialize, Func<SqlParameter[], DataTable>? createCertificate = null,
+        Func<int, DataTable>? readCertificates = null)
         : base("Regular Lecturer/Teacher Certificate", "Record and print Regular Lecturer/Teacher certificates for staff.")
     {
+        this.createCertificate = createCertificate ?? (args => DatabaseHelper.QueryUser("CreateRegularLecturerCertificate", args));
+        this.readCertificates = readCertificates ?? (id => DatabaseHelper.QueryUser("GetRegularLecturerCertificateRecords", DatabaseHelper.Int("@StaffId", id)));
         roleTitle.PlaceholderText =
             "e.g. Teacher, Lecturer";
         roleTitle.MaxLength = 30;
@@ -82,7 +89,7 @@ public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
             };
         Grid.CellMouseClick +=
             Grid_CellMouseClick;
-        Defer(
+        if (initialize) Defer(
             () => {
                 /* The ORDER here was the defect. Resetting first and binding second leaves the list populated with nothing selected, which is what opening this page means. */
                 ResetToStart();
@@ -226,12 +233,7 @@ public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
                 return;
             }
             DataTable table =
-                DatabaseHelper.QueryUser(
-                    "GetRegularLecturerCertificateRecords",
-                    DatabaseHelper.Int(
-                        "@UserId",
-                        CurrentUser.UserId),
-                    DatabaseHelper.Int("@StaffId", staffId));
+                readCertificates(staffId);
             certificateResults = CertificateRecordOrder.NewestFirst(table, "RegularLecturerCertificateId");
             Bind(certificateResults);
             FormatCertificateGrid();
@@ -406,8 +408,7 @@ public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
             int staffId =
                 staff.SelectedId;
             createCertificateButton.Enabled = false;
-            DatabaseHelper.Execute(
-                "CreateRegularLecturerCertificate",
+            using var saved = createCertificate(new[] {
                 DatabaseHelper.P(
                     "@UserId",
                     CurrentUser.UserId),
@@ -420,13 +421,14 @@ public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
                 DatabaseHelper.P(
                     "@SubjectTaught",
                     subjectTaught.Text.Trim()),
-                DatabaseHelper.Date("@CertificateDate", certificateDate.Value.Date));
-            successMessage =
-                "Certificate created successfully.";
+                DatabaseHelper.Date("@CertificateDate", certificateDate.Value.Date) });
+            int savedId = ReadSavedCertificateId(saved, "RegularLecturerCertificateId");
             ClearCertificateFields();
             ClearCertificateSelection();
             LoadCertificates(staffId);
-            SelectSavedCertificate(0);
+            CertificateRecordOrder.RequireSavedCopy(certificateResults, "RegularLecturerCertificateId", savedId);
+            SelectSavedCertificate(savedId);
+            successMessage = "Certificate created successfully.";
         }
         catch (Exception ex)
         {

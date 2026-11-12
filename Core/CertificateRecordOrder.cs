@@ -2,6 +2,14 @@ namespace FMSC_SMS.Core;
 
 internal static class CertificateRecordOrder
 {
+    internal static void RequireSavedCopy(DataTable rows, string key, int id)
+    {
+        // A date-sorted history can place a backdated or deduplicated save
+        // anywhere. Never substitute the first row for the confirmed identity.
+        if (id > 0 && rows.Columns.Contains(key) && rows.AsEnumerable().Any(row => Convert.ToInt32(row[key]) == id)) return;
+        throw new InvalidOperationException($"Certificate {id} was saved, but its history could not be refreshed. Reload history before printing or collecting; do not create it again.");
+    }
+
     internal static void FitColumns(DataGridView grid)
     {
         grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;

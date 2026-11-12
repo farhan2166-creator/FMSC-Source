@@ -30,7 +30,7 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
     internal string RecoveryPassphrase { get; private set; } = "";
 
     internal CloudRestoreSelectionDialog(IReadOnlyList<CloudBackupCoordinator.CloudSelection> all,
-        DateTime? latestLocalBackupUtc)
+        DateTime? latestLocalBackupUtc, IReadOnlyList<string>? warnings = null)
     {
         Text = "Select a cloud recovery point";
         StartPosition = FormStartPosition.CenterParent;
@@ -40,6 +40,7 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
         ClientSize = new Size(AppScale.Scale(680), AppScale.Scale(480));
         BackColor = AppTheme.PageBackground;
 
+        string warning = warnings is { Count: > 0 } ? string.Join("\n", warnings) : "";
         var groups = all.GroupBy(x => x.Remote.PackageSha256, StringComparer.OrdinalIgnoreCase)
             .Select(g => new RecoveryPoint(g.First().Remote.SqlBackupCreatedUtc,
                 g.Key, g.OrderByDescending(x => x.KnownVerifiedUpload).ToArray()))
@@ -54,7 +55,8 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
             details.Text =
                 "SQL backup created: " + selected.SqlCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt") +
                 " (computer time). Uploaded time does NOT determine the recovery order. " +
-                "The SQL header is independently verified after download, before live restoration.";
+                "The SQL header is independently verified after download, before live restoration."
+                + (warning.Length == 0 ? "" : "\n\n" + warning);
         };
         provider.Format += (_, e) =>
         {
@@ -80,13 +82,14 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(42)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(66)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(warning.Length == 0 ? 66 : 135)));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(44)));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(48)));
         string newestCloud = groups.Length > 0 ? groups[0].SqlCreatedUtc.ToLocalTime().ToString("dd-MMM HH:mm") : "None";
         string newestLocal = latestLocalBackupUtc?.ToLocalTime().ToString("dd-MMM HH:mm") ?? "None";
         panel.Controls.Add(new Label { Text = "Latest local: " + newestLocal +
-            "    |    Latest cloud: " + newestCloud + "    (by SQL backup time)",
+            "    |    Latest cloud: " + newestCloud + "    (by SQL backup time)"
+            + (warning.Length == 0 ? "" : " — Some cloud accounts could not be checked"),
             Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
         panel.Controls.Add(points, 0, 1);
         panel.Controls.Add(new Label { Text = "Download from", Dock = DockStyle.Fill }, 0, 2);

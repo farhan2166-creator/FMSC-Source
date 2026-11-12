@@ -10,8 +10,9 @@ public sealed class ProvisionalCertificatePage : V2Page, IUnsavedChanges, IBusyP
     public bool IsBusy => creatingCertificate;
     public string BusyMessage => "Please wait for the certificate to finish saving.";
     private bool creatingCertificate;
-    private readonly Func<SqlParameter[], Task> writeCertificate;
+    private readonly Func<SqlParameter[], Task<int>> writeCertificate;
     private readonly Func<int, DataTable> readCertificates;
+    private readonly Func<int, DataTable> readSubjects;
     private HumanCard workspaceDetails = null!;
     private TableLayoutPanel workspaceBody = null!;
     private Action<DataRowView?>? workspaceSaved;
@@ -108,12 +109,13 @@ public sealed class ProvisionalCertificatePage : V2Page, IUnsavedChanges, IBusyP
         "HSSC Part II"
     };
     public ProvisionalCertificatePage() : this(true) { }
-    internal ProvisionalCertificatePage(bool initialize, Func<SqlParameter[], Task>? writeCertificate = null,
-        Func<int, DataTable>? readCertificates = null)
+    internal ProvisionalCertificatePage(bool initialize, Func<SqlParameter[], Task<int>>? writeCertificate = null,
+        Func<int, DataTable>? readCertificates = null, Func<int, DataTable>? readSubjects = null)
         : base("Provisional Certificate", "Record and print provisional (board result) certificates for SSC/HSSC.")
     {
-        this.writeCertificate = writeCertificate ?? (args => DatabaseHelper.ExecuteUserAsync("CreateProvisionalCertificate", args));
+        this.writeCertificate = writeCertificate ?? (args => ReadSavedCertificateIdAsync("CreateProvisionalCertificate", "ProvisionalCertificateId", args));
         this.readCertificates = readCertificates ?? (id => DatabaseHelper.QueryUser("GetProvisionalCertificateRecords", DatabaseHelper.Int("@AdmissionId", id), DatabaseHelper.P("@UserId", CurrentUser.UserId)));
+        this.readSubjects = readSubjects ?? (id => DatabaseHelper.QueryUser("GetProvisionalCertificateSubjects", DatabaseHelper.Int("@ProvisionalCertificateId", id)));
         examType.DropDownStyle =
             ComboBoxStyle.DropDownList;
         examType.Items.AddRange(ExamTypeLabels);
@@ -831,12 +833,7 @@ public sealed class ProvisionalCertificatePage : V2Page, IUnsavedChanges, IBusyP
             // Drop any entries appended for the previously selected certificate FIRST, so a failing query below cannot leave them ticked.
             RemoveSavedSubjectItems();
             DataTable table =
-                DatabaseHelper.QueryUser(
-                    "GetProvisionalCertificateSubjects",
-                    DatabaseHelper.Int(
-                        "@UserId",
-                        CurrentUser.UserId),
-                    DatabaseHelper.Int("@ProvisionalCertificateId", provisionalCertificateId));
+                readSubjects(provisionalCertificateId);
             var names =
                 new List<string>();
             foreach (DataRow row in table.Rows)
@@ -997,7 +994,7 @@ public sealed class ProvisionalCertificatePage : V2Page, IUnsavedChanges, IBusyP
             createCertificateButton.Enabled = false;
             // Await the full write while actions are held; pass the current actor.
             using var hold = BeginBusy(BusyMessage, this);
-            await writeCertificate(new[] {
+            int savedId = await writeCertificate(new[] {
                 DatabaseHelper.P(
                     "@UserId",
                     CurrentUser.UserId),
@@ -1032,15 +1029,17 @@ public sealed class ProvisionalCertificatePage : V2Page, IUnsavedChanges, IBusyP
                     "@CertificateDate",
                     certificateDate.Value.Date),
                 DatabaseHelper.P("@SubjectIds", GetCheckedSubjectIdsCsv()) });
-            successMessage =
-                "Certificate created successfully.";
+
             /* Refresh only for the current student; retain success because the write committed. */
             if (IsDisposed || student.SelectedId != admissionId)
                 return;
             ClearCertificateFields();
             ClearCertificateSelection();
             LoadCertificates(admissionId);
-            SelectSavedCertificate(0);
+            CertificateRecordOrder.RequireSavedCopy(certificateResults, "ProvisionalCertificateId", savedId);
+            SelectSavedCertificate(savedId);
+            successMessage =
+                "Certificate created successfully.";
         }
         catch (Exception ex)
         {
