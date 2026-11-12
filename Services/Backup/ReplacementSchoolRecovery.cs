@@ -116,7 +116,8 @@ internal static class ReplacementSchoolRecovery
         string? localBak, CloudRemoteBackup? remote, string recoveryPassphrase,
         string administratorUsername, string administratorPassword,
         IProgress<BackupProgressUpdate>? progress = null,
-        CancellationToken token = default)
+        CancellationToken token = default,
+        IReadOnlyList<CloudRemoteBackup>? alternatives = null
     {
         if ((localBak is null) == (remote is null))
             throw new ArgumentException("Select exactly one local or cloud recovery source.");
@@ -142,28 +143,57 @@ internal static class ReplacementSchoolRecovery
                 Directory.CreateDirectory(stage);
                 RestrictStage(stage);
                 string package = Path.Combine(stage, "download.fmscbackup");
-                progress?.Report(new BackupProgressUpdate("Downloading encrypted school backup",
-                    remote.Provider.ToString()));
-                await CloudBackupTransport.DownloadAsync(remote.Provider, remote.RemoteId, package, token);
-                await using (var stream = File.OpenRead(package))
+                var samePoint = new[] { remote }.Concat(alternatives ?? Array.Empty<CloudRemoteBackup>())
+                    .Where(x => string.Equals(x.PackageSha256, remote.PackageSha256,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        (x.SqlBackupCreatedUtc - remote.SqlBackupCreatedUtc).Duration() <= TimeSpan.FromSeconds(1))
+                    .DistinctBy(x => (x.Provider, x.RemoteId)).ToArray();
+                var errors = new List<string>();
+                bool acquired = false;
+                foreach (CloudRemoteBackup copy in samePoint)
                 {
-                    string sha = Convert.ToHexString(await SHA256.HashDataAsync(stream, token))
-                        .ToLowerInvariant();
-                    if (!string.Equals(sha, remote.PackageSha256, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidDataException(
-                            "The downloaded backup does not match the remote object identifier.");
+                    token.ThrowIfCancellationRequested();
+                    try
+                    {
+                        progress?.Report(new BackupProgressUpdate("Downloading encrypted school backup",
+                            "Testing the " + copy.Provider + " copy without changing SQL.", copy.Provider.ToString()));
+                        await CloudBackupTransport.DownloadAsync(copy.Provider, copy.RemoteId, package, token);
+                        await using (var stream = File.OpenRead(package))
+                        {
+                            string sha = Convert.ToHexString(await SHA256.HashDataAsync(stream, token))
+                                .ToLowerInvariant();
+                            if (!string.Equals(sha, copy.PackageSha256, StringComparison.OrdinalIgnoreCase))
+                                throw new InvalidDataException(
+                                    "Downloaded backup bytes do not match the advertised remote object identity.");
+                        }
+                        progress?.Report(new BackupProgressUpdate("Authenticating and decrypting",
+                            "The passphrase and full encrypted package are checked before any SQL operation."));
+                        await Task.Run(() => CloudBackupCrypto.Decrypt(package, bak, recoveryPassphrase), token);
+                        DateTime sqlLocal = CloudBackupCrypto.ReadSqlHeaderLocalAfterVerification(package);
+                        DateTime sqlUtc = CloudBackupCrypto.ReadUnverifiedCreationUtc(package);
+                        var header = DatabaseBackupManager.GetBackupInfo(bak);
+                        if (header?.IsForFmscDatabase != true || header.BackupStartDate == default ||
+                            (header.BackupStartDate - sqlLocal).Duration() > TimeSpan.FromSeconds(1) ||
+                            (sqlUtc - remote.SqlBackupCreatedUtc).Duration() > TimeSpan.FromSeconds(1))
+                            throw new InvalidDataException("The encrypted package does not match the SQL backup identity.");
+                        acquired = true;
+                        break;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                        InvalidDataException or CryptographicException or HttpRequestException)
+                    {
+                        AppExceptionHandler.LogNonFatal(ex, "Rejected replacement-computer cloud copy before SQL restore");
+                        errors.Add(copy.Provider + ": backup could not be downloaded or verified.");
+                        progress?.Report(new BackupProgressUpdate("Trying another identical recovery copy",
+                            "The selected source failed before SQL; only copies of the same package are eligible.",
+                            copy.Provider.ToString(), true));
+                        if (File.Exists(package)) File.Delete(package);
+                        if (File.Exists(bak)) File.Delete(bak);
+                    }
                 }
-                progress?.Report(new BackupProgressUpdate("Authenticating and decrypting",
-                    "An incorrect passphrase or altered encrypted package will be rejected."));
-                await Task.Run(() => CloudBackupCrypto.Decrypt(package, bak, recoveryPassphrase), token);
-                DateTime authenticatedSqlLocal = CloudBackupCrypto.ReadSqlHeaderLocalAfterVerification(package);
-                DateTime authenticatedSqlUtc = CloudBackupCrypto.ReadUnverifiedCreationUtc(package);
-                var header = DatabaseBackupManager.GetBackupInfo(bak);
-                if (header?.IsForFmscDatabase != true || header.BackupStartDate == default ||
-                    (header.BackupStartDate - authenticatedSqlLocal).Duration() > TimeSpan.FromSeconds(1) ||
-                    (authenticatedSqlUtc - remote.SqlBackupCreatedUtc).Duration() > TimeSpan.FromSeconds(1))
-                    throw new InvalidDataException(
-                        "The downloaded school backup does not match its authenticated SQL identity.");
+                if (!acquired)
+                    throw new InvalidDataException("No cloud copy of the exact selected recovery point passed download and decryption. " +
+                        string.Join(" ", errors));
             }
             if (!File.Exists(bak)) throw new FileNotFoundException("The selected SQL backup is missing.", bak);
             progress?.Report(new BackupProgressUpdate("Verifying isolated school recovery",
