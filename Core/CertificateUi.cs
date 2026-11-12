@@ -12,7 +12,7 @@ internal static class CertificateUi
     internal static int ReadSavedCertificateId(DataTable saved, string key)
     {
         if (saved.Rows.Count == 1 && GetInt(saved.Rows[0], key) is > 0 and var id) return id;
-        throw new InvalidOperationException("The certificate save result could not be read. Reload its history before trying again; do not repeat the create action.");
+        throw new CertificateSaveResultException("The certificate save result could not be read. Reload its history before trying again; do not repeat the create action.");
     }
 
     internal static bool FocusEntry(StudentPicker picker, DataGridView grid, Control firstField) =>

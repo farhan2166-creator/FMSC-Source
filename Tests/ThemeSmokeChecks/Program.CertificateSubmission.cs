@@ -127,7 +127,7 @@ internal static partial class Program
         }
         bool refused = false;
         try { CertificateRecordOrder.RequireSavedCopy(new DataTable(), key, 2); }
-        catch (InvalidOperationException ex) { refused = ex.Message.Contains("do not create it again"); }
+        catch (InvalidOperationException ex) { refused = DbMessage.UserMessage(ex).Contains("was saved") && DbMessage.UserMessage(ex).Contains("do not create it again"); }
         Check(refused, "Missing saved-copy history cannot silently substitute a different certificate or invite duplicate creation");
     }
 }
