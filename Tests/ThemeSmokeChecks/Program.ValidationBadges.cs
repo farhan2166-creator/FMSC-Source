@@ -19,13 +19,13 @@ internal static partial class Program
             using var window = new Form { ClientSize = new Size(1500, 200) };
             actions.Dock = DockStyle.Fill; actions.WrapContents = true; actions.Visible = true;
             window.Controls.Add(actions); window.Show(); Application.DoEvents();
-            // The Admission workspace now includes Admit Sibling as an ordinary action.
-            // Assert the intended buttons rather than a stale count from before registration unification.
+            // Verify required operations and fit without freezing the toolbar to
+            // a historical button count; optional messaging can coexist here.
             var visibleActions = actions.Controls.OfType<ModernButton>().Where(b=>b.Visible).Select(b=>b.Text).ToArray();
-            Check(visibleActions.OrderBy(text=>text).SequenceEqual(new[]{
-                    "Actions ▾", "Admit Sibling", "Clear / New", "Collect Payment", "Find Student", "Print ▾", UiText.Actions.Save
-                }.OrderBy(text=>text)),
-                "Admission toolbar exposes its seven ordinary actions, including Admit Sibling");
+            Check(new[] { "Actions ▾", "Admit Sibling", "Clear / New", "Collect Payment", "Find Student", "Print ▾", UiText.Actions.Save }
+                .All(visibleActions.Contains) && visibleActions.Distinct().Count() == visibleActions.Length,
+                "Admission toolbar retains all ordinary operations without duplicate actions");
+            Check(visibleActions.Contains("Message Student…"), "An authorized operator can reach optional saved-student messaging");
             Check(!actions.Controls.OfType<ModernButton>().Single(b=>b.Text=="Save & New").Visible,
                 "Admission Save & New stays temporarily hidden to leave room for Print");
             foreach (int width in new[] { 1100, 1150, 1250, 1400, 1560 })

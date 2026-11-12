@@ -101,7 +101,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         sampleMessage.ScrollBars = ScrollBars.Vertical;
         sampleMessage.Dock = DockStyle.Bottom;
         sampleMessage.Height = AppScale.Scale(150);
-        previewGrid.SelectionChanged += (_, _) => ShowSelectedMessage();
+        // SelectionChanged can fire before CurrentRow moves to the clicked cell.
+        previewGrid.CurrentCellChanged += (_, _) => ShowSelectedMessage();
         audience.Items.AddRange(new object[]
         {
             "Entire school", "Campus", "Class", "Outstanding fees",

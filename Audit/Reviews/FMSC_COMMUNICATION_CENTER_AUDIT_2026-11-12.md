@@ -145,6 +145,16 @@ synthetic fixture also used an invalid status literal and was corrected to the
 real Left status. The final run used the unchanged guarded harness with IPC
 access and passed. No protection was disabled to obtain these results.
 
+Initial GitHub Windows execution exposed an obsolete exact toolbar list and a
+reflection fixture that omitted the new optional dashboard access argument.
+The fixtures now retain operation availability, full-caption/layout fitting,
+permission denial and dispatch-time rechecks without freezing the old UI count.
+Native event execution also caught selection notification arriving before
+DataGridView.CurrentRow changed; the preview now follows CurrentCellChanged so
+the message actually follows the clicked recipient (CC01/CC03 preview correction).
+No database, financial, backup or publication protection was relaxed.
+Local harness safety suites also passed (10 lifecycle + 8 Level 3 + 6 UI harness
+tests, with one explicitly platform-skipped test).
 Exact-commit GitHub validation and remaining acceptance are tracked on the PR.
 
 Test sources:

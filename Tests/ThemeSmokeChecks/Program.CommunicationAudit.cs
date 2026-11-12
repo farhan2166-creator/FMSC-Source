@@ -93,8 +93,9 @@ internal static partial class Program
         var grid = Field<DataGridView>(page, "previewGrid");
         grid.CurrentCell = grid.Rows[1].Cells[0]; Application.DoEvents();
         var sample = Field<ModernTextBox>(page, "sampleMessage");
-        Check(sample.ReadOnly && sample.ScrollBars == ScrollBars.Vertical && sample.Text.Contains("Z Synthetic child")
-            && sample.Text.Contains(new string('x', 600)), "Selecting another recipient exposes the complete rendered message, not an ellipsized first-recipient example");
+        Check(sample.ReadOnly && sample.ScrollBars == ScrollBars.Vertical, "The complete recipient preview is read-only and scrollable");
+        Check(sample.Text.Contains("Z Synthetic child"), "Preview follows the current recipient after the cell changes: " + sample.Text[..Math.Min(140, sample.Text.Length)]);
+        Check(sample.Text.Contains(new string('x', 600)), "The complete rendered message remains available without ellipsis");
         next.PerformClick(); PumpUntil(() => !page.IsBusy, "Manual mode is checked");
         var start = Field<ModernButton>(page, "confirm");
         start.PerformClick(); PumpUntil(() => !page.IsBusy, "Canceled confirmation returns");
