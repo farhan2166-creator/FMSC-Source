@@ -74,6 +74,13 @@ internal static class CloudRestoreStaging
                 if ((packagedSqlTime - info.BackupStartDate).Duration() > TimeSpan.FromSeconds(1))
                     throw new InvalidDataException("The authenticated package timestamp does not match the SQL backup header.");
                 cancellationToken.ThrowIfCancellationRequested();
+                // Full isolated SQL preflight is still before live restoration.
+                // An unusable downloaded copy can safely fall back to another
+                // physical copy of exactly this recovery point at this stage.
+                progress?.Report(new BackupProgressUpdate("Testing isolated SQL recovery",
+                    "Checking SQL integrity, school identity and schema without modifying live data."));
+                await Task.Run(() => DatabaseBackupManager.VerifyRecoveryCandidate(bak),
+                    cancellationToken).ConfigureAwait(false);
                 string safetyFolder = BackupSettings.GetBackupFolder();
                 if (safetyFolder.Length == 0)
                     safetyFolder = Path.Combine(DatabaseHelper.DatabaseFolder, "Backups");
