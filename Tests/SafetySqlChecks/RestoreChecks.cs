@@ -37,6 +37,14 @@ internal static class RestoreChecks
         using(var locked=new FileStream(good,FileMode.Open,FileAccess.Read,FileShare.Read))
         {
             Probe(good);Check(true,"A same-identity backup remains readable by SQL while protected against replacement");
+            BackupRestoreIdentity.ValidateCandidateForNewComputer(master, good,
+                PathFor("new-computer-checks"), candidate =>
+                {
+                    Check(BackupRestoreIdentity.ReadScope(candidate)==original,
+                        "Replacement-PC isolated candidate exposes genuine school identity.");
+                    Validate(candidate);
+                });
+            Check(true,"A replacement-PC candidate was validated in disposable SQL without touching the original.");
             try{using var overwrite=new FileStream(good,FileMode.Open,FileAccess.Write,FileShare.ReadWrite);throw new Exception("Protected backup was writable");}
             catch(IOException){Check(true,"The protected backup cannot be overwritten during validation/restore");}
         }
@@ -50,7 +58,18 @@ internal static class RestoreChecks
         string fork=Backup("same-family-foreign-school.bak");
         RejectIdentity(fork,"Even a copied database family is refused when its logical school identity differs");
         Execute("USE FMSC_DB; EXEC sys.sp_dropextendedproperty @name=N'FMSC_QuickRegistrationScope'; USE master;");
-        RejectIdentity(Backup("missing-identity.bak"),"A backup without a recovery identity is refused");
+        string noScope=Backup("missing-identity.bak");
+        RejectIdentity(noScope,"A backup without a recovery identity is refused");
+        try
+        {
+            BackupRestoreIdentity.ValidateCandidateForNewComputer(master,noScope,
+                PathFor("new-computer-checks"),_ => throw new Exception("Scope-less backup accepted"));
+            throw new Exception("A replacement PC accepted a backup without school identity.");
+        }
+        catch(BackupIdentityException)
+        {
+            Check(true,"Replacement-computer preflight also rejects a missing school identity.");
+        }
         Execute($"USE FMSC_DB; DECLARE @Scope uniqueidentifier='{original:D}'; EXEC sys.sp_addextendedproperty @name=N'FMSC_QuickRegistrationScope',@value=@Scope; UPDATE dbo.TestVersion SET Value=999; USE master;");
         try{Probe(Backup("incompatible-schema.bak"));throw new Exception("Incompatible candidate accepted");}
         catch(InvalidDataException){Check(true,"Matching identity does not bypass application compatibility");}
