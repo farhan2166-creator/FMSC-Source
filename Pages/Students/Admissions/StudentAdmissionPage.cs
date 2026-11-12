@@ -582,6 +582,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
     private int _feeScopeCampusId;
     private int _feeScopeYearId;
     private int _feeScopeClassId;
+    private ModernButton? messageStudentButton;
     private readonly Action<Func<Control>, string, string>? _navigate;
     /// <param name="navigate">The shell's page-switch callback, unchanged.</param>
     private readonly bool registrationReview;
@@ -845,6 +846,8 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
             "Collect Payment",
             (_, _) => CollectPaymentNow(),
             "Success");
+        messageStudentButton = AddAction("Message Student…", (_, _) => OpenStudentMessage(), "Secondary");
+        GateAction(messageStudentButton, "Communication.Send");
         /* Print one bill using actual amounts; showActualAmount controls the copy format. */
         /* Share one Print menu to keep both documents accessible on smaller screens. */
         var printBillItem = printMenu.Items.Add("Print Bill");
@@ -2083,6 +2086,11 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
             collectPaymentButton.Enabled = savedStudentReady && _navigate is not null && FeeCollectionAccess.CanUse(CurrentUser.HasPermission);
         if (admissionPrintButton is not null)
             admissionPrintButton.Enabled = savedStudentReady;
+        if (messageStudentButton is not null)
+        {
+            messageStudentButton.Visible = CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission);
+            messageStudentButton.Enabled = savedStudentReady && unconfirmedAdmission is null && !IsPendingRegistration;
+        }
         if (enrollmentActionsButton is not null)
             enrollmentActionsButton.Enabled = savedStudentReady &&
                 (CurrentUser.HasPermission("Students.Admit") || CurrentUser.HasPermission("Enrollment.Manage") || CurrentUser.HasPermission("Students.Administer"));
@@ -3432,6 +3440,16 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
             ? Convert.ToString(row[columnName]) ?? string.Empty
             : string.Empty;
     }
+    internal void OpenStudentMessage(Action<Control, int, string, bool>? open = null)
+    {
+        if (IsBusy || unconfirmedAdmission is not null || IsPendingRegistration) return;
+        if (currentAdmissionId <= 0) { Warn("Save or select a student before preparing a message."); return; }
+        if (!CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission))
+        { Warn("School-message and student-view permissions are required."); return; }
+        try { (open ?? CommunicationRecordEntry.Open)(this, currentAdmissionId, name.Text, false); }
+        catch (Exception ex) { Fail(ex); }
+    }
+
     private void CollectPaymentNow()
     {
         if (!FeeCollectionAccess.CanUse(CurrentUser.HasPermission)) { Warn("Fee Collection requires both Collect Fee and View Fees access."); return; }

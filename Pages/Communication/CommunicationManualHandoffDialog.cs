@@ -30,6 +30,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
            +"You must check the school account and press Send in WhatsApp yourself. "
            +"Marking 'I sent it' is your own report, not proof of delivery."
     };
+    private readonly ModernTextBox preparedMessage = HumanUi.TextBox(true, 1600);
     private readonly ModernButton open=new()
     {
         Text="Open WhatsApp Chat",ThemeRole="Primary",
@@ -53,9 +54,27 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private CommunicationManualRecipient? current;
     private bool busy;
     private FileStream? batchLease;
+    private readonly HashSet<long> failedOpen = new();
+    internal sealed record Operations(
+        Func<Guid, Task<IReadOnlyList<CommunicationManualRecipient>>> Read,
+        Func<long, Task<CommunicationManualOpen>> Open,
+        Func<long, string, Task> Mark,
+        Action<Uri> Launch,
+        Func<bool> ConfirmSent,
+        Action<string> Notify);
+    private readonly Operations operations;
 
-    internal CommunicationManualHandoffDialog(Guid batchId)
+
+    internal CommunicationManualHandoffDialog(Guid batchId) : this(batchId, null) { }
+    internal CommunicationManualHandoffDialog(Guid batchId, Operations? operations)
     {
+        this.operations = operations ?? new Operations(CommunicationManualHandoffStore.ReadAsync,
+            CommunicationManualHandoffStore.OpenAsync, CommunicationManualHandoffStore.MarkAsync,
+            uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }),
+            () => ModernMessageDialog.Show(this,
+                "Confirm you actually pressed Send in WhatsApp. FMSC cannot verify delivery.",
+                "Operator report", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes,
+            message => ModernMessageDialog.Show(this, message, "Manual WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Warning));
         this.batchId=batchId;
         actorId=CurrentUser.UserId;
         Text="Manual WhatsApp Business · School Communication";
@@ -63,30 +82,35 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         FormBorderStyle=FormBorderStyle.FixedDialog;
         MaximizeBox=MinimizeBox=false;
         ShowInTaskbar=false;
-        ClientSize=new Size(AppScale.Scale(730),AppScale.Scale(290));
+        ClientSize=new Size(AppScale.Scale(730),AppScale.Scale(440));
         MinimumSize=ClientSize;
         BackColor=AppTheme.PageBackground;
 
         var layout=new TableLayoutPanel
         {
-            Dock=DockStyle.Fill,ColumnCount=1,RowCount=4,
+            Dock=DockStyle.Fill,ColumnCount=1,RowCount=5,
             Padding=new Padding(AppScale.Scale(20))
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(45)));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(55)));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(72)));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(60)));
         layout.Controls.Add(progress,0,0);
         layout.Controls.Add(destination,0,1);
         layout.Controls.Add(explanation,0,2);
+        preparedMessage.ReadOnly = true;
+        preparedMessage.ScrollBars = ScrollBars.Vertical;
+        preparedMessage.Dock = DockStyle.Fill;
+        layout.Controls.Add(preparedMessage,0,3);
         var actions=new FlowLayoutPanel
         {
             Dock=DockStyle.Fill,WrapContents=false,AutoScroll=true,
             FlowDirection=FlowDirection.LeftToRight,Margin=Padding.Empty
         };
         actions.Controls.AddRange(new Control[]{open,reported,skip,close});
-        layout.Controls.Add(actions,0,3);
+        layout.Controls.Add(actions,0,4);
         Controls.Add(layout);
         open.Click+=async (_,_)=>await OpenAsync();
         reported.Click+=async (_,_)=>await MarkAsync("ReportedSent");
@@ -106,7 +130,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     {
         bool allowed=!busy && actorId==CurrentUser.UserId;
         open.Enabled=allowed && (current?.State is "Pending" or "Opened");
-        reported.Enabled=allowed && current?.State=="Opened";
+        reported.Enabled=allowed && current?.State=="Opened" && !failedOpen.Contains(current.RecipientId);
         skip.Enabled=allowed && (current?.State is "Pending" or "Opened");
         close.Enabled=!busy;
     }
@@ -119,11 +143,13 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         try
         {
             IReadOnlyList<CommunicationManualRecipient> entries=
-                await CommunicationManualHandoffStore.ReadAsync(batchId);
+                await operations.Read(batchId);
             if(IsDisposed)return;
             if(actorId!=CurrentUser.UserId)
                 throw new InvalidOperationException("Signed-in account changed. Close this handoff.");
-            current=entries.FirstOrDefault(e=>e.State is "Pending" or "Opened");
+            var nextRecipient=entries.FirstOrDefault(e=>e.State is "Pending" or "Opened");
+            if (current?.RecipientId != nextRecipient?.RecipientId) preparedMessage.Text = "";
+            current=nextRecipient;
             int reportedCount=entries.Count(e=>e.State=="ReportedSent");
             int skippedCount=entries.Count(e=>e.State is "Skipped" or "Excluded");
             progress.Text=$"Manual WhatsApp · {reportedCount} operator-reported · {skippedCount} skipped/excluded · {entries.Count} total";
@@ -148,20 +174,21 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         {
             if(actorId!=CurrentUser.UserId)
                 throw new InvalidOperationException("Signed-in account changed.");
-            CommunicationManualOpen handoff=await CommunicationManualHandoffStore.OpenAsync(id);
+            CommunicationManualOpen handoff=await operations.Open(id);
             if(actorId!=CurrentUser.UserId)
                 throw new InvalidOperationException("Signed-in account changed. No chat was launched.");
             if(!IsDisposed && handoff.Allowed && handoff.Link is not null)
             {
+                preparedMessage.Text = handoff.Message ?? "";
                 // Browser or linked app opens only after SQL has persisted
                 // Opened. No automatic Send or delivery acknowledgement.
-                Process.Start(new ProcessStartInfo(handoff.Link.AbsoluteUri)
-                { UseShellExecute=true });
+                operations.Launch(handoff.Link);
+                failedOpen.Remove(id);
             }
             else if(!IsDisposed&&!handoff.Allowed)
                 Warn("Recipient is no longer eligible: "+handoff.ExclusionCode+".");
         }
-        catch(Exception ex){if(!IsDisposed)Warn("Could not open WhatsApp: "+ex.Message+
+        catch(Exception ex){failedOpen.Add(id);if(!IsDisposed)Warn("Could not open WhatsApp: "+ex.Message+
             " You may reopen this chat without marking it sent.");}
         finally
         {
@@ -173,11 +200,8 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private async Task MarkAsync(string state)
     {
         if(busy||current is null)return;
-        if(state=="ReportedSent" &&
-           ModernMessageDialog.Show(this,
-               "Confirm you actually pressed Send in WhatsApp. FMSC cannot verify delivery.",
-               "Operator report",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)
-            return;
+        if (state=="ReportedSent" && (current.State!="Opened" || failedOpen.Contains(current.RecipientId)
+            || !operations.ConfirmSent())) return;
         long id=current.RecipientId;
         busy=true;
         ApplyAvailability();
@@ -185,7 +209,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         {
             if(actorId!=CurrentUser.UserId)
                 throw new InvalidOperationException("Signed-in account changed.");
-            await CommunicationManualHandoffStore.MarkAsync(id,state);
+            await operations.Mark(id,state);
         }
         catch(Exception ex){if(!IsDisposed)Warn(ex.Message);}
         finally
@@ -195,7 +219,5 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         }
     }
 
-    private void Warn(string message) =>
-        ModernMessageDialog.Show(this,message,"Manual WhatsApp",
-            MessageBoxButtons.OK,MessageBoxIcon.Warning);
+    private void Warn(string message) => operations.Notify(message);
 }

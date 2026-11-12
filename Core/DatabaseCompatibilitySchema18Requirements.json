@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "SingleStudentScope",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    }
+  ]
+}

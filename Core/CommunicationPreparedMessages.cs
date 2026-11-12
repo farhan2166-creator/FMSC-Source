@@ -19,7 +19,10 @@ internal static class CommunicationPreparedMessages
     // joining identities into one guardian-facing message.
     internal sealed record FeeStudent(
         int RecordId, string RecordName, string? AdmissionNumber,
-        decimal Outstanding, bool SameFamily);
+        decimal Outstanding, bool SameFamily)
+    {
+        internal DateTime? AdmissionDate { get; init; }
+    }
 
     internal static IReadOnlyList<BuiltIn> BuiltIns { get; } = new[]
     {
@@ -41,13 +44,27 @@ internal static class CommunicationPreparedMessages
     internal static bool HasFields(string body) => Field.IsMatch(body);
 
     internal static Values FromPreview(CommunicationPreviewEntry entry)
-        => new(entry.RecordId, entry.RecordName, entry.AdmissionNumber,
+        => entry.PreparedValues ?? new(entry.RecordId, entry.RecordName, entry.AdmissionNumber,
             entry.AdmissionDate, entry.Outstanding);
+
+    internal static void ValidateFormat(string body, string? purpose = null)
+    {
+        if (string.IsNullOrWhiteSpace(body) || body.Length > 1600)
+            throw new CommunicationValidationException("Write a message of up to 1600 characters.");
+        string remaining = Field.Replace(body, match => match.Groups["key"].Value switch {
+            "StudentName" or "AdmissionNumber" or "AdmissionDate" => "",
+            "OutstandingAmount" when purpose is null or "FeeReminder" => "",
+            "OutstandingAmount" => throw new CommunicationValidationException("Use [OutstandingAmount] with an outstanding-fee reminder."),
+            _ => throw new CommunicationValidationException("Unsupported prepared field " + match.Value + ". Use [StudentName], [AdmissionNumber], [AdmissionDate] or [OutstandingAmount].")
+        });
+        if (remaining.Contains('[') || remaining.Contains(']') || remaining.Contains("{{", StringComparison.Ordinal)
+            || remaining.Contains("}}", StringComparison.Ordinal))
+            throw new CommunicationValidationException("Complete each prepared field using [FieldName]. Remove unmatched brackets and {{...}} placeholders.");
+    }
 
     internal static string Render(string body, Values values)
     {
-        if (string.IsNullOrWhiteSpace(body) || body.Length > 1600)
-            throw new ArgumentException("Write a message of up to 1600 characters.");
+        ValidateFormat(body);
         string rendered = Field.Replace(body, m => m.Groups["key"].Value switch
         {
             "StudentName" => !string.IsNullOrWhiteSpace(values.RecordName)
@@ -56,16 +73,16 @@ internal static class CommunicationPreparedMessages
                 ? values.AdmissionNumber.Trim() : values.RecordId.ToString(CultureInfo.InvariantCulture),
             "AdmissionDate" => values.AdmissionDate.HasValue
                 ? values.AdmissionDate.Value.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)
-                : throw new InvalidOperationException("This record has no admission date. Edit the message before continuing."),
+                : throw new CommunicationValidationException("This message has no single recorded admission date. Edit the format or choose one student."),
             "OutstandingAmount" => values.Outstanding is > 0
                 ? values.Outstanding.Value.ToString("N2", CultureInfo.InvariantCulture)
-                : throw new InvalidOperationException("An outstanding balance is no longer available. Review the fee reminder again."),
-            _ => throw new ArgumentException("This message contains an unsupported prepared field: " + m.Value)
+                : throw new CommunicationValidationException("An outstanding balance is no longer available. Review the fee reminder again."),
+            _ => throw new CommunicationValidationException("This message contains an unsupported prepared field: " + m.Value)
         });
         if (rendered.Contains("{{", StringComparison.Ordinal)
             || rendered.Contains("}}", StringComparison.Ordinal)
             || rendered.Length > 1600)
-            throw new InvalidOperationException("Prepared message contains an unresolved field or exceeds 1600 characters.");
+            throw new CommunicationValidationException("Prepared message contains an unresolved field or exceeds 1600 characters.");
         return rendered;
     }
 
@@ -82,12 +99,12 @@ internal static class CommunicationPreparedMessages
             students.Any(s => s.RecordId <= 0 || s.Outstanding <= 0) ||
             students.Select(s => s.RecordId).Distinct().Count() != students.Count ||
             students.All(s => s.RecordId != selected.RecordId))
-            throw new InvalidOperationException(
+            throw new CommunicationValidationException(
                 "The shared-number outstanding-fee records changed. Review recipients again.");
         if (students.Count == 1)
             return selected with { Outstanding = students[0].Outstanding };
         if (students.Any(s => !s.SameFamily))
-            throw new InvalidOperationException(
+            throw new CommunicationValidationException(
                 "This phone number belongs to multiple outstanding students without a verified shared family. " +
                 "Review the family links and contact number before opening a fee reminder; no chat was launched.");
 
@@ -100,7 +117,9 @@ internal static class CommunicationPreparedMessages
                 ? "record #" + s.RecordId.ToString(CultureInfo.InvariantCulture)
                 : s.AdmissionNumber.Trim()));
         decimal total = students.Sum(s => s.Outstanding);
-        return selected with { RecordName = names, AdmissionNumber = admissions, Outstanding = total };
+        DateTime? date = students[0].AdmissionDate;
+        if (students.Any(student => student.AdmissionDate != date)) date = null;
+        return selected with { RecordName = names, AdmissionNumber = admissions, Outstanding = total, AdmissionDate = date };
     }
 
     // The identical classroom/campus/active-enrollment rules used by both
@@ -112,7 +131,7 @@ internal static class CommunicationPreparedMessages
         EXEC dbo.RequirePermission @UserId,N'Students.View';
         EXEC dbo.RequirePermission @UserId,N'Fees.View';
         SELECT S.AdmissionId RecordId,S.StudentName RecordName,
-               S.AdmissionNumber,F.Outstanding,
+               S.AdmissionNumber,S.AdmissionDate,F.Outstanding,
                CONVERT(bit,CASE WHEN EXISTS (
                    SELECT 1 FROM dbo.FamilyMembers Selected
                    JOIN dbo.FamilyMembers Related ON Related.FamilyId=Selected.FamilyId
@@ -141,6 +160,7 @@ internal static class CommunicationPreparedMessages
           AND E.Status=N'Active'
           AND (@CampusFilter=0 OR CCS.CampusId=@CampusFilter)
           AND (@ClassFilter=0 OR CCS.ClassId=@ClassFilter)
+          AND (@StudentFilter=0 OR S.AdmissionId=@StudentFilter)
           AND F.Outstanding>0
           AND NOT EXISTS (SELECT 1 FROM msg.Suppression O
                           WHERE O.Channel='WhatsApp' AND O.PhoneE164=R.PhoneE164)
@@ -155,7 +175,7 @@ internal static class CommunicationPreparedMessages
             EXEC dbo.RequirePermission @UserId,N'Communication.Send';
             EXEC dbo.RequirePermission @UserId,N'Students.View';
             EXEC dbo.RequirePermission @UserId,N'Fees.View';
-            SELECT B.CampusId,B.ClassId FROM msg.ManualHandoff H
+            SELECT B.CampusId,B.ClassId,CASE WHEN B.SingleStudentScope=1 THEN B.StudentId ELSE 0 END StudentId FROM msg.ManualHandoff H
             JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
             JOIN msg.Batch B ON B.BatchId=R.BatchId
             WHERE R.RecipientId=@RecipientId AND H.State='Opened'
@@ -164,20 +184,21 @@ internal static class CommunicationPreparedMessages
         using DataTable scope = await DatabaseHelper.QuerySqlAsync(scoped,
             DatabaseHelper.Int("@UserId",actor),DatabaseHelper.P("@RecipientId",recipientId));
         if (actor != CurrentUser.UserId || scope.Rows.Count != 1)
-            throw new InvalidOperationException("Fee reminder scope changed. Review the recipients again.");
+            throw new CommunicationValidationException("Fee reminder scope changed. Review the recipients again.");
         using DataTable rows = await DatabaseHelper.QuerySqlAsync(SharedFeeRecordsSql,
             DatabaseHelper.Int("@UserId",actor),
             DatabaseHelper.P("@RecipientId",recipientId),
             DatabaseHelper.Int("@CampusFilter",Convert.ToInt32(scope.Rows[0]["CampusId"])),
-            DatabaseHelper.Int("@ClassFilter",Convert.ToInt32(scope.Rows[0]["ClassId"])));
+            DatabaseHelper.Int("@ClassFilter",Convert.ToInt32(scope.Rows[0]["ClassId"])),
+            DatabaseHelper.Int("@StudentFilter",Convert.ToInt32(scope.Rows[0]["StudentId"])));
         if (actor != CurrentUser.UserId)
-            throw new InvalidOperationException("Signed-in account changed. Review the recipient again.");
+            throw new CommunicationValidationException("Signed-in account changed. Review the recipient again.");
         return AggregateFeeReminder(selected, rows.AsEnumerable().Select(row =>
             new FeeStudent(Convert.ToInt32(row["RecordId"]),
-                Convert.ToString(row["RecordName"]) ?? "",
+                CommunicationRecipientResolver.DisplayName("Student", Convert.ToInt32(row["RecordId"]), Convert.ToString(row["RecordName"])),
                 row.IsNull("AdmissionNumber") ? null : Convert.ToString(row["AdmissionNumber"]),
                 Convert.ToDecimal(row["Outstanding"]),
-                Convert.ToBoolean(row["SameFamily"]))).ToArray());
+                Convert.ToBoolean(row["SameFamily"])) { AdmissionDate = row.IsNull("AdmissionDate") ? null : Convert.ToDateTime(row["AdmissionDate"]) }).ToArray());
     }
 
     /// <summary>
@@ -189,8 +210,8 @@ internal static class CommunicationPreparedMessages
     {
         const string sql = """
             EXEC dbo.RequirePermission @UserId,N'Communication.Send';
-            DECLARE @Audience varchar(20);
-            SELECT @Audience=B.Audience
+            DECLARE @Audience varchar(20), @CampusId int, @ClassId int, @StudentId int, @StaffId int;
+            SELECT @Audience=B.Audience,@CampusId=B.CampusId,@ClassId=B.ClassId,@StudentId=CASE WHEN B.Audience='OutstandingFees' AND B.SingleStudentScope=0 THEN 0 ELSE B.StudentId END,@StaffId=B.StaffId
             FROM msg.ManualHandoff H
             JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
             JOIN msg.Batch B ON B.BatchId=R.BatchId
@@ -215,6 +236,10 @@ internal static class CommunicationPreparedMessages
             JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
             LEFT JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
             LEFT JOIN dbo.Staff T ON T.StaffId=R.StaffId
+            OUTER APPLY (SELECT TOP(1) E.ClassSectionId,E.Status FROM dbo.Enrollments E
+                WHERE E.AdmissionId=S.AdmissionId
+                ORDER BY CASE WHEN E.Status=N'Active' THEN 0 ELSE 1 END,E.EnrollmentId DESC) E
+            LEFT JOIN dbo.CampusClassSections CCS ON CCS.ClassSectionId=E.ClassSectionId
             OUTER APPLY (
                 SELECT SUM(dbo.GetFeeChargeBalance(C.BillingChargeId)) Outstanding
                 FROM dbo.BillingCharges C
@@ -228,8 +253,18 @@ internal static class CommunicationPreparedMessages
                   WHERE O.Channel='WhatsApp' AND O.PhoneE164=R.PhoneE164)
               AND ((S.AdmissionId IS NOT NULL AND S.Status=N'Active'
                     AND S.SchoolMessageConsent=1
-                    AND msg.NormalizeMobile(S.ContactNumber)=R.PhoneE164)
-                OR (T.StaffId IS NOT NULL AND T.Status=N'Active'
+                    AND msg.NormalizeMobile(S.ContactNumber)=R.PhoneE164
+                    AND (@Audience='School'
+                      OR (@Audience='Campus' AND E.Status=N'Active' AND CCS.CampusId=@CampusId)
+                      OR (@Audience='Class' AND E.Status=N'Active' AND CCS.CampusId=@CampusId AND CCS.ClassId=@ClassId)
+                      OR (@Audience='OutstandingFees' AND E.Status=N'Active'
+                          AND (@CampusId=0 OR CCS.CampusId=@CampusId) AND (@ClassId=0 OR CCS.ClassId=@ClassId)
+                          AND (@StudentId=0 OR S.AdmissionId=@StudentId) AND F.Outstanding>0)
+                      OR (@Audience='Student' AND S.AdmissionId=@StudentId)
+                      OR (@Audience='Family' AND (S.AdmissionId=@StudentId OR EXISTS(
+                          SELECT 1 FROM dbo.FamilyMembers M JOIN dbo.FamilyMembers X ON X.FamilyId=M.FamilyId
+                          WHERE M.AdmissionId=S.AdmissionId AND X.AdmissionId=@StudentId)))))
+                OR (@Audience='Staff' AND T.StaffId=@StaffId AND T.Status=N'Active'
                     AND msg.NormalizeMobile(T.ContactNumber)=R.PhoneE164));
             """;
         int actor = CurrentUser.UserId;
@@ -238,10 +273,11 @@ internal static class CommunicationPreparedMessages
             DatabaseHelper.P("@RecipientId", recipientId),
             DatabaseHelper.P("@NeedFees", needsFees));
         if (actor != CurrentUser.UserId || table.Rows.Count != 1)
-            throw new InvalidOperationException("School records or signed-in account changed. Review the WhatsApp recipient again.");
+            throw new CommunicationValidationException("School records or signed-in account changed. Review the WhatsApp recipient again.");
         DataRow row = table.Rows[0];
         Values selected = new(Convert.ToInt32(row["RecordId"]),
-            Convert.ToString(row["RecordName"]) ?? "",
+            CommunicationRecipientResolver.DisplayName(Convert.ToString(row["Audience"]) == "Staff" ? "Staff" : "Student",
+                Convert.ToInt32(row["RecordId"]), Convert.ToString(row["RecordName"])),
             row.IsNull("AdmissionNumber") ? null : Convert.ToString(row["AdmissionNumber"]),
             row.IsNull("AdmissionDate") ? null : Convert.ToDateTime(row["AdmissionDate"]),
             row.IsNull("Outstanding") ? null : Convert.ToDecimal(row["Outstanding"]));

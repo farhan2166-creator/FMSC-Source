@@ -79,6 +79,7 @@ internal static class CommunicationManagementStore
             throw new UnauthorizedAccessException("Communication Settings permission is required.");
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(body))
             throw new ArgumentException("Template name and message are required.");
+        CommunicationPreparedMessages.ValidateFormat(body, purpose);
         await DatabaseHelper.QueryUserAsync("msg.SaveTemplate",
             DatabaseHelper.Int("@TemplateId", templateId),
             DatabaseHelper.P("@Name", name.Trim()),

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.32 — Communication Centre audit corrections (schema 18)
+
+- Match family fee previews to live scoped messages, recheck school membership before preparing fields, and preserve historical bulk audiences.
+- Guard pending reads and confirmations against conflicting navigation, duplicate clicks and late intent changes; show complete per-recipient message previews.
+- Add optional Message Student entry points to Admission and Fee Collection through the existing centre, keeping admission/payment drafts intact.
+- Separate compose, history and settings access; retain independent student, staff and financial permissions.
+- Align mobile validation across Admission and SQL; count final live exclusions honestly without claiming delivery.
+- Validate prepared fields with actionable guidance, refresh edited templates, and preserve saved email-template channels.
+- Block operator-sent reporting after failed chat launch and bound inactive API response-body reads without retrying uncertain sends.
+- Add behavioral Windows and disposable SQL coverage. Automated checks do not replace real-account manual WhatsApp or exact-commit publication acceptance.
+
 ## 1.0.31 — Certificate and cloud recovery corrections (schema 17)
 
 - Select the exact saved certificate after backdated or deduplicated creation; refuse to substitute another history row if refresh fails.

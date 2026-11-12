@@ -210,6 +210,19 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
             }));
         }
     }
+    internal void OpenStudentMessage(Action<Control, int, string, bool>? open = null)
+    {
+        if (IsBusy || siblingBusy || admissionId <= 0) return;
+        if (!CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission, true))
+        { Warn("School-message, student-view and fee-view permissions are required."); return; }
+        // Message scope is explicit: the main selected student, independent of
+        // sibling payment ticks. Closing messaging never reloads or resets a split.
+        string display = student.SelectedRow is DataRow row && row.Table.Columns.Contains("StudentName")
+            ? Convert.ToString(row["StudentName"]) ?? "Selected student" : "Selected student";
+        try { using var focus = new DialogReturnFocus(this); (open ?? CommunicationRecordEntry.Open)(this, admissionId, display, true); }
+        catch (Exception ex) { Fail(ex); }
+    }
+
     internal override bool FocusEntryField()
     {
         if (admissionId > 0 && HasOutstandingCharges() && !IsBusy && paymentAmount.CanFocus)
@@ -387,6 +400,8 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         transportButton=new ModernButton{Text="Start Transport",ThemeRole="Secondary",Enabled=false,AutoSize=true};
         transportButton.Click+=async(_,_)=>await OpenTransportAsync(transportStarts);
         var recoveryItem=studentFeesMenu.Items.Add("Check Fee Change Save",null,async(_,_)=>await CheckFeeChangeSaveAsync());
+        var messageStudentItem = studentFeesMenu.Items.Add("Message Student…", null, (_, _) => OpenStudentMessage());
+        messageStudentItem.ToolTipText = "Prepare an optional fee notice for the main selected student. Your payment entries stay unchanged.";
         studentFeesMenu.Items.Add(new ToolStripSeparator());
         // Bills cover current unpaid charges. Paid transactions are reprinted as receipts.
         printBillButton = AddBusyAction("Print Family Bill", PrintSelectedFamilyBillAsync, "Secondary");
@@ -403,6 +418,8 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         familyReturnsItem.Click+=async(_,_)=>await OpenFamilyReturnsAsync();
         studentFeesMenu.Items.Add(familyReturnsItem);
         studentFeesMenu.Opening += (_, _) => {
+            messageStudentItem.Available = CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission, true);
+            messageStudentItem.Enabled = admissionId > 0 && !IsBusy && !siblingBusy;
             futureFeesItem.Enabled = futureFeesButton?.Enabled == true;
             accountItem.Enabled = historyButton?.Enabled == true;
             feeChangesItem.Enabled=admissionId>0&&CurrentUser.HasPermission("Fees.Collect")&&!siblingBusy;
