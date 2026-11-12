@@ -374,9 +374,12 @@ internal static class CloudBackupCoordinator
     }
 
     private static bool OriginallyRequested(Pending p, CloudProvider provider, CloudBackupOptions settings) =>
+        // Old journal entries never recorded initial destination enrollment.
+        // A later disabled provider is NOT proof it was unrequested, so keep
+        // those encrypted packages until verified delivery or explicit review.
         provider == CloudProvider.GoogleDrive
-            ? p.RequestedGoogle ?? settings.GoogleDriveEnabled
-            : p.RequestedDropbox ?? settings.DropboxEnabled;
+            ? p.RequestedGoogle ?? true
+            : p.RequestedDropbox ?? true;
 
     private static bool StillRequiresDelivery(Pending p, CloudProvider provider, CloudBackupOptions settings)
     {
