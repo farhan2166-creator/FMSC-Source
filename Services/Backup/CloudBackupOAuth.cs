@@ -54,6 +54,40 @@ internal static class CloudBackupOAuth
     internal static async Task ConnectAsync(CloudProvider provider, CancellationToken cancellationToken = default)
     {
         RequireAdministrator();
+        await ConnectCoreAsync(provider, cancellationToken);
+    }
+
+    /// <summary>
+    /// Renew an existing disconnected or expired provider. Retain the old
+    /// credential until the new PKCE browser flow succeeds and writes atomically.
+    /// </summary>
+    internal static async Task ReconnectAsync(CloudProvider provider,
+        CancellationToken cancellationToken = default)
+    {
+        RequireAdministrator();
+        await ConnectCoreAsync(provider, cancellationToken);
+    }
+
+    internal static async Task CheckConnectionAsync(CloudProvider provider,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await GetAccessTokenAsync(provider, cancellationToken);
+    }
+
+    /// <summary>Cloud connection before normal school login is possible on a
+    /// replacement computer. Uses the stricter online-approved Windows gate,
+    /// and must not work when any existing FMSC_DB could be overwritten.</summary>
+    internal static async Task ConnectForReplacementRecoveryAsync(
+        CloudProvider provider, CancellationToken cancellationToken = default)
+    {
+        ReplacementSchoolRecovery.RequireAbsentOrVirginSchool();
+        await ReplacementSchoolRecovery.CheckComputerAuthorizationAsync(cancellationToken);
+        ReplacementSchoolRecovery.RequireAbsentOrVirginSchool();
+        await ConnectCoreAsync(provider, cancellationToken);
+    }
+
+    private static async Task ConnectCoreAsync(CloudProvider provider, CancellationToken cancellationToken)
+    {
         string clientId = CloudProviderApplicationIds.Load().Get(provider);
         if (string.IsNullOrWhiteSpace(clientId))
             throw new InvalidOperationException(provider + " cannot be connected until the FMSC publisher registers its OAuth application.");
