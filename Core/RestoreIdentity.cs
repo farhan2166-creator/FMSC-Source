@@ -27,6 +27,20 @@ internal static class BackupRestoreIdentity
     internal static void ValidateCandidate(string masterConnectionString,string backupPath,string scratchRoot,Guid expected,Action<SqlConnection> validate)
     {
         if(expected==Guid.Empty)throw new BackupIdentityException("The current school database identity could not be verified. Restore was stopped.");
+        ValidateCore(masterConnectionString, backupPath, scratchRoot, expected, validate);
+    }
+
+    // The ONLY scope-free identity check is the explicit recovery of an ABSENT
+    // school database. The caller must first authorize the new computer, verify
+    // an existing school Administrator in this disposable catalog and ensure no
+    // original/attached FMSC_DB exists. Ordinary restore cannot use this entry.
+    internal static void ValidateCandidateForNewComputer(string masterConnectionString,
+        string backupPath, string scratchRoot, Action<SqlConnection> validate)
+        => ValidateCore(masterConnectionString, backupPath, scratchRoot, null, validate);
+
+    private static void ValidateCore(string masterConnectionString,string backupPath,string scratchRoot,
+        Guid? expected,Action<SqlConnection> validate)
+    {
         string owner=Guid.NewGuid().ToString("N"),catalog="FMSC_RestoreCheck_"+owner;
         string root=Path.GetFullPath(scratchRoot),folder=Path.GetFullPath(Path.Combine(root,owner));
         if(!folder.StartsWith(Path.TrimEndingDirectorySeparator(root)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))
@@ -76,7 +90,8 @@ internal static class BackupRestoreIdentity
             }
             var candidateBuilder=new SqlConnectionStringBuilder(masterBuilder.ConnectionString){InitialCatalog=catalog,Pooling=false};
             using var candidate=new SqlConnection(candidateBuilder.ConnectionString);candidate.Open();
-            RequireSame(expected,ReadScope(candidate));
+            Guid candidateScope = ReadScope(candidate);
+            if (expected is Guid actualScope) RequireSame(actualScope, candidateScope);
             validate(candidate);
         }
         finally
