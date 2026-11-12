@@ -76,6 +76,28 @@ internal static class RestoreChecks
         Check(Convert.ToString(Scalar("SELECT Value FROM CurrentSchool.dbo.TestMarker;"))=="Original","Every rejected backup leaves the original working database untouched");
         Check(Convert.ToInt32(Scalar("SELECT COUNT(*) FROM sys.databases WHERE name LIKE N'FMSC[_]RestoreCheck[_]%';"))==0,"Temporary restored catalogs are cleaned after successful and rejected validations");
         Check(!Directory.Exists(PathFor("checks"))||Directory.GetFileSystemEntries(PathFor("checks")).Length==0,"Temporary database files are cleaned after all validation outcomes");
-        Console.WriteLine($"PASS: {checks} real SQL backup-identity checks on the isolated instance.");
+        // Exercise the exact production SQL restore command on the owned
+        // disposable LocalDB instance, never an installed school's database.
+        Execute("ALTER DATABASE [FMSC_DB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [FMSC_DB];");
+        ReplacementSqlActivation.RestoreVerifiedBackup(c,good,
+            PathFor("replacement-new.mdf"),PathFor("replacement-new.ldf"),
+            verifiedVirginTemplate:false);
+        Check(Convert.ToString(Scalar("SELECT Value FROM FMSC_DB.dbo.TestMarker;"))=="Original",
+            "Replacement activation restored actual verified SQL backup into new school catalog.");
+        bool protectedExisting=false;
+        try
+        {
+            ReplacementSqlActivation.RestoreVerifiedBackup(c,good,
+                PathFor("replacement-overwrite.mdf"),PathFor("replacement-overwrite.ldf"),
+                verifiedVirginTemplate:false);
+        }
+        catch(InvalidOperationException){protectedExisting=true;}
+        Check(protectedExisting,
+            "Replacement SQL activation refused to overwrite an existing FMSC_DB database.");
+        Check(Convert.ToString(Scalar("SELECT Value FROM FMSC_DB.dbo.TestMarker;"))=="Original",
+            "A refused second activation did not alter the recovered school.");
+        Check(Convert.ToString(Scalar("SELECT Value FROM CurrentSchool.dbo.TestMarker;"))=="Original",
+            "Disposable replacement activation did not modify the preserved original school.");
+        Console.WriteLine($"PASS: {checks} real SQL backup-identity and replacement activation checks on the isolated instance.");
     }
 }
