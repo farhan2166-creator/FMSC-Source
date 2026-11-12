@@ -9,6 +9,8 @@ string root = Path.Combine(Path.GetTempPath(), "FMSC-CloudCryptoChecks-" + Guid.
 Directory.CreateDirectory(root);
 try
 {
+    CloudSettingsChecks.Run(root);
+    if (args.SequenceEqual(new[] { "--settings" })) return;
     // DSA-01: exclusive lease must survive await/thread switches, block another
     // process/attempt, and become available when the handle is disposed.
     string lockFile = Path.Combine(root, "cloud-job.lock");

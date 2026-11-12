@@ -57,9 +57,18 @@ internal static class CloudBackupSettings
     internal static CloudBackupOptions Load()
     {
         if (!File.Exists(SettingsPath)) return new CloudBackupOptions();
-        byte[] data = File.ReadAllBytes(SettingsPath);
+        return Deserialize(File.ReadAllBytes(SettingsPath));
+    }
+
+    internal static CloudBackupOptions Deserialize(ReadOnlySpan<byte> data)
+    {
         if (data.Length is < 2 or > 64 * 1024)
             throw new InvalidDataException("Cloud backup settings file has an invalid size.");
+        // Earlier saves used Encoding.UTF8, whose StreamWriter preamble is
+        // rejected by the byte-based JSON reader. Keep those enrolled settings
+        // readable without resetting providers, scheduling or recovery keys.
+        if (data.StartsWith(Encoding.UTF8.Preamble))
+            data = data[Encoding.UTF8.Preamble.Length..];
         var settings = JsonSerializer.Deserialize<CloudBackupOptions>(data)
             ?? throw new InvalidDataException("Cloud backup settings are empty.");
         settings.Validate();
@@ -72,7 +81,7 @@ internal static class CloudBackupSettings
             throw new UnauthorizedAccessException("Changing cloud backup settings requires backup recovery permission.");
         settings.Validate();
         EnsurePrivateDirectory();
-        AtomicTextFile.Write(SettingsPath, JsonSerializer.Serialize(settings), Encoding.UTF8);
+        AtomicTextFile.Write(SettingsPath, JsonSerializer.Serialize(settings));
     }
 
     /// <summary>

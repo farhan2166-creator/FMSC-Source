@@ -453,3 +453,9 @@ Database/*.bak
 /Tests/GlobalSearchChecks/*
 !/Tests/GlobalSearchChecks/*.cs
 !/Tests/GlobalSearchChecks/*.csproj
+
+# Cloud backup regression sources; keep generated build outputs ignored.
+!/Tests/CloudBackupCryptoChecks/
+/Tests/CloudBackupCryptoChecks/*
+!/Tests/CloudBackupCryptoChecks/*.cs
+!/Tests/CloudBackupCryptoChecks/*.csproj
