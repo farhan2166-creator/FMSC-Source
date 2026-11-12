@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — One interactive app per computer
+
+- Refuse a second interactive FMSC process across Windows sessions, bring the existing window or its active dialog forward when possible, and release the guard on exit or crash. Scheduled backups and headless installation verification keep their existing behavior.
+
 ## 1.0.32 — Communication Centre audit corrections (schema 18)
 
 - Match family fee previews to live scoped messages, recheck school membership before preparing fields, and preserve historical bulk audiences.

@@ -861,6 +861,7 @@ internal static partial class Program
         }
         if(args.Contains("--post-fix"))
         {
+            CheckSingleInstanceActivation();
             CheckValidationBadges();
             CheckAdmissionToolbarRows();
             CheckSchoolWorkflow();

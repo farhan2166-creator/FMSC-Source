@@ -49,6 +49,10 @@ internal static class Program
         }
 #endif
         ApplicationConfiguration.Initialize();
+        // Headless installation verification and scheduled backups above remain independent.
+        // Keep ownership on this STA thread until every interactive window has closed.
+        using var instance = SingleInstanceStartup.Enter();
+        if (instance is null) return;
 #if !FMSC_LEVEL2
         if (!FMSC_SMS.Core.Updates.UpdateStartupGuard.AllowStartup()) return;
 #endif
