@@ -68,13 +68,11 @@ internal static class SingleInstanceStartup
 
     internal static IntPtr ActivationWindow(IntPtr window)
     {
-        for (int depth = 0; depth < 32; depth++)
-        {
-            IntPtr popup = GetLastActivePopup(window);
-            if (popup == IntPtr.Zero || popup == window || !IsWindowVisible(popup)) break;
-            window = popup;
-        }
-        return window;
+        // GetLastActivePopup returns its argument unchanged when that window
+        // itself has an owner (including WinForms' hidden taskbar owner).
+        IntPtr root = GetAncestor(window, 3); // GA_ROOTOWNER
+        IntPtr popup = GetLastActivePopup(root == IntPtr.Zero ? window : root);
+        return popup != IntPtr.Zero && IsWindowVisible(popup) ? popup : window;
     }
 
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
@@ -85,6 +83,8 @@ internal static class SingleInstanceStartup
     private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")]
     private static extern IntPtr GetLastActivePopup(IntPtr window);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr window, uint flags);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindowVisible(IntPtr window);
 }
