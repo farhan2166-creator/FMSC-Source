@@ -14,7 +14,10 @@ internal sealed class Fixture
         // The runner publishes baseline 1, then applies any future numbered migrations.
         if (Convert.ToString(Sql.Scalar("SELECT TOP(1) VersionNumber FROM dbo.DatabaseVersion ORDER BY VersionId DESC;")) != DatabaseHelper.RequiredDatabaseSchemaVersion)
             throw new InvalidOperationException("Initialize the owned baseline fixture and apply any future migrations before seeding reference data.");
-        Sql.Query("INSERT dbo.AdmissionNumberCounter(CounterId,LastNumber) VALUES(1,1000);");
+        // A true schema-only school must already have its first admission counter
+        // through migration 15. Do not hide a missing initializer by seeding here.
+        if (Sql.Count("SELECT COUNT(*) FROM dbo.AdmissionNumberCounter WHERE CounterId=1 AND LastNumber=0;") != 1)
+            throw new InvalidOperationException("Fresh schema migration did not initialize admission counter 1 to zero.");
         // DacFx round-trips this property as varchar. Repair ONLY this disposable fixture's identity/type.
         Sql.Query("DECLARE @Scope uniqueidentifier=NEWID(); EXEC sys.sp_updateextendedproperty @name=N'FMSC_QuickRegistrationScope',@value=@Scope;");
         try { using var c = DatabaseHelper.GetConnection(); c.Open(); DatabaseCompatibility.Validate(c); }
@@ -29,23 +32,25 @@ internal sealed class Fixture
             Console.WriteLine("SCHEMA_CONTRACT_FAIL: " + safe);
             throw;
         }
-        Sql.Query("INSERT dbo.Roles(RoleName,Description) VALUES(N'Administrator',N'Fictional full-authority test role'),(N'Accountant',N'Fictional restricted test role');");
-        // The baseline installs 28 codes; migration 9 supplies three new
-        // communication codes. Seed only missing fixture permissions, then
-        // verify that every pre-existing definition exactly matches the catalog.
-        foreach (var definition in PermissionCatalog.All.Values)
-            Sql.Query("""
-                IF NOT EXISTS(SELECT 1 FROM dbo.Permissions WHERE PermissionCode=@Code)
-                    INSERT dbo.Permissions(PermissionCode,PermissionName,Description)
-                    VALUES(@Code,@Name,@Description);
-                IF NOT EXISTS(SELECT 1 FROM dbo.Permissions
-                    WHERE PermissionCode=@Code AND PermissionName=@Name AND Description=@Description)
-                    THROW 51099,'Permission metadata drifted from the audited catalog.',1;
-                """,
-                Sql.P("@Code", definition.Code), Sql.P("@Name", definition.Name),
-                Sql.P("@Description", definition.Description));
+        // No fixture-side bootstrap: migration 16 must supply reference roles,
+        // the 31 known permissions and billing state to an empty database BEFORE
+        // any administrator attempts to sign in. This is the real first-run
+        // stored-procedure precondition, not a synthetic SQL repair.
+        if (Sql.Count("SELECT COUNT(*) FROM dbo.Roles WHERE RoleName IN (N'Administrator',N'Accountant');") != 2)
+            throw new InvalidOperationException("Production migration did not prepare both school roles.");
+        if (Sql.Count("SELECT COUNT(*) FROM dbo.BillingAutomationState WHERE StateId=1;") != 1)
+            throw new InvalidOperationException("Production migration did not initialize the billing singleton.");
         if (Sql.Count("SELECT COUNT(*) FROM dbo.Permissions;") != PermissionCatalog.All.Count)
-            throw new InvalidOperationException("The fixture contains unexpected permission entries.");
+            throw new InvalidOperationException("Production migration did not seed the full permission catalog.");
+        foreach (var definition in PermissionCatalog.All.Values)
+        {
+            if (Sql.Count("""
+                SELECT COUNT(*) FROM dbo.Permissions
+                 WHERE PermissionCode=@Code AND PermissionName=@Name AND Description=@Description;
+                """, Sql.P("@Code", definition.Code), Sql.P("@Name", definition.Name),
+                Sql.P("@Description", definition.Description)) != 1)
+                throw new InvalidOperationException("Production reference permission does not match the reviewed catalog: " + definition.Code);
+        }
         var f = new Fixture();
         byte[] salt = RandomNumberGenerator.GetBytes(32);
         byte[] hash = Rfc2898DeriveBytes.Pbkdf2(Guid.NewGuid().ToString("N"), salt, 100_000, HashAlgorithmName.SHA512, 64);
@@ -95,10 +100,18 @@ internal sealed class Fixture
         Sql.P("@StartDate", new DateTime(year, 1, 1)), Sql.P("@EndDate", new DateTime(year, 12, 31)), Sql.P("@IsCurrent", current), Sql.P("@Remarks", "Synthetic fixture"), Sql.P("@UserId", Admin));
     private int Fee(string code, string name, bool mandatory, string frequency)
     {
-        int id = Sql.Key("SaveFeeType", Sql.P("@UserId", Admin), Sql.P("@FeeTypeCode", code), Sql.P("@FeeTypeName", name));
-        // Mandatory/system flags are reference data, not a supported SaveFeeType edit.
-        Sql.Query("UPDATE dbo.FeeTypes SET IsMandatory=@Mandatory,IsSystemDefined=@Mandatory,DefaultFrequency=@Frequency WHERE FeeTypeId=@Id;",
-            Sql.P("@Mandatory", mandatory), Sql.P("@Frequency", frequency), Sql.P("@Id", id)); return id;
+        // Use the same fee-type writer as the operator's editor. A fresh school
+        // must be able to configure required fees without direct SQL updates.
+        int id = Sql.Key("SaveFeeTypeWithDefaultFrequency",
+            Sql.P("@UserId", Admin), Sql.P("@FeeTypeId", 0),
+            Sql.P("@FeeTypeCode", code), Sql.P("@FeeTypeName", name),
+            Sql.P("@Description", null), Sql.P("@DisplayOrder", 0),
+            Sql.P("@DefaultFrequency", frequency),
+            Sql.P("@IsMandatory", mandatory), Sql.P("@IsTransportLinked", false));
+        // System-defined is reference-test metadata, not an operator setting.
+        Sql.Query("UPDATE dbo.FeeTypes SET IsSystemDefined=@System WHERE FeeTypeId=@Id;",
+            Sql.P("@System", mandatory), Sql.P("@Id", id));
+        return id;
     }
     internal int Rate(int classId, int fee, decimal amount, string frequency) => Sql.Key("SaveFeeConfiguration",
         Sql.P("@UserId", Admin), Sql.P("@CampusId", Campus), Sql.P("@ClassId", classId), Sql.P("@FeeTypeId", fee),

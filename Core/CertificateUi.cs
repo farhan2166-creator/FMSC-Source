@@ -2,6 +2,19 @@ namespace FMSC_SMS.Core;
 /// <summary>Small shared mechanics used by the certificate screens; certificate-specific business rules stay on their pages.</summary>
 internal static class CertificateUi
 {
+    internal static async Task<int> ReadSavedCertificateIdAsync(string procedure, string key,
+        params Microsoft.Data.SqlClient.SqlParameter[] parameters)
+    {
+        using var saved = await DatabaseHelper.QueryUserAsync(procedure, parameters);
+        return ReadSavedCertificateId(saved, key);
+    }
+
+    internal static int ReadSavedCertificateId(DataTable saved, string key)
+    {
+        if (saved.Rows.Count == 1 && GetInt(saved.Rows[0], key) is > 0 and var id) return id;
+        throw new CertificateSaveResultException("The certificate save result could not be read. Reload its history before trying again; do not repeat the create action.");
+    }
+
     internal static bool FocusEntry(StudentPicker picker, DataGridView grid, Control firstField) =>
         picker.SelectedId <= 0 ? picker.Focus() : grid.Rows.Count > 0 ? grid.Focus() : FormFlow.FocusFirstInput(firstField);
 
@@ -197,7 +210,8 @@ internal static class CertificateUi
         var selectedMode = CertificateLetterhead.PreferredMode(reportPath);
         DataRow? school = null;
         bool schoolLoaded = false;
-        using var signatureSettings = DatabaseHelper.QueryUser("GetPrintedCertificateSignature");
+        using var signatureSettings = DatabaseHelper.QueryUser("GetPrintedCertificateSignature",
+            DatabaseHelper.Bit("@ForLeaving", CertificateLetterhead.UsesPreprintedPad(reportPath)));
         var signature = signatureSettings.Rows.Count > 0 ? signatureSettings.Rows[0] : null;
         bool printSignature = signature is not null
             && signature["PrintPrincipalSignature"] is not DBNull

@@ -23,6 +23,7 @@ $app=Join-Path $release 'FMSC_SMS'
 $tools=Join-Path $release 'Tools'
 $database=Join-Path $release 'Database'
 $localMsi=Join-Path $tools 'SqlLocalDB.msi'
+$vcRedist=Join-Path $tools 'vc_redist.x64.exe'
 $sqlcmd=Join-Path $tools 'sqlcmd.exe'
 $instance='(localdb)\MSSQLLocalDB'
 $installed='C:\FMSC School Management'
@@ -65,11 +66,17 @@ function Assert-EmbeddedDatabaseContract([string]$Db) {
     $source=Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibility.cs') -Raw
     $match=[regex]::Match($source,'(?s)using var command = new SqlCommand\("""\s*(.*?)\s*""", connection\)')
     if (-not $match.Success) { throw 'Cannot locate production structural SQL compatibility query.' }
-    $requirements=@(
-        (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilityRequirements.json') -Raw)
-        (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilitySchema10Requirements.json') -Raw)
-        (Get-Content -LiteralPath (Join-Path $project 'Core/DatabaseCompatibilitySchema12Requirements.json') -Raw)
-    )
+    # Discover every authoritative schema contract; never name historical
+    # schema numbers here and risk silently skipping a future manifest.
+    $contractFiles=@(Get-ChildItem -LiteralPath (Join-Path $project 'Core') -File `
+        -Filter 'DatabaseCompatibility*Requirements.json' | Sort-Object Name)
+    if (-not ($contractFiles | Where-Object { $_.Name -ceq 'DatabaseCompatibilityRequirements.json' }) -or
+        @($contractFiles | Where-Object {
+            $_.Name -cnotmatch '^DatabaseCompatibility(Requirements|Schema[1-9][0-9]*Requirements)\.json$'
+        }).Count -gt 0) {
+        throw 'Missing or incorrectly named database compatibility contract.'
+    }
+    $requirements=@($contractFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw })
     $cn=[System.Data.SqlClient.SqlConnection]::new("Data Source=$script:instance;Initial Catalog=$Db;Integrated Security=True;Encrypt=False")
     try {
         $cn.Open()
@@ -145,6 +152,33 @@ function Invoke-ActualInstaller {
         if ($phases.Count) { Write-Host ('Installer stopped during '+$phases[$phases.Count-1].Value.Trim()) }
         foreach ($reason in @('Invalid version number','Invalid database schema version','FMSC_SMS.exe was not found','Installation stopped to prevent an application downgrade')) {
             if (($installerOutput+$installerError).Contains($reason)) { Write-Host ('Installer failure category: '+$reason) }
+        }
+        # Public CI reports ONLY allowlisted, non-secret SQL error identifiers
+        # and fixed semantic classifications, never raw installer/SQL text.
+        # Raw details stay in the disposable runner's private log.
+        $sourceLog=Join-Path $live 'Install.log'
+        $sourceText=$installerOutput+"\n"+$installerError
+        if (Test-Path -LiteralPath $sourceLog -PathType Leaf) {
+            $sourceText+="\n"+(Get-Content -LiteralPath $sourceLog -Raw -ErrorAction SilentlyContinue)
+        }
+        $codes=@([regex]::Matches($sourceText,'(?i)\b(?:Msg\s+|SQL error\s*:?\s*)(?<code>[0-9]{4,6})\b') |
+            ForEach-Object { $_.Groups['code'].Value } | Sort-Object -Unique)
+        if ($codes.Count) {
+            Write-Host ('Installer SQL diagnostics: error codes '+($codes -join ', '))
+        }
+        foreach ($item in @(
+            @{ Pattern='(?i)Migration\s+16\s+failed'; Label='Migration 16 rejected' },
+            @{ Pattern='(?i)Migration\s+15\s+failed'; Label='Migration 15 rejected' },
+            @{ Pattern='(?i)Migration\s+[0-9]+\s+failed'; Label='SQL migration rejected' },
+            @{ Pattern='(?i)verified backup.*failed|backup.*VERIFYONLY'; Label='Recovery-backup precondition rejected' },
+            @{ Pattern='(?i)The reviewed admission transport predicate has changed'; Label='Admission policy source drift (51008)' },
+            @{ Pattern='(?i)Unexpected admission procedure header'; Label='Admission procedure-header source drift (51009)' },
+            @{ Pattern='(?i)Required reference catalog bootstrap is incomplete'; Label='First-run reference bootstrap incomplete (51005)' },
+            @{ Pattern='(?i)No such file or directory|Migrations folder'; Label='Missing staged migration input' }
+        )) {
+            if ($sourceText -match $item.Pattern) {
+                Write-Host ('Installer sanitized category: '+$item.Label)
+            }
         }
     }
     return $p.ExitCode
@@ -279,8 +313,13 @@ try {
     $downloadedMsi=Join-Path $root 'SqlLocalDB.msi'
     Invoke-FmscPinnedDownload -Uri (Get-FmscToolSpec 'LocalDb').url -OutFile $downloadedMsi -TimeoutSec 300
     if ((Get-Item -LiteralPath $downloadedMsi).Length -lt 1000000) { throw 'LocalDB MSI is incomplete.' }
-    Assert-FmscMicrosoftMsi $downloadedMsi
+    Assert-FmscMicrosoftPackage $downloadedMsi
     Copy-Item -LiteralPath $downloadedMsi -Destination $localMsi
+    $downloadedVc=Join-Path $root 'vc_redist.x64.exe'
+    Invoke-FmscPinnedDownload -Uri (Get-FmscToolSpec 'VcRedist').url -OutFile $downloadedVc -TimeoutSec 300
+    if ((Get-Item -LiteralPath $downloadedVc).Length -lt 1000000) { throw 'Visual C++ x64 redistributable is incomplete.' }
+    Assert-FmscMicrosoftPackage $downloadedVc
+    Copy-Item -LiteralPath $downloadedVc -Destination $vcRedist
     if ($existing) {
         $msiCoverage='PREINSTALLED_NOT_A_CLEAN_MSI_TEST'
         Write-Host 'LocalDB already present in GitHub runner image; MSI installation was NOT exercised.'
@@ -332,7 +371,7 @@ try {
     $arguments=@('publish',(Join-Path $project 'FMSC_SMS.csproj'),'-c','Release','-r','win-x64',
         '--self-contained','true','-p:PublishProfile=PortableRelease',
         "-p:PublishDir=$app/","-p:ReleaseRoot=$release/",
-        "-p:LocalDbMsiPath=$localMsi","-p:BundledGitDirectory=$transport",
+        "-p:LocalDbMsiPath=$localMsi","-p:VcRedistPath=$vcRedist","-p:BundledGitDirectory=$transport",
         "-p:BundledSqlCmdPath=$sqlcmd",
         "-p:DeploymentDatabaseDirectory=$(Join-Path $root 'empty-source')",
         '-p:PublishSingleFile=false','-p:PublishTrimmed=false')
@@ -341,8 +380,9 @@ try {
     foreach ($file in @('FMSC_SMS/FMSC_SMS.exe','FMSC_SMS/UpdateSupport/FMSC.Setup.exe',
         'FMSC_SMS/UpdateTransport/cmd/git.exe','FMSC_SMS/UpdateTransport/usr/bin/ssh.exe',
         'FMSC_SMS/UpdateTransport/COPYING-GIT.txt',
-        'FMSC_SMS/UpdateSupport/Tools/SqlCmd/sqlcmd.exe','FMSC_SMS/UpdateSupport/Tools/LocalDb/SqlLocalDB.msi','core.ps1','Install FMSC_SMS.bat','FMSC.Setup.exe',
-        'Tools/SqlLocalDB.msi','Tools/sqlcmd.exe')) {
+        'FMSC_SMS/UpdateSupport/Tools/SqlCmd/sqlcmd.exe','FMSC_SMS/UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
+        'FMSC_SMS/UpdateSupport/Tools/VcRedist/vc_redist.x64.exe','core.ps1','Install FMSC_SMS.bat','FMSC.Setup.exe',
+        'Tools/SqlLocalDB.msi','Tools/vc_redist.x64.exe','Tools/sqlcmd.exe')) {
         if (-not (Test-Path -LiteralPath (Join-Path $release $file) -PathType Leaf)) {
             throw "Real installer asset missing: $file"
         }
@@ -514,11 +554,22 @@ IF (SELECT COUNT(*) FROM sys.database_files WHERE physical_name IN
         Assert-Level3Database
         Sql 'FMSC_DB' @'
 SET NOCOUNT ON;
-INSERT dbo.Roles(RoleName,Description) VALUES(N'Administrator',N'Synthetic installation acceptance');
-DECLARE @Role int=SCOPE_IDENTITY();
-INSERT dbo.Users(Username,RoleId,MustChangePassword) VALUES(N'level3_install_fixture',@Role,1);
-DECLARE @User int=SCOPE_IDENTITY();
-INSERT dbo.UserRoles(UserId,RoleId) VALUES(@User,@Role);
+-- Schema 16 must have initialized immutable reference data. Use the
+-- same first-administrator stored procedure as the shipped setup wizard,
+-- rather than inserting conflicting reference roles/user memberships.
+IF (SELECT COUNT(*) FROM dbo.Roles WHERE RoleName=N'Administrator')<>1
+ OR (SELECT COUNT(*) FROM dbo.Permissions)<>31
+ OR (SELECT COUNT(*) FROM dbo.BillingAutomationState WHERE StateId=1)<>1
+    THROW 51013,'First-run reference data was not prepared by migrations.',1;
+DECLARE @Hash varbinary(64)=CONVERT(varbinary(64),REPLICATE('H',64)),
+        @Salt varbinary(32)=CONVERT(varbinary(32),REPLICATE('S',32));
+EXEC dbo.BootstrapFirstAdministrator
+    @Username=N'level3_install_fixture', @PasswordHash=@Hash, @PasswordSalt=@Salt;
+DECLARE @User int=(SELECT UserId FROM dbo.Users WHERE Username=N'level3_install_fixture');
+IF @User IS NULL
+ OR NOT EXISTS(SELECT 1 FROM dbo.UserRoles U JOIN dbo.Roles R ON R.RoleId=U.RoleId
+               WHERE U.UserId=@User AND R.RoleName=N'Administrator')
+    THROW 51014,'First-run administrator bootstrap did not grant the required role.',1;
 INSERT dbo.SchoolProfile(SchoolProfileId,SchoolName,CreatedAt,UpdatedAt,CreatedByUserId,UpdatedByUserId)
 VALUES(1,N'Fictional Level 3 Install School',SYSUTCDATETIME(),SYSUTCDATETIME(),@User,@User);
 '@ | Out-Null
@@ -571,7 +622,7 @@ VALUES(1,N'Fictional Level 3 Install School',SYSUTCDATETIME(),SYSUTCDATETIME(),@
         $archive=[IO.Compression.ZipFile]::OpenRead($zipPath)
         try {
             $entries=@($archive.Entries | ForEach-Object { $_.FullName.Replace('\','/') })
-            foreach ($required in @('FMSC_SMS/FMSC_SMS.exe','FMSC_SMS/UpdateSupport/FMSC.Setup.exe','core.ps1','Install FMSC_SMS.bat','FMSC.Setup.exe','Tools/SqlLocalDB.msi','Tools/sqlcmd.exe','Database/PUT_MDF_AND_LDF_HERE.txt','READ_ME_FIRST.txt','SHA256SUMS.txt')) {
+            foreach ($required in @('FMSC_SMS/FMSC_SMS.exe','FMSC_SMS/UpdateSupport/FMSC.Setup.exe','core.ps1','Install FMSC_SMS.bat','FMSC.Setup.exe','Tools/SqlLocalDB.msi','Tools/vc_redist.x64.exe','Tools/sqlcmd.exe','Database/PUT_MDF_AND_LDF_HERE.txt','READ_ME_FIRST.txt','SHA256SUMS.txt')) {
                 if ($required -notin $entries) { throw "ZIP is missing $required" }
             }
             if (@($entries | Where-Object { $_ -match '(?i)\.(mdf|ldf|ndf|bak)$' }).Count) { throw 'Database file entered the installer ZIP.' }

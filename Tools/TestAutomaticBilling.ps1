@@ -255,7 +255,25 @@ COMMIT;
  Check (($lines.Tables[0].Select("AdmissionId=5 AND Amount=0")).Count -eq 1) 'An included free child is shown as a zero-payable receipt line without a fake payment.'
  $header=Query 'EXEC dbo.GetFeeReceiptGroup @UserId=1,@ReceiptNumber=@Receipt;' @{'@Receipt'=$receipt}
  Check ($header.Tables[0].Rows[0].StudentCount -eq 2) 'Family receipt count includes the explicitly selected free child.'
- [void](Query "INSERT dbo.Roles(RoleName) VALUES(N'Accountant'); INSERT dbo.Users(Username,RoleId) VALUES(N'fictional_accountant',2); INSERT dbo.UserRoles(UserId,RoleId) VALUES(2,2); INSERT dbo.Permissions(PermissionCode,PermissionName) VALUES(N'Fees.Collect',N'Collect'),(N'Fees.View',N'View'); INSERT dbo.RolePermissions(RoleId,PermissionId) SELECT 2,PermissionId FROM dbo.Permissions;")
+ $accountantSql=@'
+IF (SELECT COUNT(*) FROM dbo.Roles WHERE RoleName=N'Accountant')<>1
+ OR NOT EXISTS(SELECT 1 FROM dbo.Permissions WHERE PermissionCode=N'Fees.Collect')
+ OR NOT EXISTS(SELECT 1 FROM dbo.Permissions WHERE PermissionCode=N'Fees.View')
+    THROW 51017,'Billing fixture requires schema-16 reference roles and permissions.',1;
+INSERT dbo.Users(Username,RoleId)
+SELECT N'fictional_accountant',RoleId FROM dbo.Roles WHERE RoleName=N'Accountant';
+IF SCOPE_IDENTITY()<>2
+    THROW 51018,'The accountant fixture must be synthetic user 2.',1;
+INSERT dbo.UserRoles(UserId,RoleId)
+SELECT 2,RoleId FROM dbo.Roles WHERE RoleName=N'Accountant';
+INSERT dbo.RolePermissions(RoleId,PermissionId)
+SELECT R.RoleId,P.PermissionId FROM dbo.Roles R CROSS JOIN dbo.Permissions P
+WHERE R.RoleName=N'Accountant'
+  AND P.PermissionCode IN(N'Fees.Collect',N'Fees.View')
+  AND NOT EXISTS(SELECT 1 FROM dbo.RolePermissions RP
+                 WHERE RP.RoleId=R.RoleId AND RP.PermissionId=P.PermissionId);
+'@
+ [void](Query $accountantSql)
  $creditBeforeAccountant=Number 'SELECT SUM(Amount) FROM dbo.StudentCreditEntries WHERE AdmissionId=2;'
  [void](Query "DECLARE @R uniqueidentifier=NEWID(); EXEC dbo.ProcessStudentCredit @UserId=2,@AdmissionId=2,@Action=N'Refund',@Amount=500,@RequestId=@R,@Reason=N'Fictional accountant credit refund';")
  Check ((Number 'SELECT SUM(Amount) FROM dbo.StudentCreditEntries WHERE AdmissionId=2;') -eq ($creditBeforeAccountant-500)) 'Accountant can refund unused credit with existing collection authority.'
@@ -263,7 +281,7 @@ COMMIT;
  Check ((Number 'SELECT SUM(Amount) FROM dbo.StudentCreditEntries WHERE AdmissionId=2;') -eq ($creditBeforeAccountant-1000)) 'Accountant can transfer credit to a sibling.'
  $refused=$false;try{[void](Query 'EXEC dbo.RunAutomaticMonthlyBilling @UserId=2,@IncludeMissed=1;')}catch{$refused=$_.Exception.Message -like '*not authorized*'}
  Check $refused 'Accountant cannot authorize missed-month recovery without administrative permission.'
- [void](Query "UPDATE dbo.FeeTypes SET IsMandatory=1 WHERE FeeTypeId IN(1,3); UPDATE dbo.FeeTypes SET IsTransportLinked=1 WHERE FeeTypeId=2; INSERT dbo.FeeConfigurations(CampusId,ClassId,FeeTypeId,Amount,Frequency) VALUES(1,1,1,10000,N'Monthly'),(1,1,2,2000,N'Monthly'),(1,1,3,500,N'Yearly'); INSERT dbo.AdmissionNumberCounter(CounterId,LastNumber) VALUES(1,2000);")
+ [void](Query "UPDATE dbo.FeeTypes SET IsMandatory=1 WHERE FeeTypeId IN(1,3); UPDATE dbo.FeeTypes SET IsTransportLinked=1 WHERE FeeTypeId=2; INSERT dbo.FeeConfigurations(CampusId,ClassId,FeeTypeId,Amount,Frequency) VALUES(1,1,1,10000,N'Monthly'),(1,1,2,2000,N'Monthly'),(1,1,3,500,N'Yearly'); UPDATE dbo.AdmissionNumberCounter SET LastNumber=2000 WHERE CounterId=1;")
  function Admit([int]$day,[bool]$quick=$false,[string]$concession="") {
   return Query "DECLARE @Month date=DATEADD(month,-1,DATEFROMPARTS(YEAR(GETDATE()),MONTH(GETDATE()),1)),@Date date,@Birth date,@Ids dbo.FeeTypeIdList,@D dbo.AdmissionFeeDiscountType; SET @Date=DATEADD(day,@Day-1,@Month); SET @Birth=DATEADD(year,-12,@Date); INSERT @D VALUES(1,2000); EXEC dbo.AdmitStudent @UserId=1,@AdmissionDate=@Date,@AdmissionCampusId=1,@AcademicYearId=1,@ClassSectionId=1,@StudentName=@Name,@FatherName=N'Fictional Parent',@DateOfBirth=@Birth,@PlaceOfBirth=N'Fictional Town',@Gender=N'Male',@BFormNumber=NULL,@Religion=NULL,@BloodGroup=NULL,@ContactNumber=NULL,@AlternateContactNumber=NULL,@Address=N'Fictional Street',@PreviousSchool=NULL,@FatherOccupation=NULL,@Disability=N'No',@UsesTransport=0,@SelectedFeeTypeIds=@Ids,@AdmissionDiscounts=@D,@QuickRegistration=@Quick,@FeeConcessionsJson=@ConcessionJson;" @{'@Day'=$day;'@Quick'=$quick;'@Name'=('Admission '+$day+' '+$quick);'@ConcessionJson'=$(if($concession){'[{"FeeTypeId":1,"ConcessionLabel":"'+$concession+'"}]'}else{'[]'})}
  }

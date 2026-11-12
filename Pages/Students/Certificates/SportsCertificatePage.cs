@@ -11,7 +11,7 @@ public sealed class SportsCertificatePage : V2Page, IUnsavedChanges, IBusyPage, 
     public bool IsBusy => creatingCertificate;
     public string BusyMessage => "Please wait for the certificate to finish saving.";
     private bool creatingCertificate;
-    private readonly Func<SqlParameter[], Task> writeCertificate;
+    private readonly Func<SqlParameter[], Task<int>> writeCertificate;
     private readonly Func<int, DataTable> readCertificates;
     private HumanCard workspaceDetails = null!;
     private Action<DataRowView?>? workspaceSaved;
@@ -78,11 +78,11 @@ public sealed class SportsCertificatePage : V2Page, IUnsavedChanges, IBusyPage, 
         Width = AppScale.Scale(120)
     };
     public SportsCertificatePage() : this(true) { }
-    internal SportsCertificatePage(bool initialize, Func<SqlParameter[], Task>? writeCertificate = null,
+    internal SportsCertificatePage(bool initialize, Func<SqlParameter[], Task<int>>? writeCertificate = null,
         Func<int, DataTable>? readCertificates = null)
         : base("Sports Certificate", "Record and print sports certificates for students.")
     {
-        this.writeCertificate = writeCertificate ?? (args => DatabaseHelper.ExecuteUserAsync("CreateSportsCertificate", args));
+        this.writeCertificate = writeCertificate ?? (args => ReadSavedCertificateIdAsync("CreateSportsCertificate", "SportsCertificateId", args));
         this.readCertificates = readCertificates ?? (id => DatabaseHelper.QueryUser("GetSportsCertificateRecords", DatabaseHelper.Int("@AdmissionId", id)));
         sportName.MaxLength = 200;
         performance.MaxLength = 1000;
@@ -444,7 +444,7 @@ public sealed class SportsCertificatePage : V2Page, IUnsavedChanges, IBusyPage, 
             createCertificateButton.Enabled = false;
             // Await the full write while actions are held; pass the current actor.
             using var hold = BeginBusy(BusyMessage, this);
-            await writeCertificate(new[] {
+            int savedId = await writeCertificate(new[] {
                 DatabaseHelper.P(
                     "@UserId",
                     CurrentUser.UserId),
@@ -461,8 +461,7 @@ public sealed class SportsCertificatePage : V2Page, IUnsavedChanges, IBusyPage, 
                 DatabaseHelper.P(
                     "@Performance",
                     DatabaseHelper.OptionalText(performance.Text)) });
-            successMessage =
-                "Sports certificate created successfully.";
+
             AddSuggestionIfNew(sportName, sportName.Text);
             AddSuggestionIfNew(performance, performance.Text);
             /* refresh only when the student this certificate was created for is still the selected one. */
@@ -471,7 +470,10 @@ public sealed class SportsCertificatePage : V2Page, IUnsavedChanges, IBusyPage, 
             ClearCertificateFields();
             ClearCertificateSelection();
             LoadCertificates(admissionId);
-            SelectSavedCertificate(0);
+            CertificateRecordOrder.RequireSavedCopy(certificateResults, "SportsCertificateId", savedId);
+            SelectSavedCertificate(savedId);
+            successMessage =
+                "Sports certificate created successfully.";
         }
         catch (Exception ex)
         {

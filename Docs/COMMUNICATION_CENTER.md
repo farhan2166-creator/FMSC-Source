@@ -85,3 +85,10 @@ Migration 10 updates the database but does **not** replace the installed FMSC ex
 In the new WinForms build, open **Communication Center** from the dashboard (requires `Communication.View`). The only operational option in Compose is **WhatsApp Business (manual)**; SMS and Email provider delivery remain unavailable. An administrator with `Communication.Configure` opens **Settings** and chooses **Use Free WhatsApp**; the button then reads **Free WhatsApp Active** rather than offering a second activation. **Pause WhatsApp** disables new chat openings, and the same settings button changes to **Resume Free WhatsApp** while paused. Sending operators additionally need `Communication.Send` plus the corresponding `Students.View` / `Staff.View` and `Fees.View` for fee notices. Use Preview, then Confirm to open one chat at a time; **History > Resume Manual WhatsApp** restores unfinished work. No button sends automatically.
 
 For local acceptance, first confirm which executable Windows is actually running, and use synthetic destinations in a disposable copy of the database. See `COMMUNICATION_MANUAL_WHATSAPP_ACCEPTANCE.md`.
+
+Only one FMSC handoff window may operate a saved manual WhatsApp batch at a time
+on the supported per-Windows-user LocalDB installation. Close it before resuming
+that batch elsewhere. A process crash releases the exclusive handle; the recorded
+recipient states remain available through History. This does not verify WhatsApp delivery.
+A saved Admission Yes/No cannot be reset to “Not recorded” by an unrelated details save;
+choose an explicit Yes or No when changing a recorded choice.

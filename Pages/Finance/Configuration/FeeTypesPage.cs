@@ -30,7 +30,7 @@ public sealed class FeeTypesPage : MasterPage
     internal FeeTypesPage(bool splitEditorAndRecords, bool initialize)
         : base(
             "Fee Types",
-            "Define fee types, then enter their class rates in Class Fee Rates.",
+            "Mark required fees as Mandatory, link transport fees, then enter class rates.",
             "GetFeeTypes",
             "SaveFeeTypeWithDefaultFrequency",
             new[]
@@ -53,6 +53,8 @@ public sealed class FeeTypesPage : MasterPage
                     "Description",
                     "Description",
                     MaxLength: SchemaLengths.FeeTypeDescription),
+                new FieldSpec("IsMandatory", "Mandatory fee", FieldKind.Boolean),
+                new FieldSpec("IsTransportLinked", "Transport linked", FieldKind.Boolean),
                 new FieldSpec("DisplayOrder", "Display Order", FieldKind.Integer),
             },
             v => new[]
@@ -78,7 +80,13 @@ public sealed class FeeTypesPage : MasterPage
                     Convert.ToInt32(v["DisplayOrder"] ?? 0)),
                 DatabaseHelper.P(
                     "@DefaultFrequency",
-                    v["DefaultFrequency"])
+                    v["DefaultFrequency"]),
+                DatabaseHelper.Bit(
+                    "@IsMandatory",
+                    Convert.ToBoolean(v["IsMandatory"])),
+                DatabaseHelper.Bit(
+                    "@IsTransportLinked",
+                    Convert.ToBoolean(v["IsTransportLinked"]))
             },
             splitEditorAndRecords: splitEditorAndRecords,
             reorderProcedure: "ReorderFeeTypes",
@@ -98,6 +106,9 @@ public sealed class FeeTypesPage : MasterPage
             deleteBlockedProcedure:
                 "GetFeeTypeDeleteBlockedIds", initialize: initialize)
     {
+        // Both switches form one row directly below Description, starting at
+        // the description input rather than repeating captions on the left.
+        PlaceBooleanOptionsBelow("Description", "IsMandatory", "IsTransportLinked");
     }
     /// <summary>Formats the complete fee-type result without another database read.</summary>
     protected override DataTable ShapeRecords(DataTable table)

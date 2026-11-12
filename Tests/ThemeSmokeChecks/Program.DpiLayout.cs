@@ -1,4 +1,3 @@
-using System.Reflection;
 using FMSC_SMS.Core;
 
 internal static partial class Program
@@ -11,10 +10,9 @@ internal static partial class Program
         {
             CheckDpiGeometryAndMinimum();
             CheckDialogScrollHost();
-            // Synthetic client areas and DPI fields exercise the production
-            // helpers on Windows controls. This does NOT change monitor settings
-            // or establish physical multi-monitor acceptance.
-            var deviceDpi = typeof(Control).GetField("_deviceDpi", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            // Synthetic client areas and logical scale factors exercise the
+            // shared layout helpers without mutating private framework fields.
+            // Physical multi-monitor DPI acceptance remains a separate test.
             foreach (int dpi in new[] { 96, 120, 144, 192 })
             foreach (Size resolution in new[] { new Size(1280, 720), new Size(1366, 768), new Size(1920, 1080), new Size(2560, 1440), new Size(3840, 2160) })
             {
@@ -50,12 +48,6 @@ internal static partial class Program
                 root.Size = contentMinimum;
                 using var viewport = new ResponsiveViewport(root, contentMinimum); owner.Controls.Add(viewport);
                 owner.Show(); Application.DoEvents();
-                void Context(Control control)
-                {
-                    deviceDpi.SetValue(control, dpi);
-                    foreach (Control child in control.Controls) Context(child);
-                }
-                Context(root);
                 UiTheme.ApplyTree(root);
                 HumanUi.ApplyGridStyle(grid, AppTheme.Primary);
                 root.PerformLayout(); viewport.PerformLayout(); Application.DoEvents();
@@ -72,8 +64,13 @@ internal static partial class Program
                 Check(Math.Abs(tabs.Font.Size - UiDpi.ForControl(tabs, AppTheme.ButtonFont).Size) < 0.02f,
                     "Tab appearance refresh preserves monitor-relative fonts");
                 var tabButtons = Descendants(tabHost).OfType<ModernButton>().ToArray();
-                Check(tabButtons.Length == 2 && tabButtons.All(button => button.Height >= AppMetrics.TextHeight(button.Font) &&
-                    button.Width >= AppMetrics.TextWidth(button.Text, button.Font, 0)), "Tab navigation captions remain readable and clickable");
+                Check(tabButtons.Length == 2 && tabButtons.All(button => {
+                    var caption = TextRenderer.MeasureText(button.Text, button.Font,
+                        Size.Empty, TextFormatFlags.NoPadding);
+                    return button.Visible && button.Width >= caption.Width + button.Padding.Horizontal
+                        && button.Height >= caption.Height + button.Padding.Vertical;
+                }), "Tab navigation captions fit their actual rendered font and remain clickable at DPI "
+                    + dpi + ", viewport " + available);
                 Check(choice.Width <= choice.MaximumSize.Width && date.Width <= date.MaximumSize.Width,
                     "Fixed-purpose fields retain their font-based width cap on large clients");
                 Check(root.Width >= contentMinimum.Width && root.Height >= contentMinimum.Height, "A small viewport preserves readable content instead of shrinking it");
@@ -84,15 +81,13 @@ internal static partial class Program
                 // A dialog's monitor may differ from the shell's metric context.
                 AppScale.Recompute(new Size(1280, 720), 96);
                 HumanUi.ApplyGridStyle(grid, AppTheme.Primary); TabStrip.Repaint(tabs);
-                Check(grid.ColumnHeadersHeight >= AppMetrics.TextHeight(grid.ColumnHeadersDefaultCellStyle.Font!) + DpiLayout.Pixels(14, dpi),
-                    "Grid headers retain monitor-relative headroom independently of the shell DPI");
-                Check(grid.RowTemplate.Height >= AppMetrics.TextHeight(grid.DefaultCellStyle.Font!) + DpiLayout.Pixels(12, dpi),
-                    "Grid rows retain monitor-relative headroom independently of the shell DPI");
+                Check(grid.ColumnHeadersHeight >= AppMetrics.TextHeight(grid.ColumnHeadersDefaultCellStyle.Font!) + DpiLayout.Pixels(14, grid.DeviceDpi),
+                    "Grid headers retain measured control-DPI headroom when shell scaling changes");
+                Check(grid.RowTemplate.Height >= AppMetrics.TextHeight(grid.DefaultCellStyle.Font!) + DpiLayout.Pixels(12, grid.DeviceDpi),
+                    "Grid rows retain measured control-DPI headroom when shell scaling changes");
                 Check(tabButtons.All(button => button.Height >= AppMetrics.TextHeight(button.Font)),
                     "Tab navigation remains readable when the dialog and shell DPI differ");
                 AppScale.Recompute(available, dpi);
-                // Restore fake framework fields before native handle disposal.
-                foreach (Control control in Descendants(root).Prepend(root)) deviceDpi.SetValue(control, UiDpi.SystemDpi);
                 owner.Hide();
             }
         }
@@ -116,7 +111,7 @@ internal static partial class Program
         Check(root.Parent is ResponsiveViewport, "The shared window integrates a scroll host for non-scrollable dialog content");
         var viewport = (ResponsiveViewport)root.Parent!;
         // The initial viewport can expand beyond the retained content minimum.
-        Size required = (Size)typeof(ResponsiveViewport).GetField("contentMinimum", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(viewport)!;
+        Size required = root.Size; // User-visible content footprint, not private scroll-host internals.
         form.FitToWorkingArea(new Rectangle(0, 0, 640, 400), form.DeviceDpi); Application.DoEvents();
         viewport.ScrollControlIntoView(close); Application.DoEvents();
         Check(viewport.ClientRectangle.Contains(viewport.RectangleToClient(close.RectangleToScreen(close.ClientRectangle))),

@@ -173,64 +173,65 @@ try {
     if(-not $resolved.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)){throw 'Refusing cleanup outside test temp directory.'}
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }
-# Audit 04: the owner-side probe is review-only, parseable PowerShell and must
-# retain its independently pinned published EXE hash and SELECT-only SQL read.
-$localProbePath = Join-Path $PSScriptRoot 'VerifyInstalledFmscRelease.ps1'
-if (-not (Test-Path -LiteralPath $localProbePath -PathType Leaf)) {
-    throw 'Read-only local release acceptance helper is missing.'
+# Release-provenance acceptance must be verified independently of ANY
+# historical version, Source SHA, archived executable hash or audit snapshot.
+# The current release's verified hashes are inputs to the real probe; this
+# pure policy is exercised with synthetic evidence only.
+$policyPath = Join-Path $PSScriptRoot 'ReleaseProbeAcceptance.ps1'
+if (-not (Test-Path -LiteralPath $policyPath -PathType Leaf)) {
+    throw 'Release-neutral installed-binary acceptance policy is missing.'
 }
-$probeTokens=$null; $probeErrors=$null
-$probeAst=[Management.Automation.Language.Parser]::ParseFile($localProbePath,[ref]$probeTokens,[ref]$probeErrors)
-if ($probeErrors.Count) { throw 'Read-only local release acceptance helper does not parse.' }
-$probeSource=Get-Content -LiteralPath $localProbePath -Raw
-foreach ($mustHave in @('4c5b5201851b202e2b7ff33c26cabc20bcd00b9c4486be5e99df22de819c8990',
-    'Get-FileHash','--verify-installation','SELECT TOP(1)','dbo.DatabaseVersion','Source/main at audit')) {
-    if (-not $probeSource.Contains($mustHave)) { throw "Audit 04 verifier missing review safeguard $mustHave." }
+$policyTokens=$null; $policyErrors=$null
+$policyAst=[Management.Automation.Language.Parser]::ParseFile($policyPath,[ref]$policyTokens,[ref]$policyErrors)
+if (@($policyErrors).Count -ne 0) {
+    throw 'Release-neutral installed-binary acceptance policy has PowerShell parse errors.'
 }
-if ($probeSource -match '(?i)\b(INSERT\s+INTO|UPDATE\s+dbo[.]|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE)\b') {
-    throw 'Audit 04 verifier must never edit school SQL records.'
+$policyFunctions=@($policyAst.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Test-ReleaseProbeAcceptance'
+}, $true))
+if ($policyFunctions.Count -ne 1) {
+    throw 'Release-neutral acceptance must expose one testable policy function.'
 }
-# Audit 05: execute only the isolated acceptance predicate with synthetic
-# evidence; never launch FMSC, inspect real SQL, or alter an installed file.
-$acceptanceHelpers = @($probeAst.FindAll({
-    param($n)
-    $n -is [Management.Automation.Language.FunctionDefinitionAst] -and
-    $n.Name -eq 'Test-ReleaseProbeAcceptance'
-},$true))
-if ($acceptanceHelpers.Count -ne 1) {
-    throw 'The release probe needs exactly one testable acceptance decision.'
+. $policyPath
+$synthetic = @{
+    BinaryMatchesPublication=$true
+    BuildInfoPresent=$true
+    BuildInfoMatchesPublication=$true
+    Schema=417
+    RequiredSchema=417
+    CompatibilityVerified=$true
+    RunningSelectionValid=$true
 }
-Invoke-Expression $acceptanceHelpers[0].Extent.Text
-$probeCase = @{
-    BinaryMatchesPublication = $true
-    BuildInfoStatus = 'MATCHES PUBLISHED BUILD_INFO'
-    Schema = 10
-    RequiredSchema = 10
-    CompatibilityStatus = 'PASS: published application structural compatibility'
-    RunningSelection = 'MATCH'
+function Assert-ReleasePolicy([bool]$Expected, [string]$Case) {
+    $actual = Test-ReleaseProbeAcceptance @synthetic
+    if ($actual -ne $Expected) {
+        throw "Installed-release acceptance policy failed: $Case (wanted=$Expected, got=$actual)."
+    }
 }
-if (-not (Test-ReleaseProbeAcceptance @probeCase)) {
-    throw 'Matching publication evidence should pass the release probe.'
-}
-$probeCase.BuildInfoStatus = 'DIFFERS FROM PUBLISHED BUILD_INFO'
-if (Test-ReleaseProbeAcceptance @probeCase) {
-    throw 'Different BUILD_INFO bytes must refuse release-probe acceptance.'
-}
-$probeCase.BuildInfoStatus = 'NOT PRESENT'
-if (-not (Test-ReleaseProbeAcceptance @probeCase)) {
-    throw 'The existing optional BUILD_INFO policy must be preserved.'
-}
-$probeCase.BinaryMatchesPublication = $false
-if (Test-ReleaseProbeAcceptance @probeCase) { throw 'Untrusted executable bytes must fail.' }
-$probeCase.BinaryMatchesPublication = $true
-$probeCase.RunningSelection = 'DIFFERENT RUNNING EXECUTABLE OR MULTIPLE PROCESSES'
-if (Test-ReleaseProbeAcceptance @probeCase) { throw 'Wrong running executable must fail.' }
-$probeCase.RunningSelection = 'MATCH'
-$probeCase.Schema = 9
-if (Test-ReleaseProbeAcceptance @probeCase) { throw 'Wrong SQL schema must fail.' }
-$probeCase.Schema = 10
-$probeCase.CompatibilityStatus = 'FAILED: verifier exit 2'
-if (Test-ReleaseProbeAcceptance @probeCase) { throw 'Incompatible SQL must fail.' }
-Write-Output 'PASS: 7 isolated publication acceptance cases, including mismatched and optional BUILD_INFO, without SQL or executable launch.'
-Write-Output 'PASS: read-only installed-release helper parses and retains pinned provenance, SQL read and verified executable guard.'
+Assert-ReleasePolicy $true 'all independent release evidence matches'
+$synthetic.BinaryMatchesPublication=$false
+Assert-ReleasePolicy $false 'different executable bytes cannot pass'
+$synthetic.BinaryMatchesPublication=$true
+$synthetic.BuildInfoMatchesPublication=$false
+Assert-ReleasePolicy $false 'present but mismatched provenance file cannot pass'
+$synthetic.BuildInfoPresent=$false
+Assert-ReleasePolicy $true 'an absent optional legacy BUILD_INFO remains allowed'
+$synthetic.BuildInfoPresent=$true
+$synthetic.BuildInfoMatchesPublication=$true
+$synthetic.Schema=416
+Assert-ReleasePolicy $false 'older installed database schema cannot pass'
+$synthetic.Schema=418
+Assert-ReleasePolicy $false 'newer installed database schema cannot pass'
+$synthetic.Schema=417
+$synthetic.RequiredSchema=0
+Assert-ReleasePolicy $false 'missing expected schema cannot pass'
+$synthetic.RequiredSchema=417
+$synthetic.CompatibilityVerified=$false
+Assert-ReleasePolicy $false 'failed structural compatibility cannot pass'
+$synthetic.CompatibilityVerified=$true
+$synthetic.RunningSelectionValid=$false
+Assert-ReleasePolicy $false 'wrong or ambiguous running executable cannot pass'
+Write-Output 'PASS: version-independent installed-release acceptance rejects stale, corrupted and incompatible evidence.'
 $global:LASTEXITCODE = 0

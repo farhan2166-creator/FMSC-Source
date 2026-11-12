@@ -12,9 +12,11 @@ FMSC_SMS/                 Published self-contained app and resources
   UpdateSupport/Tools/     SqlCmd/ and LocalDb/ bundles with integrity manifests
   UpdateSupport/           Shared tool resolver, catalog and recovery support
 Database/                 You provide FMSC_DB.mdf and FMSC_DB_log.ldf for a fresh install
-Tools/                    Signed Microsoft SqlLocalDB.msi and verified sqlcmd.exe
+Tools/                    Signed Microsoft vc_redist.x64.exe and SqlLocalDB.msi; verified sqlcmd.exe
 Migrations/               Empty at first-production schema 1; future numbered upgrades begin at 2.sql
 FMSC.Setup.exe             Native Windows GUI entry point for new installs
+FMSC.Uninstall.exe         Separate administrator-approved uninstaller
+Uninstall-FMSC.ps1         Uninstaller engine (also included in app UpdateSupport)
 Install FMSC_SMS.bat        Compatibility shortcut to FMSC.Setup.exe
 core.ps1                   Existing protected install/update engine
 READ_ME_FIRST.txt         Packaging instructions
@@ -25,7 +27,7 @@ SHA256SUMS.txt            Package content hashes
 **Update dependencies:** The approved x64 build packages the complete pinned
 MinGit runtime (Git plus OpenSSH) with the application, alongside the self-contained
 .NET runtime. Windows PATH and a separate Git installation are not required for
-private update checks. The complete installer also packages SQL LocalDB and sqlcmd in its
+private update checks. The complete installer also packages Microsoft Visual C++ v14 x64, SQL LocalDB and sqlcmd in its
 top-level Tools folder. Installation retains all three verified tool bundles in
 `%ProgramData%\FMSC_Updater\MaintenanceTools`, protected against ordinary-user
 modification. The original extracted setup folder can be deleted after successful
@@ -38,9 +40,9 @@ single `git.exe` into the installation.
 ## Preparing tools for local or workflow publishing
 
 Local publishing defaults to the owner's adjacent `../Tools` folder containing
-`MinGit/`, `sqlcmd.exe` and `SqlLocalDB.msi`. The publish target verifies and reuses
+`MinGit/`, `sqlcmd.exe`, `SqlLocalDB.msi` and `vc_redist.x64.exe`. The publish target verifies and reuses
 these files without downloading. On first preparation, existing Git/sqlcmd versions
-must match `Installer/ToolCatalog.json`; the MSI must have a valid Microsoft signature.
+must match `Installer/ToolCatalog.json`; both Microsoft installer files must have valid Authenticode signatures.
 The preparer records complete file hashes and refuses later corruption. Keep the
 generated `FMSC.ToolIntegrity.json` files with the cached bundles.
 
@@ -83,7 +85,9 @@ The installer checks `Migrations` for top-level `*.sql` files. An empty or missi
 4. **Never ignore a blocked or failed validation.** Record the exact message and installer logs and stop before retrying or adjusting data files.
 5. After successful installation, launch the application under the intended operator account; verify connection, login, schema compatibility, a read-only student search, a report preview, and permitted user actions.
 
-The app expects `FMSC_DB` under `C:\ProgramData\FMSC_Database` and uses `(localdb)\MSSQLLocalDB` by default. The **original** approved first-production baseline was application 1.0.0 / database schema 1. The current source at this review has application **1.0.3 / schema 3**, with migrations `2.sql` and `3.sql`. Verify the actual installer version and database schema from the exact new release artifact before a fresh install; never assume the historical baseline is the current required version. See [first-release baseline](FIRST_RELEASE_BASELINE.md).
+The app expects `FMSC_DB` under `C:\ProgramData\FMSC_Database` and uses `(localdb)\MSSQLLocalDB` by default. The **original** approved first-production baseline was application 1.0.0 / database schema 1. An earlier historical snapshot used application **1.0.3 / schema 3**; it is not the current installation target. Read the actual version and schema from [`Installer/core.ps1`](../Installer/core.ps1) at the approved Source commit, and verify the full sequential migration chain. Verify the actual installer version and database schema from the exact new release artifact before a fresh install; never assume the historical baseline is the current required version. See [first-release baseline](FIRST_RELEASE_BASELINE.md).
+
+On every fresh setup and application update, FMSC checks the installed Microsoft Visual C++ v14 x64 runtime. When version 14.30 or later is missing, it runs the included, Microsoft-signed redistributable silently with a diagnostic log, before SQL Server 2022 LocalDB. An already suitable runtime is skipped. A restart-required code stops installation safely; restart Windows and rerun setup. Logs are stored under `C:\ProgramData\FMSC_Database` as `VcRedist-*.log`.
 
 If silent LocalDB installation fails (for example, MSI code 1603), the setup dialog offers a Yes/No choice to open Microsoft's official installer wizard and reports a verbose log under `C:\ProgramData\FMSC_Database` . A failed/cancelled wizard or restart-required result stops installation safely. Code 1603 alone does not identify the underlying MSI problem; retain the verbose log for diagnosis. An immediate `SQL Server LocalDB installation failed. MSI exit code: 1603` message without this fallback belongs to the older installer: verify the artifact's source commit before retrying.
 
@@ -94,9 +98,21 @@ The in-app updater launches the verified **UpdateSupport/FMSC.Setup.exe** from i
 
 - Take and **verify** a recoverable backup first and note its storage path.
 - Do **not** copy a replacement MDF/LDF over an installed school's existing pair.
-- Run the same verified installer with the app closed. The original first-production baseline requires **schema 1**. The current source requires **schema 3** and contains `2.sql` and `3.sql`; a matching approved detached database or its verified migration path is required. Legacy pre-release schemas carrying higher version labels are **not** silently downgraded to 1; use the separately approved fresh-baseline installation procedure in [first-release baseline](FIRST_RELEASE_BASELINE.md).
+- Run the same verified installer with the app closed. The original first-production baseline requires **schema 1**. That historical schema-3 description is not a current requirement. The required schema comes from the exact release's [`Installer/core.ps1`](../Installer/core.ps1) and its complete numbered migration chain; a matching approved detached database or its verified migration path is required. Legacy pre-release schemas carrying higher version labels are **not** silently downgraded to 1; use the separately approved fresh-baseline installation procedure in [first-release baseline](FIRST_RELEASE_BASELINE.md).
 - Record the automatic pre-migration safety backup, installer status, original/current version, and post-upgrade application compatibility. Recovery requires a tested restore path.
 - If anything fails, **do not manually rerun SQL migrations on the live school database**. Follow [recovery](BACKUP_RECOVERY.md), and use a verified disposable clone for diagnosis.
+
+## Uninstalling FMSC while retaining school data
+
+Close all FMSC windows and complete any pending update/recovery. In Windows **Settings → Apps → Installed apps**, select **FMSC School Management → Uninstall**. You can also double-click **FMSC.Uninstall.exe** inside `C:\FMSC School Management` or in the complete installer folder. Approve UAC, review the independent uninstall confirmation window and select **Uninstall**. Cancel makes no changes. After a successful uninstall, acknowledge the completion message; the uninstaller window then closes automatically. If uninstall fails, the window stays open to show the error.
+
+The uninstaller removes the installed application, staged/rollback application versions, updater and maintained tool bundles, FMSC per-Windows-profile local caches/settings, the FMSC desktop shortcut and the Windows uninstall entry. It does not uninstall SQL Server LocalDB or the shared Visual C++ runtime, run SQL migrations, detach the database, or delete files outside its allowlisted FMSC folders. It stops if the application is open or an update/recovery is unfinished.
+
+Existing `.mdf`, `.ldf` and `.bak` files (as well as secondary database/backup formats) under `C:\ProgramData\FMSC_Database` remain in place. Protected files found inside removable FMSC application/updater/cache folders are copied first to `C:\ProgramData\FMSC_Database\UninstallPreserved\<unique-id>`, with SHA-256 verification. If copying or verification fails, uninstall refuses to delete those source folders. Database files are **not** detached, modified or repaired by uninstall. Backups placed elsewhere by the school are untouched.
+
+**Caution:** Uninstall deletes application-local preferences, updater authorization and user secrets, including any cloud-backup credentials and encryption keys stored outside the protected data/backup files. Ensure independent cloud-backup recovery keys are retained securely before uninstalling; preserving a ciphertext backup file alone may not make it decryptable. Future installation must use the supported existing-database detection and migration checks.
+
+The uninstaller must be tested on disposable Windows installations before use on a school computer.
 
 ## Disposable Windows installation acceptance in GitHub Actions
 
@@ -142,3 +158,15 @@ The app-only ZIP is **not** a fresh-install package. The full-installer workflow
   clean Windows PC. If Windows lacks components required by SQL Server 2022,
   its signed LocalDB MSI may refuse installation; inspect the MSI log rather
   than installing unverified extras or touching the school database.
+
+### SQL dependency repair
+
+The connection screen's SQL dependency repair checks the shared VC++ v14 x64 runtime
+before repairing LocalDB. It restores verified retained tooling or obtains the approved
+replacement when necessary. A damaged registered runtime receives a repair attempt;
+a pending Windows restart stops the sequence before LocalDB setup. This operation
+never runs FMSC database migrations or replaces the school's MDF/LDF files.
+
+Uninstall removes the exact per-Windows-user FMSC cloud-backup scheduled tasks only
+when their action points to the installed FMSC executable and scheduled-backup command.
+An unexpected action is retained and stops cleanup for review; unrelated tasks are untouched.

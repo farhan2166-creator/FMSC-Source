@@ -22,7 +22,7 @@ foreach($safe in @('cmd/git.exe','nested/tool.dll','mingit\cmd\git.exe')) {
 # Signature fixture substitutes only the OS trust provider. Production uses
 # Authenticode; real signed MSI verification remains a Windows package gate.
 function Get-AuthenticodeSignature([string]$LiteralPath){
-    if([IO.File]::ReadAllText($LiteralPath) -ne 'synthetic Microsoft MSI'){
+    if([IO.File]::ReadAllText($LiteralPath) -notin @('synthetic Microsoft MSI','synthetic Microsoft EXE')){
         return [pscustomobject]@{Status='NotSigned';SignerCertificate=$null}
     }
     return [pscustomobject]@{Status='Valid';SignerCertificate=[pscustomobject]@{Subject='CN=Test,O=Microsoft Corporation'}}
@@ -41,7 +41,7 @@ function Seed([string]$Name,[string]$Directory){
     foreach($file in (Get-FmscToolSpec $Name).required){
         $path=Join-Path $Directory $file
         $null=New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force
-        $value=if($Name -eq 'LocalDb'){'synthetic Microsoft MSI'}else{'synthetic verified tool '+$file}
+        $value=if($Name -eq 'LocalDb'){'synthetic Microsoft MSI'}elseif($Name -eq 'VcRedist'){'synthetic Microsoft EXE'}else{'synthetic verified tool '+$file}
         [IO.File]::WriteAllText($path,$value)
     }
     if($Name -eq 'Git'){[IO.File]::WriteAllText((Join-Path $Directory 'support.dll'),'synthetic supporting DLL')}
@@ -51,7 +51,7 @@ function Seed([string]$Name,[string]$Directory){
 function Receive-FmscTool([string]$Name,[string]$Destination){$script:downloads++;Seed $Name $Destination}
 try {
     $app=Join-Path $work 'application'
-    foreach($name in @('Git','SqlCmd','LocalDb')){
+    foreach($name in @('Git','SqlCmd','LocalDb','VcRedist')){
         $spec=Get-FmscToolSpec $name
         $source=Join-Path $app $spec.folder
         if($name -ne 'Git'){$source=Join-Path $source $name}
@@ -63,7 +63,7 @@ try {
     }
     Check ($script:downloads -eq 0) 'First installation must copy good bundles without downloading'
     Remove-Item -LiteralPath $app -Recurse -Force
-    foreach($name in @('Git','SqlCmd','LocalDb')){
+    foreach($name in @('Git','SqlCmd','LocalDb','VcRedist')){
         Check ([bool](Find-FmscMaintenanceTool $name)) "$name must survive deletion of the source application/setup"
         $same=Find-FmscMaintenanceTool $name
         Check ((Install-FmscMaintenanceTool $name $app) -eq $same) 'Unchanged tools must be reused'
@@ -143,8 +143,10 @@ try {
     Seed 'Git' (Join-Path $local 'MinGit')
     Seed 'SqlCmd' (Join-Path $local 'SqlCmd')
     Seed 'LocalDb' (Join-Path $local 'LocalDb')
+    Seed 'VcRedist' (Join-Path $local 'VcRedist')
     Copy-Item (Join-Path $local 'SqlCmd/sqlcmd.exe') (Join-Path $local 'sqlcmd.exe')
     Copy-Item (Join-Path $local 'LocalDb/SqlLocalDB.msi') (Join-Path $local 'SqlLocalDB.msi')
+    Copy-Item (Join-Path $local 'VcRedist/vc_redist.x64.exe') (Join-Path $local 'vc_redist.x64.exe')
     function Invoke-WebRequest {throw 'A cached local publish attempted a download.'}
     $before=(Get-FileHash (Join-Path $local 'MinGit/FMSC.ToolIntegrity.json')).Hash
     & (Join-Path $project 'Tools/PrepareMaintenanceTools.ps1') -ToolsDirectory $local
@@ -163,7 +165,8 @@ try {
     [xml]$harness='<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>'
     foreach($pair in @(@('BundledGitDirectory',(Join-Path $publishTools 'MinGit')),
         @('BundledSqlCmdPath',(Join-Path $publishTools 'sqlcmd.exe')),
-        @('LocalDbMsiPath',(Join-Path $publishTools 'SqlLocalDB.msi')))){
+        @('LocalDbMsiPath',(Join-Path $publishTools 'SqlLocalDB.msi')),
+        @('VcRedistPath',(Join-Path $publishTools 'vc_redist.x64.exe')))){
         $property=$harness.CreateElement($pair[0]);$property.InnerText=$pair[1]
         $null=$harness.Project.PropertyGroup.AppendChild($property)
     }
@@ -179,7 +182,8 @@ try {
     $paths=@($items | ForEach-Object {$_.TargetPath.Replace('\','/')})
     foreach($expected in @('UpdateTransport/cmd/git.exe','UpdateTransport/support.dll','UpdateTransport/FMSC.ToolIntegrity.json',
         'UpdateSupport/Tools/SqlCmd/sqlcmd.exe','UpdateSupport/Tools/SqlCmd/FMSC.ToolIntegrity.json',
-        'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi','UpdateSupport/Tools/LocalDb/FMSC.ToolIntegrity.json')){
+        'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi','UpdateSupport/Tools/LocalDb/FMSC.ToolIntegrity.json',
+        'UpdateSupport/Tools/VcRedist/vc_redist.x64.exe','UpdateSupport/Tools/VcRedist/FMSC.ToolIntegrity.json')){
         Check ($expected -in $paths) "First publish must include freshly prepared $expected (found: $($paths -join ', '))"
     }
     [IO.File]::WriteAllText((Join-Path $local 'SqlCmd/sqlcmd.exe'),'corrupt')

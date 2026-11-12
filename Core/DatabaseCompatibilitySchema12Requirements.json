@@ -24,6 +24,16 @@
       "schema": "dbo",
       "name": "AdministratorRecoveryEvents",
       "type": "U "
+    },
+    {
+      "schema": "dbo",
+      "name": "SaveSchoolProfileDetails",
+      "type": "P "
+    },
+    {
+      "schema": "dbo",
+      "name": "SaveSchoolLogo",
+      "type": "P "
     }
   ],
   "columns": [
@@ -266,6 +276,126 @@
       "type": "int",
       "maxLength": 4,
       "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolProfileDetails",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolProfileDetails",
+      "name": "@SchoolName",
+      "type": "nvarchar",
+      "maxLength": 400,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolProfileDetails",
+      "name": "@AddressLine",
+      "type": "nvarchar",
+      "maxLength": 1000,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolProfileDetails",
+      "name": "@City",
+      "type": "nvarchar",
+      "maxLength": 200,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolProfileDetails",
+      "name": "@ContactNumber",
+      "type": "nvarchar",
+      "maxLength": 300,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolProfileDetails",
+      "name": "@Email",
+      "type": "nvarchar",
+      "maxLength": 300,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolProfileDetails",
+      "name": "@FeeProrationCutoffDay",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolProfileDetails",
+      "name": "@TransportCutoffDay",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolLogo",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolLogo",
+      "name": "@LogoImage",
+      "type": "varbinary",
+      "maxLength": -1,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolLogo",
+      "name": "@LogoFileName",
+      "type": "nvarchar",
+      "maxLength": 520,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "dbo",
+      "objectName": "SaveSchoolLogo",
+      "name": "@LogoContentType",
+      "type": "nvarchar",
+      "maxLength": 80,
+      "precision": 0,
       "scale": 0,
       "isOutput": false
     }

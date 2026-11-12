@@ -1,9 +1,12 @@
 # Workflow 04 trusted bootstrap. Run ONLY on owner-dispatched Source/main.
-# The sole Source mutation is a one-patch application version bump. No schema
-# change, database asset, migration or private feed is modified here.
+# The sole possible Source mutation is an application patch bump when Source
+# still equals the published version. Existing newer Source patches are reused.
+# No schema change, database asset, migration or private feed is modified here.
 $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$false
 . (Join-Path $PSScriptRoot 'ResolveFmscGitHubRepository.ps1')
+. (Join-Path $PSScriptRoot 'ResolveWorkflow04Version.ps1')
+. (Join-Path $PSScriptRoot 'ReadWorkflow04SourceVersions.ps1')
 Assert-FmscWorkflowIdentity -Repository Source -RequireOwnerActor
 function Require([bool]$Ok,[string]$Reason) { if (-not $Ok) { throw "Workflow 04 refused: $Reason" } }
 Require ($env:GITHUB_ACTIONS -ceq 'true' -and
@@ -32,28 +35,17 @@ Require ($LASTEXITCODE -eq 0 -and $origin -in @(
 
 $corePath=Join-Path (Get-Location).Path 'Installer/core.ps1'
 $core=[IO.File]::ReadAllText($corePath)
-$appMatch=[regex]::Match($core,'(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$')
-$dbMatch=[regex]::Match($core,'(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
-Require ($appMatch.Success -and $dbMatch.Success) 'Current application/schema versions could not be resolved from Installer/core.ps1.'
+$sourceVersions=Read-FmscWorkflow04SourceVersions -InstallerText $core
+$appMatch=$sourceVersions.AppMatch
+$targetSchema=$sourceVersions.Schema
 # Frozen schema-3/7 private fixtures remain unchanged. Sandbox uses copies
 # and upgrades them through the declared production migration target.
-$targetSchema=[int]$dbMatch.Groups[1].Value
-Require ($targetSchema -ge 7 -and $targetSchema -le 9999) 'Schema target is outside the reviewed frozen-fixture migration range.'
-Require ($targetSchema -ne 8) 'Schema 8 is retirement-only. Finish and accept schema 9+ before publishing.'
+# Validate the complete current source migration chain, without fixed release
+# version numbers or assumptions about prior Sandbox fixture file names.
+. (Join-Path $PSScriptRoot 'AssertWorkflow04MigrationInventory.ps1')
 $migrationsDir=Join-Path (Get-Location).Path 'Migrations'
-Require (Test-Path -LiteralPath $migrationsDir -PathType Container) 'Source migration directory missing.'
-$scriptVersions=@{}
-foreach ($file in @(Get-ChildItem -LiteralPath $migrationsDir -Filter '*.sql' -File)) {
-    Require ($file.BaseName -cmatch '^[1-9][0-9]*$') "Invalid numbered migration filename: $($file.Name)."
-    $v=[int]$file.BaseName
-    Require ($v -ge 2 -and $v -le $targetSchema) "Migration $v.sql lies outside the declared target schema $targetSchema."
-    Require (-not $scriptVersions.ContainsKey($v)) "Duplicate migration $v.sql."
-    $scriptVersions[$v]=$true
-}
-for ($v=2;$v -le $targetSchema;$v++) {
-    Require ($scriptVersions.ContainsKey($v)) "Missing consecutive migration $v.sql for schema $targetSchema."
-}
-$current=$appMatch.Groups[1].Value
+Assert-FmscWorkflow04MigrationInventory -TargetSchema $targetSchema -Directory $migrationsDir
+$current=$sourceVersions.AppVersion
 $release=$current
 $releaseSha=$checkout
 $bumped=$false
@@ -71,12 +63,12 @@ if ($publish) {
     $channel=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($stable.content -replace '\s','')))) | ConvertFrom-Json
     Require ($channel.format -ceq 'fmsc-git-updates/v1' -and
         $channel.latestVersion -cmatch '^[0-9]+\.[0-9]+\.[0-9]+$') 'Published channel is not the expected stable semantic version.'
-    $latest=[version]::Parse($channel.latestVersion)
-    Require ($latest.Major -ge 0 -and $latest.Minor -ge 0 -and $latest.Build -ge 0) 'Invalid current feed version.'
-    $nextVersion=('{0}.{1}.{2}' -f $latest.Major,$latest.Minor,($latest.Build+1))
-    if ($current -ceq $channel.latestVersion) {
+    $decision=Resolve-FmscWorkflow04Version -SourceVersion $current -PublishedVersion $channel.latestVersion `
+        -ApprovedTransitionVersion $env:FMSC_WORKFLOW04_APPROVED_VERSION
+    if ($decision.RequiresBump) {
+        $nextVersion=$decision.ReleaseVersion
         # Preserve CRLF/other source lines and change only one exact assignment.
-        Require ([regex]::Matches($core,'(?m)^\$AppVersion = ''([0-9]+\.[0-9]+\.[0-9]+)''\r?$').Count -eq 1) 'Ambiguous installer application-version assignment.'
+        # The unique assignment was verified by the shared release parser.
         $revised=$core.Remove($appMatch.Groups[1].Index,$appMatch.Groups[1].Length).Insert($appMatch.Groups[1].Index,$nextVersion)
         [IO.File]::WriteAllText($corePath,$revised,[Text.UTF8Encoding]::new($false))
         & git add -- Installer/core.ps1
@@ -93,14 +85,11 @@ if ($publish) {
         Require ($LASTEXITCODE -eq 0) 'Version commit could not fast-forward Source/main; feed was not touched. Check branch permissions.'
         $bumped=$true
         $release=$nextVersion
-    } elseif ($current -ceq $nextVersion) {
-        # Failed release run may leave its reviewed Source version commit.
-        # Reuse it without bumping again. Publication still requires fresh chaos
-        # and real-installer acceptance for this exact Source commit.
-        $release=$current
-        Write-Host "Reusing pending $release after an earlier unpublished attempt."
     } else {
-        throw "Source version $current is neither published version $($channel.latestVersion) nor next patch $nextVersion. Refusing to guess."
+        # Source can be multiple patches ahead when intermediate versions were
+        # never published. Reuse its exact SHA; Sandbox acceptance remains fresh.
+        $release=$decision.ReleaseVersion
+        Write-Host "Reusing pending Source version $release ahead of published $($channel.latestVersion)."
     }
 }
 # A newer source branch or race invalidates the acceptance target, regardless

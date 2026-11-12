@@ -3,6 +3,7 @@ using FMSC_SMS.Core;
 using FMSC_SMS.Pages.Finance.Collection;
 using FMSC_SMS.Pages.Reports.Students;
 using FMSC_SMS.Pages.Security;
+using FMSC_SMS.Pages.Setup;
 
 internal static partial class Program
 {
@@ -67,6 +68,76 @@ internal static partial class Program
             Target(students,Keys.Control|Keys.M,"Rename View");
             Target(students,Keys.Control|Keys.T,"Reset Filters");
             Target(students,Keys.Alt|Keys.C,"Clear Filters");
+            using var profile=new SchoolProfilePage(false);
+            using var profileHost=new Form {
+                ClientSize=new Size(1280,850),ShowInTaskbar=false,
+                StartPosition=FormStartPosition.Manual,Location=new Point(-24000,-24000)
+            };
+            profile.Dock=DockStyle.Fill;
+            profileHost.Controls.Add(profile);
+            profileHost.Show();
+            Application.DoEvents();
+
+            // Test the user's shortcut hint, not the controller's private field.
+            // No Ctrl+S click is performed: real school SQL must never be written
+            // by this SQL-free fixture.
+            var saveHints=profile.ShortcutController.AvailableHints()
+                .Where(hint => hint.Key == "Ctrl+S").ToArray();
+            Check(saveHints.Length==1 &&
+                saveHints[0].Target is ModernButton {Text:"Save"} &&
+                !saveHints[0].Target.IsDisposed,
+                "School information exposes one Ctrl+S save target distinct from image saves");
+
+            HumanCard CardWithTitle(string title)=>Descendants(profile).OfType<HumanCard>()
+                .Single(card=>card.Header.Controls.OfType<Label>()
+                    .Any(label=>label.Text==title));
+            var detailsCard=CardWithTitle("School Identity");
+            var logoCard=CardWithTitle("Logo");
+            var signatureCard=CardWithTitle("Principal Signature");
+            var logoPreview=Descendants(logoCard).OfType<PictureBox>().Single();
+            var signaturePreview=Descendants(signatureCard).OfType<PictureBox>().Single();
+            var logoButtons=Descendants(logoCard).OfType<ModernButton>().ToArray();
+            var signatureButtons=Descendants(signatureCard).OfType<ModernButton>().ToArray();
+            Check(new[]{"Choose Logo…","Save Logo","Remove Logo"}.All(caption=>
+                logoButtons.Any(button=>button.Text==caption)) &&
+                new[]{"Choose Signature…","Save Signature","Remove Signature"}.All(caption=>
+                    signatureButtons.Any(button=>button.Text==caption)),
+                "School Profile exposes independent logo and signature actions");
+
+            foreach(int width in new[]{1280,1600})
+            {
+                profileHost.ClientSize=new Size(width,850);
+                Application.DoEvents();
+                Rectangle logoBounds=logoCard.RectangleToScreen(logoCard.ClientRectangle);
+                Rectangle detailsBounds=detailsCard.RectangleToScreen(detailsCard.ClientRectangle);
+                Rectangle signatureBounds=signatureCard.RectangleToScreen(signatureCard.ClientRectangle);
+                // At a short window height, the left-hand fields may extend
+                // below the viewport. The logo must fill its actual visible
+                // column, not an imaginary height based on offscreen controls.
+                Rectangle columnBounds=logoCard.Parent!.RectangleToScreen(
+                    logoCard.Parent.ClientRectangle);
+                Check(logoBounds.Top<=columnBounds.Top+2 &&
+                    logoBounds.Bottom>=columnBounds.Bottom-2 &&
+                    logoPreview.Height>signaturePreview.Height &&
+                    signatureCard.Height<detailsCard.Height,
+                    $"School Profile visible column at {width}: logo={logoBounds}, container={columnBounds}, details={detailsBounds}, signature={signatureBounds}, imageHeights={logoPreview.Height}/{signaturePreview.Height}");
+
+                foreach(var (card,buttons) in new[]{
+                    (Card:logoCard,Buttons:logoButtons),
+                    (Card:signatureCard,Buttons:signatureButtons)})
+                {
+                    Rectangle cardBounds=card.RectangleToScreen(card.ClientRectangle);
+                    foreach(var button in buttons)
+                    {
+                        Rectangle buttonBounds=button.RectangleToScreen(button.ClientRectangle);
+                        Check(button.Visible && button.Enabled &&
+                            buttonBounds.Width>0 && buttonBounds.Height>0 &&
+                            cardBounds.Contains(buttonBounds),
+                            "School Profile image action remains visible and unclipped: "+button.Text);
+                    }
+                }
+            }
+            profileHost.Close();
             Check(!students.IsHandleCreated && !bills.IsHandleCreated,"Real-page shortcut coverage does not start database initialization");
         }
         finally {CurrentUser.SignIn(previousUser.UserId,previousUser.Username,previousUser.RoleName,previousUser.MustChangePassword,previousUser.Grants);}

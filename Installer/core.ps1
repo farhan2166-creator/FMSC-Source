@@ -27,8 +27,8 @@ function Wait-OriginalFmscExit {
     }
 }
 $AppName = 'FMSC School Management System'
-$AppVersion = '1.0.21'
-$DatabaseVersion = '12'
+$AppVersion = '1.0.31'
+$DatabaseVersion = '17'
 $ReleaseRoot = $PSScriptRoot
 $AppSource      = Join-Path $ReleaseRoot 'FMSC_SMS'
 $DatabaseSource = Join-Path $ReleaseRoot 'Database'
@@ -195,25 +195,26 @@ function Open-UpdateWindow {
     $header = New-Object Windows.Forms.Panel
     $header.SetBounds(0,0,$clientWidth,138)
     $header.BackColor = [Drawing.Color]::White
-    # The circular FMSC icon is already embedded in FMSC.Setup.exe. Use it
-    # directly rather than a separate asset or placeholder letter.
+    # WinForms can display scrambled pixels when converting PNG-compressed ICO
+    # entries with Icon.ToBitmap(). Use the approved circular PNG for the header
+    # and reserve the embedded ICO for the native window/taskbar icon.
     $mark = New-Object Windows.Forms.PictureBox
     $mark.SetBounds(30,38,54,54)
     $mark.SizeMode = [Windows.Forms.PictureBoxSizeMode]::Zoom
     $mark.BackColor = [Drawing.Color]::White
-    # The packaged circular ICO has higher-resolution sizes than some EXE
-    # icon extractors return. Fall back to the verified launcher's icon.
     foreach ($logoRoot in @($AppSource, $AppDir)) {
         if ([string]::IsNullOrWhiteSpace([string]$logoRoot)) { continue }
         try {
-            $logoPath = Join-Path $logoRoot 'Assets\FMSC_Logo_Circular.ico'
+            $logoPath = Join-Path $logoRoot 'Assets\FMSC_Logo_Circular.png'
             if (-not (Test-Path -LiteralPath $logoPath -PathType Leaf)) { continue }
-            $logoIcon = [Drawing.Icon]::new($logoPath, [Drawing.Size]::new(64,64))
-            try { $mark.Image = $logoIcon.ToBitmap() }
-            finally { $logoIcon.Dispose() }
+            # Clone before closing the file so the setup payload can be moved or
+            # cleaned without holding a lock on the artwork.
+            $logoImage = [Drawing.Image]::FromFile($logoPath)
+            try { $mark.Image = [Drawing.Bitmap]::new($logoImage) }
+            finally { $logoImage.Dispose() }
             break
         } catch {
-            # Branding is optional during recovery; never block installation.
+            # Branding is cosmetic during recovery; never block installation.
         }
     }
     if (-not $mark.Image -and $brandIcon) { $mark.Image = $brandIcon.ToBitmap() }
@@ -1237,6 +1238,44 @@ function Invoke-PendingMigrations {
     }
 }
 
+# SQL Server 2022 LocalDB's VSS Writer can fail on clean Windows
+# without a supported Visual C++ v14 x64 runtime.
+function Test-FmscVcRuntime {
+    foreach($key in @(
+        'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64'
+    )){
+        $runtime=Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+        if($runtime -and [int]$runtime.Installed -eq 1 -and
+            ([int]$runtime.Major -gt 14 -or
+             ([int]$runtime.Major -eq 14 -and [int]$runtime.Minor -ge 30))){
+            return $true
+        }
+    }
+    return $false
+}
+function Invoke-FmscVcRuntimeInstallation {
+    param([Parameter(Mandatory=$true)][string]$Path,
+          [Parameter(Mandatory=$true)][string]$LogDirectory)
+    if(Test-FmscVcRuntime){
+        Write-Success 'Microsoft Visual C++ x64 runtime is already installed.'
+        return
+    }
+    Assert-FmscMicrosoftPackage $Path
+    $log=Join-Path $LogDirectory ('VcRedist-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.log')
+    Write-Step 'Installing Microsoft Visual C++ x64 runtime before LocalDB...'
+    Write-Log "Visual C++ setup diagnostic log: $log"
+    $setup=Start-Process -FilePath $Path -ArgumentList @(
+        '/install','/quiet','/norestart','/log',"`"$log`""
+    ) -Wait -PassThru
+    if($setup.ExitCode -in @(3010,1641)){
+        throw "Microsoft Visual C++ setup requires a Windows restart (code $($setup.ExitCode)). Restart and rerun FMSC. Log: $log"
+    }
+    if($setup.ExitCode -ne 0 -or -not(Test-FmscVcRuntime)){
+        throw "Microsoft Visual C++ x64 runtime setup failed or is unverified (code $($setup.ExitCode)). Log: $log"
+    }
+    Write-Success 'Microsoft Visual C++ x64 runtime installed and verified.'
+}
 function Invoke-LocalDbMsiInstallation {
     param([Parameter(Mandatory=$true)][string]$MsiPath,
           [Parameter(Mandatory=$true)][string]$LogDirectory)
@@ -1502,6 +1541,32 @@ function Invoke-FmscSafeUpdateAbort {
     Write-Log "Safe update abort verified: previous application $installedVersion, database schema $observedSchema, failed release $($script:RecoveryJournal.Version)."
 }
 
+function Register-FmscUninstaller {
+    # Windows Settings / Installed apps. The EXE remains in the installed app
+    # and the engine stages itself outside that folder before deleting it.
+    $exe = Join-Path $AppDir 'FMSC.Uninstall.exe'
+    $script = Join-Path $AppDir 'UpdateSupport\Uninstall-FMSC.ps1'
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $script -PathType Leaf)) {
+        throw 'The standalone FMSC uninstaller is missing from the installed application.'
+    }
+    $key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\FMSC-SchoolManagement'
+    if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force | Out-Null }
+    $properties = @{
+        DisplayName = 'FMSC School Management'
+        DisplayVersion = $AppVersion
+        Publisher = 'FMSC'
+        InstallLocation = $AppDir
+        DisplayIcon = ('"' + $exe + '",0')
+        UninstallString = ('"' + $exe + '"')
+    }
+    foreach ($name in $properties.Keys) {
+        New-ItemProperty -Path $key -Name $name -Value $properties[$name] -PropertyType String -Force | Out-Null
+    }
+    New-ItemProperty -Path $key -Name NoModify -Value 1 -PropertyType DWord -Force | Out-Null
+    New-ItemProperty -Path $key -Name NoRepair -Value 1 -PropertyType DWord -Force | Out-Null
+}
+
 try {
     Open-UpdateWindow
     $existingRecovery = Read-FmscRecoveryJournal $script:RecoveryRoot
@@ -1553,6 +1618,7 @@ try {
         Confirm-FmscRecoveryBackup -CurrentSchema (Convert-ToDbVersion (Get-DatabaseVersion))
         Complete-VerifiedApplicationUpdate -ApplicationDirectory $AppDir -Source $AppDir -Prepared (Join-Path $script:RecoveryRoot 'verification')
         Remove-FmscCompletedSnapshot
+        try { Register-FmscUninstaller } catch { Write-WarningMessage "Could not register Windows uninstall entry: $($_.Exception.Message)" }
         Release-FmscInstallerLock
         Start-FmscAfterInstallation -Application (Join-Path $AppDir 'FMSC_SMS.exe')
         return
@@ -1692,13 +1758,19 @@ try {
         }
     }
     Write-Step 'Retaining verified maintenance tools on this PC...'
-    foreach($ToolName in @('Git','SqlCmd','LocalDb')){
+    foreach($ToolName in @('Git','SqlCmd','LocalDb','VcRedist')){
         $null=Install-FmscMaintenanceTool $ToolName $AppSource
     }
+    # Every fresh setup and application update validates this prerequisite.
+    # Existing compatible runtimes are skipped. If missing, install before
+    # starting SQL or touching the school's database.
+    $VcRedistRoot=Find-FmscMaintenanceTool 'VcRedist'
+    if(-not $VcRedistRoot){throw 'Verified Visual C++ runtime prerequisite is unavailable.'}
+    Invoke-FmscVcRuntimeInstallation -Path (Join-Path $VcRedistRoot 'vc_redist.x64.exe') -LogDirectory $DatabaseDir
     if (-not $SqlLocalDb) {
         Write-WarningMessage `
             'SQL Server LocalDB was not found.'
-        # The self-contained win-x64 application includes its .NET Desktop Runtime. Tools carries only database prerequisites: sqlcmd.exe and SqlLocalDB.msi.
+        # The self-contained app includes .NET; verified SQL tools and VC++ are retained separately.
         $MsiRoot=Install-FmscMaintenanceTool 'LocalDb' $AppSource
         $MsiPath=Join-Path $MsiRoot 'SqlLocalDB.msi'
         Invoke-LocalDbMsiInstallation -MsiPath $MsiPath -LogDirectory $DatabaseDir
@@ -2062,7 +2134,13 @@ try {
     Pause-Long
     Complete-VerifiedApplicationUpdate -ApplicationDirectory $AppDir -Source $AppSource -Prepared $PreparedRoot
     if ($script:RecoveryJournal) { Remove-FmscCompletedSnapshot }
-    Write-Section `
+    try {
+        Register-FmscUninstaller
+        Write-Success 'Standalone uninstaller registered in Windows Installed apps.'
+    } catch {
+        Write-WarningMessage "Uninstall registration is pending: $($_.Exception.Message)"
+    }
+    Write-Section 
         'STEP 8 OF 8  -  COMPLETED'
     Write-Host ''
     Write-Host `

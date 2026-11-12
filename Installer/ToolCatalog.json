@@ -6,19 +6,36 @@
     "sha256": "E3BF78351FE777FBA47DDEE5950082F8A98BB0F02604FDC7BA3EE2CB68FFA877",
     "licenseUrl": "https://raw.githubusercontent.com/git-for-windows/git/v2.56.0.windows.4/COPYING",
     "folder": "UpdateTransport",
-    "required": ["cmd/git.exe", "usr/bin/ssh.exe", "COPYING-GIT.txt", "THIRD_PARTY_NOTICES.txt"]
+    "required": [
+      "cmd/git.exe",
+      "usr/bin/ssh.exe",
+      "COPYING-GIT.txt",
+      "THIRD_PARTY_NOTICES.txt"
+    ]
   },
   "SqlCmd": {
     "version": "1.10.0",
     "url": "https://github.com/microsoft/go-sqlcmd/releases/download/v1.10.0/sqlcmd-windows-amd64.zip",
     "sha256": "A4C28332FCC6E497D655E53AC8F4939F4AB170F9CFD32D0FA5081B60F4D9D691",
     "folder": "UpdateSupport/Tools",
-    "required": ["sqlcmd.exe"]
+    "required": [
+      "sqlcmd.exe"
+    ]
   },
   "LocalDb": {
     "version": "SQL2022",
     "url": "https://download.microsoft.com/download/3/8/d/38de7036-2433-4207-8eae-06e247e17b25/SqlLocalDB.msi",
     "folder": "UpdateSupport/Tools",
-    "required": ["SqlLocalDB.msi"]
+    "required": [
+      "SqlLocalDB.msi"
+    ]
+  },
+  "VcRedist": {
+    "version": "v14-x64",
+    "url": "https://aka.ms/vc14/vc_redist.x64.exe",
+    "folder": "UpdateSupport/Tools",
+    "required": [
+      "vc_redist.x64.exe"
+    ]
   }
 }

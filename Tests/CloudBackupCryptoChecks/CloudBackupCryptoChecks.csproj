@@ -6,7 +6,14 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Services/Backup/CloudBackupOperations.cs" Link="CloudBackupOperations.cs" />
+    <Compile Include="../../Core/SqlPrerequisiteRepair.cs" Link="SqlPrerequisiteRepair.cs" />
+    <Compile Include="../../Services/Backup/CloudBackupTransport.cs" Link="CloudBackupTransport.cs" />
+    <Compile Include="../../Core/CommunicationHandoffLease.cs" Link="CommunicationHandoffLease.cs" />
     <Compile Include="../../Services/Backup/CloudBackupCrypto.cs" Link="CloudBackupCrypto.cs" />
+    <Compile Include="../../Services/Backup/CloudBackupJobLock.cs" Link="CloudBackupJobLock.cs" />
+    <Compile Include="../../Services/Backup/CloudDropboxIntegrity.cs" Link="CloudDropboxIntegrity.cs" />
+    <Compile Include="../../Services/Backup/CloudBackupDeliveryPolicy.cs" Link="CloudBackupDeliveryPolicy.cs" />
     <Compile Include="../../Services/Backup/CloudBackupCatalog.cs" Link="CloudBackupCatalog.cs" />
     <Compile Include="../../Services/Backup/CloudBackupSchedulePolicy.cs" Link="CloudBackupSchedulePolicy.cs" />
     <Compile Include="../../Services/Backup/CloudOAuthLoopback.cs" Link="CloudOAuthLoopback.cs" />

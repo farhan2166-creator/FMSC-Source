@@ -29,6 +29,7 @@ internal static partial class Program
             throw new InvalidOperationException("SQL fixture refuses non-local servers and any catalog other than master.");
         string database="Fmsc_ReportReadChecks_"+Guid.NewGuid().ToString("N");
         using var master=new SqlConnection(builder.ConnectionString);master.Open();Execute(master,$"CREATE DATABASE [{database}];");
+        string sqlStage="initial fixture";
         try
         {
             builder.InitialCatalog=database;
@@ -93,8 +94,48 @@ internal static partial class Program
             Check(denied,"Credit query enforces fee viewing in addition to report viewing");
             denied=false;try{Read(connection,ConcessionSummaryData.Query,user:0);}catch(SqlException){denied=true;}
             Check(denied,"Concession query enforces report permission");
+            sqlStage="reconciliation and register";
             CheckNewSql(connection);
+            sqlStage="outstanding debt";
             CheckDebtSql(connection);
+            sqlStage="collection receipts";
+            CheckCollectionSql(connection);
+        }
+        catch(SqlException ex)
+        {
+            // Public CI may retain only an allowlisted stage and numeric SQL
+            // error. No connection string, SQL text or student rows are logged.
+            Console.Error.WriteLine($"REPORT_SQL_FAIL: {sqlStage} SQL {ex.Number} line {ex.LineNumber}");
+            if(ex.Number==207)
+            {
+                // SQL 207 is an invalid schema identifier, not a row value.
+                // Emit only a narrowly formatted identifier from this owned
+                // fictional fixture; reject paths, SQL text and user input.
+                var column=System.Text.RegularExpressions.Regex.Match(ex.Message,
+                    @"Invalid column name '([A-Za-z_][A-Za-z0-9_]{0,63})'");
+                var allowedIdentifiers=new HashSet<string>(StringComparer.Ordinal) {
+                    "RegistrationNumber","AdmissionNumberBase","AdmissionNumberSuffix",
+                    "GrossAmount","ChargeDate","DueDate","FeeSort","CampusSort","ClassSort",
+                    "SectionSort","StudentName","FatherName","Gender","ClassName",
+                    "SectionName","FeeTypeName","FeeTypeId","PaidAmount","Outstanding",
+                    "BillingChargeId","Status","EnrollmentId","DisplayOrder"
+                };
+                if(column.Success && allowedIdentifiers.Contains(column.Groups[1].Value))
+                    Console.Error.WriteLine($"REPORT_COLUMN_FAIL: {sqlStage} {column.Groups[1].Value}");
+            }
+            throw;
+        }
+        catch(Exception ex)
+        {
+            // Only report the fixed synthetic fixture filename and source line,
+            // not its assertion text, SQL query, credentials or row values.
+            string[] allowed={"Program.NewReportSql.cs","Program.DebtSql.cs","Program.CollectionSql.cs"};
+            var location=new System.Diagnostics.StackTrace(ex,true).GetFrames()?
+                .Select(frame => (File:Path.GetFileName(frame.GetFileName()),Line:frame.GetFileLineNumber()))
+                .FirstOrDefault(frame=>allowed.Contains(frame.File) && frame.Line>0);
+            if(location is { Line: > 0 })
+                Console.Error.WriteLine($"REPORT_ASSERT_FAIL: {sqlStage} {location.Value.File} {location.Value.Line}");
+            throw;
         }
         finally { SqlConnection.ClearAllPools();Execute(master,$"ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}];"); }
     }

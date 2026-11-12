@@ -22,6 +22,15 @@ internal sealed class ResponsiveViewport : Panel
 
     internal void ChangeDpi(int from, int to) => contentMinimum = DpiLayout.ChangeDpi(contentMinimum, from, to);
 
+    // Dialogs with expandable details can change their required content size
+    // after the initial viewport is created. Keep scroll bounds in sync.
+    internal void SetContentMinimum(Size minimum)
+    {
+        if (contentMinimum == minimum) return;
+        contentMinimum = minimum;
+        PerformLayout();
+    }
+
     protected override void OnLayout(LayoutEventArgs e)
     {
         if (!fitting && content is not null)

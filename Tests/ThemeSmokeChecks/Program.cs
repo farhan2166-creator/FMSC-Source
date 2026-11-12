@@ -34,6 +34,12 @@ internal static partial class Program
 
     private static void RunChecks(string[] args)
     {
+        if (args.Contains("--compatibility-contract-inventory"))
+        {
+            CheckCompatibilityManifestInventory();
+            Console.WriteLine($"PASS: {checks} embedded database contract inventory checks (no SQL).");
+            return;
+        }
         if (args.Contains("--communication-workflow"))
         {
             CheckCommunicationWorkflow();

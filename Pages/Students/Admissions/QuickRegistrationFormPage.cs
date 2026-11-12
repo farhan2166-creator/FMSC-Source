@@ -425,7 +425,7 @@ internal sealed partial class QuickRegistrationFormPage : V2Page, IUnsavedChange
                 string parentName=Convert.ToString(anchor.Rows[0]["FatherName"])?.Trim()??"";
                 if(parent.Text.Trim()!=parentName){parent.Text=parentName;Warn("The linked parent name has changed. Review it and save again. Correct parent details in Admission / Review.");return;}
             }
-            var args=new List<SqlParameter>{DatabaseHelper.Int("@UserId",CurrentUser.UserId),DatabaseHelper.Bit("@QuickRegistration",true),DatabaseHelper.P("@FamilyStudentId",familyAnchor>0?familyAnchor:null),
+            var args=new List<SqlParameter>{DatabaseHelper.Int("@UserId",CurrentUser.UserId),DatabaseHelper.Bit("@QuickRegistration",true),DatabaseHelper.Bit("@UseSelectedFeeTypes",true),DatabaseHelper.P("@FamilyStudentId",familyAnchor>0?familyAnchor:null),
                 DatabaseHelper.Date("@AdmissionDate",joining.Value.Date),DatabaseHelper.Int("@AdmissionCampusId",Convert.ToInt32(row["CampusId"])),DatabaseHelper.Int("@AcademicYearId",year.SelectedId),DatabaseHelper.Int("@ClassSectionId",placement.SelectedId),
                 DatabaseHelper.P("@StudentName",name.Text.Trim()),DatabaseHelper.P("@FatherName",parent.Text.Trim()),DatabaseHelper.P("@ContactNumber",contact.Text.Trim()),DatabaseHelper.P("@Address",address.Text.Trim()),DatabaseHelper.P("@Disability","No"),DatabaseHelper.Bit("@UsesTransport",selected.Any(r=>Convert.ToBoolean(r["IsTransportLinked"]))),
                 new SqlParameter("@SelectedFeeTypeIds",SqlDbType.Structured){TypeName="dbo.FeeTypeIdList",Value=Tvp.FeeTypeIds(selected.Select(r=>Convert.ToInt32(r["FeeTypeId"])))},

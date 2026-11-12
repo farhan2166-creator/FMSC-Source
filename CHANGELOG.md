@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.0.31 — Certificate and cloud recovery corrections (schema 17)
+
+- Select the exact saved certificate after backdated or deduplicated creation; refuse to substitute another history row if refresh fails.
+- Include teacher/lecturer and bank certificate collection details and totals in Certificate Issue Register.
+- Time out stalled cloud download bodies and remove partial packages before SQL work.
+- Record pending cloud delivery visibly and return a nonzero scheduled result while uploads remain incomplete.
+- Distinguish failed cloud account listings from empty accounts, retaining available recovery points with warnings.
+
+## 1.0.30 — Release review corrections (schema 17)
+
+- Correct 12-hour backup scheduling for morning start times; reconcile Google Drive retries by a durably reserved file ID and verified size/checksum.
+- Exclude concurrent handoff windows for the same manual WhatsApp batch on the supported LocalDB host; retain human confirmation and crash-safe resume.
+- Remove only verified FMSC cloud-backup scheduled tasks during uninstall; preserve school files and unrelated tasks.
+- Preserve leaving-certificate print authority for principal signatures (migration 17); retain separate ordinary-certificate print authorization.
+- Report actual Sports/NOC/Provisional collection events. Staff collection reporting was completed in 1.0.31.
+- Reject changing recorded Admission consent to “Not recorded”; explicit Yes/No remains authoritative.
+- Repair or install the VC++ prerequisite before in-app LocalDB repair; stop for restart or an unverified runtime.
+
+
+## Update dialog pending approval / layout — 2026-11-11
+
+- Keep a newly generated computer public key visible and copyable until the owner's
+  read-only GitHub deploy-key approval is verified; generating a local key no
+  longer enables Check for Updates or collapses the enrollment panel.
+- Add explicit **Verify access**, recheck saved keys when opening the dialog,
+  and guard update checking against unverified authorization even when invoked
+  outside normal button interaction.
+- Synchronize responsive viewport limits on compact/expanded transitions to
+  avoid stale scrollbars and inaccessible buttons. Extend Windows UI smoke checks.
+
 ## 1.0.1 — Generic audit retirement
 
 - Apply migration 2 to remove the legacy generic audit tables and routines.
@@ -349,3 +379,10 @@ For the original fixes, implementation passes, schema verification and historica
 - Clarify the leaving-fee review: show each charge's reversal restriction, explain that kept dues remain payable and reversal decisions save with the certificate, name the Fee Collection destination, and count or disable the view-only settled/zero-amount history checkbox. Preserve financial eligibility and invalidate a reviewed decision when its placement changes.
 
 - Simplify financial screen wording and add practical rupee-example tooltips across collection, student advance balances, payment adjustments, fee/discount changes, posting, rate setup, transfers, readmission, leaving and reports. Explain new money versus existing advance, amounts to keep as paid, fee cancellation versus payment reversal, and excess paid money. Preserve financial calculations, permissions and transaction codes.
+
+
+## 1.0.24 — Initialize first admission counter (schema 15)
+
+- Initialize a missing `AdmissionNumberCounter` singleton when installing or upgrading an empty school, so the first direct admission can use number 1 without SQL tools.
+- Preserve all existing counter rows. Only reconstruct a lost counter for populated databases from safely interpretable numeric admission identifiers; refuse ambiguous cases instead of risking duplicates.
+- Replace the SQL lifecycle fixture's premature counter insertion with true first- and second-admission regression coverage, including transaction rollback and restored test fixture numbering.

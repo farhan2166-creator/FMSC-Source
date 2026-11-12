@@ -6,7 +6,7 @@ void Check(bool result, string name)
     if (!result) throw new InvalidOperationException(name);
     checks++;
 }
-foreach (string? value in new string?[] { null, "", " ", "03001234567", "0300-1234567", "+92 300 1234567", "042-31234567", "03001234567,03121234567", "0300-1234567, 042-31234567" })
+foreach (string? value in new string?[] { null, "", " ", "03001234567", "0300-1234567", "+92 300 1234567", "042-31234567", "03001234567,03121234567", "0300-1234567, 042-31234567", "03001234567, 03121234567, 03331234567, 03441234567" })
     Check(SchoolContactValidation.IsValidPhoneList(value), $"Valid phone list: {value}");
 foreach (string value in new[] { "123", "abc", "03001234567x", "03001234567;03121234567", ",03001234567", "03001234567,", "03001234567,,03121234567", "03001234567, ", "03001234567,123", "03001234567\n", "03001234567\t", "0300/1234567", "++923001234567" })
     Check(!SchoolContactValidation.IsValidPhoneList(value), $"Invalid phone list: {value}");

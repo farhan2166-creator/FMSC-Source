@@ -12,6 +12,8 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 }
 $project = 'Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj'
 $checks = @(
+    '--action-shortcuts',
+    '--communication-workflow',
     '--admission-fee-layout',
     '--admission-header',
     '--dialog-size-tiers',

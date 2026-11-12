@@ -18,11 +18,18 @@
   access UNCHECKED**. Its private key is stored under
   `%LOCALAPPDATA%\\FMSC\\Updates` sealed by Windows DPAPI CurrentUser.
   Windows login changes/reinstalls may require re-enrollment.
+  A locally generated key is **not** GitHub approval: the computer remains
+  pending with its public key visible and copyable until a real read-only Git
+  session succeeds. **Verify access** can be retried after the owner adds the
+  deploy key; opening the update dialog also retries authorization for a saved
+  key, without reading or downloading any update package. **Check for Updates**
+  remains disabled and guarded until live authorization has succeeded.
 - Account → **Check for Updates** is manual; no automatic program shutdown,
   replacement, or database migrations while the school works.
 - Before sign-in, a database/application schema version mismatch in either
   direction opens the existing updater inside the same startup window. The user
-  manually checks the private repository; no automatic network check or
+  manually checks the private repository; only a saved-key authorization probe
+  (not a release check or download) may run on dialog opening, and no automatic
   installation occurs. Closing the updater returns to connection guidance with
   **Open Updates** when the database is older, or **Update Application** when
   the database is newer, replacing the ineffective Reconnect/Restart options.
@@ -122,8 +129,11 @@ pass every check. A school left on 1.1 when 1.4 is released must still be able
 to install the full 1.4 release, with ALL required intervening SQL migrations.
 
 Removing old update files from the current tree **does not reclaim historical
-Git blobs**. A bounded distribution history strategy remains a separate
-production gate, limited to `FMSC-Updates`; never rewrite the source history.
+Git blobs**. Workflow 04 now rotates the private `FMSC-Updates/main` branch to a
+new parentless commit containing only the checked two-version snapshot, so old
+commits no longer remain reachable through main. GitHub may garbage-collect
+unreferenced server-side objects later; branch rotation does not promise
+immediate remote disk reclamation. Never rewrite `FMSC-Source` history.
 
 ## Implemented updater components
 
@@ -179,13 +189,14 @@ The school's **SSH authorization key is separate** and is still required.
 3. Complete field acceptance of reconnect/resume under actual network disruption.
    Verified chunk caching, bounded retries, live transfer figures and a determinate
    download bar are implemented and covered by fault-injection tests. Close cancels
-   preparation and preserves verified chunks. Remind Me Later dismisses this manual
-   check (it does not schedule a notification).
+   preparation and preserves verified chunks. The single centered Close button
+   dismisses this manual check (it does not schedule a notification).
 4. Complete disposable Windows/LocalDB acceptance of the connected installer
    handoff, including actual pre-migration backup, migration and rollback recovery.
-5. Accept the guarded manual publisher described below against the private
-   distribution. Long-term history rotation still needs a concrete reviewed
-   maintenance procedure and owner approval before any destructive operation.
+5. Accept bounded-history publication against the private distribution before
+   a live release. The owner approved retaining only two versions without
+   accumulated distribution Git ancestry. The exact-head lease guard blocks
+   concurrent writers; extra branches or tags block rotation, not disappear.
 6. Run release-readiness, Windows UI and full integration tests before asking
    for merge or installation at any school.
 
@@ -254,7 +265,8 @@ again immediately before the publisher uses its separate credential.
 Missing acceptance, failed chaos, stale Source SHA, invalid status,
 unavailable dependencies, missing secrets or failed packaging blocks
 publication. Git distribution is changed only by the publisher's final
-non-forced, checked fast-forward commit. **One click is not a distributed
+exact-head, lease-guarded replacement of `FMSC-Updates/main` with the verified
+parentless release snapshot. **One click is not a distributed
 all-or-nothing transaction:** an attempted release may leave its harmless
 Source version-bump commit after a failure, but it does not partially change
 the private school update feed; rerun after correcting the failure.
@@ -270,7 +282,9 @@ every chunk/ZIP and reconstructs the complete target from both new archives befo
 publication. The log/summary identifies version, schema, sizes, retained/retired
 versions and expected Git parent before the final atomic push. Concurrent runs are
 serialized; a concurrent external distribution update is rejected without force.
-Failures before the push leave the current school feed unchanged.
+Failures before the push leave the current school feed unchanged. A remote
+branch movement or unexpected tag/branch rejects the rotation rather than
+silently rewriting a competing publication.
 The version-preparation step may commit the next application version to
 Source/main; the workflow never changes a school database.
 
@@ -312,16 +326,23 @@ dotnet run --project Tools/UpdateDistribution -c Release -- --publish-reviewed <
 ```
 
 The tool revalidates manifests, chunk sizes, chunk hashes, combined archive
-hashes and allowed files. It commits and pushes one ordinary fast-forward
-update of `main`. Concurrent publication is rejected without force pushing.
+hashes and allowed files. It prepares a parentless commit containing only the
+latest two releases, then publishes using `--force-with-lease` pinned to the
+exact reviewed `main` commit. A competing publication, changed review tree,
+extra branch or tag is rejected; no unguarded force push is permitted.
 After a rejected push, prepare a fresh workspace against the current remote.
-No source repository history or distribution history is rewritten.
+Only the private distribution branch history is rotated; Source and Sandbox
+history, installations, databases and backups are not touched.
 
-History storage is bounded by a conservative **1 GiB local Git object budget**:
-preparation refuses further publication above it. This is a stop condition,
-not a claim that tree retention deletes historical binaries or that local
-object size equals GitHub billing. Plan reviewed archival/rotation before
-reaching it; no automatic history cleanup is authorized or performed.
+The **1 GiB publication budget** measures files in the new, verified two-version
+snapshot, not historic Git objects imported from the prior distribution.
+The new branch has one parentless commit after each publication. GitHub may
+retain unreachable old Git objects until its own garbage collection, so this
+is a bounded *reachable-history* policy rather than a promise of immediate
+GitHub storage reclamation. Existing school clients shallow-clone `main`
+and fetch latest full update parts; they need no prior commit ancestry.
+An update download already in progress during branch rotation may need to
+reconnect and retry after receiving a stale-object error.
 
 ## Verification on 4 November 2026
 
@@ -329,9 +350,11 @@ reaching it; no automatic history cleanup is authorized or performed.
   are excluded from the desktop project, including stale removed signing-tool output.
 - Packaging/preparation regressions: passed (matching delta, older full update,
   corrupted delta full fallback, schema gate, isolated staging).
-- Snapshot/publication regressions: passed against disposable local Git remotes,
-  including two-version retention, no push during review, fast-forward ancestry,
-  competing-publish rejection, corrupt parts and unexpected files.
+- Snapshot/publication regressions (4 November baseline): passed against
+  disposable local Git remotes, including two-version retention, no push during
+  review, competing-publish rejection, corrupt parts and unexpected files.
+  The new parentless-history rotation has its own repeated-release, exclusive-ref,
+  guarded-push and shallow-client regression checks (run in current CI).
 - Windows authorization: 21 checks passed after correcting inherited directory
   permissions. Credential and transient plaintext SSH directories now allow
   only the current Windows user before private key material is written.
@@ -401,7 +424,7 @@ request, and launches the installer only after the dashboard accepts closure.
 Cancelled confirmation or closure clears the pending update; ordinary later
 closure cannot start it. The work guard runs once and duplicate requests are
 suppressed. The dialog now separates version/download status, optional computer
-access details and dismissal actions. A focused SQL-free WinForms suite reproduces
+access details and a single centered dismissal action. A focused SQL-free WinForms suite reproduces
 the owned-window close path and tests exactly one inert installer callback.
 
 The owner has approved merging the source after these corrections. Further package

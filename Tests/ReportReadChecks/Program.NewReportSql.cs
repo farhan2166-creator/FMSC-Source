@@ -51,34 +51,77 @@ internal static partial class Program
             ("ProvisionalCertificates","ProvisionalCertificateId",false,"CertificateDate"),("RegularLecturerCertificates","RegularLecturerCertificateId",true,"CertificateDate"),
             ("BankAccountOpeningCertificates","BankAccountOpeningCertificateId",true,"CertificateDate") })
         {
-            Execute(connection,$"CREATE TABLE dbo.{table}({key} int PRIMARY KEY,{(staff ? "StaffId" : "AdmissionId")} int,{(staff ? "StaffName" : "StudentName")} nvarchar(100),CertificateNumber nvarchar(50),{date} date,CreatedAt datetime2,CreatedByUserId int{(table=="LeaveCertificates" ? ",CertificateType nvarchar(20)" : "")});");
-            Execute(connection,$"INSERT dbo.{table} VALUES(1,1,N'Saved snapshot',N'TEST-2026-0001','2020-01-01','2026-10-22 13:45',1{(table=="LeaveCertificates" ? ",N'School'" : "")});");
+            string collectionColumns = (staff || table is "SportsCertificates" or "NoObjectionCertificates" or "ProvisionalCertificates")
+                ? ",CollectedAt datetime2,CollectedBy nvarchar(200)" : "";
+            Execute(connection,$"CREATE TABLE dbo.{table}({key} int PRIMARY KEY,{(staff ? "StaffId" : "AdmissionId")} int,{(staff ? "StaffName" : "StudentName")} nvarchar(100),CertificateNumber nvarchar(50),{date} date,CreatedAt datetime2,CreatedByUserId int{collectionColumns}{(table=="LeaveCertificates" ? ",CertificateType nvarchar(20)" : "")});");
+            Execute(connection,$"INSERT dbo.{table}({key},{(staff ? "StaffId" : "AdmissionId")},{(staff ? "StaffName" : "StudentName")},CertificateNumber,{date},CreatedAt,CreatedByUserId{(table=="LeaveCertificates" ? ",CertificateType" : "")}) VALUES(1,1,N'Saved snapshot',N'TEST-2026-0001','2020-01-01','2026-10-22 13:45',1{(table=="LeaveCertificates" ? ",N'School'" : "")});");
         }
-        Execute(connection,"INSERT dbo.LeaveCertificates VALUES(2,2,N'Saved college snapshot',N'CL-2026-0001','2026-10-01','2026-10-22',1,N'College');");
+        Execute(connection,"INSERT dbo.LeaveCertificates(LeaveRecordId,AdmissionId,StudentName,CertificateNumber,LeaveDate,CreatedAt,CreatedByUserId,CertificateType) VALUES(2,2,N'Saved college snapshot',N'CL-2026-0001','2026-10-01','2026-10-22',1,N'College');");
         foreach(var (table,key,record,leave) in new[] { ("CharacterCertificateIssues","CharacterCertificateIssueId","CertificateRecordId",false),
             ("DateOfBirthCertificateIssues","DateOfBirthCertificateIssueId","CertificateRecordId",false),("LeaveCertificateIssues","LeaveCertificateIssueId","LeaveRecordId",true) })
         {
             Execute(connection,$"CREATE TABLE dbo.{table}({key} int PRIMARY KEY,{record} int,IssuedAt datetime2,IssuedByUserId int,CollectedAt datetime2,CollectedBy nvarchar(200){(leave ? ",IssueType nvarchar(50)" : "")});");
             Execute(connection,$"INSERT dbo.{table} VALUES(1,1,'2026-10-22 14:30',1,NULL,NULL{(leave ? ",N'Original'" : "")});");
         }
+        // The live register reads the immutable issue snapshots and regular
+        // student issue log, not the original editable certificate records.
+        // Model their *current* contracts in this disposable SQL fixture.
+        Execute(connection,"""
+            CREATE TABLE dbo.CharacterCertificateIssueSnapshots (
+                CharacterCertificateIssueId int PRIMARY KEY,StudentName nvarchar(100),
+                CertificateDate date,ExamType nvarchar(60),CorrectionReason nvarchar(100));
+            CREATE TABLE dbo.DateOfBirthCertificateIssueSnapshots (
+                DateOfBirthCertificateIssueId int PRIMARY KEY,StudentName nvarchar(100),CertificateDate date);
+            CREATE TABLE dbo.LeaveCertificateIssueSnapshots (
+                LeaveCertificateIssueId int PRIMARY KEY,StudentName nvarchar(100),LeaveDate date);
+            CREATE TABLE dbo.RegularStudentCertificateIssues (
+                RegularStudentCertificateIssueId int PRIMARY KEY,RegularStudentCertificateId int,
+                StudentName nvarchar(100),CertificateDate date,IssuedAt datetime2,
+                IssuedByUserId int,CollectedAt datetime2,CollectedBy nvarchar(200));
+            INSERT dbo.CharacterCertificateIssueSnapshots VALUES
+                (1,N'Issued character snapshot','2020-01-01',N'School',NULL),
+                (2,N'Reissued character snapshot','2020-01-01',N'School',NULL);
+            INSERT dbo.DateOfBirthCertificateIssueSnapshots VALUES
+                (1,N'Issued birth snapshot','2020-01-01');
+            INSERT dbo.LeaveCertificateIssueSnapshots VALUES
+                (1,N'Issued leaving snapshot','2020-01-01'),
+                (2,N'Duplicate leaving snapshot','2020-01-01'),
+                (3,N'College leaving snapshot','2026-10-01');
+            """);
         Execute(connection,"""
             UPDATE dbo.CharacterCertificateIssues SET CollectedAt='2026-10-22 15:00',CollectedBy=N'Parent' WHERE CharacterCertificateIssueId=1;
             INSERT dbo.CharacterCertificateIssues VALUES(2,1,'2026-10-23 10:00',1,NULL,NULL);
             INSERT dbo.LeaveCertificateIssues VALUES(2,1,'2026-10-23 10:00',1,NULL,NULL,N'Duplicate'),(3,2,'2026-10-23 11:00',1,NULL,NULL,N'Original');
             UPDATE dbo.SportsCertificates SET CertificateNumber=NULL;
+            UPDATE dbo.NoObjectionCertificates SET CollectedAt='2026-10-24 10:00',CollectedBy=N'Guardian';
+            UPDATE dbo.RegularLecturerCertificates SET CollectedAt='2026-10-24 11:00',CollectedBy=N'Teacher';
             """);
         string query=CertificateIssueRegisterData.BuildQuery(true,true);
         using var register=Read(connection,query);
         Check(register.Rows.Count==12 && register.AsEnumerable().Select(r=>r.Field<string>("Certificate Type")).Distinct().Count()==10,"SQL register consolidates all ten types and keeps repeated issues");
+        Check(register.AsEnumerable().Any(r=>r.Field<string>("Recipient")=="Issued character snapshot")
+            && register.AsEnumerable().Any(r=>r.Field<string>("Recipient")=="College leaving snapshot"),
+            "Actual certificate register uses preserved issue snapshots rather than mutable source names");
+        Check(register.AsEnumerable().Where(r=>r.Field<string>("Entry")=="Saved record only")
+            .All(r=>r.Field<string>("Collection")=="Not tracked" && r.IsNull("Collected On")
+                && r.IsNull("Collected By")),
+            "Untracked saved certificates are never represented as issued, awaiting collection or collected");
         var counts=CertificateIssueRegisterData.Totals(register);
-        Check((int)counts.Rows[0]["Logged issues"]==6 && (int)counts.Rows[0]["Saved records only"]==6 && (int)counts.Rows[0]["Awaiting collection"]==5,"SQL register counts logged issues separately from untracked saved records");
+        Check((int)counts.Rows[0]["Logged issues"]==11 && (int)counts.Rows[0]["Saved records only"]==1 && (int)counts.Rows[0]["Awaiting collection"]==8,"SQL register counts logged issues separately from untracked saved records");
         Check(register.AsEnumerable().Any(r=>r.Field<string>("Certificate No.")=="Record #1"),"SQL preserves older records with no certificate number without inventing an issued number");
         using var dateRange=Read(connection,query,configure:c=>c.Parameters["@FromDate"].Value=new DateTime(2026,10,23));
         Check(dateRange.Rows.Count==3,"SQL register filters event date, not certificate date");
         using var staffRows=Read(connection,query,configure:c=>c.Parameters["@RecipientType"].Value="Staff");
         Check(staffRows.Rows.Count==2 && staffRows.AsEnumerable().All(r=>r.Field<string>("Student / Staff No.")=="Staff #1"),"SQL register keeps staff references separate from student references");
         using var collected=Read(connection,query,configure:c=>c.Parameters["@CollectionStatus"].Value="Collected");
-        Check(collected.Rows.Count==1,"SQL collection filter uses actual collection events");
+        Check(collected.Rows.Count==3 && collected.AsEnumerable().Any(row => row.Field<string>("Certificate Type")=="No Objection"
+            && row.Field<string>("Collected By")=="Guardian"),"SQL collection filter includes row-tracked NOC collection and its actual collector");
+        Check(staffRows.AsEnumerable().Any(r => r.Field<string>("Certificate Type")=="Regular Teacher / Lecturer"
+            && r.Field<string>("Collection")=="Collected" && r.Field<string>("Collected By")=="Teacher"),
+            "SQL register shows the collected teacher copy and its actual collector");
+        Check(staffRows.AsEnumerable().Any(r => r.Field<string>("Certificate Type")=="Bank Account Opening"
+            && r.Field<string>("Entry")=="Issue logged" && r.Field<string>("Collection")=="Not Collected"),
+            "SQL register includes uncollected bank copies in collection tracking");
         using var literal=Read(connection,query,configure:c=>c.Parameters["@Search"].Value="%");
         Check(literal.Rows.Count==0,"SQL search treats wildcard characters literally");
         using var allowedGeneral=Read(connection,CertificateIssueRegisterData.BuildQuery(true,false),user:3);

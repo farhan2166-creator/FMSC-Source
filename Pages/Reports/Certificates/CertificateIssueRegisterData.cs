@@ -60,12 +60,19 @@ internal static class CertificateIssueRegisterData
         bool character=table=="CharacterCertificates";
         bool regular=table=="RegularStudentCertificates";
         bool birth=table=="DateOfBirthCertificates";
-        string collectionSource=tracked?"I":"C";
         string content=character||leave||birth?"P":regular?"I":"C";
-        string hasIssue=tracked ? "I.IssuedAt IS NOT NULL" : "1=1";
+        // Every source without a separate issue table stores copy/collection
+        // details on its own row, including teacher and bank certificates.
+        bool rowCopy=!tracked;
+        string collectionSource=tracked ? "I" : "C";
+        string hasIssue=tracked ? "I.IssuedAt IS NOT NULL" : rowCopy ? "1=1" : "1=0";
         string activity=tracked ? "COALESCE(I.IssuedAt,C.CreatedAt)" : "C.CreatedAt";
         string recordedBy=tracked ? "COALESCE(I.IssuedByUserId,C.CreatedByUserId)" : "C.CreatedByUserId";
-        string collection=$"CASE WHEN NOT ({hasIssue}) THEN N'Not tracked' WHEN {collectionSource}.CollectedAt IS NULL THEN N'Not Collected' ELSE N'Collected' END";
+        string collection=tracked || rowCopy
+            ? $"CASE WHEN NOT ({hasIssue}) THEN N'Not tracked' WHEN {collectionSource}.CollectedAt IS NULL THEN N'Not Collected' ELSE N'Collected' END"
+            : "N'Not tracked'";
+        string collectedAt=tracked || rowCopy ? $"{collectionSource}.CollectedAt" : "CAST(NULL AS datetime2)";
+        string collectedBy=tracked || rowCopy ? $"{collectionSource}.CollectedBy" : "CAST(NULL AS nvarchar(200))";
         string issueId=tracked ? regular?"I.RegularStudentCertificateIssueId":$"I.{(leave ? "Leave" : character ? "Character" : "DateOfBirth")}CertificateIssueId" : "CAST(NULL AS int)";
         return $"""
             SELECT {type} CertificateType,C.{key} RecordId,{issueId} IssueId,
@@ -76,8 +83,8 @@ internal static class CertificateIssueRegisterData
                 CASE WHEN {hasIssue} THEN N'Issue logged' ELSE N'Saved record only' END EntryKind,
                 {(leave ? "COALESCE(I.IssueType,N'')" : character ? "CONCAT(COALESCE(P.ExamType,N'Type not recorded'),CASE WHEN P.CorrectionReason IS NULL THEN N'' ELSE N' / Correction' END)" : "CAST(N'' AS nvarchar(50))")} IssueType,
                 {collection} CollectionStatus,
-                {collectionSource}.CollectedAt CollectedAt,
-                {collectionSource}.CollectedBy CollectedBy
+                {collectedAt} CollectedAt,
+                {collectedBy} CollectedBy
             FROM dbo.{table} C
             {(tracked ? $"LEFT JOIN dbo.{issues} I ON I.{issueKey}=C.{key}" : "")}
             {(character ? "LEFT JOIN dbo.CharacterCertificateIssueSnapshots P ON P.CharacterCertificateIssueId=I.CharacterCertificateIssueId" : "")}

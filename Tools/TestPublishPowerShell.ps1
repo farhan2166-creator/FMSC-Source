@@ -1,7 +1,14 @@
 # Exercise the full PortableRelease publish from PowerShell 7 in a disposable
 # directory. Its prerequisite is a readability fixture, not a real MSI; this
 # output is never uploaded/installed. No SQL connection or school data is used.
-param([string]$ProjectDirectory = (Split-Path $PSScriptRoot -Parent))
+param(
+    [string]$ProjectDirectory = (Split-Path $PSScriptRoot -Parent),
+    # Optional, never used for real publication. Default stays production TFM.
+    [string]$ProbeTargetFramework = ''
+)
+if ($ProbeTargetFramework -and $ProbeTargetFramework -cne 'net10.0-windows') {
+    throw 'The optional compatibility probe only supports net10.0-windows.'
+}
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 if (-not $IsWindows -or $PSVersionTable.PSVersion.Major -lt 7) {
@@ -28,8 +35,10 @@ try {
     Set-Content -LiteralPath $sqlCmd -Value 'Synthetic offline SQL tool; not executable.'
     $prerequisite = Join-Path $scratch 'readability fixture.txt'
     Set-Content -LiteralPath $prerequisite -Value 'Test fixture; not an installer.'
+    $redist = Join-Path $scratch 'synthetic VC runtime.exe'
+    Set-Content -LiteralPath $redist -Value 'Synthetic Visual C++ runtime; not executable.'
 
-    foreach($pair in @(@('SqlCmd','sqlcmd.exe',$sqlCmd),@('LocalDb','SqlLocalDB.msi',$prerequisite))){
+    foreach($pair in @(@('SqlCmd','sqlcmd.exe',$sqlCmd),@('LocalDb','SqlLocalDB.msi',$prerequisite),@('VcRedist','vc_redist.x64.exe',$redist))){
         $folder=Join-Path $scratch $pair[0]
         $null=New-Item -ItemType Directory -Path $folder
         Copy-Item -LiteralPath $pair[2] -Destination (Join-Path $folder $pair[1])
@@ -46,12 +55,17 @@ try {
         Set-Content -LiteralPath (Join-Path $folder '999999.sql') -Value '-- retired output fixture'
         Set-Content -LiteralPath (Join-Path $folder 'retained.txt') -Value 'preserve unrelated output'
     }
+    # The opt-in compatibility probe tracks WFO1000 design-time metadata
+    # separately. Never alter production's default compiler diagnostics.
+    $tfmOverride = if ($ProbeTargetFramework) {
+        @("-p:TargetFramework=$ProbeTargetFramework",'-p:NoWarn=WFO1000')
+    } else { @() }
     $output = & dotnet publish (Join-Path $ProjectDirectory 'FMSC_SMS.csproj') `
         -c Release -r win-x64 --self-contained true -p:PublishProfile=PortableRelease `
         "-p:PublishDir=$application/" "-p:ReleaseRoot=$release/" `
-        "-p:LocalDbMsiPath=$prerequisite" "-p:DeploymentDatabaseDirectory=$database" `
+        "-p:LocalDbMsiPath=$prerequisite" "-p:VcRedistPath=$redist" "-p:DeploymentDatabaseDirectory=$database" `
         "-p:BundledGitDirectory=$transport" "-p:BundledSqlCmdPath=$sqlCmd" `
-        -p:FmscSyntheticPublishFixture=true -p:PublishSingleFile=false -p:PublishTrimmed=false 2>&1
+        -p:FmscSyntheticPublishFixture=true -p:PublishSingleFile=false -p:PublishTrimmed=false @tfmOverride 2>&1
     $code = $LASTEXITCODE
     if ($code -ne 0) {
         throw "Full PortableRelease publish failed from PowerShell 7:`n$($output -join "`n")"
@@ -63,21 +77,31 @@ try {
     if ($env:PSModulePath -ne (Join-Path $PSHOME 'Modules')) {
         throw 'Validation changed the parent PowerShell module path.'
     }
+    if ($ProbeTargetFramework) {
+        $runtimeOptions = (Get-Content -LiteralPath (Join-Path $application 'FMSC_SMS.runtimeconfig.json') -Raw | ConvertFrom-Json).runtimeOptions
+        $expectedRuntime = $ProbeTargetFramework.Replace('-windows','')
+        if ($runtimeOptions.tfm -cne $expectedRuntime) {
+            throw "Synthetic self-contained publish targets $($runtimeOptions.tfm), not $expectedRuntime."
+        }
+    }
     foreach ($relative in @('FMSC_SMS/FMSC_SMS.exe', 'FMSC_SMS/FMSC_SMS.dll',
         'FMSC_SMS/FMSC_SMS.deps.json', 'FMSC_SMS/FMSC_SMS.runtimeconfig.json',
         'FMSC_SMS/UpdateSupport/core.ps1', 'FMSC_SMS/UpdateSupport/UpdateRecovery.ps1',
         'FMSC_SMS/UpdateSupport/Launch-FMSC.ps1', 'FMSC_SMS/UpdateSupport/FMSC.Launcher.exe',
         'FMSC_SMS/UpdateSupport/FMSC.Setup.exe',
+        'FMSC_SMS/FMSC.Uninstall.exe', 'FMSC_SMS/UpdateSupport/Uninstall-FMSC.ps1',
         'FMSC_SMS/UpdateTransport/cmd/git.exe',
         'FMSC_SMS/UpdateTransport/usr/bin/ssh.exe',
         'FMSC_SMS/UpdateTransport/COPYING-GIT.txt',
         'FMSC_SMS/UpdateTransport/THIRD_PARTY_NOTICES.txt',
         'FMSC_SMS/UpdateSupport/Tools/SqlCmd/sqlcmd.exe',
         'FMSC_SMS/UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
+        'FMSC_SMS/UpdateSupport/Tools/VcRedist/vc_redist.x64.exe',
         'FMSC_SMS/UpdateSupport/MaintenanceTools.ps1',
         'FMSC_SMS/UpdateSupport/ToolCatalog.json',
         'MaintenanceTools.ps1', 'ToolCatalog.json',
-        'UpdateRecovery.ps1', 'core.ps1', 'Install FMSC_SMS.bat', 'FMSC.Setup.exe', 'Tools/SqlLocalDB.msi')) {
+        'UpdateRecovery.ps1', 'core.ps1', 'Install FMSC_SMS.bat', 'FMSC.Setup.exe',
+        'FMSC.Uninstall.exe', 'Uninstall-FMSC.ps1', 'Tools/SqlLocalDB.msi','Tools/vc_redist.x64.exe')) {
         $file = Join-Path $release $relative
         if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-Item -LiteralPath $file).Length -eq 0) {
             throw "Full publish did not copy its required output: $relative"
@@ -93,6 +117,8 @@ try {
         ,@('Installer/ToolCatalog.json', 'ToolCatalog.json')
         ,@('Installer/ToolCatalog.json', 'FMSC_SMS/UpdateSupport/ToolCatalog.json')
         ,@('Installer/Launch-FMSC.ps1', 'FMSC_SMS/UpdateSupport/Launch-FMSC.ps1')
+        ,@('Installer/Uninstall-FMSC.ps1', 'Uninstall-FMSC.ps1')
+        ,@('Installer/Uninstall-FMSC.ps1', 'FMSC_SMS/UpdateSupport/Uninstall-FMSC.ps1')
     )) {
         $expected = (Get-FileHash -LiteralPath (Join-Path $ProjectDirectory $pair[0]) -Algorithm SHA256).Hash
         $actual = (Get-FileHash -LiteralPath (Join-Path $release $pair[1]) -Algorithm SHA256).Hash
@@ -101,6 +127,7 @@ try {
     foreach ($pair in @(
         ,@($sqlCmd, (Join-Path $application 'UpdateSupport/Tools/SqlCmd/sqlcmd.exe'))
         ,@($prerequisite, (Join-Path $application 'UpdateSupport/Tools/LocalDb/SqlLocalDB.msi'))
+        ,@($redist, (Join-Path $application 'UpdateSupport/Tools/VcRedist/vc_redist.x64.exe'))
     )) {
         if ((Get-FileHash -LiteralPath $pair[0] -Algorithm SHA256).Hash -ne
             (Get-FileHash -LiteralPath $pair[1] -Algorithm SHA256).Hash) {
@@ -108,6 +135,7 @@ try {
         }
     }
     & (Join-Path $ProjectDirectory 'Tools/TestOfflineSqlPrerequisites.ps1')
+    & (Join-Path $ProjectDirectory 'Tools/TestStandaloneUninstall.ps1')
     & (Join-Path $ProjectDirectory 'Tools/TestWindowlessLauncher.ps1') -LauncherPath (Join-Path $application 'UpdateSupport/FMSC.Launcher.exe')
     # GUI setup is one native executable copied to both first install and
     # private update support. Inspect PE subsystem without running UAC or SQL.
@@ -122,6 +150,18 @@ try {
     if ($pe -lt 64 -or $pe + 96 -ge $setupBytes.Length -or
         [BitConverter]::ToUInt16($setupBytes, $pe + 24 + 68) -ne 2) {
         throw 'FMSC.Setup.exe must be a Windows GUI executable, not a console application.'
+    }
+    $uninstallRelease = Join-Path $release 'FMSC.Uninstall.exe'
+    $uninstallApplication = Join-Path $application 'FMSC.Uninstall.exe'
+    if ((Get-FileHash -LiteralPath $uninstallRelease -Algorithm SHA256).Hash -cne
+        (Get-FileHash -LiteralPath $uninstallApplication -Algorithm SHA256).Hash) {
+        throw 'The full installer and installed application must package the same uninstaller.'
+    }
+    $uninstallBytes = [IO.File]::ReadAllBytes($uninstallRelease)
+    $uninstallPe = [BitConverter]::ToInt32($uninstallBytes,0x3c)
+    if ($uninstallPe -lt 64 -or $uninstallPe+96 -ge $uninstallBytes.Length -or
+        [BitConverter]::ToUInt16($uninstallBytes,$uninstallPe+24+68) -ne 2) {
+        throw 'FMSC.Uninstall.exe must be a Windows GUI executable.'
     }
     & (Join-Path $ProjectDirectory 'Tools/TestUpdateAutomation.ps1')
     if (-not (Test-Path -LiteralPath (Join-Path $release 'Migrations') -PathType Container)) { throw 'Package must include its migrations folder even when empty.' }
@@ -143,6 +183,7 @@ try {
     # Exercise the actual copied helper, not merely its source-tree counterpart.
     # Use a child scope so the test's mocked process/console commands stay local.
     & (Join-Path $ProjectDirectory 'Tools/TestInstallerLocalDb.ps1') -InstallerPath (Join-Path $release 'core.ps1')
+    & (Join-Path $ProjectDirectory 'Tools/TestInstallerVcRuntime.ps1') -InstallerPath (Join-Path $release 'core.ps1')
     & (Join-Path $ProjectDirectory 'Tools/TestInstallerMigrations.ps1') -InstallerPath (Join-Path $release 'core.ps1')
     # Exercise the real published WinExe's headless path. These targets must be
     # refused before any network/SQL connection or interactive startup occurs.

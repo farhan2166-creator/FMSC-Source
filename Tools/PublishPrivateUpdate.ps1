@@ -44,7 +44,8 @@ try {
     $env:GIT_TERMINAL_PROMPT = '0'
     $remote = (Resolve-FmscGitHubRepository -Repository Updates -Token $env:FMSC_UPDATES_PUBLISH_TOKEN).HttpsRemote
     $previous = Join-Path $work 'previous'
-    Invoke-Checked 'git' @('clone','--quiet','--branch','main','--single-branch',$remote,$previous)
+    # Read only the current published two-version tree, not retired Git ancestry.
+    Invoke-Checked 'git' @('clone','--quiet','--depth=1','--branch','main','--single-branch',$remote,$previous)
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $app 'FMSC_SMS.dll')).ProductVersion.Split('+')[0]
     $installer = Get-Content -LiteralPath (Join-Path $app 'UpdateSupport/core.ps1') -Raw
     $schemaMatch = [regex]::Match($installer, '(?m)^\$DatabaseVersion = ''([0-9]+)''\r?$')
@@ -99,11 +100,14 @@ try {
         "- Retired from current tree: $retired",
         "- Expected distribution parent: $expected",
         '- All chunks, ZIPs and target application files verified before publication.',
-        '- Git history is preserved. No school database or credentials are included.'
+        '- The private distribution branch is rotated to one verified root commit; prior Git history is not retained in main.',
+        '- Publication uses an exact-parent force-with-lease and refuses concurrent changes, extra branches or tags.',
+        '- School databases, installer recovery evidence and credentials are not included.'
     )
     $plan | Write-Output
     if ($env:GITHUB_STEP_SUMMARY) { $plan | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY }
-    # This is the only write to distribution main: one non-forced Git ref update.
+    # The only distribution write is an atomic, exact-parent lease-guarded
+    # rotation of main to a verified root commit (no unguarded force push).
     Distribution @('--publish-reviewed',$publication,'--expected-parent',$expected)
     $published = (& git -C $publication rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read publication receipt.' }

@@ -10,7 +10,7 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
     private readonly ModernTextBox city =
         HumanUi.TextBox(false, 200);
     private readonly ModernTextBox contactNumber =
-        HumanUi.TextBox(false, 150);
+        HumanUi.TextBox(false, SchemaLengths.SchoolProfileContactNumber);
     private readonly ModernTextBox email =
         HumanUi.TextBox(false, 250);
     private readonly ModernNumericTextBox feeProrationCutoffDay =
@@ -32,7 +32,6 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
     private byte[]? _logoBytes;
     private string? _logoFileName;
     private string? _logoContentType;
-    private bool _logoRemoved;
     private readonly PictureBox signaturePreview = new() {
         Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom,
         BackColor = AppTheme.Surface, BorderStyle = BorderStyle.FixedSingle
@@ -43,7 +42,6 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
     };
     private byte[]? _signatureBytes;
     private string? _signatureContentType;
-    private bool _signatureRemoved;
     private readonly FormValidator contactValidator = new();
     public SchoolProfilePage():this(true){}
     internal SchoolProfilePage(bool initialize)
@@ -57,10 +55,11 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         Disposed += (_, _) => contactValidator.Dispose();
         SchoolContactInput.AttachPhone(contactNumber, () => contactValidator);
         SchoolContactInput.AttachEmail(email, () => contactValidator);
-        AddAction(UiText.Actions.Save, (_, _) => Save(), "Success");
+        var saveDetailsButton = AddAction(UiText.Actions.Save, (_, _) => Save(), "Success");
+        // Ctrl+S always saves the school details, even when focus is inside the
+        // independently saved logo or signature section.
+        SetSaveShortcut(saveDetailsButton);
         AddAction(UiText.Actions.Reload, (_, _) => LoadProfile());
-        AddBusyAction("Choose Logo…", ChooseLogoAsync);
-        AddAction("Remove Logo", (_, _) => RemoveLogo(), "Danger");
         UseToolbar();
         var details =
             HumanUi.Card("School Identity", "Shown wherever a document needs the school's name, address or contact details.");
@@ -98,14 +97,46 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
             new TableLayoutPanel {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 2
+                RowCount = 3
             };
-        logoPanel.RowStyles.Add(
-            new RowStyle(SizeType.Percent, 100));
-        logoPanel.RowStyles.Add(
-            new RowStyle(SizeType.Absolute, logoInfo.Height));
+        logoPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        logoPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, logoInfo.Height));
+        logoPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(46)));
         logoPanel.Controls.Add(logoPreview, 0, 0);
         logoPanel.Controls.Add(logoInfo, 0, 1);
+        // The logo column can narrow on ordinary laptop screens. Proportional
+        // columns keep all three actions inside the card without a fixed-width
+        // FlowLayoutPanel silently clipping the last button.
+        var logoButtons = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
+            Margin = Padding.Empty, Padding = Padding.Empty
+        };
+        logoButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
+        logoButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        logoButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+        logoButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var chooseLogo = new ModernButton {
+            Text = "Choose Logo…", Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Sm, 0),
+            ThemeRole = UiDesignSystem.Actions.Secondary
+        };
+        var saveLogo = new ModernButton {
+            Text = "Save Logo", Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Sm, 0),
+            ThemeRole = UiDesignSystem.Actions.Secondary
+        };
+        var removeLogo = new ModernButton {
+            Text = "Remove Logo", Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            ThemeRole = UiDesignSystem.Actions.Secondary
+        };
+        chooseLogo.Click += async (_, _) => await ChooseLogoAsync();
+        saveLogo.Click += (_, _) => SaveLogo();
+        removeLogo.Click += (_, _) => RemoveLogo();
+        logoButtons.Controls.Add(chooseLogo, 0, 0);
+        logoButtons.Controls.Add(saveLogo, 1, 0);
+        logoButtons.Controls.Add(removeLogo, 2, 0);
+        logoPanel.Controls.Add(logoButtons, 0, 2);
         logoCard.Content.Controls.Add(logoPanel);
         var feePolicyCard =
             HumanUi.Card("Fee Policy", "Separate cutoffs for admission billing and transport changes.");
@@ -143,69 +174,105 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         feePolicyFields.Controls.Add(cutoffGuidance, 0, 1);
         feePolicyFields.SetColumnSpan(cutoffGuidance, 2);
         feePolicyCard.Content.Controls.Add(feePolicyFields);
-        var signatureCard = HumanUi.Card("Principal Signature",
-            "Optional image for certificates. When turned off, the existing blank signature line remains.");
+        // Keep certificate signature management compact: the three independent
+        // image actions share one horizontal row rather than overflowing a
+        // fixed-height vertical stack on shorter windows.
+        var signatureCard = HumanUi.Card("Principal Signature");
+        const string signatureHelp =
+            "Optional image for certificates. When turned off, the existing blank signature line remains.";
+        SetToolTip(signaturePreview, signatureHelp);
+        SetToolTip(printSignature, signatureHelp);
         var signatureFields = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+            Margin = Padding.Empty, Padding = Padding.Empty
+        };
+        signatureFields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(142)));
+        signatureFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        signatureFields.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        signaturePreview.Margin = new Padding(0, 0, UiDesignSystem.Spacing.Md, 0);
+        signatureFields.Controls.Add(signaturePreview, 0, 0);
+
+        var signatureEditor = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2,
+            Margin = Padding.Empty, Padding = Padding.Empty
+        };
+        signatureEditor.RowStyles.Add(new RowStyle(
+            SizeType.Absolute, AppMetrics.TextHeight(AppTheme.NormalFont) + AppScale.Scale(7)));
+        signatureEditor.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        printSignature.Margin = Padding.Empty;
+        signatureEditor.Controls.Add(printSignature, 0, 0);
+
+        var signatureButtons = new TableLayoutPanel {
             Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
             Margin = Padding.Empty, Padding = Padding.Empty
         };
-        signatureFields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(190)));
-        signatureFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        signatureFields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(194)));
-        signatureFields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(72)));
-        signatureFields.Controls.Add(signaturePreview, 0, 0);
-        signatureFields.Controls.Add(printSignature, 1, 0);
-        var signatureButtons = new FlowLayoutPanel {
-            Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown,
-            WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty
-        };
+        signatureButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        signatureButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 31));
+        signatureButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 31));
+        signatureButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var chooseSignature = new ModernButton {
-            Text = "Choose Signature…", Width = AppScale.Scale(180),
-            Height = AppMetrics.InputControlHeight, ThemeRole = UiDesignSystem.Actions.Secondary
+            Text = "Choose Signature…", Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Sm, 0),
+            ThemeRole = UiDesignSystem.Actions.Secondary
+        };
+        var saveSignature = new ModernButton {
+            Text = "Save Signature", Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Sm, 0),
+            ThemeRole = UiDesignSystem.Actions.Secondary
         };
         var removeSignature = new ModernButton {
-            Text = "Remove Signature", Width = AppScale.Scale(180),
-            Height = AppMetrics.InputControlHeight, ThemeRole = UiDesignSystem.Actions.Secondary
+            Text = "Remove Signature", Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            ThemeRole = UiDesignSystem.Actions.Secondary
         };
         chooseSignature.Click += async (_, _) => await ChooseSignatureAsync();
+        saveSignature.Click += (_, _) => SaveSignature();
         removeSignature.Click += (_, _) => RemoveSignature();
-        signatureButtons.Controls.Add(chooseSignature);
-        signatureButtons.Controls.Add(removeSignature);
-        signatureFields.Controls.Add(signatureButtons, 2, 0);
+        signatureButtons.Controls.Add(chooseSignature, 0, 0);
+        signatureButtons.Controls.Add(saveSignature, 1, 0);
+        signatureButtons.Controls.Add(removeSignature, 2, 0);
+        signatureEditor.Controls.Add(signatureButtons, 0, 1);
+        signatureFields.Controls.Add(signatureEditor, 1, 0);
         signatureCard.Content.Controls.Add(signatureFields);
-        /* Preserve the existing School Identity, Fee Policy and Logo layout. */
 
         int gap = UiDesignSystem.Spacing.Md;
-        var root =
-            new TableLayoutPanel {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 3,
-                Margin = new Padding(0),
-                Padding = new Padding(0)
-            };
-        root.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Percent, 62));
-        root.ColumnStyles.Add(
-            new ColumnStyle(SizeType.Percent, 38));
-        root.RowStyles.Add(
-            new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(3) + gap));
-        root.RowStyles.Add(
-            new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1) + guidanceHeight));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(137)));
-        details.Margin = new Padding(0, 0, gap, gap);
-        feePolicyCard.Margin = new Padding(0, 0, gap, 0);
-        logoCard.Margin = new Padding(0);
-        root.Controls.Add(details, 0, 0);
-        root.Controls.Add(feePolicyCard, 0, 1);
+        // Two independent columns, not a row span across mixed absolute and
+        // percent rows. The former row-span metadata was correct but WinForms
+        // visually stopped the logo at the fee-policy row on some sizes.
+        var root = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+            Margin = Padding.Empty, Padding = Padding.Empty
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var leftColumn = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4,
+            Margin = new Padding(0, 0, gap, 0), Padding = Padding.Empty
+        };
+        leftColumn.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        leftColumn.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(3) + gap));
+        leftColumn.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1) + guidanceHeight + gap));
+        int signatureRowHeight = signatureCard.Header.Height +
+            signatureCard.Padding.Vertical + signatureCard.Content.Padding.Vertical +
+            Math.Max(AppScale.Scale(78),
+                AppMetrics.TextHeight(AppTheme.NormalFont) +
+                AppMetrics.InputControlHeight + AppScale.Scale(9));
+        leftColumn.RowStyles.Add(new RowStyle(SizeType.Absolute, signatureRowHeight));
+        leftColumn.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        details.Margin = new Padding(0, 0, 0, gap);
+        feePolicyCard.Margin = new Padding(0, 0, 0, gap);
+        signatureCard.Margin = Padding.Empty;
+        logoCard.Margin = Padding.Empty;
+        leftColumn.Controls.Add(details, 0, 0);
+        leftColumn.Controls.Add(feePolicyCard, 0, 1);
+        leftColumn.Controls.Add(signatureCard, 0, 2);
+        root.Controls.Add(leftColumn, 0, 0);
         root.Controls.Add(logoCard, 1, 0);
-        root.SetRowSpan(logoCard, 2);
-        signatureCard.Margin = new Padding(0);
-        root.Controls.Add(signatureCard, 0, 2);
-        root.SetColumnSpan(signatureCard, 2);
         SetContent(
             root,
-            "Update the school details and click Save. Leave the fee cutoff day blank to start monthly fees in the admission month.");
+            "Save school details separately. Logo and principal signature each have their own Save and Remove buttons.");
         FormFlow.EnterMovesToNext(this);
         if(initialize)Defer(LoadProfile);
     }
@@ -217,8 +284,6 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         {
             _profileReadCompleted = false;
             contactValidator.ClearAll();
-            _logoRemoved = false;
-            _signatureRemoved = false;
             var dt =
                 DatabaseHelper.QueryUser("GetSchoolProfile");
             if (dt.Rows.Count == 0)
@@ -277,7 +342,7 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
             {
                 var saved = signatures.Rows[0];
                 _signatureBytes = saved["PrincipalSignatureImage"] is byte[] image ? image : null;
-                _signatureContentType = TextOf(saved["PrincipalSignatureContentType"]);
+                _signatureContentType = saved["PrincipalSignatureContentType"] is DBNull ? null : Convert.ToString(saved["PrincipalSignatureContentType"]);
                 printSignature.Checked = saved["PrintPrincipalSignature"] is not DBNull
                     && Convert.ToBoolean(saved["PrintPrincipalSignature"]);
                 UiHelper.ReplacePictureImage(signaturePreview,
@@ -298,62 +363,64 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
     {
         try
         {
-            using var dialog =
-                new OpenFileDialog {
-                    Filter =
-                        "Image files (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png",
-                    Title =
-                        "Choose the school logo"
-                };
-            if (dialog.ShowDialog(FindForm()) != DialogResult.OK)
-                return;
-            byte[] bytes =
-                await BoundedImageFile.ReadAsync(dialog.FileName, 2_000_000);
+            using var dialog = new OpenFileDialog {
+                Filter = "Image files (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png",
+                Title = "Choose the school logo"
+            };
+            if (dialog.ShowDialog(FindForm()) != DialogResult.OK) return;
+            byte[] bytes = await BoundedImageFile.ReadAsync(dialog.FileName, 2_000_000);
             if (IsDisposed) return;
-            using var validatedLogo = BitmapFromBytes(bytes);
-            if (!Confirm("Save this image as the school logo now? Any other changes on this page will also be saved.", "Save School Logo", defaultYes: false))
-                return;
-            UiHelper.ReplacePictureImage(logoPreview, new Bitmap(validatedLogo));
+            using var validated = BitmapFromBytes(bytes);
+            UiHelper.ReplacePictureImage(logoPreview, new Bitmap(validated));
             _logoBytes = bytes;
-            _logoFileName =
-                Path.GetFileName(dialog.FileName);
-            _logoContentType =
-                Path.GetExtension(dialog.FileName)
-                    .ToLowerInvariant() switch {
-                        ".png" => "image/png",
-                        _ => "image/jpeg"
-                    };
-            _logoRemoved = false;
-            logoInfo.Text =
-                $"{_logoFileName} (not saved yet)";
-            SetStatus("Logo selected. Click Save to store it.");
-            Save();
+            _logoFileName = Path.GetFileName(dialog.FileName);
+            _logoContentType = Path.GetExtension(dialog.FileName).Equals(".png",
+                StringComparison.OrdinalIgnoreCase) ? "image/png" : "image/jpeg";
+            logoInfo.Text = $"{_logoFileName} (not saved yet)";
+            SetStatus("Logo selected. Click Save Logo to store it; school details are not changed.");
         }
-        catch (InvalidDataException ex)
-        {
-            if (!IsDisposed) SetStatus(ex.Message, PageStatusKind.Warning);
-        }
-        catch (Exception ex)
-        {
-            Fail(ex);
-        }
+        catch (InvalidDataException ex) { if (!IsDisposed) SetStatus(ex.Message, PageStatusKind.Warning); }
+        catch (Exception ex) { Fail(ex); }
     }
+
+    private void SaveLogo()
+    {
+        try
+        {
+            if (!_profileReadCompleted) { Warn("Reload the school profile first."); return; }
+            if (_logoBytes is null) { Warn("Choose a logo before saving."); return; }
+            DatabaseHelper.Execute("SaveSchoolLogo",
+                DatabaseHelper.P("@UserId", CurrentUser.UserId),
+                new SqlParameter("@LogoImage", SqlDbType.VarBinary, -1) { Value = _logoBytes },
+                DatabaseHelper.P("@LogoFileName", _logoFileName),
+                DatabaseHelper.P("@LogoContentType", _logoContentType));
+            logoInfo.Text = _logoFileName ?? "Logo on file.";
+            CaptureLogoBaseline();
+            Info("School logo saved. Other school details were not changed.");
+        }
+        catch (Exception ex) { Fail(ex); }
+    }
+
     private void RemoveLogo()
     {
-        if (_logoBytes is null)
+        if (!_profileReadCompleted) { Warn("Reload the school profile first."); return; }
+        if (_logoBytes is null) { Warn("There is no logo to remove."); return; }
+        if (!Confirm("Remove the school logo now? School details and signature will not change.",
+            "Remove School Logo", defaultYes: false)) return;
+        try
         {
-            Warn("There is no logo to remove.");
-            return;
+            DatabaseHelper.Execute("SaveSchoolLogo",
+                DatabaseHelper.P("@UserId", CurrentUser.UserId),
+                new SqlParameter("@LogoImage", SqlDbType.VarBinary, -1) { Value = DBNull.Value },
+                DatabaseHelper.P("@LogoFileName", null),
+                DatabaseHelper.P("@LogoContentType", null));
+            ClearLogoState();
+            CaptureLogoBaseline();
+            Info("School logo removed. Other school details were not changed.");
         }
-        if (!Confirm("Remove the school logo and save now? Any other changes on this page will also be saved.", "Remove School Logo", defaultYes: false))
-            return;
-        ClearLogoState();
-        _logoRemoved = true;
-        logoInfo.Text =
-            "No logo (not saved yet)";
-        SetStatus("Logo removed. Click Save to make this permanent.");
-        Save();
+        catch (Exception ex) { Fail(ex); }
     }
+
     private void ClearLogoState()
     {
         UiHelper.ReplacePictureImage(logoPreview, null);
@@ -379,18 +446,56 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
             _signatureBytes = bytes;
             _signatureContentType = Path.GetExtension(dialog.FileName).Equals(".png",
                 StringComparison.OrdinalIgnoreCase) ? "image/png" : "image/jpeg";
-            _signatureRemoved = false;
-            SetStatus("Principal signature selected. Click Save to store it.");
+            SetStatus("Signature selected. Click Save Signature to store it independently.");
         }
         catch (InvalidDataException ex) { if (!IsDisposed) SetStatus(ex.Message, PageStatusKind.Warning); }
         catch (Exception ex) { Fail(ex); }
     }
+
+    private void SaveSignature()
+    {
+        try
+        {
+            if (!_profileReadCompleted) { Warn("Reload the school profile first."); return; }
+            if (printSignature.Checked && _signatureBytes is null) {
+                Warn("Choose a principal signature before enabling printing."); return;
+            }
+            DatabaseHelper.Execute("SaveSchoolCertificateSignature",
+                DatabaseHelper.P("@UserId", CurrentUser.UserId),
+                new SqlParameter("@SignatureImage", SqlDbType.VarBinary, -1) {
+                    Value = (object?)_signatureBytes ?? DBNull.Value
+                },
+                DatabaseHelper.P("@SignatureContentType",
+                    _signatureBytes is null ? null : _signatureContentType),
+                DatabaseHelper.P("@PrintSignature", printSignature.Checked));
+            CaptureSignatureBaseline();
+            Info("Principal signature settings saved. School details and logo were not changed.");
+        }
+        catch (Exception ex) { Fail(ex); }
+    }
+
     private void RemoveSignature()
     {
-        ClearSignatureState();
-        _signatureRemoved = true;
-        SetStatus("Principal signature removed. Click Save to confirm.");
+        if (!_profileReadCompleted) { Warn("Reload the school profile first."); return; }
+        if (_signatureBytes is null && loadedSignatureBytes is null && !printSignature.Checked) {
+            Warn("There is no principal signature to remove."); return;
+        }
+        if (!Confirm("Remove the principal signature and disable signature printing? School details and logo will not change.",
+            "Remove Principal Signature", defaultYes: false)) return;
+        try
+        {
+            DatabaseHelper.Execute("SaveSchoolCertificateSignature",
+                DatabaseHelper.P("@UserId", CurrentUser.UserId),
+                new SqlParameter("@SignatureImage", SqlDbType.VarBinary, -1) { Value = DBNull.Value },
+                DatabaseHelper.P("@SignatureContentType", null),
+                DatabaseHelper.P("@PrintSignature", false));
+            ClearSignatureState();
+            CaptureSignatureBaseline();
+            Info("Principal signature removed. School details and logo were not changed.");
+        }
+        catch (Exception ex) { Fail(ex); }
     }
+
     private void ClearSignatureState()
     {
         UiHelper.ReplacePictureImage(signaturePreview, null);
@@ -410,137 +515,78 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
     {
         try
         {
-            if (!_profileReadCompleted)
-            {
-                Warn("The school profile has not been read successfully, so saving now could overwrite it with blanks. Use Reload first.");
+            if (!_profileReadCompleted) {
+                Warn("The school profile has not been read successfully. Use Reload first.");
                 return;
             }
-            if (!ValidateRequiredInputs())
-                return;
+            if (!ValidateRequiredInputs()) return;
             contactValidator.Begin();
-            contactValidator.Rule(contactNumber, () => SchoolContactValidation.IsValidPhoneList(contactNumber.Text), SchoolContactValidation.PhoneMessage);
-            contactValidator.Rule(email, () => EmailAddressValidator.IsBlankOrValid(email.Text),
+            contactValidator.Rule(contactNumber,
+                () => SchoolContactValidation.IsValidPhoneList(contactNumber.Text),
+                SchoolContactValidation.PhoneMessage);
+            contactValidator.Rule(email,
+                () => EmailAddressValidator.IsBlankOrValid(email.Text),
                 "Enter a valid email address, such as name@example.com.");
             if (!contactValidator.Finish()) return;
-            if(!WholeRupees.IsWhole(feeProrationCutoffDay.Value)||!WholeRupees.IsWhole(transportCutoffDay.Value))
-            {Warn("Cutoff days must be whole numbers from 1 to 28, or blank.");return;}
-            if (string.IsNullOrWhiteSpace(schoolName.Text))
-            {
-                Warn("Enter the school name.");
-                return;
+            if (!WholeRupees.IsWhole(feeProrationCutoffDay.Value)
+                || !WholeRupees.IsWhole(transportCutoffDay.Value)) {
+                Warn("Cutoff days must be whole numbers from 1 to 28, or blank."); return;
             }
-            if (printSignature.Checked && _signatureBytes is null)
-            {
-                Warn("Choose a principal signature before turning on printing.");
-                return;
+            if (string.IsNullOrWhiteSpace(schoolName.Text)) {
+                Warn("Enter the school name."); return;
             }
-            byte[]? logoToSave =
-                _logoRemoved
-                    ? null
-                    : _logoBytes;
-            string? logoFileNameToSave =
-                _logoRemoved
-                    ? null
-                    : _logoFileName;
-            string? logoContentTypeToSave =
-                _logoRemoved
-                    ? null
-                    : _logoContentType;
-            DatabaseHelper.Execute(
-                "SaveSchoolProfile",
-                DatabaseHelper.P(
-                    "@UserId",
-                    CurrentUser.UserId),
-                DatabaseHelper.P(
-                    "@SchoolName",
-                    schoolName.Text.Trim()),
-                DatabaseHelper.P(
-                    "@AddressLine",
-                    DatabaseHelper.OptionalText(addressLine.Text)),
-                DatabaseHelper.P(
-                    "@City",
-                    DatabaseHelper.OptionalText(city.Text)),
-                DatabaseHelper.P(
-                    "@ContactNumber",
-                    DatabaseHelper.OptionalText(contactNumber.Text)),
-                DatabaseHelper.P(
-                    "@Email",
-                    DatabaseHelper.OptionalText(email.Text)),
-                new SqlParameter(
-                    "@LogoImage",
-                    SqlDbType.VarBinary,
-                    -1) {
-                    Value =
-                        (object?)logoToSave
-                        ?? DBNull.Value
-                },
-                DatabaseHelper.P(
-                    "@LogoFileName",
-                    logoFileNameToSave),
-                DatabaseHelper.P(
-                    "@LogoContentType",
-                    logoContentTypeToSave),
-                DatabaseHelper.NullableInt(
-                    "@FeeProrationCutoffDay",
-                    feeProrationCutoffDay.Value > 0
-                        ? (int?)feeProrationCutoffDay.Value
-                        : null),
-                DatabaseHelper.NullableInt("@TransportCutoffDay",transportCutoffDay.Value>0?(int?)transportCutoffDay.Value:null));
-            DatabaseHelper.Execute("SaveSchoolCertificateSignature",
+            DatabaseHelper.Execute("SaveSchoolProfileDetails",
                 DatabaseHelper.P("@UserId", CurrentUser.UserId),
-                new SqlParameter("@SignatureImage", SqlDbType.VarBinary, -1) {
-                    Value = (object?)_signatureBytes ?? DBNull.Value
-                },
-                DatabaseHelper.P("@SignatureContentType", _signatureContentType),
-                DatabaseHelper.P("@PrintSignature", printSignature.Checked));
-            _logoRemoved = false;
-            _signatureRemoved = false;
-            Info("School profile saved.");
-            LoadProfile();
+                DatabaseHelper.P("@SchoolName", schoolName.Text.Trim()),
+                DatabaseHelper.P("@AddressLine", DatabaseHelper.OptionalText(addressLine.Text)),
+                DatabaseHelper.P("@City", DatabaseHelper.OptionalText(city.Text)),
+                DatabaseHelper.P("@ContactNumber", DatabaseHelper.OptionalText(contactNumber.Text)),
+                DatabaseHelper.P("@Email", DatabaseHelper.OptionalText(email.Text)),
+                DatabaseHelper.NullableInt("@FeeProrationCutoffDay",
+                    feeProrationCutoffDay.Value > 0 ? (int?)feeProrationCutoffDay.Value : null),
+                DatabaseHelper.NullableInt("@TransportCutoffDay",
+                    transportCutoffDay.Value > 0 ? (int?)transportCutoffDay.Value : null));
+            CaptureDetailsBaseline();
+            Info("School information and fee policy saved. Logo and signature were not changed.");
             Defer(() => FormValidator.FocusInput(schoolName));
         }
-        catch (Exception ex)
-        {
-            Fail(ex);
-        }
+        catch (Exception ex) { Fail(ex); }
     }
-    /* # - the field and logo values as they were when the profile was last loaded. */
-    private string[] loadedValues =
-        Array.Empty<string>();
+
+    /* Track independent baselines so saving one section does not discard
+       unsaved edits to either of the others. */
+    private string[] loadedValues = Array.Empty<string>();
     private byte[]? loadedLogoBytes;
     private string? loadedLogoFileName;
-    private bool loadedLogoRemoved;
     private byte[]? loadedSignatureBytes;
     private string? loadedSignatureContentType;
-    private bool loadedSignatureRemoved;
-    private string[] CurrentValues() => new[]
-    {
-        schoolName.Text,
-        addressLine.Text,
-        city.Text,
-        contactNumber.Text,
-        email.Text,
-        feeProrationCutoffDay.Value.ToString(),transportCutoffDay.Value.ToString(),
-        printSignature.Checked.ToString()
+    private bool loadedPrintSignature;
+    private string[] CurrentValues() => new[] {
+        schoolName.Text, addressLine.Text, city.Text, contactNumber.Text,
+        email.Text, feeProrationCutoffDay.Value.ToString(), transportCutoffDay.Value.ToString()
     };
-    private void CaptureBaseline()
+    private void CaptureDetailsBaseline() => loadedValues = CurrentValues();
+    private void CaptureLogoBaseline()
     {
-        loadedValues =
-            CurrentValues();
-        loadedLogoBytes =
-            _logoBytes;
-        loadedLogoFileName =
-            _logoFileName;
-        loadedLogoRemoved =
-            _logoRemoved;
+        loadedLogoBytes = _logoBytes;
+        loadedLogoFileName = _logoFileName;
+    }
+    private void CaptureSignatureBaseline()
+    {
         loadedSignatureBytes = _signatureBytes;
         loadedSignatureContentType = _signatureContentType;
-        loadedSignatureRemoved = _signatureRemoved;
+        loadedPrintSignature = printSignature.Checked;
+    }
+    private void CaptureBaseline()
+    {
+        CaptureDetailsBaseline();
+        CaptureLogoBaseline();
+        CaptureSignatureBaseline();
     }
     /// <summary>implements IUnsavedChanges so the dashboard's navigation guard can see this page.</summary>
     public bool HasUnsavedChanges =>
         ComputeHasUnsavedChanges();
-    bool IUnsavedChanges.HasUnsavedChanges => false;
+    bool IUnsavedChanges.HasUnsavedChanges => ComputeHasUnsavedChanges();
     public string UnsavedChangesMessage =>
         "This record has unsaved changes.\r\n\r\nIf you leave now, those changes will be lost.";
     /* Renamed from HasUnsavedChanges so the interface property can take that name: the page had a private method of that name. */
@@ -550,10 +596,9 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
             return false;
         try
         {
-            if (_logoRemoved != loadedLogoRemoved || _signatureRemoved != loadedSignatureRemoved)
-                return true;
             if (!ReferenceEquals(_signatureBytes, loadedSignatureBytes) ||
-                !string.Equals(_signatureContentType, loadedSignatureContentType, StringComparison.Ordinal))
+                !string.Equals(_signatureContentType, loadedSignatureContentType, StringComparison.Ordinal) ||
+                printSignature.Checked != loadedPrintSignature)
                 return true;
             if (!ReferenceEquals(_logoBytes, loadedLogoBytes))
                 return true;

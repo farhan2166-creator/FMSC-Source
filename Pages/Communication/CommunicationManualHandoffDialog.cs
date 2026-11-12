@@ -52,6 +52,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     };
     private CommunicationManualRecipient? current;
     private bool busy;
+    private FileStream? batchLease;
 
     internal CommunicationManualHandoffDialog(Guid batchId)
     {
@@ -91,7 +92,13 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         reported.Click+=async (_,_)=>await MarkAsync("ReportedSent");
         skip.Click+=async (_,_)=>await MarkAsync("Skipped");
         close.Click+=(_,_)=>Close();
-        Load+=async (_,_)=>await RefreshAsync();
+        Shown+=async (_,_)=> {
+            try { batchLease=CommunicationHandoffLease.Acquire(batchId); }
+            catch(Exception ex) { Warn(ex.Message); Close(); return; }
+            await RefreshAsync();
+        };
+        FormClosing+=(_,e)=> { if(busy)e.Cancel=true; };
+        Disposed+=(_,_)=> { batchLease?.Dispose(); batchLease=null; };
         ApplyAvailability();
     }
 

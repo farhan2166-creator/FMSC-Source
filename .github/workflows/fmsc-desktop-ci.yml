@@ -12,10 +12,12 @@ on:
       - 'Services/Backup/**'
       - 'Tests/CloudBackupCryptoChecks/**'
       - 'Pages/Administration/BackupRestorePage.cs'
+      - 'Pages/Administration/CloudBackupSettingsDialog.cs'
       - 'Tests/ThemeSmokeChecks/**'
       - 'Tests/HelpChecks/**'
       - 'Tests/ReportReadChecks/**'
       - 'Tools/test_permission_policy.py'
+      - 'Tools/test_first_run_schema_contract.py'
       - 'Core/MaintenanceTools.cs'
       - 'Core/SqlDependencyRepair.cs'
       - 'Installer/**'
@@ -24,12 +26,24 @@ on:
       - 'FMSC_SMS.csproj'
       - 'Tools/PrepareBundledGit.ps1'
       - 'Tools/TestPublishPowerShell.ps1'
+      - 'Tools/UpdateDistribution/**'
+      - 'Tools/PublishPrivateUpdate.ps1'
+      - 'Tools/TestInstallerMigrations.ps1'
+      - 'Tools/ReleaseProbeAcceptance.ps1'
+      - 'Tools/VerifyInstalledFmscRelease.ps1'
       - 'Tools/PrepareWorkflow04Release.ps1'
+      - 'Tools/AssertWorkflow04MigrationInventory.ps1'
+      - 'Tools/ResolveWorkflow04Version.ps1'
+      - 'Tools/ReadWorkflow04SourceVersions.ps1'
       - 'Tools/ResolveFmscGitHubRepository.ps1'
       - 'Tools/TestGitHubRepositoryIdentity.ps1'
       - 'Tools/DispatchSandboxAcceptance.ps1'
       - 'Tools/WaitForSandboxAttestation.ps1'
       - 'Tools/TestWorkflow04Orchestration.ps1'
+      - 'Tools/AssertWorkflow04Artifact.ps1'
+      - 'Tools/TestWorkflow04Artifact.ps1'
+      - 'Tools/test_workflow04_retry_guard.py'
+      - '.github/workflows/fmsc-workflow04-auto-retry.yml'
       - '.github/workflows/fmsc-windows-download.yml'
       - '.github/workflows/fmsc-desktop-ci.yml'
   push:
@@ -103,6 +117,9 @@ jobs:
 
       - name: Compile native WinForms smoke checks
         run: dotnet build Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release
+
+      - name: Verify all current SQL compatibility contracts are embedded
+        run: dotnet run --project Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release --no-build -- --compatibility-contract-inventory
 
       - name: Verify maintenance tool lifecycle without downloads or SQL
         shell: pwsh
@@ -179,9 +196,17 @@ jobs:
         shell: pwsh
         run: .\Tools\TestInstallerLocalDb.ps1
 
+      - name: Verify Visual C++ prerequisite before LocalDB (synthetic)
+        shell: pwsh
+        run: .\Tools\TestInstallerVcRuntime.ps1
+
       - name: Test migration discovery, versions and backup ordering
         shell: powershell
         run: .\Tools\TestInstallerMigrations.ps1
+
+      - name: Verify standalone uninstaller protects data (synthetic)
+        shell: powershell
+        run: .\Tools\TestStandaloneUninstall.ps1
 
       - name: Verify normal launcher creates no PowerShell console
         shell: powershell
@@ -219,22 +244,25 @@ jobs:
           $transport = Join-Path $root 'MinGit'
           $application = Join-Path $root 'Application'
           $msi = Join-Path $root 'synthetic-LocalDB.msi'
+          $vcRedist = Join-Path $root 'synthetic-vc_redist.x64.exe'
           $sqlCmd = Join-Path $root 'synthetic-sqlcmd.exe'
           try {
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-Content -LiteralPath $msi -Value 'Disposable fixture only'
+            Set-Content -LiteralPath $vcRedist -Value 'Disposable fixture only'
             Set-Content -LiteralPath $sqlCmd -Value 'Disposable fixture only'
             & .\Tools\PrepareBundledGit.ps1 -DestinationDirectory $transport
-            foreach($pair in @(@('SqlCmd','sqlcmd.exe',$sqlCmd),@('LocalDb','SqlLocalDB.msi',$msi))){
+            foreach($pair in @(@('SqlCmd','sqlcmd.exe',$sqlCmd),@('LocalDb','SqlLocalDB.msi',$msi),@('VcRedist','vc_redist.x64.exe',$vcRedist))){
               $folder=Join-Path $root $pair[0]
               New-Item -ItemType Directory -Path $folder | Out-Null
               Copy-Item -LiteralPath $pair[2] -Destination (Join-Path $folder $pair[1])
             }
-            dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output $application -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$transport" "-p:LocalDbMsiPath=$msi" "-p:BundledSqlCmdPath=$sqlCmd" -p:FmscSyntheticPublishFixture=true -p:PublishSingleFile=false -p:PublishTrimmed=false
+            dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output $application -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$transport" "-p:LocalDbMsiPath=$msi" "-p:VcRedistPath=$vcRedist" "-p:BundledSqlCmdPath=$sqlCmd" -p:FmscSyntheticPublishFixture=true -p:PublishSingleFile=false -p:PublishTrimmed=false
             if ($LASTEXITCODE -ne 0) { throw 'Bundled updater smoke publish failed.' }
             foreach ($relative in @('UpdateTransport/cmd/git.exe','UpdateTransport/usr/bin/ssh.exe',
                 'UpdateTransport/COPYING-GIT.txt','UpdateTransport/THIRD_PARTY_NOTICES.txt',
-                'UpdateSupport/Tools/SqlCmd/sqlcmd.exe','UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')) {
+                'UpdateSupport/Tools/SqlCmd/sqlcmd.exe','UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
+                'UpdateSupport/Tools/VcRedist/vc_redist.x64.exe')) {
               if (-not (Test-Path -LiteralPath (Join-Path $application $relative) -PathType Leaf)) {
                 throw "Published Git/SSH runtime is incomplete: $relative"
               }

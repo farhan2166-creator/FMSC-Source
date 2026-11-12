@@ -121,6 +121,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
     private readonly ModernTextBox contact = HumanUi.TextBox(false, SchemaLengths.StudentContactNumber);
     private readonly ModernTextBox altContact = HumanUi.TextBox(false, SchemaLengths.AlternateContactNumber);
     private readonly ModernComboBox schoolMessagesConsent = HumanUi.Combo();
+    private bool? loadedSchoolMessageConsent;
     private readonly ModernTextBox name = HumanUi.TextBox(false, SchemaLengths.StudentName);
     private readonly ModernDatePicker dob = HumanUi.Date();
     private readonly ModernComboBox gender = HumanUi.Combo();
@@ -2697,6 +2698,11 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
             !(dob.Checked && dob.Value.Date > admissionDate.Value.Date),
             "Later than admission date",
             () => !(dob.Checked && dob.Value.Date > admissionDate.Value.Date));
+        // Unknown is a display/default state, never a silent undo of recorded consent.
+        v.Check(schoolMessagesConsent,
+            loadedSchoolMessageConsent is null || RequestedSchoolMessageConsent is not null,
+            "Choose Yes or No. A recorded choice cannot be changed to Not recorded.",
+            () => loadedSchoolMessageConsent is null || RequestedSchoolMessageConsent is not null);
         if (isNew && detailsComplete)
         {
             v.Required(Campus, "Select a campus");
@@ -2865,6 +2871,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                       ?? string.Empty;
             bool? recordedSchoolConsent = await AdmissionConsentStore.ReadAsync(admissionId);
             if (IsDisposed || version != admissionLoadVersion) return false;
+            loadedSchoolMessageConsent = recordedSchoolConsent;
             schoolMessagesConsent.SelectedIndex = recordedSchoolConsent is null ? 0 : recordedSchoolConsent.Value ? 1 : 2;
             address.Text =
                 row["Address"] == DBNull.Value
@@ -4650,6 +4657,7 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
         contact.Clear();
         altContact.Clear();
         schoolMessagesConsent.SelectedIndex = 0;
+        loadedSchoolMessageConsent = null;
         address.Clear();
         placeOfBirthInput.Clear();
         prevSchool.Clear();

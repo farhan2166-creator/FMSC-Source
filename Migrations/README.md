@@ -1,6 +1,6 @@
 # Production database migrations
 
-**Current source target (8 November 2026): FMSC application 1.0.16, database schema 10.** The committed consecutive production migration chain is `2.sql`–`10.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
+**Current source target (11 November 2026): FMSC application 1.0.31, database schema 17.** The committed consecutive production migration chain is `2.sql`–`17.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
 
 **Historical starting point:** The first production release used application **1.0.0**, database **1**.
 The schema-1 baseline contains the complete original production schema.
@@ -37,7 +37,7 @@ communication module, when present, gets a permission-checked contact-linking
 procedure plus pre-send consent revalidation. No messages send automatically and
 the migration does not install the optional module.
 
-Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed **2.sql–10.sql** production chain where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts. See [the historical baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
+Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed **2.sql–16.sql** production chain where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts. See [the historical baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
 
 # Apply migrations without the installer
 
@@ -133,7 +133,7 @@ The application must not expose sending until SQL writers, authorization, provid
 validation, verified callbacks and recovery checks are complete. See
 [Communication rebuild contract](../Docs/COMMUNICATION_REBUILD_V2.md).
 
-## Schema 10 — Provider-neutral groundwork and manual WhatsApp (current source target)
+## Schema 10 — Provider-neutral groundwork and manual WhatsApp (historical feature milestone)
 
 Migration `10.sql` requires version 9. It adds empty optional guardian/staff email
 fields on their existing school records, an opt-out-only email suppression table,
@@ -158,3 +158,62 @@ resume/skip/operator-report semantics, and a database trigger refusing a
 provider API attempt from manual profiles. The administrator must explicitly
 enable the free WhatsApp handoff; it never sends itself or produces verified
 delivery receipts. This extension is in the **committed `10.sql`**; migration 9 is not retroactively edited. An operator report does not prove provider delivery. A database upgrade to 10 alone cannot add the new WinForms UI to an older installed executable; use a validated matching application build.
+
+## Schema 14 — Editable fee-type policy for new-school setup
+
+Migration `14.sql` requires schema 13. It exposes the existing `IsMandatory` and
+`IsTransportLinked` flags through `GetFeeTypes` and extends
+`SaveFeeTypeWithDefaultFrequency` to persist both in the same transaction as the
+fee name, description, and frequency. Existing flags, fee configurations,
+student assignments and bills are **not** modified by the migration. Older
+procedure callers that omit the two new optional parameters retain their
+current policy values. Operators can now open **Fee Rate Setup → Fee Types**,
+select Tuition Fee (or another non-transport fee), mark **Mandatory fee**, save,
+then re-run **Setup Readiness**. Class fee rates remain separately configured.
+
+The disposable Lifecycle SQL fixture verifies the same save path used by the
+editor, including the missing-mandatory readiness warning, its resolution,
+transport-linked round-trip and a legacy caller that omits new parameters.
+
+
+## Schema 15 — First admission on a fresh or restored empty database
+
+Migration `15.sql` requires schema 14 and initializes the missing singleton
+`dbo.AdmissionNumberCounter` (`CounterId=1`) without requiring the operator
+to run SQL. An empty school starts with `LastNumber=0`, so the normal admission
+writer allocates admission number 1. Existing counter values are left untouched.
+If the counter has disappeared from a populated database, the migration
+conservatively derives the largest numeric prefix from existing official
+admission numbers; ambiguous or out-of-range numbers cause the migration to
+abort rather than risk duplicate numbering. A verified backup and transactional
+rollback are managed by the installer before this migration.
+
+The disposable SQL lifecycle tests now assert the seed exists before any
+fixture overrides it, submit real first and second admissions through
+`dbo.AdmitStudent`, verify 1/2 and counter progression, then roll back the
+test transaction. Only after these checks does the fixture set the historical
+test reference counter to 1000. No changes to the Admissions UI are needed.
+
+## Schema 16 — Empty-school prerequisites and optional transport fees
+
+Migration `16.sql` requires schema 15. On an owned genuinely **empty** school
+(no users or students), it initializes only the authoritative Administrator and
+Accountant reference roles, any missing entries in the reviewed 31-code
+permission catalog, and the `BillingAutomationState` singleton.
+**It never creates an administrator login or any school profile, student,
+fee rate or payment.** Existing user-bearing school databases are not seeded;
+a database with students but no users is refused for supervised recovery.
+
+The first administrator must still be created through the normal, secure
+`BootstrapFirstAdministrator` process. The SQL lifecycle and disposable
+Windows installer checks now assert the prerequisites exist without direct
+test-only inserts of the reference roles or permissions.
+
+The default `AdmitStudent` missing-fee check is aligned to Setup Readiness:
+a mandatory transport-linked fee rate is required **only when a student uses
+transport**. Quick Registration defaults transport-linked choices to opt-out
+and submits its explicitly reviewed fee list; ordinary mandatory nontransport
+fees remain required by setup validation. The migration validates the
+original SQL predicate before altering it and aborts on semantic drift.
+Every migration remains subject to the installer's verified backup and
+transactional rollback safety.

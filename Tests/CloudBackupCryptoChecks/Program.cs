@@ -1,16 +1,91 @@
 using FMSC_SMS.Services.Backup;
 using System.Security.Cryptography;
 
+await ReleaseReviewChecks.RunAsync();
+await AuditFollowupChecks.RunAsync();
+if (args.SequenceEqual(new[] { "--release-review" })) return;
+
 string root = Path.Combine(Path.GetTempPath(), "FMSC-CloudCryptoChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
 {
+    // DSA-01: exclusive lease must survive await/thread switches, block another
+    // process/attempt, and become available when the handle is disposed.
+    string lockFile = Path.Combine(root, "cloud-job.lock");
+    using (var lease = CloudBackupJobLock.TryAcquire(lockFile)
+        ?? throw new Exception("First cloud job lease was refused."))
+    {
+        await Task.Run(async () =>
+        {
+            await Task.Yield();
+            using var competing = CloudBackupJobLock.TryAcquire(lockFile);
+            if (competing != null) throw new Exception("Cloud job exclusion failed.");
+        });
+    }
+    using (var retry = await Task.Run(() => CloudBackupJobLock.TryAcquire(lockFile)))
+    {
+        if (retry is null) throw new Exception("Cloud job lease was not released after async work.");
+    }
+    // A failed lock path is NOT mistaken for another job in progress.
+    try
+    {
+        using var invalidLock = CloudBackupJobLock.TryAcquire(Path.Combine(root, "missing-folder", "job.lock"));
+        throw new Exception("Cloud job lock failure was incorrectly accepted.");
+    }
+    catch (DirectoryNotFoundException) { }
+
     string source = Path.Combine(root, "source.bak");
     string package = Path.Combine(root, "source.fmscbackup");
     string restored = Path.Combine(root, "restored.bak");
     string passphrase = "test-only-long-recovery-passphrase";
     var random = RandomNumberGenerator.GetBytes(2 * 1024 * 1024 + 137);
     File.WriteAllBytes(source, random);
+    // DSA-08: Dropbox's server-generated content hash is SHA-256 of the
+    // concatenation of individual 4-MiB block hashes, not the local SHA-256.
+    string oneBlockHash = Convert.ToHexString(SHA256.HashData(SHA256.HashData(random)))
+        .ToLowerInvariant();
+    if (CloudDropboxIntegrity.ComputeContentHash(source) != oneBlockHash)
+        throw new Exception("Dropbox one-block content hash calculation failed.");
+    byte[] block = RandomNumberGenerator.GetBytes(4 * 1024 * 1024);
+    byte[] tail = RandomNumberGenerator.GetBytes(17);
+    string twoBlock = Path.Combine(root, "dropbox-two-blocks.bin");
+    using (var output = File.Create(twoBlock))
+    {
+        output.Write(block);
+        output.Write(tail);
+    }
+    string expectedContentHash = Convert.ToHexString(SHA256.HashData(
+        SHA256.HashData(block).Concat(SHA256.HashData(tail)).ToArray())).ToLowerInvariant();
+    if (CloudDropboxIntegrity.ComputeContentHash(twoBlock) != expectedContentHash)
+        throw new Exception("Dropbox multi-block remote content hash calculation failed.");
+    using (var remoteReceipt = System.Text.Json.JsonDocument.Parse(
+        System.Text.Json.JsonSerializer.Serialize(new {
+            id = "id:verified-remote", name = "verified.fmscbackup",
+            size = new FileInfo(twoBlock).Length, content_hash = expectedContentHash
+        })))
+    {
+        CloudDropboxIntegrity.RequireMatchingMetadata(remoteReceipt.RootElement,
+            "verified.fmscbackup", new FileInfo(twoBlock).Length, expectedContentHash);
+        bool rejected = false;
+        try {
+            CloudDropboxIntegrity.RequireMatchingMetadata(remoteReceipt.RootElement,
+                "verified.fmscbackup", new FileInfo(twoBlock).Length, new string('0',64));
+        } catch (IOException) { rejected = true; }
+        if (!rejected) throw new Exception("Dropbox mismatched provider content hash accepted.");
+    }
+    using (var notFound = System.Text.Json.JsonDocument.Parse(
+        """{"error":{".tag":"path","path":{".tag":"not_found"}}}"""))
+    {
+        if (!CloudDropboxIntegrity.IsPathNotFound(notFound.RootElement))
+            throw new Exception("Dropbox missing-file response not recognized.");
+    }
+    using (var denied = System.Text.Json.JsonDocument.Parse(
+        """{"error":{".tag":"path","path":{".tag":"restricted_content"}}}"""))
+    {
+        if (CloudDropboxIntegrity.IsPathNotFound(denied.RootElement))
+            throw new Exception("Dropbox permission error treated as a missing backup.");
+    }
+
     var originalTime = new DateTime(2026, 11, 9, 13, 0, 0, DateTimeKind.Utc);
     // Simulate a school in UTC+5: SQL backup header contains a local
     // timestamp distinct from the cloud catalog's absolute UTC time.
@@ -24,6 +99,25 @@ try
         throw new Exception("Authenticated original SQL backup time was altered by local time zone.");
     if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(File.ReadAllBytes(restored)), SHA256.HashData(random)))
         throw new Exception("Cloud backup did not survive round trip.");
+    // DSA-11: exercise many encryption/decryption chunks and compare streaming
+    // digests without loading the expanded fixture into memory.
+    string largeSql = Path.Combine(root, "many-chunks.bak");
+    string largePackage = Path.Combine(root, "many-chunks.fmscbackup");
+    string largeRestore = Path.Combine(root, "many-chunks-verified.bak");
+    using (var output = File.Create(largeSql))
+    {
+        byte[] payload = RandomNumberGenerator.GetBytes(1024 * 1024);
+        for (int i = 0; i < 24; i++) output.Write(payload);
+    }
+    CloudBackupCrypto.Encrypt(largeSql, largePackage, passphrase, originalTime, originalSqlHeaderTime);
+    CloudBackupCrypto.Decrypt(largePackage, largeRestore, passphrase);
+    using (var expected = File.OpenRead(largeSql))
+    using (var actual = File.OpenRead(largeRestore))
+    {
+        if (!CryptographicOperations.FixedTimeEquals(
+            SHA256.HashData(expected), SHA256.HashData(actual)))
+            throw new Exception("Multi-chunk encrypted SQL backup roundtrip failed.");
+    }
     File.Delete(restored);
     MustReject(() => CloudBackupCrypto.Decrypt(package, restored, "wrong-but-valid-recovery-key"), "incorrect passphrase");
     if (File.Exists(restored)) throw new Exception("Wrong-key attempt left a restorable output.");
@@ -43,6 +137,18 @@ try
     string invalid = Path.Combine(root, "invalid.fmscbackup");
     File.WriteAllBytes(invalid, Array.Empty<byte>());
     MustReject(() => CloudBackupCrypto.Decrypt(invalid, restored, passphrase), "empty package");
+    // DSA-03: a retained local ciphertext pending to another provider must
+    // never re-upload its intentionally pruned Google/Dropbox remote copy.
+    if (CloudBackupDeliveryPolicy.RequiresUpload(true, "", true) ||
+        !CloudBackupDeliveryPolicy.RequiresUpload(true, "", false) ||
+        CloudBackupDeliveryPolicy.RequiresUpload(true, "id:present", false) ||
+        CloudBackupDeliveryPolicy.RequiresUpload(false, "", false) ||
+        !CloudBackupDeliveryPolicy.HasCompletedProvider(true, "", true) ||
+        CloudBackupDeliveryPolicy.HasCompletedProvider(true, "", false) ||
+        !CloudBackupDeliveryPolicy.HasCompletedProvider(true, "id:present", false) ||
+        !CloudBackupDeliveryPolicy.HasCompletedProvider(false, "", false))
+        throw new Exception("Cloud provider retention incorrectly requeued a pruned backup.");
+
     var h1 = new string('a', 64);
     var h2 = new string('b', 64);
     var earliestCreated = new DateTime(2026, 11, 9, 10, 0, 0, DateTimeKind.Utc);
