@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -23,10 +24,11 @@ internal static class GitHubRepositoryIdentity
     };
 
     internal static async Task<string> ResolveOwnerLoginAsync(
-        HttpClient? client = null, CancellationToken cancellationToken = default)
+        HttpClient? client = null, CancellationToken cancellationToken = default,
+        string? token = null)
     {
         using var account = await GetJsonAsync(
-            client ?? Client, $"https://api.github.com/user/{OwnerId}", null, cancellationToken);
+            client ?? Client, $"https://api.github.com/user/{OwnerId}", token, cancellationToken);
         var root = account.RootElement;
         if (root.GetProperty("id").GetInt64() != OwnerId ||
             root.GetProperty("type").GetString() != "User")
@@ -58,7 +60,10 @@ internal static class GitHubRepositoryIdentity
         if (string.IsNullOrWhiteSpace(token))
             throw new InvalidOperationException("A private Updates metadata token is required for publication.");
         var http = client ?? Client;
-        string login = await ResolveOwnerLoginAsync(http, cancellationToken);
+        // The publisher must authenticate its owner-ID lookup as well as its private
+        // repository lookup. An anonymous first request can exhaust the shared
+        // GitHub Actions runner rate limit even when the publisher token is valid.
+        string login = await ResolveOwnerLoginAsync(http, cancellationToken, token);
         string name = $"{login}/{UpdatesName}";
         using var repository = await GetJsonAsync(http,
             $"https://api.github.com/repos/{name}", token, cancellationToken);
@@ -83,31 +88,73 @@ internal static class GitHubRepositoryIdentity
     private static async Task<JsonDocument> GetJsonAsync(HttpClient client, string uri,
         string? token, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-        request.Headers.UserAgent.ParseAdd("FMSC-School-Management/1");
-        request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
-        if (token is not null)
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        using var response = await client.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        // Never accept a redirect to a legacy account URL or another API host.
-        if (response.RequestMessage?.RequestUri?.AbsoluteUri != uri)
-            throw new InvalidDataException("GitHub identity lookup was redirected.");
-        if (response.Content.Headers.ContentLength is > 65536)
-            throw new InvalidDataException("GitHub identity metadata exceeded its size limit.");
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var buffer = new MemoryStream();
-        var bytes = new byte[8192];
-        int n;
-        while ((n = await stream.ReadAsync(bytes, cancellationToken)) != 0)
+        // Retry only rate limits and transient GitHub API failures; never retry
+        // authentication failures, identity mismatches, or redirects.
+        for (int attempt = 1; attempt <= 3; attempt++)
         {
-            if (buffer.Length + n > 65536)
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+            request.Headers.UserAgent.ParseAdd("FMSC-School-Management/1");
+            request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
+            if (token is not null)
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var response = await client.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            // Never accept a redirect to a legacy account URL or another API host,
+            // including on a retry.
+            if (response.RequestMessage?.RequestUri?.AbsoluteUri != uri)
+                throw new InvalidDataException("GitHub identity lookup was redirected.");
+            if (!response.IsSuccessStatusCode && attempt < 3 &&
+                await IsTransientGitHubFailureAsync(response, cancellationToken))
+            {
+                TimeSpan delay = TimeSpan.FromSeconds(2 * attempt);
+                if (response.Headers.RetryAfter?.Delta is { } recommended && recommended > delay)
+                    delay = recommended;
+                // A prolonged API quota exhaustion requires a subsequent owner
+                // action, not an unbounded wait or a bypass of publication checks.
+                if (delay <= TimeSpan.FromSeconds(30))
+                {
+                    await Task.Delay(delay, cancellationToken);
+                    continue;
+                }
+            }
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is > 65536)
                 throw new InvalidDataException("GitHub identity metadata exceeded its size limit.");
-            buffer.Write(bytes, 0, n);
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var buffer = new MemoryStream();
+            var bytes = new byte[8192];
+            int n;
+            while ((n = await stream.ReadAsync(bytes, cancellationToken)) != 0)
+            {
+                if (buffer.Length + n > 65536)
+                    throw new InvalidDataException("GitHub identity metadata exceeded its size limit.");
+                buffer.Write(bytes, 0, n);
+            }
+            buffer.Position = 0;
+            return await JsonDocument.ParseAsync(buffer, cancellationToken: cancellationToken);
         }
-        buffer.Position = 0;
-        return await JsonDocument.ParseAsync(buffer, cancellationToken: cancellationToken);
+        throw new InvalidOperationException("GitHub identity metadata retry unexpectedly exhausted.");
     }
+
+    private static async Task<bool> IsTransientGitHubFailureAsync(
+        HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        if (response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
+            return true;
+        if (response.StatusCode != HttpStatusCode.Forbidden)
+            return false;
+        if (response.Headers.RetryAfter is not null ||
+            (response.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining) &&
+             remaining.Any(value => value.Trim() == "0")))
+            return true;
+        if (response.Content.Headers.ContentLength is > 4096)
+            return false;
+        // GitHub's secondary rate limits can return 403 without a remaining
+        // quota header. Inspect only the bounded error message, not other 403s.
+        string error = await response.Content.ReadAsStringAsync(cancellationToken);
+        return error.Contains("rate limit", StringComparison.OrdinalIgnoreCase);
+    }
+
 }
