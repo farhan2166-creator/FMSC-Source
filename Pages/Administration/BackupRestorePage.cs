@@ -23,9 +23,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         ScrollBars = ScrollBars.Vertical, Height = AppScale.Scale(110), Visible = false
     };
     private readonly Label destinationResults = new() {
-        Dock = DockStyle.Top, Height = AppScale.Scale(24),
-        ForeColor = AppTheme.MutedText, AutoEllipsis = true,
-        Text = "Select destinations in Backup Settings."
+        Dock = DockStyle.Top, Height = AppScale.Scale(60),
+        ForeColor = AppTheme.MutedText, AutoEllipsis = false,
+        TextAlign = ContentAlignment.TopLeft,
+        Text = "Configure Local, Google Drive or Dropbox in Backup Settings."
     };
     ModernButton? retryPendingButton;
     ModernButton? cloudSettingsButton;
@@ -586,9 +587,9 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             var result = await CloudBackupCoordinator.CreateAndUploadAsync(progress: progress);
             destinationResults.Text = "Local: " + (settings.LocalEnabled
                     ? (result.LocalSucceeded ? "Verified" : "Failed") : "Disabled") +
-                "   |   Drive: " + (settings.GoogleDriveEnabled
+                "\nGoogle Drive: " + (settings.GoogleDriveEnabled
                     ? (result.GoogleSucceeded ? "Recovery verified" : "Pending retry") : "Disabled") +
-                "   |   Dropbox: " + (settings.DropboxEnabled
+                "\nDropbox: " + (settings.DropboxEnabled
                     ? (result.DropboxSucceeded ? "Recovery verified" : "Pending retry") : "Disabled");
             await LoadHistoryAsync();
             await LoadRecoveryCatalogueAsync();
