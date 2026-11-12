@@ -18,6 +18,8 @@
     <Compile Include="../../Services/Backup/CloudDropboxIntegrity.cs" Link="CloudDropboxIntegrity.cs" />
     <Compile Include="../../Services/Backup/CloudBackupDeliveryPolicy.cs" Link="CloudBackupDeliveryPolicy.cs" />
     <Compile Include="../../Services/Backup/CloudBackupCatalog.cs" Link="CloudBackupCatalog.cs" />
+    <Compile Include="../../Services/Backup/UnifiedRecoveryCatalog.cs" Link="UnifiedRecoveryCatalog.cs" />
+    <Compile Include="../../Services/Backup/CloudBackupQueuePolicy.cs" Link="CloudBackupQueuePolicy.cs" />
     <Compile Include="../../Services/Backup/CloudBackupSchedulePolicy.cs" Link="CloudBackupSchedulePolicy.cs" />
     <Compile Include="../../Services/Backup/CloudOAuthLoopback.cs" Link="CloudOAuthLoopback.cs" />
   </ItemGroup>
