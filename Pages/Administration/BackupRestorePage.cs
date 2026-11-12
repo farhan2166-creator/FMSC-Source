@@ -7,10 +7,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     readonly ModernTextBox restoreFile = HumanUi.TextBox(false, 500);
     readonly bool canRestore = CurrentUser.HasPermission("Backup.Restore");
     ModernButton backupNowButton = null!;
-    ModernButton? cloudBackupButton;
+    ModernButton? retryPendingButton;
     ModernButton? cloudSettingsButton;
     ModernButton? cloudChooseRestoreButton;
     CloudBackupCoordinator.CloudSelection? selectedCloud;
+    IReadOnlyList<CloudRemoteBackup> selectedCloudAlternatives = Array.Empty<CloudRemoteBackup>();
     string cloudRecoveryPassphrase = string.Empty;
     Action? refreshCloudStatus;
     ModernButton? restoreButton;
@@ -59,8 +60,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         var chooseBackupButton =
             AddBusyAction("Choose Backup Folder…", ChooseBackupFolderAsync);
         backupNowButton =
-            AddBusyAction("Back Up Data", BackupNowAsync, "Success");
-        cloudBackupButton = AddBusyAction("Cloud Backup Now", CloudBackupNowAsync, "Secondary");
+            AddBusyAction("Back Up Now", BackupNowAsync, "Success");
+        retryPendingButton = AddBusyAction("Retry Pending Uploads", RetryPendingAsync, "Secondary");
         if (canRestore)
             cloudSettingsButton = AddAction("Cloud Settings…", (_, _) => OpenCloudSettings());
         ModernButton? chooseRestoreButton = null;
@@ -88,8 +89,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             backupNowButton);
         if (cloudSettingsButton is not null)
             RelocateFromActions(cloudSettingsButton);
-        if (cloudBackupButton is not null)
-            RelocateFromActions(cloudBackupButton);
+        if (retryPendingButton is not null)
+            RelocateFromActions(retryPendingButton);
         if (cloudChooseRestoreButton is not null)
             RelocateFromActions(cloudChooseRestoreButton);
         if (chooseRestoreButton is not null && restoreButton is not null)
@@ -99,7 +100,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         UseToolbar();
         var backupCard = HumanUi.Card(
             "Backup",
-            "Choose a folder and save a complete copy of your school data.");
+            "Create one verified backup and deliver to all enabled destinations.");
         var localOnlyNotice = new Label {
             Dock = DockStyle.Top,
             Height = AppScale.Scale(46),
@@ -126,7 +127,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
         backupFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         backupFields.Controls.Add(
-            HumanUi.Field("Backup Folder", backupFolder),
+            HumanUi.Field("Local Backup Folder", backupFolder),
             0,
             0);
         backupFields.Controls.Add(
@@ -134,8 +135,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             0,
             1);
         backupFields.Controls.Add(
-            canRestore ? CreateActionRow(cloudSettingsButton!, cloudBackupButton!)
-                       : CreateActionRow(cloudBackupButton!),
+            canRestore ? CreateActionRow(cloudSettingsButton!, retryPendingButton!)
+                       : CreateActionRow(retryPendingButton!),
             0, 2);
         // Each upper card can scroll independently when the available half-height
         // is smaller than its actions and warnings (compact windows / high DPI).
@@ -414,48 +415,32 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     }
     async Task BackupNowAsync()
     {
-        if (isBusy)
-            return;
-        string folder = backupFolder.Text.Trim();
-        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
-        {
-            Warn("Please choose a valid backup folder first.");
-            return;
-        }
-        string backupPath = DatabaseBackupManager.CreateUniqueBackupPath(
-            folder,
-            DatabaseBackupManager.CreateBackupFileName());
+        if (isBusy) return;
         isBusy = true;
-        busyMessage = "A backup is running. Please wait until it finishes.";
+        busyMessage = "Creating one verified school backup for the enabled destinations.";
         SetBusyState(true);
         SetStatus("Backing up school data…");
         try
         {
-            var result = await Task.Run(() => DatabaseBackupManager.CreateBackup(backupPath));
-            /* reload FIRST, then report. */
-            await LoadHistoryAsync();
-            if (result.Success)
+            var settings = CloudBackupSettings.Load();
+            if (settings.LocalEnabled &&
+                (string.IsNullOrWhiteSpace(backupFolder.Text) || !Directory.Exists(backupFolder.Text)))
             {
-                /* Restoring replaces the database and requires explicit confirmation. */
-                ModernMessageDialog.ShowInfo(
-                    FindForm(),
-                    $"{result.Message}\n\n{backupPath}");
+                Warn("Choose a valid Local Backup Folder or disable the Local destination in Cloud Settings.");
+                return;
             }
-            else
-            {
-                Warn(result.Message);
-            }
-        }
-        catch (Exception ex)
-        {
+            var result = await CloudBackupCoordinator.CreateAndUploadAsync();
             await LoadHistoryAsync();
-            Fail(ex);
+            SetStatus(result.Message, result.UploadsPending);
+            if (result.UploadsPending) Warn(result.Message);
+            else ModernMessageDialog.ShowInfo(FindForm(), result.Message);
         }
+        catch (Exception ex) { Fail(ex); }
         finally
         {
             isBusy = false;
             busyMessage = string.Empty;
-            SetBusyState(false);
+            if (!IsDisposed) SetBusyState(false);
         }
     }
 
@@ -472,25 +457,24 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         catch (Exception ex) { Fail(ex); }
     }
 
-    private async Task CloudBackupNowAsync()
+    private async Task RetryPendingAsync()
     {
         if (isBusy) return;
         isBusy = true;
-        busyMessage = "Creating a verified, encrypted school backup and uploading enabled destinations.";
+        busyMessage = "Retrying encrypted cloud uploads already in the protected queue.";
         SetBusyState(true);
         try
         {
-            SetStatus("Creating encrypted cloud backup…");
-            var result = await CloudBackupCoordinator.CreateAndUploadAsync();
-            await LoadHistoryAsync();
-            SetStatus(result.Message, result.UploadsPending);
-            if (result.LocalSucceeded)
-                ModernMessageDialog.ShowInfo(FindForm(), result.Message);
+            SetStatus("Retrying pending cloud deliveries…");
+            string result = await CloudBackupCoordinator.RetryPendingUploadsNowAsync();
+            SetStatus(result);
+            ModernMessageDialog.ShowInfo(FindForm(), result);
         }
         catch (Exception ex) { Fail(ex); }
         finally
         {
-            isBusy = false; busyMessage = string.Empty;
+            isBusy = false;
+            busyMessage = string.Empty;
             if (!IsDisposed) SetBusyState(false);
         }
     }
@@ -516,6 +500,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 dialog.SelectedCopy is not { } selected)
                 return;
             selectedCloud = selected;
+            selectedCloudAlternatives = options.Copies
+                .Where(copy => string.Equals(copy.Remote.PackageSha256, selected.Remote.PackageSha256,
+                    StringComparison.OrdinalIgnoreCase) &&
+                    (copy.Remote.SqlBackupCreatedUtc - selected.Remote.SqlBackupCreatedUtc).Duration() < TimeSpan.FromSeconds(1))
+                .Select(copy => copy.Remote).ToArray();
             cloudRecoveryPassphrase = dialog.RecoveryPassphrase;
             selectedRestoreBackupInfo = null;
             restoreFile.Tag = null;
@@ -557,7 +546,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         {
             SetStatus("Downloading and verifying encrypted cloud backup…");
             var result = await CloudBackupCoordinator.RestoreFromCloudAsync(
-                selection.Remote, cloudRecoveryPassphrase);
+                selection.Remote, cloudRecoveryPassphrase, selectedCloudAlternatives);
             if (result.Success)
             {
                 // CloudRestoreStaging has already removed the temporary
@@ -581,7 +570,17 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         }
         finally
         {
+            // A failed cloud restore must never leave the same selection active
+            // with an erased passphrase: that made immediate retries fail again.
             cloudRecoveryPassphrase = string.Empty;
+            selectedCloud = null;
+            selectedCloudAlternatives = Array.Empty<CloudRemoteBackup>();
+            if (!IsDisposed)
+            {
+                restoreFile.Text = string.Empty;
+                selectedRestoreBackupInfo = null;
+                ShowRestoreFileStatus(RestoreFileState.None, null);
+            }
             isBusy = false; busyMessage = string.Empty;
             if (!IsDisposed) SetBusyState(false);
         }
@@ -592,6 +591,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         if (isBusy)
             return;
         selectedCloud = null;
+        selectedCloudAlternatives = Array.Empty<CloudRemoteBackup>();
         cloudRecoveryPassphrase = string.Empty;
         using var dialog = new OpenFileDialog {
             Title = "Select FMSC Database Backup",
@@ -702,9 +702,9 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         restoreStatusDetail.ForeColor =
             state == RestoreFileState.None ? AppTheme.MutedText : AppTheme.Text;
         restoreStatusPanel.BackColor = AppTheme.Tint(accent, 0.90f);
-        /* Valid and stale backups require confirmation; unverifiable or foreign backups are rejected. */
-        SetRestoreAllowed(
-            state is RestoreFileState.Valid or RestoreFileState.Stale or RestoreFileState.None);
+        /* No selection is not an eligible restore. A selected cloud copy is
+           represented as Valid but still requires verification before SQL. */
+        SetRestoreAllowed(state is RestoreFileState.Valid or RestoreFileState.Stale);
     }
     void SetRestoreAllowed(bool allowed)
     {
@@ -950,7 +950,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     void SetBusyState(bool busy)
     {
         backupNowButton.Enabled = !busy;
-        if (cloudBackupButton != null) cloudBackupButton.Enabled = !busy;
+        if (retryPendingButton != null) retryPendingButton.Enabled = !busy;
         if (cloudSettingsButton != null) cloudSettingsButton.Enabled = !busy;
         if (cloudChooseRestoreButton != null) cloudChooseRestoreButton.Enabled = !busy;
         /* Keep Refresh History available for retrying a failed read. */

@@ -151,6 +151,22 @@ try
         !CloudBackupDeliveryPolicy.HasCompletedProvider(false, "", false))
         throw new Exception("Cloud provider retention incorrectly requeued a pruned backup.");
 
+    // Upload receipts do not permit ciphertext cleanup or retention pruning.
+    // Even if all destinations are disabled, never silently discard the sole
+    // undelivered encrypted package.
+    if (!CloudBackupDeliveryPolicy.RequiresRecoveryVerification(true, false, false) ||
+        CloudBackupDeliveryPolicy.RequiresRecoveryVerification(false, false, false) ||
+        CloudBackupDeliveryPolicy.RequiresRecoveryVerification(true, false, true) ||
+        CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(false, false, false,
+            false, false, false) ||
+        CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(true, false, false,
+            false, false, false) ||
+        CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(true, true, false,
+            true, false, false) ||
+        !CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(true, true, false,
+            true, true, false))
+        throw new Exception("Unverified cloud delivery was treated as recovery-tested or released from its retry queue.");
+
     var h1 = new string('a', 64);
     var h2 = new string('b', 64);
     var earliestCreated = new DateTime(2026, 11, 9, 10, 0, 0, DateTimeKind.Utc);
