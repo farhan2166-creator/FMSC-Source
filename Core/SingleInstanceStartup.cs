@@ -68,12 +68,20 @@ internal static class SingleInstanceStartup
 
     internal static IntPtr ActivationWindow(IntPtr window)
     {
-        // GetLastActivePopup returns its argument unchanged when that window
-        // itself has an owner (including WinForms' hidden taskbar owner).
-        IntPtr root = GetAncestor(window, 3); // GA_ROOTOWNER
-        IntPtr popup = GetLastActivePopup(root == IntPtr.Zero ? window : root);
-        return popup != IntPtr.Zero && IsWindowVisible(popup) ? popup : window;
+        // Last-active bookkeeping can still point at a disabled owner while
+        // a modal dialog opens in the background. Prefer its enabled popup.
+        IntPtr root = GetAncestor(window, 3); // GA_ROOTOWNER (also handles WinForms' hidden owner).
+        if (root == IntPtr.Zero) root = window;
+        IntPtr popup = GetLastActivePopup(root);
+        if (CanActivate(popup)) return popup;
+        popup = GetWindow(window, 6); // GW_ENABLEDPOPUP
+        if (CanActivate(popup)) return popup;
+        popup = GetWindow(root, 6);
+        return CanActivate(popup) ? popup : window;
     }
+
+    private static bool CanActivate(IntPtr window) => window != IntPtr.Zero
+        && IsWindowVisible(window) && IsWindowEnabled(window);
 
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsIconic(IntPtr window);
@@ -85,6 +93,10 @@ internal static class SingleInstanceStartup
     private static extern IntPtr GetLastActivePopup(IntPtr window);
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowEnabled(IntPtr window);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindowVisible(IntPtr window);
 }

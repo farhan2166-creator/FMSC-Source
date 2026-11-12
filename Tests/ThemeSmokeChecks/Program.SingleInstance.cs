@@ -14,7 +14,10 @@ internal static partial class Program
         modal.Shown += (_, _) => modal.BeginInvoke((Action)(() => {
             IntPtr target = SingleInstanceStartup.ActivationWindow(owner.Handle);
             Check(target == modal.Handle,
-                "Repeated launch targets the active modal dialog; selected owner=" + (target == owner.Handle));
+                "Repeated launch targets the active modal dialog; selected owner=" + (target == owner.Handle)
+                + "; native owner enabled=" + InstanceNative.IsWindowEnabled(owner.Handle)
+                + "; popup owned by main=" + (InstanceNative.GetWindow(modal.Handle, 4) == owner.Handle)
+                + "; enabled popup is dialog=" + (InstanceNative.GetWindow(owner.Handle, 6) == modal.Handle));
             modal.Close();
         }));
         modal.ShowDialog(owner);
@@ -22,6 +25,15 @@ internal static partial class Program
             "After closing a dialog, activation returns to the existing main window");
         owner.Close();
         CheckRestoreRestartRequest();
+    }
+
+    private static class InstanceNative
+    {
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        internal static extern bool IsWindowEnabled(IntPtr window);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        internal static extern IntPtr GetWindow(IntPtr window, uint command);
     }
 
     private static void CheckRestoreRestartRequest()
