@@ -45,6 +45,9 @@ internal static class UnifiedRecoveryChecks
         Require(UnifiedRecoveryCatalog.Group(Array.Empty<RecoveryLocalCopy>(),
             new[] { remote[0], differentTimestamp }).Count == 2,
             "Encrypted package copies with contradictory SQL creation time were merged.");
+        Require(UnifiedRecoveryCatalog.Group(Array.Empty<RecoveryLocalCopy>(),
+            new[] { remote[0] with { Remote = remote[0].Remote with { Size = 0 } } }).Count == 0,
+            "Empty upload placeholders must not be offered as recovery points.");
         Console.WriteLine("PASS: local/cloud catalogue digest linkage, legacy isolation and verification provenance.");
     }
 

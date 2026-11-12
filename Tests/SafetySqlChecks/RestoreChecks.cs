@@ -19,7 +19,7 @@ internal static class RestoreChecks
         }
         string Backup(string file)
         {
-            string path=PathFor(file);Execute($"BACKUP DATABASE FMSC_DB TO DISK={Quote(path)} WITH COPY_ONLY,CHECKSUM,INIT;");return path;
+            string path=PathFor(file);Execute($"BACKUP DATABASE FMSC_DB TO DISK={Quote(path)} WITH COPY_ONLY,CHECKSUM,INIT;");FixtureFileAccess.MakeReadable(path);return path;
         }
         void Validate(SqlConnection candidate)
         {
@@ -45,8 +45,12 @@ internal static class RestoreChecks
                     Validate(candidate);
                 });
             Check(true,"A replacement-PC candidate was validated in disposable SQL without touching the original.");
-            try{using var overwrite=new FileStream(good,FileMode.Open,FileAccess.Write,FileShare.ReadWrite);throw new Exception("Protected backup was writable");}
-            catch(IOException){Check(true,"The protected backup cannot be overwritten during validation/restore");}
+            if (OperatingSystem.IsWindows())
+            {
+                try{using var overwrite=new FileStream(good,FileMode.Open,FileAccess.Write,FileShare.ReadWrite);throw new Exception("Protected backup was writable");}
+                catch(IOException){Check(true,"The protected backup cannot be overwritten during validation/restore");}
+            }
+            else Console.WriteLine("SKIP: Windows file sharing enforcement; covered by native Windows recovery checks.");
         }
         Execute("DROP DATABASE FMSC_DB;");CreateSource(other,"Foreign");string foreign=Backup("different-school.bak");
         using(var header=new SqlCommand($"RESTORE HEADERONLY FROM DISK={Quote(foreign)};",c))

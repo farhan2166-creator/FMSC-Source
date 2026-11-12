@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Services/Backup/GoogleDesktopRegistration.cs" Link="GoogleDesktopRegistration.cs" />
+    <Compile Include="../../Services/Backup/CloudRecoverySourceFailure.cs" Link="CloudRecoverySourceFailure.cs" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <Compile Include="../../Core/AtomicTextFile.cs" Link="AtomicTextFile.cs" />
     <Compile Include="../../Services/Backup/CloudBackupSettings.cs" Link="CloudBackupSettings.cs" />

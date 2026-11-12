@@ -50,7 +50,7 @@ internal static class UnifiedRecoveryCatalog
             .DistinctBy(x => x.FilePath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var cloud = cloudCopies
-            .Where(x => x.Remote.SqlBackupCreatedUtc != default &&
+            .Where(x => x.Remote.Size > 0 && x.Remote.SqlBackupCreatedUtc != default &&
                 IsSha256(x.Remote.PackageSha256))
             .ToArray();
         var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

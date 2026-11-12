@@ -13,8 +13,8 @@ namespace FMSC_SMS.Services.Backup;
 internal enum CloudProvider { GoogleDrive, Dropbox }
 
 /// <summary>
-/// Public OAuth application identifiers are owner-controlled build/configuration
-/// inputs; private client secrets are NEVER shipped with a Windows application.
+/// OAuth registration is publisher-controlled. Google accepts only installed-app
+/// metadata; confidential web client credentials are never supported.
 /// Connecting a school account is impossible until both provider applications
 /// are registered by the FMSC publisher.
 /// </summary>
@@ -31,6 +31,16 @@ internal sealed class CloudProviderApplicationIds
         if (ids.GoogleClientId.Length > 250 || ids.DropboxAppKey.Length > 150)
             throw new InvalidDataException("Cloud provider application identifier is too long.");
         return ids;
+    }
+    internal string? GetDesktopClientSecret(CloudProvider provider)
+    {
+        if (provider != CloudProvider.GoogleDrive) return null;
+        string path = Path.Combine(AppContext.BaseDirectory, "CloudBackupGoogleDesktop.json");
+        if (!File.Exists(path))
+            throw new InvalidOperationException("Google Drive requires the publisher's Google Desktop app registration (CloudBackupGoogleDesktop.json). No sign-in was started. Web application credentials are not supported.");
+        if (new FileInfo(path).Length > 16 * 1024)
+            throw new InvalidDataException("Google Desktop registration is too large.");
+        return GoogleDesktopRegistration.Parse(File.ReadAllText(path), GoogleClientId.Trim()).ClientSecret;
     }
     internal string Get(CloudProvider provider) => provider switch
     {
@@ -88,9 +98,11 @@ internal static class CloudBackupOAuth
 
     private static async Task ConnectCoreAsync(CloudProvider provider, CancellationToken cancellationToken)
     {
-        string clientId = CloudProviderApplicationIds.Load().Get(provider);
+        var registration = CloudProviderApplicationIds.Load();
+        string clientId = registration.Get(provider);
         if (string.IsNullOrWhiteSpace(clientId))
             throw new InvalidOperationException(provider + " cannot be connected until the FMSC publisher registers its OAuth application.");
+        string? desktopClientSecret = registration.GetDesktopClientSecret(provider);
         string verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
         string challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
         string state = Base64Url(RandomNumberGenerator.GetBytes(24));
@@ -112,16 +124,17 @@ internal static class CloudBackupOAuth
         Process.Start(new ProcessStartInfo(authorization) { UseShellExecute = true });
         string code;
         try { code = await listener.ReceiveCodeAsync(state, cancellationToken); }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw new TimeoutException("Cloud sign-in was cancelled or timed out.");
         }
         string tokenUri = provider == CloudProvider.GoogleDrive
             ? "https://oauth2.googleapis.com/token" : "https://api.dropboxapi.com/oauth2/token";
-        using var payload = new FormUrlEncodedContent(new Dictionary<string,string> {
-            ["client_id"] = clientId, ["code"] = code, ["code_verifier"] = verifier,
-            ["redirect_uri"] = callback, ["grant_type"] = "authorization_code"
-        });
+        var fields = GoogleDesktopRegistration.TokenFields(clientId, desktopClientSecret, "authorization_code");
+        fields["code"] = code;
+        fields["code_verifier"] = verifier;
+        fields["redirect_uri"] = callback;
+        using var payload = new FormUrlEncodedContent(fields);
         using var exchange = await Http.PostAsync(tokenUri, payload, cancellationToken);
         await RequireSuccess(exchange, "Account authorization", cancellationToken);
         using var json = JsonDocument.Parse(await exchange.Content.ReadAsStringAsync(cancellationToken));
@@ -134,15 +147,16 @@ internal static class CloudBackupOAuth
     internal static async Task<string> GetAccessTokenAsync(CloudProvider provider, CancellationToken cancellationToken = default)
     {
         var credential = ReadCredential(provider);
-        string registeredId = CloudProviderApplicationIds.Load().Get(provider);
+        var registration = CloudProviderApplicationIds.Load();
+        string registeredId = registration.Get(provider);
         if (!string.Equals(credential.ClientId, registeredId, StringComparison.Ordinal))
             throw new InvalidOperationException("Cloud provider registration changed. Reconnect this account.");
         string tokenUri = provider == CloudProvider.GoogleDrive
             ? "https://oauth2.googleapis.com/token" : "https://api.dropboxapi.com/oauth2/token";
-        using var form = new FormUrlEncodedContent(new Dictionary<string,string> {
-            ["client_id"] = credential.ClientId, ["refresh_token"] = credential.RefreshToken,
-            ["grant_type"] = "refresh_token"
-        });
+        var fields = GoogleDesktopRegistration.TokenFields(credential.ClientId,
+            registration.GetDesktopClientSecret(provider), "refresh_token");
+        fields["refresh_token"] = credential.RefreshToken;
+        using var form = new FormUrlEncodedContent(fields);
         using var response = await Http.PostAsync(tokenUri, form, cancellationToken);
         await RequireSuccess(response, "Cloud account refresh", cancellationToken);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));

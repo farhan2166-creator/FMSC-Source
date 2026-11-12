@@ -305,6 +305,7 @@ internal static class CloudBackupTransport
                         (registered - created).Duration() > TimeSpan.FromSeconds(1))
                         continue;
                 }
+                if (ParseSize(entry) <= 0) continue;
                 items.Add(new CloudRemoteBackup(CloudProvider.GoogleDrive, id, name, sha, created,
                     ParseUtc(GetString(entry, "createdTime")), ParseSize(entry)));
             }
@@ -431,6 +432,7 @@ internal static class CloudBackupTransport
                 if (GetString(entry, ".tag") != "file") continue;
                 string name = GetString(entry, "name"), id = GetString(entry, "id");
                 if (!ParseName(name, out var created, out var sha)) continue;
+                if (ParseSize(entry) <= 0) continue;
                 items.Add(new CloudRemoteBackup(CloudProvider.Dropbox, id, name, sha, created,
                     ParseUtc(GetString(entry, "server_modified")), ParseSize(entry)));
             }

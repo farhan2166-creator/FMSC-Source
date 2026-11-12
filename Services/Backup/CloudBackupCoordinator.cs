@@ -16,8 +16,13 @@ namespace FMSC_SMS.Services.Backup;
 /// </summary>
 internal static class CloudBackupCoordinator
 {
+#if FMSC_BACKUP_FIXTURE
+    // Compile-time isolation for the coordinator's disposable behavioral fixture.
+    private static readonly string Root = Path.Combine(Path.GetTempPath(), "FMSC-BackupFixture-" + Guid.NewGuid().ToString("N"));
+#else
     private static readonly string Root = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FMSC", "CloudBackups");
+#endif
     private static readonly string Queue = Path.Combine(Root, "queue");
     private static readonly string Staging = Path.Combine(Root, "staging");
     private static readonly string Journal = Path.Combine(Root, "journal");
@@ -143,7 +148,9 @@ internal static class CloudBackupCoordinator
                 progress?.Report(new BackupProgressUpdate("Completed", "Verified SQL backup saved.", "Local"));
                 BackupActivityJournal.TryRecord("Backup", "Local", "SQL recovery file verified");
                 return RecordOutcome(new CloudBackupOutcome(true, false, false,
-                    "Verified local SQL backup saved: " + bak));
+                    "Verified local SQL backup saved: " + bak +
+                    (retryIssues.Count == 0 ? "" : ". Pending cloud delivery: " + string.Join("; ", retryIssues)),
+                    UploadsPending: retryIssues.Count > 0));
             }
             string id = Guid.NewGuid().ToString("N");
             string packaged = Path.Combine(Queue, id + ".fmscbackup");
@@ -192,7 +199,6 @@ internal static class CloudBackupCoordinator
             // provider was temporarily unavailable.
             SaveState(new State { LastSuccessfulLocalBackup = DateTimeOffset.Now });
             bool google = false, dropbox = false;
-            var issues = new List<string>(retryIssues);
             if (settings.GoogleDriveEnabled)
             {
                 try { google = await UploadOneAsync(pending, CloudProvider.GoogleDrive, settings, token, progress); }
@@ -200,7 +206,6 @@ internal static class CloudBackupCoordinator
                 {
                     token.ThrowIfCancellationRequested();
                     progress?.Report(new BackupProgressUpdate("Pending retry", SafeTransportError(ex), "Google Drive", true));
-                    issues.Add("Google Drive: " + SafeTransportError(ex));
                 }
             }
             if (settings.DropboxEnabled)
@@ -210,13 +215,14 @@ internal static class CloudBackupCoordinator
                 {
                     token.ThrowIfCancellationRequested();
                     progress?.Report(new BackupProgressUpdate("Pending retry", SafeTransportError(ex), "Dropbox", true));
-                    issues.Add("Dropbox: " + SafeTransportError(ex));
                 }
             }
             RemoveFullyDeliveredPayload(pending, settings);
             if (settings.LocalEnabled)
                 await Task.Run(() => PruneLocalManagedBackups(folder, settings.MaximumLocalBackups), token)
                     .ConfigureAwait(false);
+            // A newer verified delivery can supersede failures seen at run start.
+            var issues = ReadDeliveryIssues(settings);
             string summary = issues.Count == 0
                 ? (settings.LocalEnabled ? "Local backup saved. " : "") + "Encrypted backup uploaded to the selected cloud destinations."
                 : (settings.LocalEnabled ? "Local backup saved. " : "Encrypted backup safely queued. ") +
@@ -313,15 +319,15 @@ internal static class CloudBackupCoordinator
         }
         progress?.Report(new BackupProgressUpdate("Retrying encrypted deliveries", "Only unfinished requested destinations are retried."));
         var issues = await RetryPendingUploadsCoreAsync(settings, token, progress).ConfigureAwait(false);
-        int waiting = ReadPending().Count(p => File.Exists(p.PackageFile) &&
-            (StillRequiresDelivery(p, CloudProvider.GoogleDrive, settings) ||
-             StillRequiresDelivery(p, CloudProvider.Dropbox, settings)));
+        int waiting = ReadPending().Count(p =>
+            StillRequiresDelivery(p, CloudProvider.GoogleDrive, settings) ||
+            StillRequiresDelivery(p, CloudProvider.Dropbox, settings));
         string message = waiting == 0
             ? "No enabled cloud deliveries are waiting for retry."
             : waiting + " encrypted backup package(s) still await upload.";
         if (issues.Count > 0) message += " " + string.Join("; ", issues);
-        progress?.Report(new BackupProgressUpdate(waiting > 0 ? "Pending deliveries remain" : "Delivery retry complete", message));
-        RecordOutcome(new CloudBackupOutcome(false, false, false, message, waiting > 0));
+        progress?.Report(new BackupProgressUpdate(waiting > 0 || issues.Count > 0 ? "Pending deliveries remain" : "Delivery retry complete", message));
+        RecordOutcome(new CloudBackupOutcome(false, false, false, message, waiting > 0 || issues.Count > 0));
         return message;
     }
 
@@ -425,9 +431,13 @@ internal static class CloudBackupCoordinator
     {
         var issues = new List<string>();
         if (!Directory.Exists(Journal)) return issues;
-        foreach (var p in ReadPending().Where(p => File.Exists(p.PackageFile)))
+        foreach (string id in ReadPending().OrderByDescending(p => p.SqlCreatedUtc).Select(p => p.Id))
         {
             token.ThrowIfCancellationRequested();
+            // Previous iterations can persist supersession and retention flags.
+            // Never overwrite them with an earlier in-memory journal snapshot.
+            var p = ReadPending().SingleOrDefault(p => p.Id == id);
+            if (p is null || !File.Exists(p.PackageFile)) continue;
             foreach (var provider in new[] { CloudProvider.GoogleDrive, CloudProvider.Dropbox })
             {
                 if (!StillRequiresDelivery(p, provider, settings)) continue;
@@ -462,6 +472,26 @@ internal static class CloudBackupCoordinator
                 }
             }
             RemoveFullyDeliveredPayload(p, settings);
+        }
+        return ReadDeliveryIssues(settings);
+    }
+
+    private static List<string> ReadDeliveryIssues(CloudBackupOptions settings)
+    {
+        var issues = new List<string>();
+        var pending = ReadPending(error => issues.Add("A cloud backup journal could not be read. Review the protected queue before trusting delivery status."));
+        foreach (var p in pending)
+        foreach (var provider in new[] { CloudProvider.GoogleDrive, CloudProvider.Dropbox })
+        {
+            if (!StillRequiresDelivery(p, provider, settings)) continue;
+            string reason = !File.Exists(p.PackageFile)
+                ? "queued encrypted file is missing; delivery is incomplete. Create a new verified backup or recover the queued file."
+                : !(provider == CloudProvider.GoogleDrive ? settings.GoogleDriveEnabled : settings.DropboxEnabled)
+                    ? "pending backup preserved while this destination is disabled."
+                    : (provider == CloudProvider.GoogleDrive ? p.GoogleDeliveryAttempts : p.DropboxDeliveryAttempts) >= MaximumAutomaticDeliveryAttempts
+                        ? "automatic retries exhausted; use Retry Pending Uploads after correcting the cause."
+                        : "delivery or recovery verification is pending; check the account connection and retry.";
+            issues.Add(provider + " (" + p.SqlCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy HH:mm", CultureInfo.InvariantCulture) + "): " + reason);
         }
         return issues;
     }
@@ -550,7 +580,7 @@ internal static class CloudBackupCoordinator
             : newer.DropboxRecoveryVerified && !newer.DropboxPruned && newer.DropboxId.Length > 0;
         if (!newestVerified) return;
         foreach (var older in ReadPending().Where(p => p.Id != newer.Id &&
-                     p.SqlCreatedUtc < newer.SqlCreatedUtc && File.Exists(p.PackageFile)))
+                     p.SqlCreatedUtc < newer.SqlCreatedUtc))
         {
             if (!CloudBackupQueuePolicy.MaySupersede(older.SqlCreatedUtc,
                 newer.SqlCreatedUtc, newerRecoveryTested: true, newerStillAvailable: true,
@@ -667,7 +697,7 @@ internal static class CloudBackupCoordinator
             throw new IOException("Scheduled SQL backup did not produce a readable non-empty file.");
     }
 
-    private static IReadOnlyList<Pending> ReadPending()
+    private static IReadOnlyList<Pending> ReadPending(Action<Exception>? unreadable = null)
     {
         if (!Directory.Exists(Journal)) return Array.Empty<Pending>();
         var items = new List<Pending>();
@@ -675,14 +705,20 @@ internal static class CloudBackupCoordinator
         {
             try
             {
-                if (new FileInfo(path).Length > 4096) continue;
+                if (new FileInfo(path).Length > 4096)
+                    throw new InvalidDataException("Cloud backup journal entry exceeds its size limit.");
                 var p = JsonSerializer.Deserialize<Pending>(File.ReadAllText(path));
                 if (p is not null && Guid.TryParseExact(p.Id, "N", out _) &&
                     p.Sha256.Length == 64 && p.Sha256.All(Uri.IsHexDigit) &&
                     p.PackageFile == Path.Combine(Queue, p.Id + ".fmscbackup"))
                     items.Add(p);
+                else throw new InvalidDataException("Invalid cloud backup journal identity or queue path.");
             }
-            catch (Exception ex) { AppExceptionHandler.LogNonFatal(ex, "Unreadable cloud backup journal entry"); }
+            catch (Exception ex)
+            {
+                AppExceptionHandler.LogNonFatal(ex, "Unreadable cloud backup journal entry");
+                unreadable?.Invoke(ex);
+            }
         }
         return items;
     }
