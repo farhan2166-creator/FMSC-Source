@@ -396,6 +396,25 @@ public static class DatabaseBackupManager
                 DatabaseHelper.RefreshDatabaseConnection();
         }
     }
+    /// <summary>
+    /// Full non-destructive recovery-readiness verification for a downloaded cloud
+    /// package. Performs an isolated disposable SQL restore without replacing the
+    /// live database. Only the same-school, compatible backup is accepted.
+    /// </summary>
+    internal static void VerifyRecoveryCandidate(string backupPath)
+    {
+        ValidateBackupFile(backupPath);
+        Guid currentScope;
+        using (var current = new SqlConnection(DatabaseHelper.GetConnectionString("FMSC_DB")))
+        {
+            DatabaseHelper.OpenConnection(current);
+            currentScope = BackupRestoreIdentity.ReadScope(current);
+        }
+        BackupRestoreIdentity.ValidateCandidate(MasterConnectionString, backupPath,
+            Path.Combine(DatabaseHelper.DatabaseFolder, "RestoreChecks"), currentScope,
+            DatabaseCompatibility.Validate);
+    }
+
     /// <summary>The pre-restore safety backup is MANDATORY.</summary>
     private static string TryCreatePreRestoreSafetyBackup(
         string aboutToRestoreFrom,
