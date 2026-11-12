@@ -36,6 +36,21 @@ internal static class CloudSettingsChecks
             CloudBackupSettings.Deserialize(Encoding.UTF8.GetBytes("{broken"));
             throw new Exception("Corrupt settings were silently accepted.");
         } catch (JsonException) { }
+        // Files written before independent-destination selection omitted
+        // LocalEnabled. Preserve the previous permanent-local default.
+        string oldFormat = json.Replace("\"LocalEnabled\":true,", "");
+        if (oldFormat == json || !CloudBackupSettings.Deserialize(Encoding.UTF8.GetBytes(oldFormat)).LocalEnabled)
+            throw new Exception("Legacy backup settings lost the local backup destination.");
+        original.LocalEnabled = false;
+        var remoteOnly = CloudBackupSettings.Deserialize(JsonSerializer.SerializeToUtf8Bytes(original));
+        if (remoteOnly.LocalEnabled || !remoteOnly.DropboxEnabled)
+            throw new Exception("Cloud-only backup settings were not preserved.");
+        original.DropboxEnabled = false;
+        try {
+            CloudBackupSettings.Deserialize(JsonSerializer.SerializeToUtf8Bytes(original));
+            throw new Exception("A backup schedule without any destinations was accepted.");
+        } catch (InvalidDataException) { }
+        original.DropboxEnabled = true;
         original.MaximumDropboxBackups = 0;
         try {
             CloudBackupSettings.Deserialize(JsonSerializer.SerializeToUtf8Bytes(original));
