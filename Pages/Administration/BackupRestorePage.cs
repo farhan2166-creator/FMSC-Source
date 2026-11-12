@@ -837,6 +837,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 // download after RestoreBackup verified successful recovery.
                 cloudRecoveryPassphrase = string.Empty;
                 selectedCloud = null;
+                BackupActivityJournal.TryRecord("Restore", "Cloud", "Completed");
                 ModernMessageDialog.Show(FindForm(),
                     result.Message + "\n\nFMSC will restart.",
                     "Restore Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -844,11 +845,13 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 RestartApplication(FindForm());
                 return;
             }
+            BackupActivityJournal.TryRecord("Restore", "Cloud", "Failed");
             await LoadHistoryAsync();
             Warn(result.Message);
         }
         catch (Exception ex)
         {
+            BackupActivityJournal.TryRecord("Restore", "Cloud", "Failed");
             await LoadHistoryAsync();
             Fail(ex);
         }
@@ -1053,6 +1056,21 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         return answer;
     }
 
+    private async Task<bool> TryCloudFallbackForUnavailableLocalAsync()
+    {
+        if (selectedCloudAlternatives.Count == 0 ||
+            !UnifiedRecoveryCatalog.IsSha256(selectedLocalRecoverySha256)) return false;
+        string? passphrase = AskFallbackPassphrase();
+        if (passphrase is null) return true; // The user chose not to restore.
+        selectedCloud = new CloudBackupCoordinator.CloudSelection(
+            selectedCloudAlternatives[0], KnownVerifiedUpload: false,
+            SourceBakSha256: selectedLocalRecoverySha256);
+        cloudRecoveryPassphrase = passphrase;
+        passphrase = string.Empty;
+        await RestoreCloudNowAsync();
+        return true;
+    }
+
     async Task RestoreNowAsync()
     {
         if (isBusy)
@@ -1074,6 +1092,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         string backupPath = restoreFile.Text.Trim();
         if (string.IsNullOrWhiteSpace(backupPath) || !File.Exists(backupPath))
         {
+            if (await TryCloudFallbackForUnavailableLocalAsync()) return;
             Warn("Please choose a valid .bak backup file first.");
             return;
         }
@@ -1089,6 +1108,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         ShowRestoreFileStatus(state, info);
         if (state is RestoreFileState.Unverified or RestoreFileState.WrongDatabase)
         {
+            if (await TryCloudFallbackForUnavailableLocalAsync()) return;
             Warn(state == RestoreFileState.Unverified
                 ? "This backup could not be checked. Choose a readable FMSC backup file."
                 : "This backup is not compatible with FMSC. Choose an FMSC school data backup.");
@@ -1168,6 +1188,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                     progress: stageReporter));
             if (result.Success)
             {
+                BackupActivityJournal.TryRecord("Restore", beforeSqlFailed ? "Cloud fallback" : "Local", "Completed");
                 ModernMessageDialog.Show(
                     FindForm(),
                     result.Message + "\n\nThe application will now restart so all database " +
@@ -1181,6 +1202,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 RestartApplication(FindForm());
                 return;
             }
+            BackupActivityJournal.TryRecord("Restore", beforeSqlFailed ? "Cloud fallback" : "Local", "Failed");
             /* Reload before reporting success so refresh feedback cannot replace the outcome. */
             await LoadHistoryAsync();
             Warn(result.Message);
