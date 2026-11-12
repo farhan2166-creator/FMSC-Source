@@ -45,6 +45,9 @@ internal sealed class DatabaseConnectionView : UserControl
     private readonly ModernButton _restart = new() { Text = "Restart Connection", ThemeRole = "Secondary" };
     private readonly ModernButton _repair = new() { Text = "Repair Connection", ThemeRole = "Secondary" };
     private readonly ModernButton _close = new() { Text = UiText.Actions.Close, ThemeRole = "Secondary" };
+    private readonly ModernButton _restoreSchool = new() {
+        Text = "Restore Existing School", ThemeRole = "Secondary", Visible = false
+    };
     private readonly ModernTextBox _details = new() {
         Multiline = true, ReadOnly = true, Dock = DockStyle.Fill,
         ScrollBars = ScrollBars.Vertical
@@ -121,7 +124,7 @@ internal sealed class DatabaseConnectionView : UserControl
             AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Anchor = AnchorStyles.None, WrapContents = false, Padding = Padding.Empty, Margin = Padding.Empty
         };
-        foreach (var button in new[] { _reconnect, _restart, _repair, _updates })
+        foreach (var button in new[] { _reconnect, _restart, _repair, _updates, _restoreSchool })
         {
             button.Height = AppMetrics.ButtonHeight;
             button.Width = TextRenderer.MeasureText(button.Text, button.Font).Width + AppScale.S(36);
@@ -154,6 +157,20 @@ internal sealed class DatabaseConnectionView : UserControl
         root.Controls.Add(footer, 0, 3);
         root.Controls.Add(detailsCard, 0, 4);
         Controls.Add(root);
+        _restoreSchool.Click += async (_, _) => {
+#if !FMSC_LEVEL2
+            if (_busy) return;
+            try { Services.Backup.ReplacementSchoolRecovery.RequireAbsentOrVirginSchool(); }
+            catch (Exception ex)
+            {
+                ModernMessageDialog.ShowWarning(_host, DbMessage.UserMessage(ex), "Replacement School Recovery");
+                return;
+            }
+            using var recovery = new FMSC_SMS.Pages.Security.RestoreExistingSchoolForm();
+            if (recovery.ShowDialog(_host) == DialogResult.OK)
+                await ConnectAsync(false);
+#endif
+        };
         _reconnect.Click += async (_, _) => await ConnectAsync(false);
         _restart.Click += async (_, _) => await ConnectAsync(true);
         _updates.Click += (_, _) => {
@@ -185,7 +202,7 @@ internal sealed class DatabaseConnectionView : UserControl
     private void SetBusy(bool busy)
     {
         _busy = busy;
-        foreach (var button in new[] { _reconnect, _restart, _repair, _updates, _close }) button.Enabled = !busy;
+        foreach (var button in new[] { _reconnect, _restart, _repair, _updates, _close, _restoreSchool }) button.Enabled = !busy;
         _restart.Enabled = !busy && _canRestart;
         _repair.Enabled = !busy && _canRepair;
         _progress.Visible = busy;
@@ -209,6 +226,7 @@ internal sealed class DatabaseConnectionView : UserControl
                 _canRestart = true;
                 _canRepair = false;
                 _repair.Visible = false;
+                _restoreSchool.Visible = false;
                 _message.Text = "Your database is connected and ready.";
                 _status.Text = "Connection Successful";
                 _details.Text = ConnectionDetails(string.Empty);
@@ -265,6 +283,13 @@ internal sealed class DatabaseConnectionView : UserControl
             guidance.CanRepair;
 #endif
         _repair.Visible = _canRepair;
+        // Only offer new-school recovery when there is no installed MDF and
+        // no schema mismatch. The recovery service independently refuses an
+        // attached/foreign database even if this UI check is stale.
+#if !FMSC_LEVEL2
+        _restoreSchool.Visible = !File.Exists(DatabaseHelper.DatabaseFile) &&
+            !_updateSchema.HasValue;
+#endif
         _status.Text = guidance.Status;
         _message.Text = guidance.Message;
 #if !FMSC_LEVEL2

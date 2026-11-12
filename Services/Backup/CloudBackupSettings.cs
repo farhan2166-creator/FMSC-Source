@@ -27,6 +27,9 @@ internal sealed class CloudBackupOptions
     public int MaximumLocalBackups { get; set; } = 7;
     public int MaximumGoogleDriveBackups { get; set; } = 7;
     public int MaximumDropboxBackups { get; set; } = 7;
+    // The encrypted pending queue is independent of permanent Local backups.
+    // Existing settings without this property use the safe 8-GiB default.
+    public int MaximumPendingQueueMegabytes { get; set; } = 8192;
 
     public void Validate()
     {
@@ -34,7 +37,8 @@ internal sealed class CloudBackupOptions
             Format != CurrentFormat || !Enum.IsDefined(Frequency) || !Enum.IsDefined(WeeklyDay)
             || MaximumLocalBackups is < 1 or > 365
             || MaximumGoogleDriveBackups is < 1 or > 365
-            || MaximumDropboxBackups is < 1 or > 365)
+            || MaximumDropboxBackups is < 1 or > 365
+            || MaximumPendingQueueMegabytes is < 512 or > 1_048_576)
             throw new InvalidDataException("Saved cloud backup schedule or retention settings are invalid.");
     }
 
@@ -73,7 +77,7 @@ internal static class CloudBackupSettings
             warning = null;
             return existing;
         }
-        catch (Exception ex) when (ex is InvalidDataException or JsonException)
+        catch (Exception ex) when (ex is InvalidDataException or JsonException or IOException or UnauthorizedAccessException)
         {
             warning = "The saved backup settings could not be read. Their original file will be preserved before you explicitly save repaired settings. Automatic backups will not use the invalid configuration.";
             AppExceptionHandler.LogNonFatal(ex, "Opening damaged cloud backup settings for safe repair");
@@ -87,7 +91,7 @@ internal static class CloudBackupSettings
         // A valid file does not need a snapshot. Never delete or rewrite a broken
         // file before preserving its exact bytes in a separate protected path.
         try { _ = Load(); return; }
-        catch (Exception ex) when (ex is InvalidDataException or JsonException)
+        catch (Exception ex) when (ex is InvalidDataException or JsonException or IOException or UnauthorizedAccessException)
         {
             EnsurePrivateDirectory();
             string copy = Path.Combine(Root, "schedule.unreadable." +

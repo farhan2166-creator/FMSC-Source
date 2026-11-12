@@ -37,6 +37,14 @@ internal static class RestoreChecks
         using(var locked=new FileStream(good,FileMode.Open,FileAccess.Read,FileShare.Read))
         {
             Probe(good);Check(true,"A same-identity backup remains readable by SQL while protected against replacement");
+            BackupRestoreIdentity.ValidateCandidateForNewComputer(master, good,
+                PathFor("new-computer-checks"), candidate =>
+                {
+                    Check(BackupRestoreIdentity.ReadScope(candidate)==original,
+                        "Replacement-PC isolated candidate exposes genuine school identity.");
+                    Validate(candidate);
+                });
+            Check(true,"A replacement-PC candidate was validated in disposable SQL without touching the original.");
             try{using var overwrite=new FileStream(good,FileMode.Open,FileAccess.Write,FileShare.ReadWrite);throw new Exception("Protected backup was writable");}
             catch(IOException){Check(true,"The protected backup cannot be overwritten during validation/restore");}
         }
@@ -50,13 +58,57 @@ internal static class RestoreChecks
         string fork=Backup("same-family-foreign-school.bak");
         RejectIdentity(fork,"Even a copied database family is refused when its logical school identity differs");
         Execute("USE FMSC_DB; EXEC sys.sp_dropextendedproperty @name=N'FMSC_QuickRegistrationScope'; USE master;");
-        RejectIdentity(Backup("missing-identity.bak"),"A backup without a recovery identity is refused");
+        string noScope=Backup("missing-identity.bak");
+        RejectIdentity(noScope,"A backup without a recovery identity is refused");
+        try
+        {
+            BackupRestoreIdentity.ValidateCandidateForNewComputer(master,noScope,
+                PathFor("new-computer-checks"),_ => throw new Exception("Scope-less backup accepted"));
+            throw new Exception("A replacement PC accepted a backup without school identity.");
+        }
+        catch(BackupIdentityException)
+        {
+            Check(true,"Replacement-computer preflight also rejects a missing school identity.");
+        }
         Execute($"USE FMSC_DB; DECLARE @Scope uniqueidentifier='{original:D}'; EXEC sys.sp_addextendedproperty @name=N'FMSC_QuickRegistrationScope',@value=@Scope; UPDATE dbo.TestVersion SET Value=999; USE master;");
         try{Probe(Backup("incompatible-schema.bak"));throw new Exception("Incompatible candidate accepted");}
         catch(InvalidDataException){Check(true,"Matching identity does not bypass application compatibility");}
         Check(Convert.ToString(Scalar("SELECT Value FROM CurrentSchool.dbo.TestMarker;"))=="Original","Every rejected backup leaves the original working database untouched");
         Check(Convert.ToInt32(Scalar("SELECT COUNT(*) FROM sys.databases WHERE name LIKE N'FMSC[_]RestoreCheck[_]%';"))==0,"Temporary restored catalogs are cleaned after successful and rejected validations");
         Check(!Directory.Exists(PathFor("checks"))||Directory.GetFileSystemEntries(PathFor("checks")).Length==0,"Temporary database files are cleaned after all validation outcomes");
-        Console.WriteLine($"PASS: {checks} real SQL backup-identity checks on the isolated instance.");
+        // Exercise the exact production SQL restore command on the owned
+        // disposable LocalDB instance, never an installed school's database.
+        Execute("ALTER DATABASE [FMSC_DB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [FMSC_DB];");
+        ReplacementSqlActivation.RestoreVerifiedBackup(c,good,
+            PathFor("replacement-new.mdf"),PathFor("replacement-new.ldf"),
+            verifiedVirginTemplate:false);
+        Check(Convert.ToString(Scalar("SELECT Value FROM FMSC_DB.dbo.TestMarker;"))=="Original",
+            "Replacement activation restored actual verified SQL backup into new school catalog.");
+        bool protectedExisting=false;
+        try
+        {
+            ReplacementSqlActivation.RestoreVerifiedBackup(c,good,
+                PathFor("replacement-overwrite.mdf"),PathFor("replacement-overwrite.ldf"),
+                verifiedVirginTemplate:false);
+        }
+        catch(InvalidOperationException){protectedExisting=true;}
+        Check(protectedExisting,
+            "Replacement SQL activation refused to overwrite an existing FMSC_DB database.");
+        Check(Convert.ToString(Scalar("SELECT Value FROM FMSC_DB.dbo.TestMarker;"))=="Original",
+            "A refused second activation did not alter the recovered school.");
+        Check(Convert.ToString(Scalar("SELECT Value FROM CurrentSchool.dbo.TestMarker;"))=="Original",
+            "Disposable replacement activation did not modify the preserved original school.");
+        string syntheticSafety=PathFor("virgin-template-pre-recovery-safety.bak");
+        Execute("UPDATE FMSC_DB.dbo.TestMarker SET Value=N'Blank';");
+        Execute($"BACKUP DATABASE [FMSC_DB] TO DISK={Quote(syntheticSafety)} WITH COPY_ONLY,CHECKSUM,INIT;");
+        Execute($"RESTORE VERIFYONLY FROM DISK={Quote(syntheticSafety)} WITH CHECKSUM;");
+        Check(File.Exists(syntheticSafety)&&new FileInfo(syntheticSafety).Length>0,
+            "A synthetic first-run template has a verified safety copy before replacement.");
+        ReplacementSqlActivation.RestoreVerifiedBackup(c,good,
+            PathFor("replacement-new.mdf"),PathFor("replacement-new.ldf"),
+            verifiedVirginTemplate:true);
+        Check(Convert.ToString(Scalar("SELECT Value FROM FMSC_DB.dbo.TestMarker;"))=="Original",
+            "Verified virgin-template replacement completed and preserved the recovered SQL data.");
+        Console.WriteLine($"PASS: {checks} real SQL backup-identity and replacement activation checks on the isolated instance.");
     }
 }

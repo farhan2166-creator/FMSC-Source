@@ -1,5 +1,6 @@
 using FMSC_SMS.Core;
 using FMSC_SMS.Services.Backup;
+using System.Security.Cryptography;
 namespace FMSC_SMS.Pages.Administration;
 public sealed class BackupRestorePage : V2Page, IBusyPage
 {
@@ -7,12 +8,43 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     readonly ModernTextBox restoreFile = HumanUi.TextBox(false, 500);
     readonly bool canRestore = CurrentUser.HasPermission("Backup.Restore");
     ModernButton backupNowButton = null!;
+    private readonly Label operationStage = new() {
+        Dock = DockStyle.Top, Height = AppScale.Scale(28),
+        ForeColor = AppTheme.Primary, Font = AppTheme.FontSmallBold,
+        Text = "Ready for backup or restore", TextAlign = ContentAlignment.MiddleLeft
+    };
+    private readonly LinkLabel toggleTechnicalDetails = new() {
+        Dock = DockStyle.Top, Height = AppScale.Scale(24),
+        Text = "Show technical details", LinkColor = AppTheme.Primary,
+        TextAlign = ContentAlignment.MiddleLeft
+    };
+    private readonly TextBox technicalDetails = new() {
+        Dock = DockStyle.Top, Multiline = true, ReadOnly = true,
+        ScrollBars = ScrollBars.Vertical, Height = AppScale.Scale(110), Visible = false
+    };
+    private readonly Label destinationResults = new() {
+        Dock = DockStyle.Top, Height = AppScale.Scale(60),
+        ForeColor = AppTheme.MutedText, AutoEllipsis = false,
+        TextAlign = ContentAlignment.TopLeft,
+        Text = "Configure Local, Google Drive or Dropbox in Backup Settings."
+    };
     ModernButton? retryPendingButton;
     ModernButton? cloudSettingsButton;
     ModernButton? cloudChooseRestoreButton;
+    ModernButton? selectRecoveryButton;
+    readonly DataGridView availableBackupsGrid = CreateAvailableBackupsGrid();
+    readonly Label availableBackupsStatus = new() {
+        Dock = DockStyle.Top, Height = AppScale.Scale(42), AutoEllipsis = true,
+        ForeColor = AppTheme.MutedText, TextAlign = ContentAlignment.MiddleLeft
+    };
+    int recoveryCatalogueVersion;
+    private readonly ListBox recordedCloudActivity = new() {
+        Dock = DockStyle.Fill, IntegralHeight = false, HorizontalScrollbar = true
+    };
     CloudBackupCoordinator.CloudSelection? selectedCloud;
     IReadOnlyList<CloudRemoteBackup> selectedCloudAlternatives = Array.Empty<CloudRemoteBackup>();
     string cloudRecoveryPassphrase = string.Empty;
+    string selectedLocalRecoverySha256 = string.Empty;
     Action? refreshCloudStatus;
     ModernButton? restoreButton;
     ModernButton? locateFileButton;
@@ -71,17 +103,22 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 AddAction("Choose Backup File…", (_, _) => ChooseRestoreFile());
             cloudChooseRestoreButton =
                 AddBusyAction("Choose Cloud Backup…", ChooseCloudRestoreAsync);
+            selectRecoveryButton =
+                AddBusyAction("Use Selected Recovery Point", UseSelectedRecoveryPointAsync);
             /* Prevent duplicate restore submissions. */
             restoreButton =
                 AddBusyAction("Restore Data", RestoreNowAsync, "Danger");
             /* Preserve disabled states when the busy scope restores actions. */
             restoreButton.EnabledChanged += (_, _) => {
-                if ((!restoreAllowed || !HistoryDependentActionsUsable) &&
+                if ((!restoreAllowed || isBusy) &&
                     restoreButton is { Enabled: true })
                     restoreButton.Enabled = false;
             };
         }
-        refreshHistoryButton = AddBusyAction("Refresh History", LoadHistoryAsync);
+        refreshHistoryButton = AddBusyAction("Refresh History", async () => {
+            await LoadHistoryAsync();
+            await LoadRecoveryCatalogueAsync();
+        });
         locateFileButton =
             AddBusyAction("Locate Missing File…", LocateMissingFileAsync, "Secondary");
         RelocateFromActions(
@@ -93,6 +130,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             RelocateFromActions(retryPendingButton);
         if (cloudChooseRestoreButton is not null)
             RelocateFromActions(cloudChooseRestoreButton);
+        if (selectRecoveryButton is not null)
+            RelocateFromActions(selectRecoveryButton);
         if (chooseRestoreButton is not null && restoreButton is not null)
             RelocateFromActions(
                 chooseRestoreButton,
@@ -141,8 +180,18 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         // Each upper card can scroll independently when the available half-height
         // is smaller than its actions and warnings (compact windows / high DPI).
         backupCard.Content.AutoScroll = true;
+        backupCard.Content.Controls.Add(technicalDetails);
+        backupCard.Content.Controls.Add(toggleTechnicalDetails);
+        backupCard.Content.Controls.Add(destinationResults);
+        backupCard.Content.Controls.Add(operationStage);
         backupCard.Content.Controls.Add(backupFields);
         backupCard.Content.Controls.Add(localOnlyNotice);
+        toggleTechnicalDetails.LinkClicked += (_, _) => {
+            technicalDetails.Visible = !technicalDetails.Visible;
+            toggleTechnicalDetails.Text = technicalDetails.Visible
+                ? "Hide technical details" : "Show technical details";
+            FitBackupNotice();
+        };
         void FitBackupNotice()
         {
             if (backupCard.Content.ClientSize.Width <= 0)
@@ -159,7 +208,9 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 textHeight + AppMetrics.SpacingSm);
             backupCard.Content.AutoScrollMinSize = new Size(
                 0, localOnlyNotice.Height + backupFields.Height +
-                   backupCard.Content.Padding.Vertical);
+                    operationStage.Height + destinationResults.Height + toggleTechnicalDetails.Height +
+                    (technicalDetails.Visible ? technicalDetails.Height : 0) +
+                    backupCard.Content.Padding.Vertical);
         }
         backupCard.Content.SizeChanged += (_, _) => FitBackupNotice();
         string backupNotice = localOnlyNotice.Text;
@@ -258,7 +309,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 0,
                 2);
             restoreFields.Controls.Add(
-                CreateActionRow(cloudChooseRestoreButton!), 0, 3);
+                CreateActionRow(selectRecoveryButton!, cloudChooseRestoreButton!), 0, 3);
             restoreFields.Height = AppMetrics.FieldRowHeight +
                 restoreStatusHeight + 2 * AppMetrics.ButtonRowHeight + AppMetrics.SpacingXs;
             restoreCard.Content.AutoScroll = true;
@@ -271,9 +322,27 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             ShowRestoreFileStatus(RestoreFileState.None, null);
         }
         var historyCard = HumanUi.Card(
-            "Backup & Restore History",
-            "Every backup and restore operation performed from this application.");
-        historyCard.Content.Controls.Add(Grid);
+            "Available Backups & Activity History",
+            "Choose a recovery point from available destinations, or review past operations.");
+        var tabs = new TabControl { Dock = DockStyle.Fill };
+        var availableTab = new TabPage("Available Backups") { BackColor = AppTheme.PageBackground };
+        var activityTab = new TabPage("Activity History") { BackColor = AppTheme.PageBackground };
+        availableBackupsGrid.CellDoubleClick += async (_, _) => await UseSelectedRecoveryPointAsync();
+        availableTab.Controls.Add(availableBackupsGrid);
+        availableTab.Controls.Add(availableBackupsStatus);
+        var activityLayout = new TableLayoutPanel {
+            Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1,
+            Margin = Padding.Empty, Padding = Padding.Empty
+        };
+        activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 36));
+        activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 64));
+        activityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        activityLayout.Controls.Add(recordedCloudActivity, 0, 0);
+        activityLayout.Controls.Add(Grid, 0, 1);
+        activityTab.Controls.Add(activityLayout);
+        tabs.TabPages.Add(availableTab);
+        tabs.TabPages.Add(activityTab);
+        historyCard.Content.Controls.Add(tabs);
         historyCard.Margin = new Padding(0, AppMetrics.SpacingXs, 0, 0);
         if (!canRestore)
             upper.SetColumnSpan(backupCard, 2);
@@ -285,7 +354,91 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         /* Keep history-dependent actions disabled until loading succeeds. */
         CloseHistoryDependentActions();
         Defer(LoadHistoryAsync);
+        Defer(LoadRecoveryCatalogueAsync);
+        RefreshRecordedActivity();
+        RefreshDestinationSummary();
     }
+
+    private void RefreshDestinationSummary()
+    {
+        if (IsDisposed || Disposing) return;
+        var settings = CloudBackupSettings.LoadForEditing(out string? warning);
+        if (warning is not null)
+        {
+            destinationResults.Text = "Backup settings need repair — open Backup Settings.";
+            return;
+        }
+        destinationResults.Text = "Destinations: " +
+            (settings.LocalEnabled ? "Local · " : "") +
+            (settings.GoogleDriveEnabled ? "Google Drive · " : "") +
+            (settings.DropboxEnabled ? "Dropbox · " : "") +
+            (settings.AutomaticEnabled ? "Scheduled" : "Manual");
+    }
+
+    private void RefreshRecordedActivity()
+    {
+        if (IsDisposed || Disposing) return;
+        recordedCloudActivity.BeginUpdate();
+        try
+        {
+            recordedCloudActivity.Items.Clear();
+            foreach (var item in BackupActivityJournal.ReadRecent().Take(80))
+                recordedCloudActivity.Items.Add(
+                    item.Utc.ToLocalTime().ToString("dd-MMM HH:mm") + "  |  " +
+                    item.Operation + "  |  " + item.Destination + "  |  " + item.State +
+                    (item.Detail.Length > 0 ? "  |  " + item.Detail : ""));
+            if (recordedCloudActivity.Items.Count == 0)
+                recordedCloudActivity.Items.Add("No recorded cloud delivery or restore activity yet.");
+        }
+        finally { recordedCloudActivity.EndUpdate(); }
+    }
+
+    private void ReportBackupStage(BackupProgressUpdate update)
+    {
+        if (IsDisposed || Disposing) return;
+        operationStage.Text = update.Display;
+        operationStage.ForeColor = update.IsError ? AppTheme.Danger : AppTheme.Primary;
+        if (update.Detail.Length > 0)
+        {
+            string line = DateTime.Now.ToString("HH:mm:ss") + "  " + update.Display +
+                " — " + update.Detail + Environment.NewLine;
+            if (technicalDetails.TextLength > 12000) technicalDetails.Clear();
+            technicalDetails.AppendText(line);
+        }
+        if (restoreStatusDetail is not null && isBusy)
+            restoreStatusDetail.Text = update.Display;
+    }
+
+    private static DataGridView CreateAvailableBackupsGrid()
+    {
+        var grid = new DataGridView {
+            Dock = DockStyle.Fill,
+            ReadOnly = true,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
+            MultiSelect = false,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            AutoGenerateColumns = false,
+            RowHeadersVisible = false,
+            BackgroundColor = AppTheme.PageBackground,
+            BorderStyle = BorderStyle.None
+        };
+        grid.Columns.Add(new DataGridViewTextBoxColumn {
+            HeaderText = "SQL backup date", Width = AppScale.Scale(170),
+            SortMode = DataGridViewColumnSortMode.NotSortable
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn {
+            HeaderText = "Available copies", Width = AppScale.Scale(200),
+            SortMode = DataGridViewColumnSortMode.NotSortable
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn {
+            HeaderText = "Recovery status", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            SortMode = DataGridViewColumnSortMode.NotSortable
+        });
+        return grid;
+    }
+
     static TableLayoutPanel CreateActionRow(params ModernButton[] buttons)
     {
         var row = new TableLayoutPanel {
@@ -335,8 +488,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             return;
         historyLoading = false;
         historyLoadFailed = !historyLoadedLatest;
-        if (historyLoadFailed)
-            return;
         ApplyHistoryDependentEnablement();
     }
     /// <summary>Shared eligibility rules for Restore and Locate Missing File.</summary>
@@ -345,8 +496,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         bool usable = HistoryDependentActionsUsable;
         if (locateFileButton is not null)
             locateFileButton.Enabled = usable;
+        // History-query failures must not disable a separately validated file
+        // or cloud recovery point. RestoreBackup enforces SQL identity and safety.
         if (restoreButton is not null)
-            restoreButton.Enabled = usable && restoreAllowed;
+            restoreButton.Enabled = !isBusy && restoreAllowed;
     }
     void LoadBackupFolder()
     {
@@ -429,8 +582,18 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 Warn("Choose a valid Local Backup Folder or disable the Local destination in Cloud Settings.");
                 return;
             }
-            var result = await CloudBackupCoordinator.CreateAndUploadAsync();
+            technicalDetails.Clear();
+            var progress = new Progress<BackupProgressUpdate>(ReportBackupStage);
+            var result = await CloudBackupCoordinator.CreateAndUploadAsync(progress: progress);
+            destinationResults.Text = "Local: " + (settings.LocalEnabled
+                    ? (result.LocalSucceeded ? "Verified" : "Failed") : "Disabled") +
+                "\nGoogle Drive: " + (settings.GoogleDriveEnabled
+                    ? (result.GoogleSucceeded ? "Recovery verified" : "Pending retry") : "Disabled") +
+                "\nDropbox: " + (settings.DropboxEnabled
+                    ? (result.DropboxSucceeded ? "Recovery verified" : "Pending retry") : "Disabled");
             await LoadHistoryAsync();
+            await LoadRecoveryCatalogueAsync();
+            RefreshRecordedActivity();
             SetStatus(result.Message, result.UploadsPending);
             if (result.UploadsPending) Warn(result.Message);
             else ModernMessageDialog.ShowInfo(FindForm(), result.Message);
@@ -452,7 +615,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             RequirePermission("Backup.Restore");
             using var dialog = new CloudBackupSettingsDialog();
             if (dialog.ShowDialog(FindForm()) == DialogResult.OK)
-                SetStatus("Cloud provider, schedule and retention settings saved.");
+            {
+                SetStatus("Backup destination, schedule and retention settings saved.");
+                RefreshDestinationSummary();
+                _ = LoadRecoveryCatalogueAsync();
+            }
         }
         catch (Exception ex) { Fail(ex); }
     }
@@ -466,7 +633,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         try
         {
             SetStatus("Retrying pending cloud deliveries…");
-            string result = await CloudBackupCoordinator.RetryPendingUploadsNowAsync();
+            technicalDetails.Clear();
+            string result = await CloudBackupCoordinator.RetryPendingUploadsNowAsync(
+                progress: new Progress<BackupProgressUpdate>(ReportBackupStage));
+            await LoadRecoveryCatalogueAsync();
+            RefreshRecordedActivity();
             SetStatus(result);
             ModernMessageDialog.ShowInfo(FindForm(), result);
         }
@@ -477,6 +648,119 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             busyMessage = string.Empty;
             if (!IsDisposed) SetBusyState(false);
         }
+    }
+
+    private async Task LoadRecoveryCatalogueAsync()
+    {
+        int version = ++recoveryCatalogueVersion;
+        if (!IsDisposed)
+            availableBackupsStatus.Text = "Checking local and connected cloud recovery points…";
+        try
+        {
+            var inventory = await UnifiedRecoveryInventory.LoadAsync();
+            if (IsDisposed || version != recoveryCatalogueVersion) return;
+            availableBackupsGrid.Rows.Clear();
+            foreach (var point in inventory.Points)
+            {
+                int rowIndex = availableBackupsGrid.Rows.Add(
+                    point.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy  hh:mm tt"),
+                    point.AvailableSources,
+                    point.VerificationSummary);
+                availableBackupsGrid.Rows[rowIndex].Tag = point;
+            }
+            availableBackupsGrid.ClearSelection();
+            string countText = inventory.Points.Count == 0
+                ? "No available recovery points found. Choose a backup file manually or connect a cloud account."
+                : inventory.Points.Count + " available recovery point(s). Select a row and use 'Use Selected Recovery Point'.";
+            availableBackupsStatus.Text = inventory.Warnings.Count == 0
+                ? countText : countText + "  " + string.Join(" ", inventory.Warnings);
+        }
+        catch (Exception ex)
+        {
+            if (IsDisposed || version != recoveryCatalogueVersion) return;
+            AppExceptionHandler.LogNonFatal(ex, "Loading unified backup recovery-point catalogue");
+            availableBackupsStatus.Text =
+                "Recovery points could not be refreshed. Existing backups were not modified; try Refresh History or Choose Backup File.";
+        }
+    }
+
+    private async Task UseSelectedRecoveryPointAsync()
+    {
+        if (isBusy || !canRestore) return;
+        if (availableBackupsGrid.SelectedRows.Count != 1 ||
+            availableBackupsGrid.SelectedRows[0].Tag is not UnifiedRecoveryPoint point)
+        {
+            Warn("Select a recovery point in Available Backups, then choose Use Selected Recovery Point.");
+            return;
+        }
+        try
+        {
+            RequirePermission("Backup.Restore");
+            if (point.LocalCopies.Count > 0)
+            {
+                string path = point.LocalCopies[0].FilePath;
+                if (!File.Exists(path))
+                {
+                    Warn("This local backup is no longer available. Refresh the recovery points or select a cloud copy.");
+                    return;
+                }
+                var info = await Task.Run(() => DatabaseBackupManager.GetBackupInfo(path));
+                RestoreFileState state = ClassifyRestoreFile(info);
+                if (state is RestoreFileState.Valid or RestoreFileState.Stale)
+                {
+                    DateTime currentSqlUtc = DateTime.SpecifyKind(info!.BackupStartDate, DateTimeKind.Local)
+                        .ToUniversalTime();
+                    if ((currentSqlUtc - point.SqlBackupCreatedUtc).Duration() > TimeSpan.FromSeconds(1))
+                    {
+                        Warn("The backup file changed since the catalogue was refreshed. Refresh and select it again.");
+                        return;
+                    }
+                }
+                selectedCloud = null;
+                // The catalogue has checked both SQL time and the original
+                // .bak digest. Cloud copies of this same point are candidates
+                // ONLY for a failed pre-SQL acquisition, never SQL rollback.
+                selectedCloudAlternatives = point.CloudCopies.Select(x => x.Remote).ToArray();
+                cloudRecoveryPassphrase = string.Empty;
+                selectedRestoreBackupInfo = info;
+                selectedLocalRecoverySha256 = point.LocalCopies[0].SourceBakSha256;
+                restoreFile.Text = path;
+                restoreFile.Tag = null; // Re-read the SQL header at final restore confirmation.
+                ShowRestoreFileStatus(state, info);
+                if (state is RestoreFileState.Valid or RestoreFileState.Stale)
+                    SetStatus("Local copy selected. Restore Selected will validate the file again before replacing school data.");
+                else
+                    Warn("The selected local file could not be verified as an FMSC database backup.");
+                return;
+            }
+            if (point.CloudCopies.Count == 0)
+            {
+                Warn("This recovery point has no currently available copies.");
+                return;
+            }
+            // Ask for the original passphrase only when the chosen source is
+            // encrypted. Do not retrieve secrets from unrelated cloud accounts.
+            var copies = point.CloudCopies.Select(x =>
+                new CloudBackupCoordinator.CloudSelection(x.Remote, x.RecoveryTested, x.SourceBakSha256))
+                .ToArray();
+            using var dialog = new CloudRestoreSelectionDialog(copies, null);
+            if (dialog.ShowDialog(FindForm()) != DialogResult.OK ||
+                dialog.SelectedCopy is not { } selected) return;
+            selectedCloud = selected;
+            selectedCloudAlternatives = point.CloudCopies.Select(x => x.Remote).ToArray();
+            cloudRecoveryPassphrase = dialog.RecoveryPassphrase;
+            selectedRestoreBackupInfo = null;
+            restoreFile.Tag = null;
+            restoreFile.Text = selected.Remote.Provider + " — " +
+                selected.Remote.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt");
+            ShowRestoreFileStatus(RestoreFileState.Valid, null);
+            if (restoreStatusHeadline != null)
+                restoreStatusHeadline.Text = "Cloud Recovery Point Selected";
+            if (restoreStatusDetail != null)
+                restoreStatusDetail.Text = "Remote metadata is provisional; downloaded encryption and SQL integrity are checked before restoration.";
+            SetStatus("Encrypted cloud recovery point selected. Restore Selected will download and validate this exact recovery point.");
+        }
+        catch (Exception ex) { Fail(ex); }
     }
 
     private async Task ChooseCloudRestoreAsync()
@@ -546,13 +830,15 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         {
             SetStatus("Downloading and verifying encrypted cloud backup…");
             var result = await CloudBackupCoordinator.RestoreFromCloudAsync(
-                selection.Remote, cloudRecoveryPassphrase, selectedCloudAlternatives);
+                selection.Remote, cloudRecoveryPassphrase, selectedCloudAlternatives,
+                progress: new Progress<BackupProgressUpdate>(ReportBackupStage));
             if (result.Success)
             {
                 // CloudRestoreStaging has already removed the temporary
                 // download after RestoreBackup verified successful recovery.
                 cloudRecoveryPassphrase = string.Empty;
                 selectedCloud = null;
+                BackupActivityJournal.TryRecord("Restore", "Cloud", "Completed");
                 ModernMessageDialog.Show(FindForm(),
                     result.Message + "\n\nFMSC will restart.",
                     "Restore Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -560,11 +846,13 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 RestartApplication(FindForm());
                 return;
             }
+            BackupActivityJournal.TryRecord("Restore", "Cloud", "Failed");
             await LoadHistoryAsync();
             Warn(result.Message);
         }
         catch (Exception ex)
         {
+            BackupActivityJournal.TryRecord("Restore", "Cloud", "Failed");
             await LoadHistoryAsync();
             Fail(ex);
         }
@@ -593,6 +881,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         selectedCloud = null;
         selectedCloudAlternatives = Array.Empty<CloudRemoteBackup>();
         cloudRecoveryPassphrase = string.Empty;
+        selectedLocalRecoverySha256 = string.Empty;
         using var dialog = new OpenFileDialog {
             Title = "Select FMSC Database Backup",
             Filter = "SQL Server Backup Files (*.bak)|*.bak|All Files (*.*)|*.*",
@@ -736,6 +1025,53 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 : "less than an hour ago";
         return $"on {when} ({ageText})";
     }
+    private string? AskFallbackPassphrase()
+    {
+        using var window = new Form {
+            Text = "Cloud fallback authorization",
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            ClientSize = new Size(AppScale.Scale(450), AppScale.Scale(180)),
+            MaximizeBox = false, MinimizeBox = false
+        };
+        var input = new TextBox { Dock = DockStyle.Top, UseSystemPasswordChar = true };
+        var label = new Label { Dock = DockStyle.Top, AutoSize = true,
+            Text = "The selected local copy failed before SQL restoration.\n" +
+                   "Enter the school's cloud recovery passphrase to try the same recovery point." };
+        var ok = new Button { Dock = DockStyle.Top, Text = "Verify cloud copy", Height = AppScale.Scale(38) };
+        window.Controls.Add(ok);
+        window.Controls.Add(input);
+        window.Controls.Add(label);
+        ok.Click += (_, _) => {
+            if (input.Text.Length < 12)
+            {
+                ModernMessageDialog.ShowWarning(window, "Enter the saved recovery passphrase (at least 12 characters).",
+                    "Cloud fallback");
+                return;
+            }
+            window.DialogResult = DialogResult.OK;
+            window.Close();
+        };
+        var answer = window.ShowDialog(FindForm()) == DialogResult.OK ? input.Text : null;
+        input.Clear();
+        return answer;
+    }
+
+    private async Task<bool> TryCloudFallbackForUnavailableLocalAsync()
+    {
+        if (selectedCloudAlternatives.Count == 0 ||
+            !UnifiedRecoveryCatalog.IsSha256(selectedLocalRecoverySha256)) return false;
+        string? passphrase = AskFallbackPassphrase();
+        if (passphrase is null) return true; // The user chose not to restore.
+        selectedCloud = new CloudBackupCoordinator.CloudSelection(
+            selectedCloudAlternatives[0], KnownVerifiedUpload: false,
+            SourceBakSha256: selectedLocalRecoverySha256);
+        cloudRecoveryPassphrase = passphrase;
+        passphrase = string.Empty;
+        await RestoreCloudNowAsync();
+        return true;
+    }
+
     async Task RestoreNowAsync()
     {
         if (isBusy)
@@ -757,6 +1093,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         string backupPath = restoreFile.Text.Trim();
         if (string.IsNullOrWhiteSpace(backupPath) || !File.Exists(backupPath))
         {
+            if (await TryCloudFallbackForUnavailableLocalAsync()) return;
             Warn("Please choose a valid .bak backup file first.");
             return;
         }
@@ -772,6 +1109,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         ShowRestoreFileStatus(state, info);
         if (state is RestoreFileState.Unverified or RestoreFileState.WrongDatabase)
         {
+            if (await TryCloudFallbackForUnavailableLocalAsync()) return;
             Warn(state == RestoreFileState.Unverified
                 ? "This backup could not be checked. Choose a readable FMSC backup file."
                 : "This backup is not compatible with FMSC. Choose an FMSC school data backup.");
@@ -798,9 +1136,60 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         SetStatus("Restoring school data…");
         try
         {
-            var result = await Task.Run(() => DatabaseBackupManager.RestoreBackup(backupPath));
+            technicalDetails.Clear();
+            var stageReporter = new Progress<string>(message =>
+                ReportBackupStage(new BackupProgressUpdate(message, "Validated local SQL restore stage.")));
+            DatabaseBackupManager.BackupResult result;
+            bool beforeSqlFailed = false;
+            if (selectedCloudAlternatives.Count > 0)
+            {
+                try
+                {
+                    // Pairing local/cloud needs the original verified SQL bytes,
+                    // not just matching SQL creation timestamps. Recheck the
+                    // hash at restore time before any live SQL work begins.
+                    if (!UnifiedRecoveryCatalog.IsSha256(selectedLocalRecoverySha256))
+                        throw new InvalidDataException("The selected local/cloud pairing lacks a trusted original SQL digest.");
+                    await using (var stream = File.OpenRead(backupPath))
+                    {
+                        string digest = Convert.ToHexString(await SHA256.HashDataAsync(stream))
+                            .ToLowerInvariant();
+                        if (!string.Equals(digest, selectedLocalRecoverySha256,
+                                StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException(
+                                "The selected local backup has changed since its recovery-point identity was recorded.");
+                    }
+                    ReportBackupStage(new BackupProgressUpdate("Preflighting local recovery copy",
+                        "The local source must pass isolated SQL identity checks before SQL restoration begins."));
+                    await Task.Run(() => DatabaseBackupManager.VerifyRecoveryCandidate(backupPath));
+                }
+                catch (Exception preflightError)
+                {
+                    beforeSqlFailed = true;
+                    AppExceptionHandler.LogNonFatal(preflightError, "Local recovery candidate rejected before SQL restore; checking same-point cloud fallback");
+                }
+            }
+            if (beforeSqlFailed)
+            {
+                string? fallbackPassphrase = AskFallbackPassphrase();
+                if (fallbackPassphrase is null)
+                {
+                    Warn("The local copy failed verification before SQL restoration. Cloud fallback was cancelled; the live school database is unchanged.");
+                    return;
+                }
+                ReportBackupStage(new BackupProgressUpdate("Trying cloud fallback",
+                    "Only the exact recovery point selected from the catalogue is eligible."));
+                result = await CloudBackupCoordinator.RestoreFromCloudAsync(
+                    selectedCloudAlternatives[0], fallbackPassphrase, selectedCloudAlternatives,
+                    progress: new Progress<BackupProgressUpdate>(ReportBackupStage));
+                fallbackPassphrase = string.Empty;
+            }
+            else
+                result = await Task.Run(() => DatabaseBackupManager.RestoreBackup(backupPath,
+                    progress: stageReporter));
             if (result.Success)
             {
+                BackupActivityJournal.TryRecord("Restore", beforeSqlFailed ? "Cloud fallback" : "Local", "Completed");
                 ModernMessageDialog.Show(
                     FindForm(),
                     result.Message + "\n\nThe application will now restart so all database " +
@@ -814,6 +1203,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 RestartApplication(FindForm());
                 return;
             }
+            BackupActivityJournal.TryRecord("Restore", beforeSqlFailed ? "Cloud fallback" : "Local", "Failed");
             /* Reload before reporting success so refresh feedback cannot replace the outcome. */
             await LoadHistoryAsync();
             Warn(result.Message);
@@ -878,6 +1268,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             {
                 Bind(history);
                 historyLoadedLatest = true;
+                RefreshRecordedActivity();
                 /* Report after binding, which overwrites the status with its row count. */
                 if (pruned.removed > 0)
                 {
@@ -953,6 +1344,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         if (retryPendingButton != null) retryPendingButton.Enabled = !busy;
         if (cloudSettingsButton != null) cloudSettingsButton.Enabled = !busy;
         if (cloudChooseRestoreButton != null) cloudChooseRestoreButton.Enabled = !busy;
+        if (selectRecoveryButton != null) selectRecoveryButton.Enabled = !busy;
         /* Keep Refresh History available for retrying a failed read. */
         if (refreshHistoryButton is not null)
             refreshHistoryButton.Enabled = !busy;

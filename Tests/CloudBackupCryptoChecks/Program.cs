@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 
 await ReleaseReviewChecks.RunAsync();
 await AuditFollowupChecks.RunAsync();
+UnifiedRecoveryChecks.Run();
+CloudQueueSafetyChecks.Run();
 if (args.SequenceEqual(new[] { "--release-review" })) return;
 
 string root = Path.Combine(Path.GetTempPath(), "FMSC-CloudCryptoChecks-" + Guid.NewGuid().ToString("N"));

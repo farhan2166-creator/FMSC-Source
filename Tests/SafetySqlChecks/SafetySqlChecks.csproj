@@ -6,6 +6,7 @@
   <ItemGroup>
     <ProjectReference Include="../../Apps/Worker/Worker.csproj" />
     <Compile Include="../../Core/RestoreIdentity.cs" Link="RestoreIdentity.cs" />
+    <Compile Include="../../Services/Backup/ReplacementSqlActivation.cs" Link="ReplacementSqlActivation.cs" />
     <Using Include="System.Data" />
   </ItemGroup>
 </Project>

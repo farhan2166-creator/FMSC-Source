@@ -7,6 +7,9 @@ public sealed class FirstRunSetupForm : ApplicationWindowForm
     private readonly ModernTextBox password = new() { PlaceholderText = "Administrator password", UseSystemPasswordChar = true, Dock = DockStyle.Fill };
     private readonly ModernTextBox confirm = new() { PlaceholderText = "Confirm password", UseSystemPasswordChar = true, Dock = DockStyle.Fill };
     private readonly ModernButton create = new() { SavesChanges = true, Text = "Create Administrator", Dock = DockStyle.Fill };
+    private readonly ModernButton restoreExisting = new() {
+        Text = "Restore an Existing School", ThemeRole = "Secondary", Dock = DockStyle.Fill
+    };
     private readonly Label status = new() { AutoSize = true, TextAlign = ContentAlignment.MiddleCenter };
     /* The sibling security forms guard typed input on close; this one did not, so the administrator credentials typed here were thrown away by the window's close button. */
     private bool savedSuccessfully;
@@ -47,7 +50,7 @@ public sealed class FirstRunSetupForm : ApplicationWindowForm
         var root = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 7
+            RowCount = 8
         };
         root.RowStyles.Add(new RowStyle(
             SizeType.Absolute,
@@ -58,6 +61,8 @@ public sealed class FirstRunSetupForm : ApplicationWindowForm
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
         root.RowStyles.Add(new RowStyle(
             SizeType.Absolute,
+            AppMetrics.ButtonHeight + AppMetrics.SpacingSm));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute,
             AppMetrics.ButtonHeight + AppMetrics.SpacingSm));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.Controls.Add(logo, 0, 0);
@@ -72,7 +77,8 @@ public sealed class FirstRunSetupForm : ApplicationWindowForm
         root.Controls.Add(HumanUi.Field("Password", password, true), 0, 3);
         root.Controls.Add(HumanUi.Field("Confirm Password", confirm, true), 0, 4);
         root.Controls.Add(create, 0, 5);
-        root.Controls.Add(status, 0, 6);
+        root.Controls.Add(restoreExisting, 0, 6);
+        root.Controls.Add(status, 0, 7);
         create.SetColors(AppTheme.Success);
         create.Dock = DockStyle.Fill;
         status.Font = AppTheme.NormalFont;
@@ -97,6 +103,27 @@ public sealed class FirstRunSetupForm : ApplicationWindowForm
         validator.BindSummary(status);
         Disposed += (_, _) => validator.Dispose();
         create.Click += Create_Click;
+#if FMSC_LEVEL2
+        restoreExisting.Visible = false;
+#else
+        restoreExisting.Click += (_, _) => {
+            try
+            {
+                FMSC_SMS.Services.Backup.ReplacementSchoolRecovery.RequireAbsentOrVirginSchool();
+                using var wizard = new RestoreExistingSchoolForm();
+                if (wizard.ShowDialog(this) == DialogResult.OK)
+                {
+                    savedSuccessfully = true;
+                    DialogResult = DialogResult.OK;
+                    Close();
+                }
+            }
+            catch (Exception ex)
+            {
+                ModernMessageDialog.ShowWarning(this, DbMessage.UserMessage(ex), "School recovery unavailable");
+            }
+        };
+#endif
         /* see savedSuccessfully. The window's close is the form's only discard gesture; programmatic closes are left alone. */
         FormClosing += (_, e) => {
             if (e.CloseReason != CloseReason.UserClosing)
