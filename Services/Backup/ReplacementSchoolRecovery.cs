@@ -328,41 +328,10 @@ internal static class ReplacementSchoolRecovery
             throw new IOException("Unexpected school files appeared before the new database could be installed.");
         using var master = DatabaseHelper.GetMasterConnection();
         DatabaseHelper.OpenConnection(master);
-        using var list = new SqlCommand("RESTORE FILELISTONLY FROM DISK=@Path WITH FILE=1;", master) {
-            CommandTimeout = 0
-        };
-        list.Parameters.Add("@Path", SqlDbType.NVarChar, 1000).Value = bak;
-        using var table = new DataTable();
-        using (var adapter = new SqlDataAdapter(list)) adapter.Fill(table);
-        var dataRows = table.Rows.Cast<DataRow>().Where(r => Convert.ToString(r["Type"]) == "D").ToArray();
-        var logRows = table.Rows.Cast<DataRow>().Where(r => Convert.ToString(r["Type"]) == "L").ToArray();
-        if (table.Rows.Count != 2 || dataRows.Length != 1 || logRows.Length != 1)
-            throw new InvalidDataException(
-                "The recovered FMSC database must contain exactly one SQL data file and one log file.");
         if (RequireAbsentOrVirginSchool() != virgin)
             throw new IOException("The target school changed while the verified backup was prepared.");
         SqlConnection.ClearAllPools();
-        if (virgin)
-        {
-            using var exclusive = new SqlCommand(
-                "ALTER DATABASE [FMSC_DB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;", master) {
-                CommandTimeout = 60
-            };
-            exclusive.ExecuteNonQuery();
-        }
-        string restoreSql = "RESTORE DATABASE [FMSC_DB] FROM DISK=@Path " +
-            "WITH FILE=1, RECOVERY, CHECKSUM, " +
-            "MOVE @DataLogical TO @DataPath, MOVE @LogLogical TO @LogPath" +
-            (virgin ? ", REPLACE;" : ";");
-        using (var restore = new SqlCommand(restoreSql, master) { CommandTimeout = 0 })
-        {
-            restore.Parameters.Add("@Path", SqlDbType.NVarChar, 1000).Value = bak;
-            restore.Parameters.Add("@DataLogical", SqlDbType.NVarChar, 128).Value = Convert.ToString(dataRows[0]["LogicalName"]);
-            restore.Parameters.Add("@LogLogical", SqlDbType.NVarChar, 128).Value = Convert.ToString(logRows[0]["LogicalName"]);
-            restore.Parameters.Add("@DataPath", SqlDbType.NVarChar, 1000).Value = data;
-            restore.Parameters.Add("@LogPath", SqlDbType.NVarChar, 1000).Value = log;
-            restore.ExecuteNonQuery();
-        }
+        ReplacementSqlActivation.RestoreVerifiedBackup(master, bak, data, log, virgin);
         DatabaseHelper.RefreshDatabaseConnection();
         if (!DatabaseHelper.TestConnection(out string reason))
             throw new InvalidDataException("SQL recovered the database but its final compatibility check failed. " +
