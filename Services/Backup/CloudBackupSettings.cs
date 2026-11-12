@@ -20,6 +20,8 @@ internal sealed class CloudBackupOptions
     public CloudBackupFrequency Frequency { get; set; } = CloudBackupFrequency.Daily;
     public TimeOnly LocalScheduledTime { get; set; } = new(18, 0);
     public DayOfWeek WeeklyDay { get; set; } = DayOfWeek.Friday;
+    // Absent in existing schedule.json files: preserve their historical local-backup behavior.
+    public bool LocalEnabled { get; set; } = true;
     public bool GoogleDriveEnabled { get; set; }
     public bool DropboxEnabled { get; set; }
     public int MaximumLocalBackups { get; set; } = 7;
@@ -28,7 +30,8 @@ internal sealed class CloudBackupOptions
 
     public void Validate()
     {
-        if (Format != CurrentFormat || !Enum.IsDefined(Frequency) || !Enum.IsDefined(WeeklyDay)
+        if ((!LocalEnabled && !GoogleDriveEnabled && !DropboxEnabled) ||
+            Format != CurrentFormat || !Enum.IsDefined(Frequency) || !Enum.IsDefined(WeeklyDay)
             || MaximumLocalBackups is < 1 or > 365
             || MaximumGoogleDriveBackups is < 1 or > 365
             || MaximumDropboxBackups is < 1 or > 365)
@@ -58,6 +61,39 @@ internal static class CloudBackupSettings
     {
         if (!File.Exists(SettingsPath)) return new CloudBackupOptions();
         return Deserialize(File.ReadAllBytes(SettingsPath));
+    }
+
+    // Editing must remain accessible if a saved schedule is damaged. This read-only
+    // fallback never silently overwrites the original or enables unattended jobs.
+    internal static CloudBackupOptions LoadForEditing(out string? warning)
+    {
+        try
+        {
+            var existing = Load();
+            warning = null;
+            return existing;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or JsonException)
+        {
+            warning = "The saved backup settings could not be read. Their original file will be preserved before you explicitly save repaired settings. Automatic backups will not use the invalid configuration.";
+            AppExceptionHandler.LogNonFatal(ex, "Opening damaged cloud backup settings for safe repair");
+            return new CloudBackupOptions();
+        }
+    }
+
+    internal static void PreserveUnreadableSettings()
+    {
+        if (!File.Exists(SettingsPath)) return;
+        // A valid file does not need a snapshot. Never delete or rewrite a broken
+        // file before preserving its exact bytes in a separate protected path.
+        try { _ = Load(); return; }
+        catch (Exception ex) when (ex is InvalidDataException or JsonException)
+        {
+            EnsurePrivateDirectory();
+            string copy = Path.Combine(Root, "schedule.unreadable." +
+                DateTime.UtcNow.ToString("yyyyMMddHHmmss") + "." + Guid.NewGuid().ToString("N") + ".json");
+            File.Copy(SettingsPath, copy, overwrite: false);
+        }
     }
 
     internal static CloudBackupOptions Deserialize(ReadOnlySpan<byte> data)
