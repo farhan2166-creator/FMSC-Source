@@ -19,14 +19,35 @@ function Assert-FmscWorkflowIdentity {
     }
 }
 
+# Only retry transient GitHub API failures; never retry identity or authorization mismatches.
+function Invoke-FmscGitHubMetadata {
+    param([Parameter(Mandatory)][string]$Uri, [Parameter(Mandatory)][hashtable]$Headers)
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $response = Invoke-RestMethod -Method Get -Uri $Uri -Headers $Headers
+            return $response
+        } catch {
+            $status = 0
+            if ($null -ne $_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+            $message = [string]$_.Exception.Message + ' ' + [string]$_.ErrorDetails.Message
+            $transient = ($status -in @(429,502,503,504)) -or
+                ($message -match '(?i)(api rate limit exceeded|secondary rate limit|rate limit exceeded)')
+            if (-not $transient -or $attempt -eq 3) { throw }
+            Start-Sleep -Seconds (2 * $attempt)
+        }
+    }
+}
+
 function Resolve-FmscGitHubRepository {
     param(
         [Parameter(Mandatory)][ValidateSet('Source','Sandbox','Updates')][string]$Repository,
         [string]$Token
     )
     $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28' }
-    # The immutable user-ID endpoint is public. No secret is needed here.
-    $owner = Invoke-RestMethod -Method Get -Uri "https://api.github.com/user/$script:FmscOwnerId" -Headers $headers
+    # Authenticate both lookups when the caller supplies its existing scoped token.
+    # The first (owner-ID) lookup previously exhausted shared unauthenticated runner quota.
+    if ($Token) { $headers.Authorization = "Bearer $Token" }
+    $owner = Invoke-FmscGitHubMetadata -Uri "https://api.github.com/user/$script:FmscOwnerId" -Headers $headers
     if ([string]$owner.id -cne [string]$script:FmscOwnerId -or
         $owner.type -cne 'User' -or
         $owner.login -cnotmatch '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$') {
@@ -34,8 +55,7 @@ function Resolve-FmscGitHubRepository {
     }
     $name = $script:FmscRepoNames[$Repository]
     $full = $owner.login + '/' + $name
-    if ($Token) { $headers.Authorization = "Bearer $Token" }
-    $repo = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$full" -Headers $headers
+    $repo = Invoke-FmscGitHubMetadata -Uri "https://api.github.com/repos/$full" -Headers $headers
     if ([string]$repo.id -cne [string]$script:FmscRepoIds[$Repository] -or
         [string]$repo.owner.id -cne [string]$script:FmscOwnerId -or
         $repo.name -cne $name -or
