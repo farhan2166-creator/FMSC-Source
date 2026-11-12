@@ -10,6 +10,7 @@ namespace FMSC_SMS.Pages.Administration;
 internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
 {
     private readonly CheckBox automatic = new() { Text = "Enable automatic backups", AutoSize = true };
+    private readonly CheckBox local = new() { Text = "Keep permanent local SQL backup", AutoSize = true };
     private readonly CheckBox google = new() { Text = "Upload encrypted copy to Google Drive", AutoSize = true };
     private readonly CheckBox dropbox = new() { Text = "Upload encrypted copy to Dropbox", AutoSize = true };
     private readonly ComboBox frequency = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 210 };
@@ -25,6 +26,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
     private readonly ModernButton cancel = ActionButton("Cancel");
     private readonly ModernButton passphraseButton = ActionButton("Set recovery passphrase");
     private readonly CloudBackupOptions previous;
+    private readonly string? settingsWarning;
     private bool operationBusy;
     private bool closingAfterSave;
 
@@ -37,7 +39,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         ShowInTaskbar = false;
         ClientSize = new Size(AppScale.Scale(700), AppScale.Scale(640));
         BackColor = AppTheme.PageBackground;
-        previous = CloudBackupSettings.Load();
+        previous = CloudBackupSettings.LoadForEditing(out settingsWarning);
 
         frequency.Items.AddRange(new object[] {
             "Manual only", "Every 12 hours", "Daily", "Weekly"
@@ -47,6 +49,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         weeklyDay.Items.AddRange(Enum.GetNames<DayOfWeek>());
         weeklyDay.SelectedIndex = (int)previous.WeeklyDay;
         automatic.Checked = previous.AutomaticEnabled;
+        local.Checked = previous.LocalEnabled;
         google.Checked = previous.GoogleDriveEnabled;
         dropbox.Checked = previous.DropboxEnabled;
         localMax.Value = previous.MaximumLocalBackups;
@@ -63,7 +66,8 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         AddRow(body, "Frequency", frequency);
         AddRow(body, "Backup time (computer local)", scheduleTime);
         AddRow(body, "Weekly backup day", weeklyDay);
-        AddRow(body, "Maximum automatic local backups", localMax);
+        AddRow(body, "Local destination", local);
+        AddRow(body, "Maximum managed local backups", localMax);
         AddRow(body, "Google Drive", google);
         AddRow(body, "Google Drive maximum cloud backups", googleMax);
         AddRow(body, "Google Drive account", driveConnect);
@@ -90,6 +94,11 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         Controls.Add(actions);
         CancelButton = cancel;
         RefreshConnectionState();
+        Shown += (_, _) => {
+            if (settingsWarning is not null)
+                MessageBox.Show(this, settingsWarning, "Backup settings need repair",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        };
 
         driveConnect.Click += async (_, _) => await ToggleProviderAsync(CloudProvider.GoogleDrive, driveConnect);
         dropboxConnect.Click += async (_, _) => await ToggleProviderAsync(CloudProvider.Dropbox, dropboxConnect);
@@ -218,8 +227,8 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                 throw new InvalidOperationException("Connect Google Drive before enabling it.");
             if (dropbox.Checked && !CloudBackupOAuth.IsConnected(CloudProvider.Dropbox))
                 throw new InvalidOperationException("Connect Dropbox before enabling it.");
-            if (automatic.Checked && (!google.Checked && !dropbox.Checked))
-                throw new InvalidOperationException("Choose at least one cloud destination for automatic backup.");
+            if (!local.Checked && !google.Checked && !dropbox.Checked)
+                throw new InvalidOperationException("Choose at least one backup destination.");
             if (automatic.Checked && frequency.SelectedIndex == 0)
                 throw new InvalidOperationException("Select a scheduled frequency or disable automatic backup.");
             if ((automatic.Checked || google.Checked || dropbox.Checked) &&
@@ -227,6 +236,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                 throw new InvalidOperationException("Set and independently retain a recovery passphrase first.");
             var newSettings = new CloudBackupOptions {
                 AutomaticEnabled = automatic.Checked,
+                LocalEnabled = local.Checked,
                 GoogleDriveEnabled = google.Checked, DropboxEnabled = dropbox.Checked,
                 Frequency = (CloudBackupFrequency)frequency.SelectedIndex,
                 LocalScheduledTime = TimeOnly.FromDateTime(scheduleTime.Value),
@@ -236,11 +246,12 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                 MaximumDropboxBackups = (int)dropboxMax.Value
             };
             newSettings.Validate();
-            if (newSettings.AutomaticEnabled && BackupSettings.GetBackupFolder().Length == 0)
+            if (newSettings.LocalEnabled && BackupSettings.GetBackupFolder().Length == 0)
                 throw new InvalidOperationException("Select a local backup folder on the Backup / Restore page before scheduling.");
             // Persist settings first, then register the task. If Windows
             // rejects task registration, restore the previously saved state
             // so FMSC never claims automatic backup is active when it isn't.
+            if (settingsWarning is not null) CloudBackupSettings.PreserveUnreadableSettings();
             CloudBackupSettings.Save(newSettings);
             try { await CloudBackupTaskSchedule.ConfigureAsync(newSettings.AutomaticEnabled); }
             catch
