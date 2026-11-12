@@ -1,10 +1,17 @@
 using FMSC_SMS.Core;
 using System.Data;
 
+if (AppInstanceChecks.TryRunChild(args, out int instanceExit)) { Environment.ExitCode = instanceExit; return; }
+
 int checks=0;
 void Assert(bool condition,string message){if(!condition)throw new Exception(message);checks++;}
 void Reject(Action action,string message){try{action();}catch(ArgumentException){checks++;return;}throw new Exception(message);}
 
+AppInstanceChecks.Run(Assert);
+if (args.Contains("--single-instance"))
+{
+    Console.WriteLine($"PASS: {checks} cross-process single-instance and crash recovery checks."); return;
+}
 CollectionCreditScopeChecks.Run(Assert);
 if(args.Contains("--collection-credit"))
 {

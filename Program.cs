@@ -2,6 +2,15 @@ using FMSC_SMS.Core;
 namespace FMSC_SMS;
 internal static class Program
 {
+    private static bool restartRequested;
+    internal static void RequestRestart() => restartRequested = true;
+    internal static bool ConsumeRestartRequest()
+    {
+        bool requested = restartRequested;
+        restartRequested = false;
+        return requested;
+    }
+
     [STAThread]
     static void Main(string[] args)
     {
@@ -49,6 +58,30 @@ internal static class Program
         }
 #endif
         ApplicationConfiguration.Initialize();
+        // Headless installation verification and scheduled backups above remain independent.
+        // Keep ownership on this STA thread until every interactive window has closed.
+        using (var instance = SingleInstanceStartup.Enter())
+        {
+            if (instance is null) return;
+            RunInteractive();
+        }
+        // Restore may request a restart only after closing was accepted. All
+        // forms and the instance lease must be gone before the replacement starts.
+        if (ConsumeRestartRequest())
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!) {
+                    UseShellExecute = true, WorkingDirectory = AppContext.BaseDirectory
+                })?.Dispose();
+            }
+            catch (Exception error)
+            { AppExceptionHandler.LogNonFatal(error, "Restart after closing FMSC"); }
+        }
+    }
+
+    private static void RunInteractive()
+    {
 #if !FMSC_LEVEL2
         if (!FMSC_SMS.Core.Updates.UpdateStartupGuard.AllowStartup()) return;
 #endif

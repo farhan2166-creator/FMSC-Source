@@ -20,6 +20,7 @@
     <Compile Include="../../Core/StudentPurchasesAccess.cs" Link="StudentPurchasesAccess.cs" />
     <Compile Include="../../Core/CertificateWorkspaceAccess.cs" Link="CertificateWorkspaceAccess.cs" />
     <Compile Include="../../Core/DailyClosingSummary.cs" Link="DailyClosingSummary.cs" />
+    <Compile Include="../../Core/AppInstanceLease.cs" Link="AppInstanceLease.cs" />
     <Compile Include="../../Core/WholeRupees.cs" Link="WholeRupees.cs" />
     <Compile Include="../../Core/QuickRegistrationQuote.cs" Link="QuickRegistrationQuote.cs" />
     <Compile Include="../../Core/InputParse.cs" Link="InputParse.cs" />
