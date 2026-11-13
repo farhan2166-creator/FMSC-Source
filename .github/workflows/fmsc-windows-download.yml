@@ -125,16 +125,24 @@ jobs:
           # The Sandbox gate and publisher already recheck Source/main. Do it
           # here too, before expensive packaging, to avoid building a candidate
           # that cannot possibly pass the immutable release-head gate.
-          if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) { throw 'Missing read-only GitHub token for release preflight.' }
-          $headers = @{
-            Authorization = "Bearer $env:GITHUB_TOKEN"
-            Accept = 'application/vnd.github+json'
-            'X-GitHub-Api-Version' = '2022-11-28'
-          }
-          $api = "https://api.github.com/repos/$env:GITHUB_REPOSITORY"
-          $current = (Invoke-RestMethod -Uri "$api/branches/main" -Headers $headers -MaximumRetryCount 2 -RetryIntervalSec 2).commit.sha
-          if ($current -cne $env:RELEASE_SHA) {
-            throw 'Source/main changed after preparation; skip an obsolete Windows build. No package or update published.'
+          if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
+            $headers = @{
+              Authorization = "Bearer $env:GITHUB_TOKEN"
+              Accept = 'application/vnd.github+json'
+              'X-GitHub-Api-Version' = '2022-11-28'
+            }
+            $api = "https://api.github.com/repos/$env:GITHUB_REPOSITORY"
+            $current = $null
+            try {
+              $current = (Invoke-RestMethod -Uri "$api/branches/main" -Headers $headers -MaximumRetryCount 2 -RetryIntervalSec 2).commit.sha
+            } catch {
+              # This is only a cost-saving preflight. Mandatory Sandbox and
+              # publisher checks still fail closed if GitHub becomes unavailable.
+              Write-Warning 'Optional Source/main preflight unavailable; final publication safety gates remain mandatory.'
+            }
+            if ($current -and $current -cne $env:RELEASE_SHA) {
+              throw 'Source/main changed after preparation; skip an obsolete Windows build. No package or update published.'
+            }
           }
           $core=Get-Content -LiteralPath Installer/core.ps1 -Raw
           if ($core -cnotmatch ('(?m)^\$AppVersion = '''+[regex]::Escape($env:RELEASE_VERSION)+'''\r?$') -or
