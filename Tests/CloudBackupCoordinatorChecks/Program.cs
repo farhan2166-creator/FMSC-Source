@@ -101,6 +101,29 @@ try
             "Local-only backups must enforce the same retention after verifying a replacement.");
         Check(File.Exists(separate) && Directory.GetFiles(queue, "*.fmscbackup").Single() == retainedPayload,
             "Local retention must preserve separately named backups and previously queued ciphertext.");
+
+        settings.MaximumPendingQueueMegabytes = 8192;
+        settings.MaximumGoogleDriveBackups = 1;
+        settings.GoogleDriveEnabled = true;
+        FixtureRuntime.Connected = false;
+        outcome = await CloudBackupCoordinator.CreateAndUploadAsync();
+        string googleOnly = Directory.GetFiles(queue, "*.fmscbackup").Single();
+        Check(outcome.LocalSucceeded && outcome.UploadsPending && googleOnly != retainedPayload,
+            "A verified new offline package must replace the oldest pending package at the provider limit.");
+
+        settings.DropboxEnabled = true;
+        outcome = await CloudBackupCoordinator.CreateAndUploadAsync();
+        string shared = Directory.GetFiles(queue, "*.fmscbackup").Single();
+        Check(outcome.LocalSucceeded && outcome.UploadsPending && shared != googleOnly,
+            "Both providers must receive the new pending backup when one is at its limit.");
+        await CloudBackupCoordinator.CreateAndUploadAsync();
+        Check(File.Exists(shared) && Directory.GetFiles(queue, "*.fmscbackup").Length == 2,
+            "A package retired for Google Drive must remain while Dropbox still needs it.");
+        using (var entry = JsonDocument.Parse(File.ReadAllText(Path.Combine(journal,
+            Path.GetFileNameWithoutExtension(shared) + ".json"))))
+            Check(entry.RootElement.GetProperty("GoogleSuperseded").GetBoolean() &&
+                !entry.RootElement.GetProperty("DropboxSuperseded").GetBoolean(),
+                "Pending rotation must be tracked separately for each provider.");
     }
     else Console.WriteLine("SKIP: coordinator ACL, job lease and persisted supersession require Windows; exercised by desktop CI.");
     Console.WriteLine($"PASS: {checks} actual coordinator journal, retry and delivery-health checks.");

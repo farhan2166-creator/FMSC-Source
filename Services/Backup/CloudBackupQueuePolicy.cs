@@ -2,8 +2,8 @@ namespace FMSC_SMS.Services.Backup;
 
 /// <summary>
 /// Pure, non-destructive decisions for a protected encrypted upload queue.
-/// Only a verified *newer* remote recovery point on the same destination can
-/// supersede an older undelivered copy. Never compare upload timestamps.
+/// Remote recovery verification can retire all older pending copies on the
+/// same destination. Local pending retention is applied by the coordinator.
 /// </summary>
 internal static class CloudBackupQueuePolicy
 {

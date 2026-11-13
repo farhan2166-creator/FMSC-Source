@@ -81,7 +81,13 @@ internal static class CloudBackupCrypto
         }
     }
 
-    internal static void Decrypt(string package, string destinationBak, string passphrase)
+    internal static void VerifyPackage(string package, string passphrase) =>
+        ReadPackage(package, null, passphrase);
+
+    internal static void Decrypt(string package, string destinationBak, string passphrase) =>
+        ReadPackage(package, destinationBak, passphrase);
+
+    private static void ReadPackage(string package, string? destinationBak, string passphrase)
     {
         CheckPassphrase(passphrase);
         using var input = new FileStream(package, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -94,10 +100,10 @@ internal static class CloudBackupCrypto
         byte[] key = Rfc2898DeriveBytes.Pbkdf2(passphrase, header.AsSpan(12, SaltBytes),
             KdfIterations, HashAlgorithmName.SHA256, 32);
         byte[] plain = new byte[ChunkBytes], cipher = new byte[ChunkBytes], tag = new byte[TagBytes];
-        string temporary = destinationBak + "." + Guid.NewGuid().ToString("N") + ".partial";
+        string? temporary = destinationBak is null ? null : destinationBak + "." + Guid.NewGuid().ToString("N") + ".partial";
         try
         {
-            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (var output = temporary is null ? null : new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
             using var aes = new AesGcm(key, TagBytes);
             int index = 0;
@@ -115,22 +121,23 @@ internal static class CloudBackupCrypto
                 BinaryPrimitives.WriteInt32LittleEndian(aad[HeaderBytes..], index);
                 BinaryPrimitives.WriteInt32LittleEndian(aad[(HeaderBytes + 4)..], count);
                 aes.Decrypt(nonce, cipher.AsSpan(0, count), tag, plain.AsSpan(0, count), aad);
-                output.Write(plain, 0, count);
+                output?.Write(plain, 0, count);
                 remaining -= count;
                 index = checked(index + 1);
             }
             if (input.Position != input.Length)
                 throw new InvalidDataException("The encrypted backup has unexpected trailing data.");
-            output.Flush(flushToDisk: true);
+            output?.Flush(flushToDisk: true);
             }
-            File.Move(temporary, destinationBak, overwrite: false);
+            if (temporary is not null && destinationBak is not null)
+                File.Move(temporary, destinationBak, overwrite: false);
         }
         finally
         {
             CryptographicOperations.ZeroMemory(key);
             CryptographicOperations.ZeroMemory(plain);
             CryptographicOperations.ZeroMemory(cipher);
-            if (File.Exists(temporary)) File.Delete(temporary);
+            if (temporary is not null && File.Exists(temporary)) File.Delete(temporary);
         }
     }
 

@@ -205,9 +205,17 @@ internal static class CloudBackupCoordinator
             string packaged = Path.Combine(Queue, id + ".fmscbackup");
             // Large encrypted SQL backups must never block the WinForms message pump.
             progress?.Report(new BackupProgressUpdate("Encrypting cloud backup", "The recovery passphrase is not included in the package."));
-            await Task.Run(() => CloudBackupCrypto.Encrypt(
-                bak, packaged, CloudBackupSettings.OpenRecoveryPassphrase(),
-                sqlCreated, info.BackupStartDate), token).ConfigureAwait(false);
+            await Task.Run(() =>
+            {
+                string passphrase = CloudBackupSettings.OpenRecoveryPassphrase();
+                CloudBackupCrypto.Encrypt(bak, packaged, passphrase, sqlCreated, info.BackupStartDate);
+                try { CloudBackupCrypto.VerifyPackage(packaged, passphrase); }
+                catch
+                {
+                    File.Delete(packaged);
+                    throw;
+                }
+            }, token).ConfigureAwait(false);
             string digest;
             await using (var content = File.OpenRead(packaged))
                 digest = Convert.ToHexString(await SHA256.HashDataAsync(content, token)).ToLowerInvariant();
@@ -224,6 +232,7 @@ internal static class CloudBackupCoordinator
                 RequestedDropbox = settings.DropboxEnabled
             };
             SavePending(pending);
+            EnforcePendingRetention(pending, settings);
             progress?.Report(new BackupProgressUpdate("Protected retry package saved", "Pending deliveries survive a restart."));
             // Cloud-only delivery retains the encrypted retry payload, not a
             // permanent plaintext local copy. Leave the .bak for diagnosis if
@@ -247,7 +256,7 @@ internal static class CloudBackupCoordinator
             if (!settings.LocalEnabled)
                 SaveState(new State { LastSuccessfulLocalBackup = DateTimeOffset.Now });
             bool google = false, dropbox = false;
-            if (settings.GoogleDriveEnabled)
+            if (StillRequiresDelivery(pending, CloudProvider.GoogleDrive, settings))
             {
                 try { google = await UploadOneAsync(pending, CloudProvider.GoogleDrive, settings, token, progress); }
                 catch (Exception ex)
@@ -257,7 +266,7 @@ internal static class CloudBackupCoordinator
                     AppExceptionHandler.LogNonFatal(ex, "Google Drive delivery or recovery verification pending");
                 }
             }
-            if (settings.DropboxEnabled)
+            if (StillRequiresDelivery(pending, CloudProvider.Dropbox, settings))
             {
                 try { dropbox = await UploadOneAsync(pending, CloudProvider.Dropbox, settings, token, progress); }
                 catch (Exception ex)
@@ -446,6 +455,32 @@ internal static class CloudBackupCoordinator
         return provider == CloudProvider.GoogleDrive
             ? !p.GoogleRecoveryVerified && !p.GoogleDrivePruned && !p.GoogleSuperseded
             : !p.DropboxRecoveryVerified && !p.DropboxPruned && !p.DropboxSuperseded;
+    }
+
+    private static void EnforcePendingRetention(Pending newestSaved, CloudBackupOptions settings)
+    {
+        var queued = ReadPending(error => throw new IOException("FMSC could not read the encrypted backup queue.", error))
+            .Where(p => p.Id != newestSaved.Id && File.Exists(p.PackageFile))
+            .Append(newestSaved)
+            .OrderByDescending(p => p.SqlCreatedUtc)
+            .ThenByDescending(p => p.Id == newestSaved.Id)
+            .ThenByDescending(p => p.Id, StringComparer.Ordinal)
+            .ToArray();
+        foreach (var provider in new[] { CloudProvider.GoogleDrive, CloudProvider.Dropbox })
+        {
+            if (!StillRequiresDelivery(newestSaved, provider, settings)) continue;
+            int limit = provider == CloudProvider.GoogleDrive
+                ? settings.MaximumGoogleDriveBackups : settings.MaximumDropboxBackups;
+            var excess = queued.Where(p => StillRequiresDelivery(p, provider, settings)).Skip(limit).ToArray();
+            foreach (var older in excess)
+            {
+                if (provider == CloudProvider.GoogleDrive) older.GoogleSuperseded = true;
+                else older.DropboxSuperseded = true;
+                SavePending(older);
+                RemoveFullyDeliveredPayload(older, settings);
+                BackupActivityJournal.TryRecord("Encrypted queue", provider.ToString(), "Pending backup limit applied");
+            }
+        }
     }
 
     private static bool QueueIsAtCapacity(CloudBackupOptions settings, out string warning)

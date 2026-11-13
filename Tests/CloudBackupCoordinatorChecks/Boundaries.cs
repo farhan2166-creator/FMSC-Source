@@ -16,7 +16,7 @@ internal enum CloudProvider {GoogleDrive,Dropbox}
 internal sealed record CloudRemoteBackup(CloudProvider Provider,string RemoteId,string Name,string PackageSha256,DateTime SqlBackupCreatedUtc,DateTime UploadedUtc,long Size);
 internal sealed class CloudBackupOptions {
  public bool LocalEnabled {get;set;}=true;public bool GoogleDriveEnabled {get;set;}=true;public bool DropboxEnabled {get;set;}
- public bool AutomaticEnabled {get;set;}=true;public int MaximumPendingQueueMegabytes {get;set;}=8192;public int MaximumLocalBackups {get;set;}=7;public int MaximumGoogleDriveBackups=>7;public int MaximumDropboxBackups=>7;
+ public bool AutomaticEnabled {get;set;}=true;public int MaximumPendingQueueMegabytes {get;set;}=8192;public int MaximumLocalBackups {get;set;}=7;public int MaximumGoogleDriveBackups {get;set;}=7;public int MaximumDropboxBackups=>7;
  internal void Validate(){} internal bool IsDue(DateTimeOffset now,DateTimeOffset? last)=>FixtureRuntime.Due;
 }
 internal static class CloudBackupSettings
