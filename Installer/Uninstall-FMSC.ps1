@@ -33,12 +33,22 @@ function Test-FmscNoLinks {
         }
     }
 }
+# Retain cloud recovery credentials and delivery evidence with encrypted backups.
+# OAuth tokens and general application settings are deliberately excluded.
+function Test-FmscCloudRecoveryArtifact {
+    param([string]$RootPath,[string]$FilePath)
+    if (-not $RootPath.TrimEnd('\').EndsWith('\AppData\Local\FMSC',
+        [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $relative = $FilePath.Substring($RootPath.TrimEnd('\').Length).TrimStart('\')
+    return $relative -match '^CloudBackups\\(?:recovery-key\.v1\.dpapi|queue\\[^\\]+\.fmscbackup\.dpapi|journal\\[^\\]+\.json)$'
+}
 function Get-FmscProtectedFiles {
     param([Parameter(Mandatory=$true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return @() }
     Test-FmscNoLinks $Path
     return @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction Stop |
-        Where-Object { $ProtectExtensions -contains $_.Extension.ToLowerInvariant() })
+        Where-Object { ($ProtectExtensions -contains $_.Extension.ToLowerInvariant()) -or
+            (Test-FmscCloudRecoveryArtifact -RootPath $Path -FilePath $_.FullName) })
 }
 function Save-FmscProtectedFiles {
     param([object[]]$Roots,[string]$PreservationDirectory)
@@ -103,8 +113,16 @@ function Remove-FmscNonProtectedContents {
     param([Parameter(Mandatory=$true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return }
     Test-FmscNoLinks $Path
-    # Delete only files that are NOT database, log or backup material.
+    # Keep the checked recovery archive intact: cloud passphrase credentials
+    # and upload journals have .dpapi/.json extensions, not backup extensions.
+    $isSchoolDatabaseFolder = [string]::Equals(
+        [IO.Path]::GetFullPath($Path).TrimEnd('\'),
+        [IO.Path]::GetFullPath($DataDirectory).TrimEnd('\'),
+        [StringComparison]::OrdinalIgnoreCase)
+    $archivePrefix = (Join-Path $DataDirectory 'UninstallPreserved').TrimEnd('\') + '\'
     foreach ($file in @(Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction Stop)) {
+        if ($isSchoolDatabaseFolder -and
+            $file.FullName.StartsWith($archivePrefix,[StringComparison]::OrdinalIgnoreCase)) { continue }
         if ($ProtectExtensions -notcontains $file.Extension.ToLowerInvariant()) {
             Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
         }
@@ -281,7 +299,7 @@ function Invoke-FmscUninstall {
         if (Test-Path -LiteralPath $UninstallRegistryPath) {
             Remove-Item -LiteralPath $UninstallRegistryPath -Recurse -Force -ErrorAction Stop
         }
-        Write-FmscUninstallStatus ('Uninstall complete. School MDF/LDF/BAK files preserved in ' + $DataDirectory)
+        Write-FmscUninstallStatus ('Uninstall complete. School data and archived encrypted recovery material remain in ' + $DataDirectory)
     } finally {
         if ($held) { $mutex.ReleaseMutex() }
         $mutex.Dispose()
@@ -310,14 +328,17 @@ function Show-FmscUninstallWindow {
     $heading.Text = 'Uninstall FMSC School Management'
     $heading.Font = New-Object Drawing.Font('Segoe UI',17,[Drawing.FontStyle]::Bold)
     $explanation = New-Object Windows.Forms.Label
-    $explanation.SetBounds(28,85,620,102)
+    $explanation.SetBounds(28,85,620,122)
     $explanation.Text = ('This removes the FMSC application, updater, temporary files, local settings and shortcuts.' +
         [Environment]::NewLine + [Environment]::NewLine +
-        'Your school MDF, LDF and BAK files are preserved. SQL Server LocalDB is not uninstalled.' +
-        [Environment]::NewLine + 'Encrypted cloud backups may require separately retained recovery keys.')
+        'School databases and backups are kept; SQL Server LocalDB stays installed.' +
+        [Environment]::NewLine +
+        'Queued encrypted backups and their recovery metadata are archived, not deleted.' +
+        [Environment]::NewLine +
+        'Cloud accounts are disconnected locally. Keep your recovery passphrase separately.')
     $explanation.ForeColor = [Drawing.Color]::FromArgb(50,60,75)
     $script:StatusText = New-Object Windows.Forms.Label
-    $script:StatusText.SetBounds(28,212,625,55)
+    $script:StatusText.SetBounds(28,219,625,55)
     $script:StatusText.Text = 'Ready. No files will be deleted until you confirm.'
     $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(37,99,235)
     $start = New-Object Windows.Forms.Button
@@ -345,7 +366,7 @@ function Show-FmscUninstallWindow {
             Invoke-FmscUninstall
             $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(20,132,70)
             [Windows.Forms.MessageBox]::Show($form,
-                'FMSC has been uninstalled. Database files and backups were retained.' +
+                'FMSC has been uninstalled. School data, backups and queued cloud recovery material were retained.' +
                 [Environment]::NewLine + $DataDirectory,
                 'FMSC Uninstall Complete','OK','Information') | Out-Null
             $uninstallSucceeded = $true

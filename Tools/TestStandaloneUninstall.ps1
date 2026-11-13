@@ -5,7 +5,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath,[ref]$tokens,[ref]$errors)
 if ($errors.Count -ne 0) { throw "Standalone uninstaller PowerShell parse failed: $($errors[0])" }
-foreach ($name in @('Test-FmscNoLinks','Get-FmscProtectedFiles','Save-FmscProtectedFiles',
+foreach ($name in @('Test-FmscNoLinks','Test-FmscCloudRecoveryArtifact','Get-FmscProtectedFiles','Save-FmscProtectedFiles',
     'Assert-FmscProtectedCopies','Remove-FmscNonProtectedContents')) {
     $definition = $ast.Find({
         param($node)
@@ -45,7 +45,10 @@ try {
     $updater = Join-Path $testRoot 'Updater'
     $school = Join-Path $testRoot 'SchoolDatabase'
     $external = Join-Path $testRoot 'UnrelatedDocuments'
-    foreach ($folder in @($app,$updater,$school,$external)) {
+    $profile = Join-Path $testRoot 'Users\TestSchool\AppData\Local\FMSC'
+    $cloud = Join-Path $profile 'CloudBackups'
+    $DataDirectory = $school
+    foreach ($folder in @($app,$updater,$school,$external,$cloud)) {
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
     }
     $appMdf = Join-Path $app 'subdir\spare.mdf'
@@ -61,15 +64,46 @@ try {
     [IO.File]::WriteAllText((Join-Path $school 'Backups.bak'),'synthetic live backup')
     [IO.File]::WriteAllText((Join-Path $school 'Install.log'),'synthetic removable log')
     [IO.File]::WriteAllText((Join-Path $external 'not-FMSC.txt'),'external data')
+    $package = Join-Path $cloud 'queue\abc.fmscbackup'
+    $queuedKey = Join-Path $cloud 'queue\abc.fmscbackup.dpapi'
+    $journal = Join-Path $cloud 'journal\abc.json'
+    $recoveryKey = Join-Path $cloud 'recovery-key.v1.dpapi'
+    $oauth = Join-Path $cloud 'oauth-googledrive.v1.dpapi'
+    $schedule = Join-Path $cloud 'schedule.json'
+    foreach ($file in @($package,$queuedKey,$journal,$recoveryKey,$oauth,$schedule)) {
+        New-Item -ItemType Directory -Path (Split-Path $file -Parent) -Force | Out-Null
+        [IO.File]::WriteAllText($file,'synthetic cloud material for '+$file)
+    }
     $roots = @(
         [pscustomobject]@{Label='Application';Path=$app},
-        [pscustomobject]@{Label='Updater';Path=$updater}
+        [pscustomobject]@{Label='Updater';Path=$updater},
+        [pscustomobject]@{Label='User-Synthetic';Path=$profile}
     )
     $preserved = Join-Path $school ('UninstallPreserved\'+[guid]::NewGuid().ToString('N'))
     $original = Get-FileHash -LiteralPath $appMdf -Algorithm SHA256
     $originalBackup = Get-FileHash -LiteralPath $updateBak -Algorithm SHA256
     $records = @(Save-FmscProtectedFiles -Roots $roots -PreservationDirectory $preserved)
-    if ($records.Count -ne 3) { throw "Expected three protected files; found $($records.Count)." }
+    if ($records.Count -ne 7) { throw "Expected seven protected files including cloud recovery state; found $($records.Count)." }
+    foreach ($file in @($package,$queuedKey,$journal,$recoveryKey)) {
+        if (@($records | Where-Object Source -eq $file).Count -ne 1) {
+            throw "Missing encrypted cloud recovery artifact: $file"
+        }
+    }
+    if (@($records | Where-Object { $_.Source -eq $oauth -or $_.Source -eq $schedule }).Count -gt 0) {
+        throw 'OAuth tokens or cloud settings must not be retained with school recovery data.'
+    }
+    Assert-FmscProtectedCopies -Roots $roots -Records $records
+    $lateKey = Join-Path $cloud 'queue\late.fmscbackup.dpapi'
+    [IO.File]::WriteAllText($lateKey,'new protected cloud key')
+    $rejected = $false
+    try { Assert-FmscProtectedCopies -Roots $roots -Records $records } catch { $rejected = $true }
+    if (-not $rejected) { throw 'New cloud recovery credential was not detected.' }
+    Remove-Item -LiteralPath $lateKey -Force
+    [IO.File]::WriteAllText($journal,'changed cloud delivery receipt')
+    $rejected = $false
+    try { Assert-FmscProtectedCopies -Roots $roots -Records $records } catch { $rejected = $true }
+    if (-not $rejected) { throw 'Changed cloud journal was not detected.' }
+    [IO.File]::WriteAllText($journal,'synthetic cloud material for '+$journal)
     Assert-FmscProtectedCopies -Roots $roots -Records $records
     $new = Join-Path $updater 'just-arrived.bak'
     [IO.File]::WriteAllText($new,'new recovery backup')
@@ -88,6 +122,7 @@ try {
     Remove-FmscNonProtectedContents $school
     if (Test-Path -LiteralPath $app) { throw 'Synthetic application not removed.' }
     if (Test-Path -LiteralPath $updater) { throw 'Synthetic updater not removed.' }
+    if (Test-Path -LiteralPath $profile) { throw 'Synthetic cloud cache and OAuth tokens were not removed.' }
     if (Test-Path -LiteralPath (Join-Path $school 'Install.log')) { throw 'Synthetic logs not removed.' }
     foreach ($name in @('FMSC_DB.mdf','FMSC_DB_log.ldf','Backups.bak')) {
         if (-not (Test-Path -LiteralPath (Join-Path $school $name))) {
@@ -104,8 +139,14 @@ try {
         (Get-FileHash -LiteralPath $savedBak.Target).Hash -cne $originalBackup.Hash) {
         throw 'Protected database and backup copies were not retained byte-for-byte.'
     }
+    foreach ($record in $records) {
+        if (-not (Test-Path -LiteralPath $record.Target -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $record.Target -Algorithm SHA256).Hash -cne $record.Sha256) {
+            throw "Protected SQL or cloud recovery file lost during database folder cleanup: $($record.Source)"
+        }
+    }
     Write-Host 'PASS: successful uninstalls close the window after acknowledgement; failure remains visible.'
-    Write-Host 'PASS: uninstall engine parses, preserves SQL/backup bytes and refuses new or changed files.'
+    Write-Host 'PASS: SQL and encrypted cloud recovery copies survive cleanup; new or changed artifacts block deletion.'
     Write-Host 'PASS: removable FMSC folders/logs can be cleared without deleting school data or unrelated files.'
 } finally {
     if (Test-Path -LiteralPath $testRoot) {
