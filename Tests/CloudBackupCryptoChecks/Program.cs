@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 await ReleaseReviewChecks.RunAsync();
 await AuditFollowupChecks.RunAsync();
 UnifiedRecoveryChecks.Run();
+await RecoverySourceChecks.RunAsync();
 CloudQueueSafetyChecks.Run();
 if (args.SequenceEqual(new[] { "--release-review" })) return;
 

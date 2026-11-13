@@ -35,8 +35,28 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
     private readonly LinkLabel toggle = new() { Text = "Show technical details", Dock = DockStyle.Fill };
     private bool busy;
 
+    // Internal delegates keep modal behavior testable without SQL, credentials or browser sign-in.
+    internal Func<bool> ConfirmRecovery { get; set; }
+    internal Action ShowRecoveryComplete { get; set; }
+    internal Action<string> ShowRecoveryFailure { get; set; }
+    internal Func<string?, CloudRemoteBackup?, string, string, string,
+        IProgress<BackupProgressUpdate>, IReadOnlyList<CloudRemoteBackup>, Task> RecoveryAction { get; set; } =
+        (local, remote, key, name, password, progress, alternatives) =>
+            ReplacementSchoolRecovery.RecoverAsync(local, remote, key, name, password,
+                progress, alternatives: alternatives);
+
     internal RestoreExistingSchoolForm()
     {
+        ConfirmRecovery = () => MessageBox.Show(this,
+            "Recover the selected school to this NEW computer? " +
+            "FMSC will refuse if an existing school database is detected. " +
+            "The computer must be publisher-authorized and the original Administrator credentials must match.",
+            "Confirm school recovery", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+        ShowRecoveryComplete = () => ModernMessageDialog.ShowInfo(this,
+            "The verified school database has been recovered. Sign in with the original school Administrator account.",
+            "School Recovery Completed");
+        ShowRecoveryFailure = message => ModernMessageDialog.ShowWarning(this, message, "Recovery not completed");
         Text = "FMSC — Restore an Existing School";
         ClientSize = new Size(AppScale.Scale(830), AppScale.Scale(700));
         MinimumSize = new Size(AppScale.Scale(710), AppScale.Scale(580));
@@ -186,20 +206,12 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
         try
         {
             status.Text = "Checking connected cloud accounts for encrypted FMSC backups…";
-            var copies = new List<CloudRemoteBackup>();
-            var warnings = new List<string>();
-            foreach (CloudProvider provider in new[] { preferred,
-                         preferred == CloudProvider.GoogleDrive ? CloudProvider.Dropbox : CloudProvider.GoogleDrive })
-            {
-                if (!CloudBackupOAuth.IsConnected(provider)) continue;
-                try { copies.AddRange(await CloudBackupTransport.ListAsync(provider)); }
-                catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or
-                    UnauthorizedAccessException or InvalidOperationException)
-                {
-                    AppExceptionHandler.LogNonFatal(ex, "Replacement computer provider discovery");
-                    warnings.Add(provider + " could not be checked; reconnect and retry.");
-                }
-            }
+            var inventory = await CloudBackupOperations.BrowseAsync(CloudBackupOAuth.IsConnected,
+                CloudBackupTransport.ListAsync,
+                (provider, error) => AppExceptionHandler.LogNonFatal(error,
+                    provider + " replacement computer discovery"), CancellationToken.None);
+            var copies = inventory.Copies;
+            var warnings = inventory.Warnings;
             if (IsDisposed) return;
             available.Items.Clear();
             var groups = copies.GroupBy(x => (x.PackageSha256.ToLowerInvariant(),
@@ -253,19 +265,13 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
         }
         if (string.IsNullOrWhiteSpace(administrator.Text) || password.Text.Length == 0)
         { status.Text = "Enter the original school Administrator credentials."; return; }
-        var confirm = MessageBox.Show(this,
-            "Recover the selected school to this NEW computer? " +
-            "FMSC will refuse if an existing school database is detected. " +
-            "The computer must be publisher-authorized and the original Administrator credentials must match.",
-            "Confirm school recovery", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
-            MessageBoxDefaultButton.Button2);
-        if (confirm != DialogResult.Yes) return;
+        if (!ConfirmRecovery()) return;
         string name = administrator.Text, secret = password.Text, key = passphrase.Text;
         SetBusy(true);
         diagnostics.Clear();
         try
         {
-            await ReplacementSchoolRecovery.RecoverAsync(local, remote, key, name, secret,
+            await RecoveryAction(local, remote, key, name, secret,
                 new Progress<BackupProgressUpdate>(update =>
                 {
                     if (IsDisposed) return;
@@ -273,13 +279,12 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
                     if (update.Detail.Length > 0)
                         diagnostics.AppendText(DateTime.Now.ToString("HH:mm:ss") + "  " +
                             update.Display + ": " + update.Detail + Environment.NewLine);
-                }), alternatives: alternatives);
+                }), alternatives);
             if (IsDisposed) return;
             password.Clear();
             passphrase.Clear();
-            ModernMessageDialog.ShowInfo(this,
-                "The verified school database has been recovered. Sign in with the original school Administrator account.",
-                "School Recovery Completed");
+            ShowRecoveryComplete();
+            SetBusy(false); // Backend activation has finished; allow the successful modal close.
             DialogResult = DialogResult.OK;
             Close();
         }
@@ -298,7 +303,7 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
         status.Text = DbMessage.UserMessage(ex);
         diagnostics.AppendText(DateTime.Now.ToString("HH:mm:ss") + "  Recovery stopped: " +
             DbMessage.UserMessage(ex) + Environment.NewLine);
-        ModernMessageDialog.ShowWarning(this, status.Text, "Recovery not completed");
+        ShowRecoveryFailure(status.Text);
     }
 
     private void SetBusy(bool isBusy)

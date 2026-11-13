@@ -77,18 +77,7 @@ internal static class ReplacementSchoolRecovery
         }
         // A missing Administrator alone is NOT sufficient: that may indicate
         // damaged access on a real school. Require no operator-owned records.
-        using (var check = new SqlCommand("""
-            SELECT COUNT(*) FROM sys.dm_db_partition_stats S
-            JOIN sys.tables T ON T.object_id=S.object_id
-            WHERE S.index_id IN (0,1) AND S.row_count>0 AND
-                T.name NOT IN (N'DatabaseVersion',N'Roles',N'Permissions',
-                    N'RolePermissions',N'BillingAutomationState',N'FeeTypes');
-            """, original))
-        {
-            if (Convert.ToInt32(check.ExecuteScalar()) > 0)
-                throw new UnauthorizedAccessException(
-                    "School records or setup data already exist. The database is not a clean first-run template; recovery was refused.");
-        }
+        ReplacementTemplateGuard.RequireNoSchoolRecords(original);
         return true; // verified virgin template; mandatory safety backup first
 #endif
     }
@@ -179,8 +168,7 @@ internal static class ReplacementSchoolRecovery
                         acquired = true;
                         break;
                     }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
-                        InvalidDataException or CryptographicException or HttpRequestException)
+                    catch (Exception ex) when (CloudRecoverySourceFailure.CanTryAnotherCopy(ex, token))
                     {
                         AppExceptionHandler.LogNonFatal(ex, "Rejected replacement-computer cloud copy before SQL restore");
                         errors.Add(copy.Provider + ": backup could not be downloaded or verified.");
@@ -196,6 +184,9 @@ internal static class ReplacementSchoolRecovery
                         string.Join(" ", errors));
             }
             if (!File.Exists(bak)) throw new FileNotFoundException("The selected SQL backup is missing.", bak);
+            // Keep the exact validated bytes readable by SQL but deny writers and
+            // replacement until activation finishes, as normal restore already does.
+            using var backupLease = new FileStream(bak, FileMode.Open, FileAccess.Read, FileShare.Read);
             progress?.Report(new BackupProgressUpdate("Verifying isolated school recovery",
                 "Checking SQL structure, school identity and the original Administrator without touching FMSC_DB."));
             Guid candidateScope = Guid.Empty;

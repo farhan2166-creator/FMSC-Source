@@ -48,15 +48,25 @@ No live database credentials, student records, or backup files belong in GitHub 
 
 ## OAuth publisher configuration (required before any school can connect)
 
-`CloudBackupProviders.json` ships with **empty public identifiers** until
-the owner registers the two applications. Neither provider account passwords
-nor OAuth client secrets are ever embedded in the release, repository, or SQL.
+`CloudBackupProviders.json` contains the publisher's public application IDs. School
+passwords, refresh tokens and account credentials never belong in that file or Git.
 
-**Google Drive:** In a Google Cloud project, enable the Drive API, configure
-the consent screen with the limited `drive.file` scope, then register an
-**installed/desktop OAuth client**. Put its public client ID into
-`GoogleClientId`. The desktop login uses a localhost loopback callback,
-authorization-code PKCE, and refresh tokens protected by Windows DPAPI.
+**Google Drive:** Enable Drive API and register an **installed/Desktop app OAuth
+client**, using the limited `drive.file` scope. Keep its public client ID in
+`GoogleClientId`. Download that Desktop client's JSON as
+`CloudBackupGoogleDesktop.json` beside the project before publishing. It is ignored
+by Git and copied to application output/publish only when supplied. For GitHub
+publishing, materialize the same file from a protected publisher build input before
+`dotnet publish`; never print or commit it. Existing installations need this file
+beside the executable as well.
+
+The parser accepts Google's `installed` envelope, rejects `web` credentials and
+requires the ID to match `GoogleClientId`. Google Desktop token exchange and refresh
+require the native `client_secret` metadata, alongside PKCE for sign-in. Native app
+metadata is not a confidential server credential and cannot replace PKCE or user
+consent. No web client secret or additional server is supported. Missing metadata
+fails with a publisher-configuration diagnostic before opening browser sign-in.
+Refresh tokens remain protected by Windows DPAPI.
 
 **Dropbox:** Create a **Scoped App** restricted to the app's own folder.
 Enable `files.metadata.read`, `files.content.read`, and
@@ -64,7 +74,7 @@ Enable `files.metadata.read`, `files.content.read`, and
 `http://127.0.0.1:41847/fmsc-backup/`. Put its public app key in
 `DropboxAppKey`. The app uses PKCE, offline refresh, and app-folder isolation.
 
-Once both public IDs are supplied, the owner must validate browser login,
+Once both registrations and the Desktop metadata are supplied, the owner must validate browser login,
 refresh, logout/revoke, large encrypted upload, provider listing, manual
 download, daily scheduled operation and SQL restoration using disposable
 test credentials/databases **before shipping**. Blank IDs fail closed and

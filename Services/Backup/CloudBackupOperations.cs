@@ -23,9 +23,9 @@ internal static class CloudBackupOperations
         {
             token.ThrowIfCancellationRequested();
             if (!connected(provider)) continue;
-            try { copies.AddRange(await list(provider, token).ConfigureAwait(false)); }
-            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or IOException
-                || ex is OperationCanceledException && !token.IsCancellationRequested)
+            try { copies.AddRange((await list(provider, token).ConfigureAwait(false)).Where(copy => copy.Size > 0)); }
+            catch (Exception ex) when (CloudRecoverySourceFailure.CanTryAnotherCopy(ex, token)
+                || ex is InvalidOperationException)
             {
                 logFailure(provider, ex);
                 warnings.Add(provider + " could not be checked. Check the connection or reconnect the account; its backups may still be available.");

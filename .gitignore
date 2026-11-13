@@ -459,3 +459,15 @@ Database/*.bak
 /Tests/CloudBackupCryptoChecks/*
 !/Tests/CloudBackupCryptoChecks/*.cs
 !/Tests/CloudBackupCryptoChecks/*.csproj
+
+# Publisher's downloaded Google Desktop OAuth registration. Never commit credentials.
+/CloudBackupGoogleDesktop.json
+!/Tests/CloudBackupCoordinatorChecks/
+/Tests/CloudBackupCoordinatorChecks/*
+!/Tests/CloudBackupCoordinatorChecks/*.cs
+!/Tests/CloudBackupCoordinatorChecks/*.csproj
+
+# Production backup services are source, not generated backup directories.
+!/Services/Backup/
+!/Services/Backup/*.cs
+!/Tests/SafetySqlChecks/run.py

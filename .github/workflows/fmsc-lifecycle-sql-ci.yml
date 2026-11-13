@@ -7,6 +7,9 @@ on:
     paths:
       - 'Migrations/**'
       - 'Tests/LifecycleSqlChecks/**'
+      - 'Tests/SafetySqlChecks/**'
+      - 'Services/Backup/**'
+      - 'Core/RestoreIdentity.cs'
       - 'Tests/ReportReadChecks/**'
       - 'Tests/Level3Checks/**'
       - 'Pages/Students/Admissions/**'
@@ -70,6 +73,9 @@ jobs:
           python Tests/LifecycleSqlChecks/run.py --level3
           --output "$RUNNER_TEMP/fmsc-level1-evidence"
           --state "$RUNNER_TEMP/fmsc-level1-owner.json"
+
+      - name: Verify fresh templates and actual SQL recovery on a separately owned instance
+        run: python Tests/SafetySqlChecks/run.py
 
       - name: Confirm cleanup even after failure or cancellation
         if: always()

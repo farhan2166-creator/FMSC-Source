@@ -11,6 +11,7 @@ on:
       - 'Core/CertificateSignature.cs'
       - 'Services/Backup/**'
       - 'Tests/CloudBackupCryptoChecks/**'
+      - 'Tests/CloudBackupCoordinatorChecks/**'
       - 'Pages/Administration/BackupRestorePage.cs'
       - 'Pages/Administration/CloudBackupSettingsDialog.cs'
       - 'Tests/ThemeSmokeChecks/**'
@@ -108,6 +109,9 @@ jobs:
 
       - name: Verify authenticated cloud-backup roundtrip and corruption rejection
         run: dotnet run --project Tests/CloudBackupCryptoChecks/CloudBackupCryptoChecks.csproj -c Release
+
+      - name: Verify durable coordinator queue health and supersession
+        run: dotnet run --project Tests/CloudBackupCoordinatorChecks/CloudBackupCoordinatorChecks.csproj -c Release
 
       - name: Restore application
         run: dotnet restore FMSC_SMS.sln
