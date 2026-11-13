@@ -16,7 +16,7 @@ if ($env:GITHUB_ACTOR_ID -notmatch '^\d+$' -or $env:GITHUB_ACTOR -notmatch '^[A-
 }
 if (Test-Path -LiteralPath $WorkDirectory) { throw 'Publication work directory must be new.' }
 New-Item -ItemType Directory -Path $WorkDirectory | Out-Null
-$app = [IO.Path]::GetFullPath($ApplicationDirectory)
+$candidate = [IO.Path]::GetFullPath($ApplicationDirectory)
 $work = [IO.Path]::GetFullPath($WorkDirectory)
 $packagesProject = Join-Path $PSScriptRoot 'UpdatePackages/UpdatePackages.csproj'
 $distributionProject = Join-Path $PSScriptRoot 'UpdateDistribution/UpdateDistribution.csproj'
@@ -38,6 +38,12 @@ foreach ($key in @('GIT_CONFIG_COUNT','GIT_CONFIG_KEY_0','GIT_CONFIG_VALUE_0','G
     $saved[$key] = [Environment]::GetEnvironmentVariable($key)
 }
 try {
+    # Keep the verified candidate unchanged and never upload this private copy
+    # as a Source artifact. Only native registration and its inventory differ;
+    # all code, release identity and Sandbox acceptance remain unchanged.
+    $app = Join-Path $work 'application'
+    Copy-Item -LiteralPath $candidate -Destination $app -Recurse
+    Package @('--prepare-google-registration',$app)
     $env:GIT_CONFIG_COUNT = '1'
     $env:GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader'
     $env:GIT_CONFIG_VALUE_0 = 'AUTHORIZATION: basic ' + $encoded

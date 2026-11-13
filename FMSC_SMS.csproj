@@ -226,6 +226,16 @@
 	<!-- Only the private GitHub Actions application-only ZIP may skip installer
 	     prerequisites/copying. Normal full release publishing remains validated. -->
 	<!-- Validate installer, prerequisite, migrations and any supplied database snapshot before publishing. -->
+    <Target Name="ValidateGoogleDesktopPublishInput" BeforeTargets="PrepareForPublish"
+            Condition="'$(RequireGoogleDesktopRegistration)' == 'true' And '$(FmscSyntheticPublishFixture)' != 'true'">
+        <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Tools\ValidateGoogleDesktopPublish.ps1&quot; -ApplicationDirectory &quot;$(MSBuildProjectDirectory)&quot;"
+              EnvironmentVariables="PSModulePath=$(SystemRoot)\System32\WindowsPowerShell\v1.0\Modules" />
+    </Target>
+    <Target Name="ValidateGoogleDesktopPublishOutput" AfterTargets="Publish"
+            Condition="'$(RequireGoogleDesktopRegistration)' == 'true' And '$(FmscSyntheticPublishFixture)' != 'true'">
+        <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Tools\ValidateGoogleDesktopPublish.ps1&quot; -ApplicationDirectory &quot;$(PublishDir)\.&quot;"
+              EnvironmentVariables="PSModulePath=$(SystemRoot)\System32\WindowsPowerShell\v1.0\Modules" />
+    </Target>
 	<Target Name="ValidateDeploymentAssets" BeforeTargets="PrepareForPublish" Condition="'$(CIAppOnlyBundle)' != 'true' Or '$(GITHUB_ACTIONS)' != 'true'">
 		<PropertyGroup>
 			<DeploymentDatabaseDirectory Condition="'$(DeploymentDatabaseDirectory)' == ''">$(MSBuildProjectDirectory)\..\Database</DeploymentDatabaseDirectory>
