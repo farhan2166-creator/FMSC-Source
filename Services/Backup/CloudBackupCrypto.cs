@@ -162,7 +162,7 @@ internal static class CloudBackupCrypto
 
     private static void CheckPassphrase(string passphrase)
     {
-        if (string.IsNullOrWhiteSpace(passphrase) || passphrase.Length < 12)
-            throw new ArgumentException("A cloud recovery passphrase of at least 12 characters is required.");
+        if (string.IsNullOrWhiteSpace(passphrase))
+            throw new ArgumentException("Enter the recovery credential used for this cloud backup.");
     }
 }

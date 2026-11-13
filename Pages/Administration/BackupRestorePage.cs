@@ -1041,9 +1041,9 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         window.Controls.Add(input);
         window.Controls.Add(label);
         ok.Click += (_, _) => {
-            if (input.Text.Length < 12)
+            if (string.IsNullOrWhiteSpace(input.Text))
             {
-                ModernMessageDialog.ShowWarning(window, "Enter the saved recovery passphrase (at least 12 characters).",
+                ModernMessageDialog.ShowWarning(window, "Enter the Administrator password or separate passphrase used for this backup.",
                     "Cloud fallback");
                 return;
             }

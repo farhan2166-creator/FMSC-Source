@@ -19,7 +19,15 @@ internal sealed class CloudBackupOptions {
  public bool AutomaticEnabled {get;set;}=true;public int MaximumPendingQueueMegabytes=>8192;public int MaximumLocalBackups=>7;public int MaximumGoogleDriveBackups=>7;public int MaximumDropboxBackups=>7;
  internal void Validate(){} internal bool IsDue(DateTimeOffset now,DateTimeOffset? last)=>FixtureRuntime.Due;
 }
-internal static class CloudBackupSettings { internal static CloudBackupOptions Load()=>FixtureRuntime.Options;internal static bool HasLocalRecoveryPassphrase=>true;internal static string OpenRecoveryPassphrase()=>"fictional-disposable-recovery-key"; }
+internal static class CloudBackupSettings
+{
+    internal static CloudBackupOptions Load() => FixtureRuntime.Options;
+    internal static CloudBackupOptions LoadForEditing(out string? warning) { warning = null; return Load(); }
+    internal static bool HasLocalRecoveryPassphrase => true;
+    internal static string OpenRecoveryPassphrase(string? queuedKeyPath = null) => "fictional-disposable-recovery-key";
+    internal static void PreserveQueuedPassphrase(string path) => throw new NotSupportedException();
+    internal static void SaveRecoveryPassphrase(string passphrase, bool useAdministratorPassword) => throw new NotSupportedException();
+}
 internal static class BackupSettings {internal static string GetBackupFolder()=>FixtureRuntime.LocalFolder;}
 internal static class DatabaseBackupManager {
  internal sealed class BackupResult {public bool Success {get;init;}public string Message{get;init;}="";}

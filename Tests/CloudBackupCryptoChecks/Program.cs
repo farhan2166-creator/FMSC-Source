@@ -45,6 +45,14 @@ try
     string passphrase = "test-only-long-recovery-passphrase";
     var random = RandomNumberGenerator.GetBytes(2 * 1024 * 1024 + 137);
     File.WriteAllBytes(source, random);
+    string shortPasswordPackage = Path.Combine(root, "administrator-password.fmscbackup");
+    string shortPasswordRestore = Path.Combine(root, "administrator-password.bak");
+    const string administratorPassword = "Test-842";
+    CloudBackupCrypto.Encrypt(source, shortPasswordPackage, administratorPassword, DateTime.UtcNow);
+    CloudBackupCrypto.Decrypt(shortPasswordPackage, shortPasswordRestore, administratorPassword);
+    if (!File.ReadAllBytes(shortPasswordRestore).SequenceEqual(random))
+        throw new Exception("A backup protected by a shorter Administrator password did not round trip.");
+    Console.WriteLine("PASS: a backup protected by a shorter Administrator password can be restored.");
     // DSA-08: Dropbox's server-generated content hash is SHA-256 of the
     // concatenation of individual 4-MiB block hashes, not the local SHA-256.
     string oneBlockHash = Convert.ToHexString(SHA256.HashData(SHA256.HashData(random)))

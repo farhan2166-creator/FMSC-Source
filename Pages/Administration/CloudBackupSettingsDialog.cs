@@ -9,26 +9,25 @@ namespace FMSC_SMS.Pages.Administration;
 /// </summary>
 internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
 {
-    private readonly CheckBox automatic = new() { Text = "Enable automatic backups", AutoSize = true };
-    private readonly CheckBox local = new() { Text = "Keep permanent local SQL backup", AutoSize = true };
-    private readonly CheckBox google = new() { Text = "Upload encrypted copy to Google Drive", AutoSize = true };
-    private readonly CheckBox dropbox = new() { Text = "Upload encrypted copy to Dropbox", AutoSize = true };
-    private readonly ComboBox frequency = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 210 };
-    private readonly ComboBox weeklyDay = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 210 };
-    private readonly DateTimePicker scheduleTime = new() {
-        Format = DateTimePickerFormat.Custom, CustomFormat = "hh:mm tt", ShowUpDown = true, Width = 160
+    private readonly ModernCheckBox automatic = Option("Enable automatic backups");
+    private readonly ModernCheckBox local = Option("Keep local SQL backups");
+    private readonly ModernCheckBox google = Option("Upload encrypted backups");
+    private readonly ModernCheckBox dropbox = Option("Upload encrypted backups");
+    private readonly ModernComboBox frequency = HumanUi.Combo();
+    private readonly ModernComboBox weeklyDay = HumanUi.Combo();
+    private readonly ModernDatePicker scheduleTime = new() { TimeOnly = true };
+    private readonly ModernNumericTextBox localMax = Limit(), googleMax = Limit(), dropboxMax = Limit();
+    private readonly ModernNumericTextBox maximumQueueMb = new() {
+        Minimum = 512, Maximum = 1_048_576, ThousandsSeparator = true
     };
-    private readonly NumericUpDown localMax = Limit(), googleMax = Limit(), dropboxMax = Limit();
-    private readonly NumericUpDown maximumQueueMb = new() { Minimum = 512, Maximum = 1048576,
-        Increment = 512, ThousandsSeparator = true, Width = 140 };
     private readonly ModernButton driveConnect = ActionButton("Connect Google Drive");
     private readonly ModernButton driveRepair = ActionButton("Verify / Reconnect Drive");
     private readonly ModernButton dropboxConnect = ActionButton("Connect Dropbox");
     private readonly ModernButton dropboxRepair = ActionButton("Verify / Reconnect Dropbox");
-    private readonly Label recoveryStatus = new() { AutoSize = true, ForeColor = AppTheme.MutedText };
-    private readonly ModernButton save = ActionButton("Save Backup Settings");
+    private readonly Label recoveryStatus = Note("");
+    private readonly ModernButton save = new() { Text = "Save Backup Settings", ThemeRole = "Primary" };
     private readonly ModernButton cancel = ActionButton("Cancel");
-    private readonly ModernButton passphraseButton = ActionButton("Set recovery passphrase");
+    private readonly ModernButton passphraseButton = ActionButton("Set recovery credential");
     private readonly CloudBackupOptions previous;
     private readonly string? settingsWarning;
     private bool operationBusy;
@@ -36,13 +35,14 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
 
     internal CloudBackupSettingsDialog()
     {
-        Text = "Cloud backup options";
+        Text = "Cloud Backup Options";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(AppScale.Scale(700), AppScale.Scale(640));
+        ClientSize = new Size(AppScale.Scale(740), AppScale.Scale(600));
         BackColor = AppTheme.PageBackground;
+        Font = AppTheme.NormalFont;
         previous = CloudBackupSettings.LoadForEditing(out settingsWarning);
 
         frequency.Items.AddRange(new object[] {
@@ -61,51 +61,13 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         dropboxMax.Value = previous.MaximumDropboxBackups;
         maximumQueueMb.Value = previous.MaximumPendingQueueMegabytes;
 
-        var body = new TableLayoutPanel {
-            Dock = DockStyle.Fill, ColumnCount = 2, AutoScroll = true,
-            Padding = new Padding(AppScale.Scale(20)), RowCount = 0
-        };
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 47));
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 53));
-        AddRow(body, "Automatic scheduling", automatic);
-        AddRow(body, "Frequency", frequency);
-        AddRow(body, "Backup time (computer local)", scheduleTime);
-        AddRow(body, "Weekly backup day", weeklyDay);
-        AddRow(body, "Local destination", local);
-        AddRow(body, "Maximum managed local backups", localMax);
-        AddRow(body, "Google Drive", google);
-        AddRow(body, "Google Drive maximum cloud backups", googleMax);
-        AddRow(body, "Google Drive account", driveConnect);
-        AddRow(body, "Google Drive connection health", driveRepair);
-        AddRow(body, "Dropbox", dropbox);
-        AddRow(body, "Dropbox maximum cloud backups", dropboxMax);
-        AddRow(body, "Maximum encrypted queue (MB)", maximumQueueMb);
-        AddRow(body, "Dropbox account", dropboxConnect);
-        AddRow(body, "Dropbox connection health", dropboxRepair);
-        AddRow(body, "Encryption recovery", passphraseButton);
-        AddRow(body, "Recovery status", recoveryStatus);
-        var note = new Label {
-            Text = "Cloud copies are encrypted before upload. Keep the recovery passphrase outside this PC. " +
-                   "Automatic backups use the same Windows/LocalDB identity that enrolled the providers. " +
-                   "Upload failures never change school records.",
-            Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText, AutoSize = false
-        };
-        AddRow(body, "Important", note, AppScale.Scale(87));
-        cancel.DialogResult = DialogResult.Cancel;
-        var actions = new FlowLayoutPanel {
-            Dock = DockStyle.Bottom, Height = AppScale.Scale(62),
-            FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(15)
-        };
-        actions.Controls.Add(save);
-        actions.Controls.Add(cancel);
-        Controls.Add(body);
-        Controls.Add(actions);
+        BuildLayout();
         CancelButton = cancel;
+        SetSaveShortcut(save);
         RefreshConnectionState();
         Shown += (_, _) => {
             if (settingsWarning is not null)
-                MessageBox.Show(this, settingsWarning, "Backup settings need repair",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ModernMessageDialog.ShowWarning(this, settingsWarning, "Backup Settings Need Repair");
         };
 
         driveConnect.Click += async (_, _) => await ToggleProviderAsync(CloudProvider.GoogleDrive, driveConnect);
@@ -125,6 +87,103 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
             }
         };
     }
+
+    private void BuildLayout()
+    {
+        var tabs = new TabControl { Dock = DockStyle.Fill, Margin = Padding.Empty };
+        var destinations = new TableLayoutPanel {
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top, ColumnCount = 2, RowCount = 2, Margin = Padding.Empty
+        };
+        destinations.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        destinations.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        destinations.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        destinations.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var localSettings = Section("Local Backups", local,
+            Field("Maximum local backups", localMax));
+        localSettings.Margin = new Padding(0, 0, 0, AppMetrics.SpacingMd);
+        destinations.Controls.Add(localSettings, 0, 0);
+        destinations.SetColumnSpan(localSettings, 2);
+
+        var driveSettings = Section("Google Drive", google,
+            Field("Maximum cloud backups", googleMax), driveConnect, driveRepair);
+        driveSettings.Margin = new Padding(0, 0, AppMetrics.SpacingSm, 0);
+        destinations.Controls.Add(driveSettings, 0, 1);
+        destinations.Controls.Add(Section("Dropbox", dropbox,
+            Field("Maximum cloud backups", dropboxMax), dropboxConnect, dropboxRepair), 1, 1);
+
+        AddTab(tabs, "Schedule", Section("Automatic Backups", automatic,
+            Field("Frequency", frequency), Field("Backup time (local)", scheduleTime),
+            Field("Weekly backup day", weeklyDay),
+            Note("Automatic backups use the Windows account and LocalDB instance that connected the cloud accounts.")));
+        AddTab(tabs, "Destinations", destinations);
+        AddTab(tabs, "Recovery", Section("Cloud Recovery", recoveryStatus, passphraseButton,
+            Note("Use your Administrator password or a separate passphrase. Keep the credential used for each backup."),
+            Field("Maximum encrypted upload queue (MB)", maximumQueueMb)));
+
+        cancel.DialogResult = DialogResult.Cancel;
+        var root = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2,
+            Padding = new Padding(AppMetrics.SpacingMd)
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var actions = HumanUi.DialogButtons(cancel, save);
+        actions.Margin = new Padding(0, AppMetrics.SpacingMd, 0, 0);
+        root.Controls.Add(tabs, 0, 0);
+        root.Controls.Add(actions, 0, 1);
+        Controls.Add(root);
+    }
+
+    private static void AddTab(TabControl tabs, string title, Control content)
+    {
+        var page = new TabPage(title) { BackColor = AppTheme.Surface };
+        var viewport = new Panel {
+            Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(AppMetrics.SpacingMd)
+        };
+        viewport.Controls.Add(content);
+        page.Controls.Add(viewport);
+        tabs.TabPages.Add(page);
+    }
+
+    private static TableLayoutPanel Section(string title, params Control[] controls)
+    {
+        var section = new TableLayoutPanel {
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top, ColumnCount = 1, RowCount = controls.Length + 1,
+            Margin = Padding.Empty
+        };
+        section.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        var heading = HumanUi.GroupHeading(title);
+        heading.Margin = new Padding(0, 0, 0, AppMetrics.SpacingSm);
+        section.RowStyles.Add(new RowStyle(SizeType.Absolute, HumanUi.GroupHeadingHeight + heading.Margin.Vertical));
+        section.Controls.Add(heading, 0, 0);
+        for (int index = 0; index < controls.Length; index++)
+        {
+            section.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            section.Controls.Add(controls[index], 0, index + 1);
+        }
+        return section;
+    }
+
+    private static Control Field(string caption, Control input)
+    {
+        var field = HumanUi.Field(caption, input);
+        field.Height = AppMetrics.FieldRowHeight;
+        return field;
+    }
+
+    private static ModernCheckBox Option(string text) => new() {
+        Text = text, OptionStyle = true, AutoSize = true, Anchor = AnchorStyles.Left,
+        Margin = new Padding(0, 0, 0, AppMetrics.SpacingSm)
+    };
+
+    private static Label Note(string text) => new() {
+        Text = text, AutoSize = true, Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText,
+        Margin = new Padding(0, AppMetrics.SpacingXs, 0, AppMetrics.SpacingSm)
+    };
 
     private bool TryBeginOperation()
     {
@@ -232,33 +291,66 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                 "Existing backups keep their original passphrase",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
             return;
-        using var dialog = new Form {
-            Text = "Cloud recovery passphrase", StartPosition = FormStartPosition.CenterParent,
+        using var dialog = new ApplicationWindowForm {
+            Text = "Cloud Recovery Credential", StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog, MinimizeBox = false, MaximizeBox = false,
-            ClientSize = new Size(AppScale.Scale(480), AppScale.Scale(220))
+            ShowInTaskbar = false, Font = AppTheme.NormalFont, BackColor = AppTheme.PageBackground,
+            ClientSize = new Size(AppScale.Scale(540), AppScale.Scale(360))
         };
-        var first = new TextBox { UseSystemPasswordChar = true, Width = AppScale.Scale(400) };
-        var again = new TextBox { UseSystemPasswordChar = true, Width = AppScale.Scale(400) };
-        var note = new Label {
-            Text = "At least 12 characters. Keep it in a safe place outside this PC. " +
-                   "Without it, cloud backups cannot be recovered after the computer is lost.",
-            AutoSize = true, MaximumSize = new Size(AppScale.Scale(440), 0)
+        var useAdministrator = Option("Use my Administrator password");
+        useAdministrator.Checked = useAdministrator.Enabled = CurrentUser.IsAdministrator;
+        var first = HumanUi.TextBox(maxLength: 32767);
+        var again = HumanUi.TextBox(maxLength: 32767);
+        first.UseSystemPasswordChar = again.UseSystemPasswordChar = true;
+        var note = Note("");
+        var button = new ModernButton { Text = "Save Recovery Credential", ThemeRole = "Primary" };
+        var close = new ModernButton {
+            Text = UiText.Actions.Cancel, ThemeRole = "Secondary", DialogResult = DialogResult.Cancel
         };
-        var button = new Button { Text = "Save recovery passphrase", AutoSize = true };
-        var layout = new FlowLayoutPanel {
-            Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown,
-            Padding = new Padding(15), WrapContents = false
+        var firstField = Field("Recovery credential", first);
+        var againField = Field("Confirm passphrase", again);
+        var layout = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(AppMetrics.SpacingLg)
         };
-        layout.Controls.Add(note);
-        layout.Controls.Add(new Label { Text = "Recovery passphrase:", AutoSize = true });
-        layout.Controls.Add(first);
-        layout.Controls.Add(new Label { Text = "Confirm passphrase:", AutoSize = true });
-        layout.Controls.Add(again);
-        layout.Controls.Add(button);
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.Controls.Add(useAdministrator, 0, 0);
+        layout.Controls.Add(note, 0, 1);
+        layout.Controls.Add(firstField, 0, 2);
+        layout.Controls.Add(againField, 0, 3);
+        layout.Controls.Add(HumanUi.DialogButtons(close, button), 0, 5);
         dialog.Controls.Add(layout);
+        dialog.AcceptButton = button;
+        dialog.CancelButton = close;
+        dialog.FormClosed += (_, _) => { first.Clear(); again.Clear(); };
+        void UpdateMode()
+        {
+            first.Clear();
+            again.Clear();
+            first.PlaceholderText = useAdministrator.Checked ? "Current Administrator password" : "At least 12 characters";
+            againField.Visible = !useAdministrator.Checked;
+            note.Text = useAdministrator.Checked
+                ? "Backups use this password until you update the recovery credential here. A stolen backup allows offline password guessing."
+                : "Use at least 12 characters and keep the passphrase somewhere safe outside this PC.";
+        }
+        useAdministrator.CheckedChanged += (_, _) => UpdateMode();
+        UpdateMode();
         button.Click += (_, _) =>
         {
-            if (first.Text.Length < 12 || first.Text != again.Text)
+            if (useAdministrator.Checked)
+            {
+                if (!AuthenticationService.VerifyAdministratorPassword(first.Text, out string message))
+                {
+                    ModernMessageDialog.ShowWarning(dialog, message, "Administrator Password");
+                    return;
+                }
+            }
+            else if (first.Text.Length < 12 || first.Text != again.Text)
             {
                 MessageBox.Show(dialog, "Enter a matching passphrase of at least 12 characters.",
                     "Recovery passphrase", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -266,7 +358,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
             }
             try
             {
-                CloudBackupSettings.SaveRecoveryPassphrase(first.Text);
+                CloudBackupCoordinator.SetRecoveryPassphrase(first.Text, useAdministrator.Checked);
                 first.Clear(); again.Clear();
                 dialog.DialogResult = DialogResult.OK;
                 dialog.Close();
@@ -344,25 +436,12 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         dropboxConnect.Text = CloudBackupOAuth.IsConnected(CloudProvider.Dropbox)
             ? "Disconnect Dropbox" : "Connect Dropbox";
         recoveryStatus.Text = CloudBackupSettings.HasLocalRecoveryPassphrase
-            ? "Recovery passphrase enrolled on this Windows account"
-            : "Recovery passphrase not configured";
+            ? "Recovery credential saved for this Windows account"
+            : "Recovery credential not configured";
     }
-    private static ModernButton ActionButton(string title) =>
-        new() { Text = title, AutoSize = true, Height = AppMetrics.ButtonHeight, ThemeRole = "Secondary" };
-    private static NumericUpDown Limit() => new() {
-        Minimum = 1, Maximum = 365, Value = 7, Width = 110
+    private static ModernButton ActionButton(string title) => new() {
+        Text = title, AutoSize = true, Height = AppMetrics.ButtonHeight, ThemeRole = "Secondary",
+        Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, AppMetrics.SpacingSm)
     };
-    private static void AddRow(TableLayoutPanel panel, string title, Control input, int height = 0)
-    {
-        int index = panel.RowCount++;
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute,
-            height > 0 ? height : AppScale.Scale(45)));
-        panel.Controls.Add(new Label {
-            Text = title, AutoSize = false, Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-            ForeColor = AppTheme.Text
-        }, 0, index);
-        input.Anchor = AnchorStyles.Left;
-        panel.Controls.Add(input, 1, index);
-    }
+    private static ModernNumericTextBox Limit() => new() { Minimum = 1, Maximum = 365, Value = 7 };
 }

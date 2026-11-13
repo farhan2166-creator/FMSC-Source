@@ -129,19 +129,26 @@ internal static class CloudBackupSettings
     /// backup on THIS Windows account; it must not be the only surviving copy
     /// of the passphrase, as another PC cannot decrypt this local credential.
     /// </summary>
-    internal static void SaveRecoveryPassphrase(string passphrase)
+    internal static void SaveRecoveryPassphrase(string passphrase, bool useAdministratorPassword)
     {
         if (!CurrentUser.HasPermission("Backup.Restore"))
             throw new UnauthorizedAccessException("Only a backup recovery administrator may configure encryption.");
-        if (string.IsNullOrWhiteSpace(passphrase) || passphrase.Length < 12)
+        if (string.IsNullOrWhiteSpace(passphrase) || (!useAdministratorPassword && passphrase.Length < 12))
             throw new ArgumentException("The recovery passphrase must contain at least 12 characters.");
         EnsurePrivateDirectory();
+        WriteRecoveryPassphrase(RecoveryKeyPath, passphrase);
+    }
+
+    private static void WriteRecoveryPassphrase(string path, string passphrase)
+    {
         byte[] clear = Encoding.UTF8.GetBytes(passphrase);
         byte[] protectedBytes = Array.Empty<byte>();
         try
         {
             protectedBytes = ProtectedData.Protect(clear, Entropy, DataProtectionScope.CurrentUser);
-            string temp = RecoveryKeyPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            if (protectedBytes.Length > 8192)
+                throw new ArgumentException("The recovery credential is too long to store.");
+            string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
@@ -149,7 +156,7 @@ internal static class CloudBackupSettings
                     output.Write(protectedBytes);
                     output.Flush(flushToDisk: true);
                 }
-                File.Move(temp, RecoveryKeyPath, overwrite: true);
+                File.Move(temp, path, overwrite: true);
             }
             finally { if (File.Exists(temp)) File.Delete(temp); }
         }
@@ -160,9 +167,16 @@ internal static class CloudBackupSettings
         }
     }
 
-    internal static string OpenRecoveryPassphrase()
+    internal static void PreserveQueuedPassphrase(string path)
     {
-        byte[] protectedBytes = File.ReadAllBytes(RecoveryKeyPath);
+        if (!File.Exists(path))
+            WriteRecoveryPassphrase(path, OpenRecoveryPassphrase());
+    }
+
+    internal static string OpenRecoveryPassphrase(string? queuedKeyPath = null)
+    {
+        byte[] protectedBytes = File.ReadAllBytes(
+            queuedKeyPath is not null && File.Exists(queuedKeyPath) ? queuedKeyPath : RecoveryKeyPath);
         if (protectedBytes.Length is < 32 or > 8192)
             throw new InvalidDataException("Saved cloud recovery credential is invalid.");
         byte[] clear = Array.Empty<byte>();
@@ -170,7 +184,7 @@ internal static class CloudBackupSettings
         {
             clear = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.CurrentUser);
             string value = Encoding.UTF8.GetString(clear);
-            if (value.Length < 12)
+            if (string.IsNullOrWhiteSpace(value))
                 throw new InvalidDataException("Cloud recovery credential is incomplete.");
             return value;
         }

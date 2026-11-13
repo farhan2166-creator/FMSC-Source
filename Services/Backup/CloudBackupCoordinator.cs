@@ -68,6 +68,25 @@ internal static class CloudBackupCoordinator
         CloudRemoteBackup Remote, bool KnownVerifiedUpload, string SourceBakSha256 = "");
     internal sealed record LocalBackupLink(string FilePath, string SourceBakSha256, DateTime SqlCreatedUtc);
 
+    internal static void SetRecoveryPassphrase(string passphrase, bool useAdministratorPassword)
+    {
+        EnsurePrivateDirectories();
+        using var jobLease = CloudBackupJobLock.TryAcquire(Path.Combine(Root, "cloud-job.lock"))
+            ?? throw new InvalidOperationException("Wait for the current cloud backup or upload to finish.");
+        if (CloudBackupSettings.HasLocalRecoveryPassphrase)
+        {
+            var settings = CloudBackupSettings.LoadForEditing(out _);
+            foreach (var pending in ReadPending(error => throw new IOException(
+                "A pending backup journal could not be read. The recovery passphrase was not changed.", error)))
+            {
+                if (StillRequiresDelivery(pending, CloudProvider.GoogleDrive, settings) ||
+                    StillRequiresDelivery(pending, CloudProvider.Dropbox, settings))
+                    CloudBackupSettings.PreserveQueuedPassphrase(pending.PackageFile + ".dpapi");
+            }
+        }
+        CloudBackupSettings.SaveRecoveryPassphrase(passphrase, useAdministratorPassword);
+    }
+
     // Source digest is only a proposed association. The catalogue MUST hash
     // and re-check the live local .bak before using this local journal link.
     internal static IReadOnlyList<LocalBackupLink> ReadLocalLinks() => ReadPending()
@@ -540,7 +559,7 @@ internal static class CloudBackupCoordinator
         progress?.Report(new BackupProgressUpdate("Recovery testing", "Downloading, decrypting and testing an isolated SQL restore.", provider.ToString()));
         await CloudRestoreStaging.VerifyRemoteCopyAsync(
             (destination, ct) => DownloadAndCheckAsync(copy, destination, ct),
-            CloudBackupSettings.OpenRecoveryPassphrase(), p.SqlCreatedUtc, token);
+            CloudBackupSettings.OpenRecoveryPassphrase(p.PackageFile + ".dpapi"), p.SqlCreatedUtc, token);
         if (provider == CloudProvider.GoogleDrive)
         {
             p.GoogleRecoveryVerified = true;
@@ -630,9 +649,11 @@ internal static class CloudBackupCoordinator
                 OriginallyRequested(p, CloudProvider.GoogleDrive, settings),
                 p.GoogleRecoveryVerified, p.GoogleDrivePruned, p.GoogleSuperseded,
                 OriginallyRequested(p, CloudProvider.Dropbox, settings),
-                p.DropboxRecoveryVerified, p.DropboxPruned, p.DropboxSuperseded) &&
-            File.Exists(p.PackageFile))
+                p.DropboxRecoveryVerified, p.DropboxPruned, p.DropboxSuperseded))
+        {
             File.Delete(p.PackageFile);
+            File.Delete(p.PackageFile + ".dpapi");
+        }
         // Keep the small journal: it proves what we uploaded and protects
         // retention decisions even after the queued ciphertext is cleaned up.
     }

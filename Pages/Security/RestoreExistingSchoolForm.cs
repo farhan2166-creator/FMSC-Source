@@ -113,7 +113,7 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
         Field(5, "Local backup file", localPath);
         Field(6, "School Administrator username", administrator);
         Field(7, "Administrator password", password);
-        Field(8, "Cloud recovery passphrase", passphrase);
+        Field(8, "Cloud passphrase (if different)", passphrase);
         var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3 };
         for (int i = 0; i < 3; i++) footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3));
         footer.Controls.Add(recover, 0, 0);
@@ -254,8 +254,6 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
             { status.Text = "Choose a cloud recovery point first."; return; }
             remote = selection.Backup;
             alternatives = selection.Copies;
-            if (passphrase.Text.Length < 12)
-            { status.Text = "Enter the existing school recovery passphrase."; return; }
         }
         else
         {
@@ -266,7 +264,8 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
         if (string.IsNullOrWhiteSpace(administrator.Text) || password.Text.Length == 0)
         { status.Text = "Enter the original school Administrator credentials."; return; }
         if (!ConfirmRecovery()) return;
-        string name = administrator.Text, secret = password.Text, key = passphrase.Text;
+        string name = administrator.Text, secret = password.Text;
+        string key = passphrase.Text.Length == 0 ? secret : passphrase.Text;
         SetBusy(true);
         diagnostics.Clear();
         try

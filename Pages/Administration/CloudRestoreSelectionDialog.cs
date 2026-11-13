@@ -60,7 +60,7 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
                 e.Value = $"{ProviderName(copy.Remote.Provider)} · uploaded {FormatBackupDate(copy.Remote.UploadedUtc)}";
         };
         passphrase.UseSystemPasswordChar = true;
-        passphrase.PlaceholderText = "At least 12 characters";
+        passphrase.PlaceholderText = "Administrator password or separate passphrase";
 
         var confirm = new ModernButton { Text = "Select Backup", ThemeRole = "Primary" };
         var cancel = new ModernButton {
@@ -108,7 +108,8 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
         card.Content.Controls.Add(body);
         Controls.Add(card);
 
-        void UpdateConfirm() => confirm.Enabled = provider.SelectedItem is not null && passphrase.Text.Length >= 12;
+        void UpdateConfirm() => confirm.Enabled = provider.SelectedItem is not null &&
+            !string.IsNullOrWhiteSpace(passphrase.Text);
         void SelectPoint(RecoveryPoint point)
         {
             provider.Items.Clear();
@@ -131,7 +132,7 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
         confirm.Click += (_, _) =>
         {
             if (provider.SelectedItem is not CloudBackupCoordinator.CloudSelection selected ||
-                passphrase.Text.Length < 12)
+                string.IsNullOrWhiteSpace(passphrase.Text))
                 return;
             SelectedCopy = selected;
             RecoveryPassphrase = passphrase.Text;

@@ -34,7 +34,21 @@ public static class AuthenticationService
     private static readonly object LoginAttemptsLock = new();
     public static bool Authenticate(string username, string password, out string message) =>
         Authenticate(username, password, out message, out _);
-    internal static bool Authenticate(string username, string password, out string message, out Exception? failure)
+    internal static bool Authenticate(string username, string password, out string message, out Exception? failure) =>
+        CheckCredentials(username, password, out message, out failure);
+
+    internal static bool VerifyAdministratorPassword(string password, out string message)
+    {
+        if (!CurrentUser.IsAdministrator)
+        {
+            message = "Sign in as an Administrator to use your password for backups.";
+            return false;
+        }
+        return CheckCredentials(CurrentUser.Username, password, out message, out _, CurrentUser.UserId);
+    }
+
+    private static bool CheckCredentials(string username, string password, out string message,
+        out Exception? failure, int? administratorId = null)
     {
         failure = null;
         message = string.Empty;
@@ -96,7 +110,9 @@ public static class AuthenticationService
             var hash = (byte[])r["PasswordHash"];
             var salt = (byte[])r["PasswordSalt"];
             var computed = Rfc2898DeriveBytes.Pbkdf2(password, salt, PasswordIterations, HashAlgorithmName.SHA512, hash.Length);
-            if (!CryptographicOperations.FixedTimeEquals(hash, computed))
+            bool matches = CryptographicOperations.FixedTimeEquals(hash, computed);
+            CryptographicOperations.ZeroMemory(computed);
+            if (!matches)
             {
                 RecordFailedAttempt(cleanUsername);
                 // (option A): the durable half of the same count.
@@ -107,6 +123,19 @@ public static class AuthenticationService
             var userId = Convert.ToInt32(r["UserId"]);
             var roleName =
                 Convert.ToString(r["RoleName"]) ?? "";
+            if (administratorId.HasValue)
+            {
+                if (userId != administratorId.Value ||
+                    !roleName.Split(',', StringSplitOptions.TrimEntries)
+                        .Contains("Administrator", StringComparer.OrdinalIgnoreCase))
+                {
+                    message = GenericSignInFailure;
+                    return false;
+                }
+                ResetFailedAttempts(cleanUsername);
+                ResetFailedLoginInDatabase(userId);
+                return true;
+            }
             var mustChange =
                 r["MustChangePassword"] != DBNull.Value &&
                 Convert.ToBoolean(r["MustChangePassword"]);
