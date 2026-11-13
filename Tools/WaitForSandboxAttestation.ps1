@@ -44,10 +44,10 @@ $records=@(Get-FmscGitHubCommitStatuses -Uri "$api/commits/$SourceSha/statuses?p
             Write-Host "A NEW trusted private acceptance approved $SourceSha."
             if ($env:GITHUB_STEP_SUMMARY) {
                 @(
-                    '## Private SQL and chaos acceptance',
+                    '## Private schema-7 SQL and real installer acceptance',
                     "- Accepted Source SHA: $SourceSha",
                     "- Run: $($attestation.target_url)",
-                    '- Schema-3 + schema-7 SQL and real installers, plus historical chaos and recovery, required.'
+                    '- Current schema-7 SQL migration, real installer, billing and recovery verification required. Historical schema-3 chaos is a separate manual workflow.'
                 ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
             }
             return
