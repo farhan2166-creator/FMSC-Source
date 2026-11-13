@@ -33,6 +33,9 @@ $recoveryStorage=Join-Path ([Environment]::GetFolderPath('CommonApplicationData'
 $ownedDatabase=$false
 $ownedInstallation=$false
 $ownedRoot=$false
+$ownedGoogleRegistration=$false
+$googleRegistrationHash=''
+$googleRegistration=Join-Path $project 'CloudBackupGoogleDesktop.json'
 $fixtureFiles=@()
 $fixtureProbeName=''
 $cleanupResult='NOT_REQUIRED'
@@ -363,6 +366,18 @@ try {
     $checks.Add('Actual LocalDB instance started using Microsoft-signed prerequisites')
 
     Stage 'Pinned SQL command and full installer publishing'
+    # Exercise the real private publish validation without borrowing a real
+    # publisher credential or skipping any installer/SQL acceptance checks.
+    $providers=Get-Content -LiteralPath (Join-Path $project 'CloudBackupProviders.json') -Raw | ConvertFrom-Json
+    if (-not [string]::IsNullOrWhiteSpace($providers.GoogleClientId) -and
+        -not (Test-Path -LiteralPath $googleRegistration)) {
+        $fixtureJson=@{installed=@{client_id=$providers.GoogleClientId;client_secret='fictional-installer-test-only'}} | ConvertTo-Json -Compress
+        $bytes=[Text.Encoding]::UTF8.GetBytes($fixtureJson)
+        $stream=[IO.File]::Open($googleRegistration,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
+        $ownedGoogleRegistration=$true
+        $googleRegistrationHash=(Get-FileHash -LiteralPath $googleRegistration -Algorithm SHA256).Hash
+    }
     & (Join-Path $project 'Tools/PrepareBundledSqlCmd.ps1') -DestinationFile $sqlcmd
     $transport = Join-Path $root 'MinGit'
     & (Join-Path $project 'Tools/PrepareBundledGit.ps1') -DestinationDirectory $transport
@@ -377,6 +392,15 @@ try {
         '-p:PublishSingleFile=false','-p:PublishTrimmed=false')
     & dotnet @arguments
     NativeOk 'Full PortableRelease publish'
+    if (-not [string]::IsNullOrWhiteSpace($providers.GoogleClientId)) {
+        $publishedRegistration=Join-Path $app 'CloudBackupGoogleDesktop.json'
+        if (-not (Test-Path -LiteralPath $publishedRegistration -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $googleRegistration -Algorithm SHA256).Hash -cne
+            (Get-FileHash -LiteralPath $publishedRegistration -Algorithm SHA256).Hash) {
+            throw 'Full installer did not copy the exact Google Desktop registration into its application payload.'
+        }
+        $checks.Add('Full private publish validates and copies Desktop registration; synthetic metadata requires no live cloud account')
+    }
     foreach ($file in @('FMSC_SMS/FMSC_SMS.exe','FMSC_SMS/UpdateSupport/FMSC.Setup.exe',
         'FMSC_SMS/UpdateTransport/cmd/git.exe','FMSC_SMS/UpdateTransport/usr/bin/ssh.exe',
         'FMSC_SMS/UpdateTransport/COPYING-GIT.txt',
@@ -681,6 +705,12 @@ finally {
             }
         }
         if ($ownedTheme -and (Test-Path -LiteralPath $themeFile)) { Remove-Item -LiteralPath $themeFile -Force }
+        if ($ownedGoogleRegistration -and (Test-Path -LiteralPath $googleRegistration)) {
+            if ((Get-FileHash -LiteralPath $googleRegistration -Algorithm SHA256).Hash -cne $googleRegistrationHash) {
+                throw 'Synthetic Google registration changed unexpectedly; the unrecognized file was retained.'
+            }
+            Remove-Item -LiteralPath $googleRegistration -Force
+        }
         if ($ownedRoot) { Remove-Item -LiteralPath $root -Recurse -Force }
         $cleanupResult='PASS'
     }
