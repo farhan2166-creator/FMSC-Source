@@ -20,6 +20,12 @@ Require ($env:GITHUB_SHA -cmatch '^[0-9a-f]{40}$' -and
 Require ($env:FMSC_WORKFLOW04_PUBLISH -cin @('true','false')) 'Invalid workflow publication input.'
 Require (-not [string]::IsNullOrWhiteSpace($env:GH_SOURCE_TOKEN)) 'Source contents-write token is missing.'
 $publish=$env:FMSC_WORKFLOW04_PUBLISH -ceq 'true'
+if ($publish) {
+    # Fail before any version bump or costly Sandbox acceptance when registration is absent.
+    . (Join-Path $PSScriptRoot 'AssertGoogleDesktopRegistration.ps1')
+    $providers = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../CloudBackupProviders.json') -Raw | ConvertFrom-Json
+    Assert-FmscGoogleDesktopRegistration -ClientId $providers.GoogleClientId -Json $env:FMSC_GOOGLE_DESKTOP_JSON
+}
 $sourceRepo=Resolve-FmscGitHubRepository -Repository Source -Token $env:GH_SOURCE_TOKEN
 $sourceApi=$sourceRepo.Api
 $headers=@{ Authorization="Bearer $env:GH_SOURCE_TOKEN"; Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28' }

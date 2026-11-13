@@ -30,8 +30,13 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
     private readonly ModernButton passphraseButton = ActionButton("Set recovery credential");
     private readonly CloudBackupOptions previous;
     private readonly string? settingsWarning;
+    private readonly Label connectionStatus = Note("");
+    private CancellationTokenSource? accountCancellation;
     private bool operationBusy;
     private bool closingAfterSave;
+
+    internal Func<CloudProvider, CancellationToken, Task> ConnectAccountAsync { get; set; } =
+        CloudBackupOAuth.ConnectAsync;
 
     internal CloudBackupSettingsDialog()
     {
@@ -76,14 +81,16 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         dropboxRepair.Click += async (_, _) => await VerifyOrReconnectAsync(CloudProvider.Dropbox);
         passphraseButton.Click += (_, _) => SetRecoveryPassphrase();
         save.Click += async (_, _) => await SaveAsync();
+        cancel.Click += (_, _) => accountCancellation?.Cancel();
         FormClosing += (_, e) =>
         {
-            // A pending OAuth connection or settings/task registration can
-            // outlive the dialog. Do not allow disposal or a false Cancel.
+            // Browser waiting can be cancelled, but await its cleanup before
+            // disposing the dialog. Saving settings/task registration stays protected.
             if (operationBusy && !closingAfterSave)
             {
                 e.Cancel = true;
                 DialogResult = DialogResult.None;
+                accountCancellation?.Cancel();
             }
         };
     }
@@ -124,16 +131,18 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
 
         cancel.DialogResult = DialogResult.Cancel;
         var root = new TableLayoutPanel {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2,
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
             Padding = new Padding(AppMetrics.SpacingMd)
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var actions = HumanUi.DialogButtons(cancel, save);
         actions.Margin = new Padding(0, AppMetrics.SpacingMd, 0, 0);
         root.Controls.Add(tabs, 0, 0);
-        root.Controls.Add(actions, 0, 1);
+        root.Controls.Add(connectionStatus, 0, 1);
+        root.Controls.Add(actions, 0, 2);
         Controls.Add(root);
     }
 
@@ -185,16 +194,22 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         Margin = new Padding(0, AppMetrics.SpacingXs, 0, AppMetrics.SpacingSm)
     };
 
-    private bool TryBeginOperation()
+    private bool TryBeginOperation(bool allowCancellation = false)
     {
         if (operationBusy || IsDisposed || Disposing) return false;
         operationBusy = true;
+        accountCancellation = allowCancellation ? new CancellationTokenSource() : null;
+        connectionStatus.Text = allowCancellation
+            ? "Waiting for the cloud account. If you closed the browser, select Cancel Connection and try again."
+            : "";
+        cancel.Text = allowCancellation ? "Cancel Connection" : "Cancel";
+        cancel.DialogResult = allowCancellation ? DialogResult.None : DialogResult.Cancel;
         driveConnect.Enabled = false;
         driveRepair.Enabled = false;
         dropboxConnect.Enabled = false;
         dropboxRepair.Enabled = false;
         save.Enabled = false;
-        cancel.Enabled = false;
+        cancel.Enabled = allowCancellation;
         passphraseButton.Enabled = false;
         return true;
     }
@@ -202,6 +217,8 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
     private void EndOperation()
     {
         operationBusy = false;
+        accountCancellation?.Dispose();
+        accountCancellation = null;
         if (IsDisposed || Disposing) return;
         driveConnect.Enabled = true;
         driveRepair.Enabled = true;
@@ -209,25 +226,37 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         dropboxRepair.Enabled = true;
         save.Enabled = true;
         cancel.Enabled = true;
+        cancel.Text = "Cancel";
+        cancel.DialogResult = DialogResult.Cancel;
+        if (connectionStatus.Text.StartsWith("Waiting for", StringComparison.Ordinal))
+            connectionStatus.Text = "";
         passphraseButton.Enabled = true;
     }
 
     private async Task ToggleProviderAsync(CloudProvider provider, ModernButton button)
     {
-        if (!TryBeginOperation()) return;
+        bool connected = CloudBackupOAuth.IsConnected(provider);
+        if (!TryBeginOperation(allowCancellation: !connected)) return;
+        CancellationToken token = accountCancellation?.Token ?? CancellationToken.None;
         try
         {
-            if (CloudBackupOAuth.IsConnected(provider))
+            if (connected)
             {
                 if (MessageBox.Show(this, "Disconnect this cloud backup account?", "Disconnect",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                    await CloudBackupOAuth.DisconnectAsync(provider);
+                    await CloudBackupOAuth.DisconnectAsync(provider, token);
             }
             else
-                await CloudBackupOAuth.ConnectAsync(provider);
+                await ConnectAccountAsync(provider, token);
+            connectionStatus.Text = "Cloud account operation finished.";
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            connectionStatus.Text = "Cloud connection cancelled. You can try again.";
         }
         catch (Exception ex)
         {
+            connectionStatus.Text = "Cloud connection could not be completed. You can try again.";
             MessageBox.Show(this, ex.Message, "Cloud account", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
@@ -239,21 +268,25 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
 
     private async Task VerifyOrReconnectAsync(CloudProvider provider)
     {
-        if (!TryBeginOperation()) return;
+        if (!TryBeginOperation(allowCancellation: true)) return;
+        CancellationToken token = accountCancellation!.Token;
         try
         {
             bool healthy = false;
             try
             {
-                await CloudBackupOAuth.CheckConnectionAsync(provider);
+                await CloudBackupOAuth.CheckConnectionAsync(provider, token);
                 healthy = true;
             }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
             catch (Exception error)
             {
                 AppExceptionHandler.LogNonFatal(error, provider + " account connection health check failed");
             }
+            token.ThrowIfCancellationRequested();
             if (healthy)
             {
+                connectionStatus.Text = "Cloud account connection verified.";
                 MessageBox.Show(this, provider + " responded successfully. Its connection is ready.",
                     "Cloud connection verified", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
@@ -263,13 +296,19 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                     "Reconnect cloud backup account", MessageBoxButtons.YesNo,
                     MessageBoxIcon.Warning) != DialogResult.Yes)
                 return;
-            await CloudBackupOAuth.ReconnectAsync(provider);
-            await CloudBackupOAuth.CheckConnectionAsync(provider);
+            await CloudBackupOAuth.ReconnectAsync(provider, token);
+            await CloudBackupOAuth.CheckConnectionAsync(provider, token);
+            connectionStatus.Text = "Cloud account reconnected.";
             MessageBox.Show(this, provider + " is reconnected and ready.",
                 "Cloud account recovered", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            connectionStatus.Text = "Cloud connection cancelled. You can try again.";
+        }
         catch (Exception error)
         {
+            connectionStatus.Text = "Cloud connection could not be completed. You can try again.";
             AppExceptionHandler.LogNonFatal(error, provider + " cloud reconnect failed");
             MessageBox.Show(this, provider + " could not be reconnected. Other backup destinations are unchanged. " +
                 "Open technical diagnostics or retry when the network is available.",

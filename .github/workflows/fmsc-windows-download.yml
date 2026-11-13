@@ -47,6 +47,7 @@ jobs:
           GH_SOURCE_TOKEN: ${{ github.token }}
           FMSC_UPDATES_PUBLISH_TOKEN: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
           FMSC_SANDBOX_DISPATCH_TOKEN: ${{ secrets.FMSC_SANDBOX_DISPATCH_TOKEN }}
+          FMSC_GOOGLE_DESKTOP_JSON: ${{ secrets.FMSC_GOOGLE_DESKTOP_JSON }}
           FMSC_WORKFLOW04_PUBLISH: ${{ inputs.publish_update }}
           FMSC_WORKFLOW04_APPROVED_VERSION: ${{ inputs.approved_version_transition }}
         run: ./Tools/PrepareWorkflow04Release.ps1
@@ -199,6 +200,9 @@ jobs:
         run: |
           dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output out/windows-x64-app -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$env:GITHUB_WORKSPACE/out/prerequisites/MinGit" "-p:LocalDbMsiPath=$env:GITHUB_WORKSPACE/out/prerequisites/SqlLocalDB.msi" "-p:VcRedistPath=$env:GITHUB_WORKSPACE/out/prerequisites/vc_redist.x64.exe" "-p:BundledSqlCmdPath=$env:GITHUB_WORKSPACE/out/prerequisites/sqlcmd.exe" -p:PublishSingleFile=false -p:PublishTrimmed=false
           if ($LASTEXITCODE -ne 0) { throw "Windows publish failed." }
+          if (Test-Path -LiteralPath 'out/windows-x64-app/CloudBackupGoogleDesktop.json') {
+            throw 'Google Desktop registration belongs only in the private publication copy, never the public candidate artifact.'
+          }
 
       - name: Verify ZIP contents and add build manifest
         shell: pwsh
@@ -356,6 +360,7 @@ jobs:
           FMSC_UPDATES_PUBLISH_TOKEN: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          FMSC_GOOGLE_DESKTOP_JSON: ${{ secrets.FMSC_GOOGLE_DESKTOP_JSON }}
         run: |
           # Recheck live Source/main and latest private Sandbox attestation
           # immediately before changing the private update feed.

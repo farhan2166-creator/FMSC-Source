@@ -74,12 +74,14 @@ internal sealed class CloudOAuthLoopback : IDisposable
                 parameters.TryGetValue("code", out var code);
                 suppliedState ??= "";
                 code ??= "";
-                bool accepted = code.Length > 8 && code.Length < 4096 &&
-                    CryptographicOperations.FixedTimeEquals(
-                        SHA256.HashData(Encoding.UTF8.GetBytes(suppliedState)),
-                        SHA256.HashData(Encoding.UTF8.GetBytes(expectedState)));
+                bool stateMatches = CryptographicOperations.FixedTimeEquals(
+                    SHA256.HashData(Encoding.UTF8.GetBytes(suppliedState)),
+                    SHA256.HashData(Encoding.UTF8.GetBytes(expectedState)));
+                bool accepted = stateMatches && code.Length > 8 && code.Length < 4096;
                 await RespondAsync(input, accepted, requestTimeout.Token);
                 if (accepted) return code;
+                if (stateMatches && parameters.TryGetValue("error", out var error) && error.Length > 0)
+                    throw new InvalidOperationException("Cloud sign-in was declined. You can try again.");
                 // An unrelated loopback request must not steal or cancel the
                 // real browser authorization attempt.
             }
