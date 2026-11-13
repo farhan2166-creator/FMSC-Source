@@ -34,6 +34,9 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
     private readonly Button close = new() { Text = "Cancel", Dock = DockStyle.Fill };
     private readonly LinkLabel toggle = new() { Text = "Show technical details", Dock = DockStyle.Fill };
     private bool busy;
+    private CancellationTokenSource? connectionCancellation;
+    internal Func<CloudProvider, CancellationToken, Task> ConnectAccountAsync { get; set; } =
+        CloudBackupOAuth.ConnectForReplacementRecoveryAsync;
 
     // Internal delegates keep modal behavior testable without SQL, credentials or browser sign-in.
     internal Func<bool> ConfirmRecovery { get; set; }
@@ -138,7 +141,11 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
         connect.Click += async (_, _) => await ConnectCloudAsync();
         refresh.Click += async (_, _) => await ListCloudAsync();
         recover.Click += async (_, _) => await RecoverAsync();
-        close.Click += (_, _) => { if (!busy) { DialogResult = DialogResult.Cancel; Close(); } };
+        close.Click += (_, _) => {
+            if (connectionCancellation is not null) connectionCancellation.Cancel();
+            else if (!busy) { DialogResult = DialogResult.Cancel; Close(); }
+        };
+        CancelButton = close;
         help.Click += (_, _) => ModernMessageDialog.ShowWarning(this,
             "Administrator credentials are required to recover an existing school on a new computer. " +
             "If they are forgotten, request a separately approved recovery procedure from the FMSC publisher. " +
@@ -148,7 +155,12 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
             diagnostics.Visible = !diagnostics.Visible;
             toggle.Text = diagnostics.Visible ? "Hide technical details" : "Show technical details";
         };
-        FormClosing += (_, e) => { if (busy) e.Cancel = true; };
+        FormClosing += (_, e) => {
+            if (!busy) return;
+            e.Cancel = true;
+            DialogResult = DialogResult.None;
+            connectionCancellation?.Cancel();
+        };
         RefreshSourceDisplay();
         Shown += (_, _) => administrator.Focus();
     }
@@ -188,14 +200,25 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
     private async Task ConnectCloudAsync()
     {
         if (busy || !IsCloud) return;
+        using var cancellation = new CancellationTokenSource();
+        connectionCancellation = cancellation;
         SetBusy(true);
+        status.Text = "Waiting for browser sign-in. If you closed the browser, select Cancel Connection and try again.";
         try
         {
-            await CloudBackupOAuth.ConnectForReplacementRecoveryAsync(SelectedProvider);
+            await ConnectAccountAsync(SelectedProvider, cancellation.Token);
             status.Text = "Cloud account connected. Select Find Cloud Backups.";
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            status.Text = "Cloud connection cancelled. You can try again.";
+        }
         catch (Exception error) { ReportError(error); }
-        finally { SetBusy(false); }
+        finally
+        {
+            connectionCancellation = null;
+            SetBusy(false);
+        }
     }
 
     private async Task ListCloudAsync()
@@ -315,7 +338,8 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
         refresh.Enabled = !busy && IsCloud;
         recover.Enabled = !busy;
         help.Enabled = !busy;
-        close.Enabled = !busy;
-        UseWaitCursor = busy;
+        close.Enabled = !busy || connectionCancellation is not null;
+        close.Text = connectionCancellation is not null ? "Cancel Connection" : "Cancel";
+        UseWaitCursor = busy && connectionCancellation is null;
     }
 }

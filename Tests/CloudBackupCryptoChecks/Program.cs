@@ -5,6 +5,7 @@ await ReleaseReviewChecks.RunAsync();
 await AuditFollowupChecks.RunAsync();
 UnifiedRecoveryChecks.Run();
 await RecoverySourceChecks.RunAsync();
+await OAuthCancellationChecks.RunAsync();
 CloudQueueSafetyChecks.Run();
 if (args.SequenceEqual(new[] { "--release-review" })) return;
 
