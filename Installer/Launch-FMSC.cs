@@ -8,10 +8,14 @@ using System.Windows.Forms;
 internal static class FmscLauncher
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         try
         {
+            bool recover = args.Length == 1 && args[0] == "--recover";
+            if (args.Length != 0 && !recover)
+                throw new ArgumentException("Invalid FMSC launcher arguments.");
+
             string root = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
             string script = Path.Combine(root, "Launch-FMSC.ps1");
             if (!File.Exists(script)) throw new FileNotFoundException("The FMSC launcher is missing. Contact support.");
@@ -19,7 +23,8 @@ internal static class FmscLauncher
             {
                 FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
                     @"WindowsPowerShell\v1.0\powershell.exe"),
-                Arguments = "-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + script + "\"",
+                Arguments = "-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + script + "\"" +
+                    (recover ? " -ResumeUpdate" : ""),
                 WorkingDirectory = root,
                 UseShellExecute = false,
                 CreateNoWindow = true,
