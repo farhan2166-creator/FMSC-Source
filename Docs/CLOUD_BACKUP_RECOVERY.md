@@ -55,8 +55,10 @@ passwords, refresh tokens and account credentials never belong in that file or G
 client**, using the limited `drive.file` scope. Keep its public client ID in
 `GoogleClientId`. Download that Desktop client's JSON as
 `CloudBackupGoogleDesktop.json` beside the project before publishing. It is ignored
-by Git and copied to application output/publish only when supplied. Existing
-installations need this file beside the executable as well.
+by Git and copied to application output/publish. Local `PortableRelease` publishing
+validates both the project input and actual published output; a configured Google
+client cannot silently produce an installer without its matching registration.
+Existing installations need this file beside the executable as well.
 
 To include it in a private complete installer, store the JSON in the
 `FMSC_GOOGLE_DESKTOP_JSON` Actions secret in **FMSC-Sandbox**. A Sandbox workflow
@@ -81,8 +83,36 @@ jobs:
 Save the caller under `.github/workflows/` in FMSC-Sandbox and run it from
 Sandbox's main branch. The downloaded private installer contains the registration
 beside the application. The public Source installer and Workflow 04 candidate
-artifact do not receive this secret. Workflow 04 does not currently bundle it
-into private updates.
+artifact do not receive this secret.
+
+**Private updates (Workflow 04):** also add `FMSC_GOOGLE_DESKTOP_JSON` to
+**FMSC-Source → Settings → Secrets and variables → Actions**. Use the same downloaded
+Desktop JSON matching the pinned public client ID. GitHub secrets are scoped to a
+repository: the Sandbox secret is not automatically available to Source. Do not
+paste the JSON into source, issues or chat.
+
+Workflow 04 checks this configuration before bumping a version or dispatching
+Sandbox acceptance. After the exact candidate, Source SHA and Sandbox acceptance
+checks, the private publisher makes a separate working copy and adds the validated
+registration there. The sealed public candidate stays unchanged. The private copy
+gets a complete inventory, and both full and incremental packages include the
+registration under their normal hash verification. Nothing containing it is
+uploaded as a public Source artifact. Missing, web-type or mismatched metadata
+stops private publication; there is no silent omission.
+
+For local update packaging, include `CloudBackupGoogleDesktop.json` in the published
+application, or prepare a private copy with the packager's
+`--prepare-google-registration <application-directory>` command and the
+`FMSC_GOOGLE_DESKTOP_JSON` environment variable. The normal package command refuses
+configured Google updates without valid metadata. No installed refresh tokens or
+school credentials are copied into update packages.
+
+An old installed copy alone is insufficient: updates replace the application tree
+with the manifest's exact contents. Publish a newer fixed update to restore a
+missing registration. If immediate recovery is needed, place the matching Desktop
+JSON beside the installed executable; the next correctly published update will
+include it. Do not copy files into a downloaded, hash-verified updater package or
+edit its manifest.
 
 The parser accepts Google's `installed` envelope, rejects `web` credentials and
 requires the ID to match `GoogleClientId`. Google Desktop token exchange and refresh

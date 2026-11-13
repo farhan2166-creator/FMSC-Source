@@ -18,8 +18,15 @@ try
         Console.WriteLine("PASS: package chunks, full ZIP, complete target and incremental reconstruction verified.");
         return;
     }
+    if (args.Length == 2 && args[0] == "--prepare-google-registration")
+    {
+        GoogleRegistrationDelivery.Prepare(args[1], Environment.GetEnvironmentVariable("FMSC_GOOGLE_DESKTOP_JSON"));
+        Console.WriteLine("PASS: private Google Desktop registration matches the application's public client ID.");
+        return;
+    }
     if (args.Length == 1 && args[0] == "--self-test")
     {
+        GoogleRegistrationDeliveryTests.Run();
         SelfTest.Run();
         UpdatePreparationTests.Run();
         UpdateDownloadTests.Run();
@@ -85,6 +92,7 @@ static void ValidateReleaseInput(string current, string version, int schema)
     string migrations = Path.Combine(current, "UpdateSupport", "Migrations");
     if (schema > 1 && (!Directory.Exists(migrations) || !Directory.EnumerateFiles(migrations, "*.sql").Any()))
         throw new InvalidDataException("Numbered installer migrations are missing from the published update.");
+    GoogleRegistrationDelivery.Require(current);
 }
 
 internal static class PackageBuilder

@@ -102,18 +102,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $json = $env:FMSC_GOOGLE_DESKTOP_JSON
-          if ([string]::IsNullOrWhiteSpace($json)) { return }
           $providers = Get-Content -LiteralPath CloudBackupProviders.json -Raw | ConvertFrom-Json
-          try { $registration = ConvertFrom-Json -InputObject $json -ErrorAction Stop }
-          catch { throw 'The Google Desktop registration secret is not valid JSON.' }
-          if ([Text.Encoding]::UTF8.GetByteCount($json) -gt 16384 -or
-              $registration.PSObject.Properties['web'] -or
-              $registration.installed.client_id -cne $providers.GoogleClientId -or
-              $providers.GoogleClientId.Length -lt 3 -or $providers.GoogleClientId.Length -gt 250 -or
-              [string]::IsNullOrWhiteSpace($registration.installed.client_secret) -or
-              $registration.installed.client_secret.Length -gt 250) {
-            throw 'The Google Desktop registration secret must match GoogleClientId in the pinned Source commit.'
-          }
+          . ./Tools/AssertGoogleDesktopRegistration.ps1
+          Assert-FmscGoogleDesktopRegistration -ClientId $providers.GoogleClientId -Json $json
+          if ([string]::IsNullOrWhiteSpace($json)) { return }
           [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'CloudBackupGoogleDesktop.json'), $json, [Text.UTF8Encoding]::new($false))
 
       # ValidateDeploymentAssets and CopyDeploymentFiles MSBuild targets.
@@ -134,6 +126,8 @@ jobs:
             'publish', 'FMSC_SMS.csproj', '-c', 'Release',
             '-r', 'win-x64', '--self-contained', 'true',
             '-p:PublishProfile=PortableRelease',
+            # Public Source artifacts omit native metadata; private Sandbox packaging validated it above.
+            "-p:RequireGoogleDesktopRegistration=$($env:GITHUB_REPOSITORY_ID -eq '1449162585')",
             "-p:PublishDir=$application/",
             "-p:ReleaseRoot=$release/",
             "-p:LocalDbMsiPath=$msi",
