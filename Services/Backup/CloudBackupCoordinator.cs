@@ -552,18 +552,23 @@ internal static class CloudBackupCoordinator
     {
         var issues = new List<string>();
         var pending = ReadPending(error => issues.Add("A cloud backup journal could not be read. Review the protected queue before trusting delivery status."));
-        foreach (var p in pending)
         foreach (var provider in new[] { CloudProvider.GoogleDrive, CloudProvider.Dropbox })
         {
-            if (!StillRequiresDelivery(p, provider, settings)) continue;
-            string reason = !File.Exists(p.PackageFile)
-                ? "queued encrypted file is missing; delivery is incomplete. Create a new verified backup or recover the queued file."
-                : !(provider == CloudProvider.GoogleDrive ? settings.GoogleDriveEnabled : settings.DropboxEnabled)
-                    ? "pending backup preserved while this destination is disabled."
-                    : (provider == CloudProvider.GoogleDrive ? p.GoogleDeliveryAttempts : p.DropboxDeliveryAttempts) >= MaximumAutomaticDeliveryAttempts
-                        ? "automatic retries exhausted; use Retry Pending Uploads after correcting the cause."
-                        : "delivery or recovery verification is pending; check the account connection and retry.";
-            issues.Add(provider + " (" + p.SqlCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy HH:mm", CultureInfo.InvariantCulture) + "): " + reason);
+            var deliveries = pending.Where(p => StillRequiresDelivery(p, provider, settings)).ToArray();
+            if (deliveries.Length == 0) continue;
+
+            bool google = provider == CloudProvider.GoogleDrive;
+            string name = google ? "Google Drive" : "Dropbox";
+            bool enabled = google ? settings.GoogleDriveEnabled : settings.DropboxEnabled;
+            int missing = deliveries.Count(p => !File.Exists(p.PackageFile));
+            int exhausted = deliveries.Count(p => File.Exists(p.PackageFile) &&
+                (google ? p.GoogleDeliveryAttempts : p.DropboxDeliveryAttempts) >= MaximumAutomaticDeliveryAttempts);
+
+            string summary = $"{name}: {deliveries.Length} pending";
+            if (!enabled) summary += ", destination disabled";
+            if (missing > 0) summary += $", {missing} missing";
+            if (enabled && exhausted > 0) summary += $", {exhausted} with retries exhausted";
+            issues.Add(summary + ".");
         }
         return issues;
     }
