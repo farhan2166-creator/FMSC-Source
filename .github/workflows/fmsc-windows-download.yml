@@ -295,7 +295,7 @@ jobs:
         with:
           name: FMSC_SMS-Windows-x64-app-only-${{ github.run_number }}
           path: out/windows-x64-app/
-          retention-days: 14
+          retention-days: 3
           if-no-files-found: error
 
   publish:
