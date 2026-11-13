@@ -36,21 +36,310 @@ jobs:
           ref: ${{ inputs.source_sha || github.sha }}
           persist-credentials: false
 
-      - name: Record checked-out source revision
+      - name: Record and preflight checked-out Source revision
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          $revision = git rev-parse HEAD
+          $ErrorActionPreference = 'Stop'
+          $revision = (& git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0) { throw 'Unable to identify the checked-out source.' }
           if ($env:GITHUB_REPOSITORY_ID -notin @('1412760928', '1449162585')) {
             throw 'This package builder is restricted to the Source and Sandbox repository identities.'
           }
-          if ($env:GITHUB_REPOSITORY_ID -eq '1449162585' -and $env:FMSC_EXPECTED_SOURCE_SHA -notmatch '^[0-9a-f]{40}$') {
+          if ($env:GITHUB_REPOSITORY_ID -eq '1449162585' -and $env:FMSC_EXPECTED_SOURCE_SHA -notmatch '^[0-9a-f]{40}
+
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Build Windows application (Release)
+        run: |
+          dotnet restore FMSC_SMS.sln
+          dotnet build FMSC_SMS.sln -c Release --no-restore
+
+      - name: Compile native WinForms test project
+        run: dotnet build Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release
+
+      - name: Verify maintenance tool lifecycle without downloads or SQL
+        shell: pwsh
+        run: .\Tools\TestMaintenanceTools.ps1
+
+      - name: Run portable C# regression checks
+        run: dotnet run --project Tests/AuditFixChecks/AuditFixChecks.csproj -c Release
+
+      - name: Run synthetic performance checks
+        run: dotnet run --project Tests/PerformanceChecks/PerformanceChecks.csproj -c Release
+
+      - name: Test full PortableRelease publishing (disposable prerequisite fixture)
+        shell: pwsh
+        run: .\Tools\TestPublishPowerShell.ps1 -ProjectDirectory .
+
+      # SQL Server 2022 Express LocalDB's standalone x64 MSI from Microsoft.
+      # Validate its Authenticode signature before including it in the package.
+      # Never use an unsigned mirror or download from the school database.
+      - name: Prepare verified maintenance tools
+        shell: pwsh
+        run: |
+          & .\Tools\PrepareMaintenanceTools.ps1 -ToolsDirectory (Join-Path $env:GITHUB_WORKSPACE 'out/prerequisites') -DownloadMissing
+
+      # This uses the EXISTING PortableRelease publish profile and its genuine
+      - name: Prepare Google Drive registration for the private installer
+        if: github.event.repository.private && github.repository_id == '1449162585'
+        shell: pwsh
+        env:
+          FMSC_GOOGLE_DESKTOP_JSON: ${{ secrets.FMSC_GOOGLE_DESKTOP_JSON }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $json = $env:FMSC_GOOGLE_DESKTOP_JSON
+          $providers = Get-Content -LiteralPath CloudBackupProviders.json -Raw | ConvertFrom-Json
+          . ./Tools/AssertGoogleDesktopRegistration.ps1
+          Assert-FmscGoogleDesktopRegistration -ClientId $providers.GoogleClientId -Json $json
+          if ([string]::IsNullOrWhiteSpace($json)) { return }
+          [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'CloudBackupGoogleDesktop.json'), $json, [Text.UTF8Encoding]::new($false))
+
+      # ValidateDeploymentAssets and CopyDeploymentFiles MSBuild targets.
+      # Unlike the app-only ZIP, there is NO CIAppOnlyBundle bypass.
+      # A deliberately empty input DB folder is allowed: the user supplies
+      # the detached MDF and LDF AFTER downloading/extracting this artifact.
+      - name: Publish full existing installer without school database
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $workspace = $env:GITHUB_WORKSPACE
+          $release = Join-Path $workspace 'out/complete-installer'
+          $application = Join-Path $release 'FMSC_SMS'
+          $emptyDatabase = Join-Path $workspace 'out/empty-database-input'
+          $msi = Join-Path $workspace 'out/prerequisites/SqlLocalDB.msi'
+          New-Item -ItemType Directory -Path $release, $emptyDatabase -Force | Out-Null
+          $arguments = @(
+            'publish', 'FMSC_SMS.csproj', '-c', 'Release',
+            '-r', 'win-x64', '--self-contained', 'true',
+            '-p:PublishProfile=PortableRelease',
+            # Public Source artifacts omit native metadata; private Sandbox packaging validated it above.
+            "-p:RequireGoogleDesktopRegistration=$($env:GITHUB_REPOSITORY_ID -eq '1449162585')",
+            "-p:PublishDir=$application/",
+            "-p:ReleaseRoot=$release/",
+            "-p:LocalDbMsiPath=$msi",
+            "-p:VcRedistPath=$workspace/out/prerequisites/vc_redist.x64.exe",
+            "-p:BundledSqlCmdPath=$workspace/out/prerequisites/sqlcmd.exe",
+            "-p:BundledGitDirectory=$workspace/out/prerequisites/MinGit",
+            "-p:DeploymentDatabaseDirectory=$emptyDatabase",
+            '-p:PublishSingleFile=false',
+            '-p:PublishTrimmed=false'
+          )
+          & dotnet @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'Full PortableRelease publishing failed.' }
+          $registration = Join-Path $workspace 'CloudBackupGoogleDesktop.json'
+          if (Test-Path -LiteralPath $registration -PathType Leaf) {
+            if ($env:GITHUB_REPOSITORY_ID -ne '1449162585') {
+              throw 'Google Desktop registration is restricted to the private Sandbox installer.'
+            }
+            $publishedRegistration = Join-Path $application 'CloudBackupGoogleDesktop.json'
+            if (-not (Test-Path -LiteralPath $publishedRegistration -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $registration).Hash -cne (Get-FileHash -LiteralPath $publishedRegistration).Hash) {
+              throw 'The private installer is missing its Google Desktop registration.'
+            }
+          }
+          $tools = Join-Path $release 'Tools'
+          New-Item -ItemType Directory -Path $tools -Force | Out-Null
+          Copy-Item -LiteralPath (Join-Path $workspace 'out/prerequisites/sqlcmd.exe') -Destination (Join-Path $tools 'sqlcmd.exe') -Force
+
+      - name: Validate complete installer layout and create database instructions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:GITHUB_WORKSPACE 'out/complete-installer'
+          if ($env:GITHUB_REPOSITORY_ID -ne '1449162585' -and
+              (Test-Path -LiteralPath (Join-Path $root 'FMSC_SMS/CloudBackupGoogleDesktop.json'))) {
+            throw 'Google Desktop registration cannot be included in the public installer artifact.'
+          }
+          $required = @(
+            'FMSC_SMS/FMSC_SMS.exe',
+            'FMSC_SMS/FMSC_SMS.dll',
+            'FMSC_SMS/FMSC_SMS.deps.json',
+            'FMSC_SMS/FMSC_SMS.runtimeconfig.json',
+            'FMSC_SMS/UpdateSupport/FMSC.Setup.exe',
+            'FMSC_SMS/FMSC.Uninstall.exe',
+            'FMSC_SMS/UpdateSupport/Uninstall-FMSC.ps1',
+            'FMSC_SMS/UpdateTransport/cmd/git.exe',
+            'FMSC_SMS/UpdateTransport/usr/bin/ssh.exe',
+            'FMSC_SMS/UpdateTransport/COPYING-GIT.txt',
+            'FMSC_SMS/UpdateTransport/THIRD_PARTY_NOTICES.txt',
+            'FMSC_SMS/UpdateSupport/Tools/SqlCmd/sqlcmd.exe',
+            'FMSC_SMS/UpdateSupport/Tools/LocalDb/SqlLocalDB.msi',
+            'FMSC_SMS/UpdateSupport/Tools/VcRedist/vc_redist.x64.exe',
+            'FMSC_SMS/UpdateSupport/MaintenanceTools.ps1',
+            'FMSC_SMS/UpdateSupport/ToolCatalog.json',
+            'FMSC.Setup.exe',
+            'FMSC.Uninstall.exe',
+            'Uninstall-FMSC.ps1',
+            'Install FMSC_SMS.bat',
+            'core.ps1',
+            'MaintenanceTools.ps1',
+            'ToolCatalog.json',
+            'Tools/SqlLocalDB.msi',
+            'Tools/vc_redist.x64.exe',
+            'Tools/sqlcmd.exe'
+          )
+          foreach ($item in $required) {
+            $file = Join-Path $root $item
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-Item -LiteralPath $file).Length -le 0) {
+              throw "Required full-installer file missing or empty: $item"
+            }
+          }
+          $toolApp = Join-Path $root 'FMSC_SMS'
+          . (Join-Path $toolApp 'UpdateSupport/MaintenanceTools.ps1')
+          foreach ($toolName in @('Git','SqlCmd','LocalDb','VcRedist')) {
+            $spec = Get-FmscToolSpec $toolName
+            $bundle = Join-Path $toolApp $spec.folder
+            if ($toolName -ne 'Git') { $bundle = Join-Path $bundle $toolName }
+            if (-not (Test-FmscTool $bundle $toolName)) { throw "Published maintenance bundle failed integrity verification: $toolName" }
+          }
+          foreach ($pair in @(
+            ,@('Installer/core.ps1', 'core.ps1')
+            ,@('Installer/MaintenanceTools.ps1', 'MaintenanceTools.ps1')
+            ,@('Installer/ToolCatalog.json', 'ToolCatalog.json')
+            ,@('Installer/Uninstall-FMSC.ps1', 'Uninstall-FMSC.ps1')
+            ,@('Installer/Uninstall-FMSC.ps1', 'FMSC_SMS/UpdateSupport/Uninstall-FMSC.ps1')
+          )) {
+            $expected = (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $pair[0]) -Algorithm SHA256).Hash
+            $actual = (Get-FileHash -LiteralPath (Join-Path $root $pair[1]) -Algorithm SHA256).Hash
+            if ($actual -ne $expected) { throw "Packaged installer asset differs from checked-out source: $($pair[1])" }
+          }
+          foreach ($pair in @(
+            ,@('Tools/sqlcmd.exe','FMSC_SMS/UpdateSupport/Tools/SqlCmd/sqlcmd.exe')
+            ,@('Tools/SqlLocalDB.msi','FMSC_SMS/UpdateSupport/Tools/LocalDb/SqlLocalDB.msi')
+            ,@('Tools/vc_redist.x64.exe','FMSC_SMS/UpdateSupport/Tools/VcRedist/vc_redist.x64.exe')
+          )) {
+            $one=(Get-FileHash -LiteralPath (Join-Path $root $pair[0]) -Algorithm SHA256).Hash
+            $two=(Get-FileHash -LiteralPath (Join-Path $root $pair[1]) -Algorithm SHA256).Hash
+            if ($one -ne $two) { throw "Installed/offline prerequisite mismatch: $($pair[1])" }
+          }
+          & (Join-Path $env:GITHUB_WORKSPACE 'Tools/TestStandaloneUninstall.ps1')
+          & (Join-Path $env:GITHUB_WORKSPACE 'Tools/TestInstallerLocalDb.ps1') -InstallerPath (Join-Path $root 'core.ps1')
+          & (Join-Path $env:GITHUB_WORKSPACE 'Tools/TestInstallerVcRuntime.ps1') -InstallerPath (Join-Path $root 'core.ps1')
+          & (Join-Path $env:GITHUB_WORKSPACE 'Tools/TestInstallerMigrations.ps1') -InstallerPath (Join-Path $root 'core.ps1')
+          $excluded = @(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { $_.Extension.ToLowerInvariant() -in @('.mdf','.ldf','.ndf','.bak','.bacpac','.dacpac') })
+          if ($excluded.Count -gt 0) { throw 'Unexpected school database or backup file in the GitHub artifact.' }
+
+          # Derive package instructions from the actual source version, never a stale number.
+          $installerText = Get-Content -LiteralPath (Join-Path $root 'core.ps1') -Raw
+          $installerVersion = [regex]::Match($installerText, '\$DatabaseVersion\s*=\s*''([0-9]+)''')
+          if (-not $installerVersion.Success) {
+            throw 'Cannot determine schema version from the packaged Installer/core.ps1.'
+          }
+          $requiredSchema = $installerVersion.Groups[1].Value
+
+          $db = Join-Path $root 'Database'
+          New-Item -ItemType Directory -Path $db -Force | Out-Null
+          @(
+            'PLACE BOTH DETACHED DATABASE FILES IN THIS DIRECTORY AFTER DOWNLOADING:'
+            ''
+            '  FMSC_DB.mdf'
+            '  FMSC_DB_log.ldf'
+            ''
+            'Do not rename the files. Make sure the pair belongs to the SAME verified'
+            'detached school database snapshot. Never copy attached/live MDF/LDF files.'
+            'Do not replace existing school data on a machine with an installed database.'
+          ) | Set-Content -LiteralPath (Join-Path $db 'PUT_MDF_AND_LDF_HERE.txt') -Encoding UTF8
+
+          $sourceRevision = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceRevision -notmatch '^[0-9a-f]{40}$') {
+            throw 'Unable to identify exact checked-out Source revision.'
+          }
+          @(
+            'FMSC_SMS - FULL Windows x64 installer folder (database files not included)'
+            ''
+            'HOW TO PREPARE A FRESH INSTALL'
+            '1. Extract this GitHub Actions ZIP completely.'
+            '2. Copy your verified DETACHED database pair into the Database folder:'
+            '      Database\FMSC_DB.mdf'
+            '      Database\FMSC_DB_log.ldf'
+            '3. Double-click "FMSC.Setup.exe" and approve the Windows administrator prompt.'
+            '4. Follow the FMSC graphical installation progress; databases are protected.'
+            ''
+            'APPLICATION UPDATE WITHOUT REPLACING A SCHOOL DATABASE'
+            'Do not put a new MDF/LDF over an existing installed school database.'
+            "The installer and application require database schema $requiredSchema."
+            'Only consecutive pending migrations may upgrade an older supported schema.'
+            'A missing version stops before backup or SQL changes; newer databases refuse.'
+            'For a fresh install, supply the latest compatible detached database pair.'
+            ''
+            'Includes the self-contained .NET 8 app and signed Microsoft Visual C++ v14 x64,'
+            'SQL LocalDB 2022 MSI, pinned Microsoft sqlcmd tool and installer core.ps1.'
+            'Includes pinned Git for Windows MinGit and OpenSSH; no Git PATH setup needed.'
+            'Installed application retains Microsoft-signed VC++ and LocalDB installers and verified sqlcmd for offline update/recovery.'
+            'The migrations folder may be empty. Numbered SQL files newer than the'
+            'installed database version run in numeric order, with a verified backup'
+            'first. Missing intermediate files refuse without touching SQL.'
+            'Already-applied files are skipped; failed SQL or compatibility'
+            'verification stops application activation. Retired setup 7 is not rerun.'
+            'Communication Center is preserved from the supplied/installed database.'
+            'If silent LocalDB setup fails, this installer offers the official Microsoft'
+            'wizard and reports verbose MSI log paths. An immediate old-style 1603 error'
+            'without that offer indicates an older core.ps1: check the source commit below.'
+            'SQL integration, interactive GUI, printers, live school data and installation'
+            'still require separate acceptance checks on a disposable/test Windows PC.'
+            ''
+            "Source commit: $sourceRevision"
+            "GitHub Actions run: $env:GITHUB_RUN_NUMBER"
+            'Artifact access follows repository visibility. Never include school data.'
+          ) | Set-Content -LiteralPath (Join-Path $root 'READ_ME_FIRST.txt') -Encoding UTF8
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'Docs/COMMUNICATION_CENTER.md') -Destination (Join-Path $root 'COMMUNICATION_CENTER.md')
+
+          $checksumLines = @(Get-ChildItem -LiteralPath $root -Recurse -File | Sort-Object FullName | ForEach-Object {
+            $relative = [System.IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+            '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $relative
+          })
+          $checksumLines | Set-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt') -Encoding UTF8
+          Write-Host "Full installer folder validated: $($required.Count) required files; no MDF/LDF/BAK."
+
+      - name: Upload database-free complete installer ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          name: FMSC_SMS-Complete-Windows-x64-Add-Database-Files
+          path: out/complete-installer/
+          retention-days: 3
+          if-no-files-found: error
+) {
             throw 'Private Sandbox packaging requires an exact Source commit SHA.'
           }
           if ($env:FMSC_EXPECTED_SOURCE_SHA -and $revision -cne $env:FMSC_EXPECTED_SOURCE_SHA) {
             throw 'Checked-out Source does not match the pinned private packaging SHA.'
           }
-          Write-Host "Checked-out source revision: $revision"
+          # Private reusable packaging can be queued behind other runs. Refuse
+          # an already-obsolete Source SHA BEFORE paying for SDK setup, builds
+          # and installer assembly. The private final-package step independently
+          # rechecks HEAD later; this early check is not an approval or shortcut.
+          if ($env:GITHUB_REPOSITORY_ID -eq '1449162585') {
+            if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
+              throw 'Read-only GitHub token missing for current Source/main preflight.'
+            }
+            $api = "https://api.github.com/repos/$env:GITHUB_REPOSITORY_OWNER/FMSC-Source"
+            $headers = @{
+              Authorization = "Bearer $env:GITHUB_TOKEN"
+              Accept = 'application/vnd.github+json'
+              'X-GitHub-Api-Version' = '2022-11-28'
+            }
+            $source = Invoke-RestMethod -Uri $api -Headers $headers -MaximumRetryCount 2 -RetryIntervalSec 2
+            if ($source.id -ne 1412760928 -or
+                $source.owner.id -ne 316891609 -or
+                $source.private -ne $false) {
+              throw 'Private installer preflight refused an unexpected Source repository identity.'
+            }
+            $head = (Invoke-RestMethod -Uri "$api/branches/main" -Headers $headers -MaximumRetryCount 2 -RetryIntervalSec 2).commit.sha
+            if ($head -cne $revision) {
+              throw 'Source/main advanced after private installer dispatch; skip obsolete Windows packaging and rerun against the current commit.'
+            }
+          }
+          Write-Host "Checked-out Source revision: $revision"
           "Source revision: $revision" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
       - name: Install .NET 8 SDK
