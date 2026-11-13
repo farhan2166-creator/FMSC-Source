@@ -60,9 +60,13 @@ internal static class AuditFollowupChecks
             }
             using var healthy = new HttpClient(new Reply(() => new ByteArrayContent(new byte[] { 1, 2, 3 })));
             using var success = new HttpRequestMessage(HttpMethod.Get, "https://fixture.invalid/download");
-            await CloudBackupTransport.DownloadToFileAsync(success, destination, default, healthy);
+            var samples = new List<(long Bytes, long? Total)>();
+            await CloudBackupTransport.DownloadToFileAsync(success, destination, default, healthy,
+                reportTransfer: (bytes, total) => samples.Add((bytes, total)));
             Require(File.ReadAllBytes(destination).SequenceEqual(new byte[] { 1, 2, 3 }) && Directory.GetFiles(root).Length == 1,
                 "A complete download must atomically retain only the final package.");
+            Require(samples.SequenceEqual(new (long, long?)[] { (0, 3), (3, 3) }),
+                "Download progress must report bytes written and the response length.");
         }
         finally { Directory.Delete(root, true); }
         Console.WriteLine("PASS: continued-audit cloud failure, cancellation, streaming cleanup and scheduled-result checks.");

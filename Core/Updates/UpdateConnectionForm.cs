@@ -273,10 +273,8 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             $"{SizeText(state.BytesRemaining)} remaining\nSpeed: {speed} · Elapsed: {DurationText(elapsed)} · Time left: {remaining}";
     }
 
-    private static string SizeText(double bytes) => bytes >= 1048576 ? $"{bytes / 1048576:0.00} MB" :
-        bytes >= 1024 ? $"{bytes / 1024:0.0} KB" : $"{bytes:0} B";
-    private static string DurationText(TimeSpan span) => span.TotalHours >= 1 ?
-        $"{(int)span.TotalHours}:{span.Minutes:00}:{span.Seconds:00}" : $"{(int)span.TotalMinutes:00}:{span.Seconds:00}";
+    private static string SizeText(double bytes) => TransferMetrics.SizeText(bytes);
+    private static string DurationText(TimeSpan span) => TransferMetrics.DurationText(span);
     private void RefreshAuthorization()
     {
         try

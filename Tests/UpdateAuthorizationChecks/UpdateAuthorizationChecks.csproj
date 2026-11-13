@@ -15,6 +15,7 @@
     <Compile Include="../../Core/Updates/UpdateGitSession.cs" Link="UpdateGitSession.cs" />
     <Compile Include="../../Core/Updates/UpdateReleasePreparer.cs" Link="UpdateReleasePreparer.cs" />
     <Compile Include="../../Core/Updates/UpdateDownload.cs" Link="UpdateDownload.cs" />
+    <Compile Include="../../Core/TransferMetrics.cs" Link="TransferMetrics.cs" />
     <Compile Include="../../Core/Updates/UpdateStager.cs" Link="UpdateStager.cs" />
     <Compile Include="../../Core/Updates/UpdateManifest.cs" Link="UpdateManifest.cs" />
     <Compile Include="../../Core/Updates/UpdateChunks.cs" Link="UpdateChunks.cs" />

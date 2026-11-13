@@ -111,7 +111,11 @@ internal static class UnifiedRecoveryInventory
                     AppExceptionHandler.LogNonFatal(ex, "Checking original local backup digest for unified catalogue");
                 }
             }
-            copies.Add(new RecoveryLocalCopy(path, createdUtc, sourceDigest));
+            long? size = null;
+            try { size = new FileInfo(path).Length; }
+            catch (IOException) { /* The file may have moved since the SQL header check. */ }
+            catch (UnauthorizedAccessException) { /* SQL may have access even when Windows cannot read file metadata. */ }
+            copies.Add(new RecoveryLocalCopy(path, createdUtc, sourceDigest, size));
         }
         return (copies, warnings);
     }

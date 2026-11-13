@@ -16,6 +16,7 @@
     <Compile Include="../../Services/Backup/UnifiedRecoveryCatalog.cs" />
     <Compile Include="../../Services/Backup/CloudBackupJobLock.cs" />
     <Compile Include="../../Services/Backup/BackupProgressUpdate.cs" />
+    <Compile Include="../../Core/TransferMetrics.cs" />
     <Compile Include="../../Services/Backup/CloudBackupCrypto.cs" />
     <Compile Include="../../Services/Backup/CloudRecoverySourceFailure.cs" />
     <Compile Include="../../Core/AtomicTextFile.cs" />

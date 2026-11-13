@@ -39,9 +39,9 @@ internal static class DatabaseBackupManager {
 internal static class CloudBackupOAuth {internal static bool IsConnected(CloudProvider p)=>FixtureRuntime.Connected;}
 internal static class CloudBackupTransport {
  internal static Task<IReadOnlyList<CloudRemoteBackup>> ListAsync(CloudProvider p,CancellationToken t)=>Task.FromResult<IReadOnlyList<CloudRemoteBackup>>(FixtureRuntime.Remote.Values.Select(x=>x.Remote).Where(x=>x.Provider==p).ToArray());
- internal static Task DownloadAsync(CloudProvider p,string id,string path,CancellationToken t)=>File.WriteAllBytesAsync(path,FixtureRuntime.Remote[id].Bytes,t);
+ internal static Task DownloadAsync(CloudProvider p,string id,string path,CancellationToken t,Action<long,long?>? report=null)=>File.WriteAllBytesAsync(path,FixtureRuntime.Remote[id].Bytes,t);
  internal static Task DeleteAsync(CloudProvider p,string id,CancellationToken t)=>throw new Exception("Network forbidden");
- internal static Task<CloudRemoteBackup> UploadAsync(CloudProvider p,string path,DateTime d,CancellationToken t,string? id,Action<string> save)
+ internal static Task<CloudRemoteBackup> UploadAsync(CloudProvider p,string path,DateTime d,CancellationToken t,string? id,Action<string> save,Action<long,long?>? report=null)
  {
   byte[] bytes=File.ReadAllBytes(path);
   var remote=new CloudRemoteBackup(p,Guid.NewGuid().ToString("N"),"synthetic",Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant(),d,DateTime.UtcNow,bytes.Length);
@@ -51,7 +51,7 @@ internal static class CloudBackupTransport {
 internal static class CloudRestoreStaging {
  internal sealed record DownloadCandidate(Func<string,CancellationToken,Task> Download,string HistoryPath,string Label);
  internal static Task<DatabaseBackupManager.BackupResult> RestoreWithFallbackAsync(IReadOnlyList<DownloadCandidate> c,string p,CancellationToken t,IProgress<BackupProgressUpdate>? progress)=>throw new Exception("SQL forbidden");
- internal static async Task VerifyRemoteCopyAsync(Func<string,CancellationToken,Task> d,string p,DateTime when,CancellationToken t)
+ internal static async Task VerifyRemoteCopyAsync(Func<string,CancellationToken,Task> d,string p,DateTime when,CancellationToken t,Action? reportVerification=null)
  {
   string package=Path.Combine(FixtureRuntime.LocalFolder,Guid.NewGuid()+".fmscbackup");
   string bak=package+".bak";

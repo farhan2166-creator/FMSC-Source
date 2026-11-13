@@ -12,5 +12,6 @@
     <Compile Include="../../Core/Updates/UpdateChunks.cs" Link="UpdateChunks.cs" />
     <Compile Include="../../Core/Updates/UpdateReleasePreparer.cs" Link="UpdateReleasePreparer.cs" />
     <Compile Include="../../Core/Updates/UpdateDownload.cs" Link="UpdateDownload.cs" />
+    <Compile Include="../../Core/TransferMetrics.cs" Link="TransferMetrics.cs" />
   </ItemGroup>
 </Project>

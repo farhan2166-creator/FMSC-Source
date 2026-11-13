@@ -8,7 +8,7 @@ namespace FMSC_SMS.Services.Backup;
 /// recorded when the original backup was made.
 /// </summary>
 internal sealed record RecoveryLocalCopy(
-    string FilePath, DateTime SqlBackupCreatedUtc, string SourceBakSha256 = "");
+    string FilePath, DateTime SqlBackupCreatedUtc, string SourceBakSha256 = "", long? SizeBytes = null);
 
 internal sealed record RecoveryCloudCopy(
     CloudRemoteBackup Remote, bool RecoveryTested, string SourceBakSha256 = "");
@@ -20,16 +20,26 @@ internal sealed record UnifiedRecoveryPoint(
     IReadOnlyList<RecoveryCloudCopy> CloudCopies)
 {
     internal bool HasLocal => LocalCopies.Count > 0;
-    internal bool HasRecoveryTestedCloud => CloudCopies.Any(x => x.RecoveryTested);
+    internal int RecoveryTestedCloudCount => CloudCopies.Count(x => x.RecoveryTested);
+    internal bool HasRecoveryTestedCloud => RecoveryTestedCloudCount > 0;
     internal string AvailableSources => string.Join(", ",
         (HasLocal ? new[] { "Local" } : Array.Empty<string>())
         .Concat(CloudCopies.Select(x => x.Remote.Provider.ToString()).Distinct()));
-    internal string VerificationSummary => HasLocal
-        ? (CloudCopies.Count == 0 ? "Local SQL header verified" :
-            HasRecoveryTestedCloud ? "Local + cloud recovery-tested" : "Local verified; cloud not recovery-tested")
-        : HasRecoveryTestedCloud
-            ? "Cloud recovery-tested"
-            : "Cloud copy — verify before restore";
+    internal string VerificationSummary
+    {
+        get
+        {
+            string cloud = CloudCopies.Count switch
+            {
+                0 => "",
+                _ when !HasRecoveryTestedCloud => "Cloud copy · verify before restore",
+                1 => "Cloud recovery-tested",
+                _ => $"{RecoveryTestedCloudCount} of {CloudCopies.Count} cloud copies tested"
+            };
+            if (!HasLocal) return cloud;
+            return cloud.Length == 0 ? "Local SQL header checked" : $"Local header checked · {cloud}";
+        }
+    }
 }
 
 /// <summary>

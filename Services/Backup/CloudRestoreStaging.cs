@@ -122,9 +122,10 @@ internal static class CloudRestoreStaging
                     return new DatabaseBackupManager.BackupResult {
                         Success = false, Message = "Cloud SQL restoration failed. No alternate provider was attempted after SQL restoration started. " +
                             DbMessage.UserMessage(ex) };
+                string message = BackupProgressUpdate.NetworkFailureMessage(ex) ?? DbMessage.UserMessage(ex);
                 progress?.Report(new BackupProgressUpdate("Source rejected before SQL restore",
-                    DbMessage.UserMessage(ex) + " Trying another copy of the same recovery point if available.", candidate.Label, true));
-                errors.Add(candidate.Label + ": " + DbMessage.UserMessage(ex));
+                    message + " Trying another copy of the same recovery point if available.", candidate.Label, true));
+                errors.Add(candidate.Label + ": " + message);
             }
             finally
             {
@@ -154,7 +155,7 @@ internal static class CloudRestoreStaging
     internal static async Task VerifyRemoteCopyAsync(
         Func<string, CancellationToken, Task> downloadPackage,
         string recoveryPassphrase, DateTime expectedSqlCreatedUtc,
-        CancellationToken token = default)
+        CancellationToken token = default, Action? reportVerification = null)
     {
         string root = Path.Combine(DatabaseHelper.DatabaseFolder, "CloudVerificationStaging");
         string folder = Path.Combine(root, Guid.NewGuid().ToString("N"));
@@ -167,6 +168,7 @@ internal static class CloudRestoreStaging
             RestrictToCurrentWindowsUser(folder);
             await downloadPackage(package, token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
+            reportVerification?.Invoke();
             await Task.Run(() =>
             {
                 CloudBackupCrypto.Decrypt(package, bak, recoveryPassphrase);

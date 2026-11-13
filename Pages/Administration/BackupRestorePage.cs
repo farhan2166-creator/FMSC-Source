@@ -1,5 +1,6 @@
 using FMSC_SMS.Core;
 using FMSC_SMS.Services.Backup;
+using System.Diagnostics;
 using System.Security.Cryptography;
 namespace FMSC_SMS.Pages.Administration;
 public sealed class BackupRestorePage : V2Page, IBusyPage
@@ -7,6 +8,20 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     readonly ModernTextBox backupFolder = HumanUi.TextBox(false, 500);
     readonly ModernTextBox restoreFile = HumanUi.TextBox(false, 500);
     readonly bool canRestore = CurrentUser.HasPermission("Backup.Restore");
+    private readonly Label operationStage = new() {
+        Dock = DockStyle.Fill, Font = AppTheme.FontSmallBold, AutoEllipsis = true,
+        TextAlign = ContentAlignment.MiddleLeft
+    };
+    private readonly ProgressBar operationBar = new() { Dock = DockStyle.Fill };
+    private readonly Label operationStats = new() {
+        Dock = DockStyle.Fill, AutoEllipsis = true, ForeColor = AppTheme.MutedText,
+        TextAlign = ContentAlignment.MiddleLeft
+    };
+    private readonly Stopwatch operationWatch = new();
+    private readonly System.Windows.Forms.Timer operationTimer = new() { Interval = 500 };
+    private RowStyle operationRow = null!;
+    private BackupTransferProgress? operationTransfer;
+    private TimeSpan transferUpdatedAt;
     ModernButton backupNowButton = null!;
     private readonly LinkLabel toggleTechnicalDetails = new() {
         Dock = DockStyle.Top, Height = AppScale.Scale(24),
@@ -17,7 +32,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         Dock = DockStyle.Top, Multiline = true, ReadOnly = true,
         ScrollBars = ScrollBars.Vertical, Height = AppScale.Scale(110), Visible = false
     };
-    ModernButton? retryPendingButton;
+    readonly ModernButton retryPendingButton;
     ModernButton? cloudSettingsButton;
     ModernButton? selectRecoveryButton;
     ModernButton? selectCloudCopyButton;
@@ -28,8 +43,12 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     };
     int recoveryCatalogueVersion;
     bool selectingBackup;
-    private readonly ListBox recordedCloudActivity = new() {
-        Dock = DockStyle.Fill, IntegralHeight = false, HorizontalScrollbar = true
+    private readonly DataGridView recordedCloudActivity = new() {
+        Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false,
+        AllowUserToDeleteRows = false, AllowUserToResizeRows = false,
+        RowHeadersVisible = false, MultiSelect = false, BorderStyle = BorderStyle.None,
+        SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+        AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None
     };
     CloudBackupCoordinator.CloudSelection? selectedCloud;
     IReadOnlyList<CloudRemoteBackup> selectedCloudAlternatives = Array.Empty<CloudRemoteBackup>();
@@ -86,24 +105,24 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         backupFolder.ReadOnly = true;
         restoreFile.ReadOnly = true;
         var chooseBackupButton =
-            AddBusyAction("Choose Backup Folder…", ChooseBackupFolderAsync);
+            AddBusyAction("Local Folder…", ChooseBackupFolderAsync, "Secondary");
         backupNowButton =
             AddBusyAction("Back Up Now", BackupNowAsync, "Success");
         retryPendingButton = AddBusyAction("Retry Pending Uploads", RetryPendingAsync, "Secondary");
         if (canRestore)
-            cloudSettingsButton = AddAction("Backup Settings…", (_, _) => OpenCloudSettings());
+            cloudSettingsButton = AddAction("Backup Settings…", (_, _) => OpenCloudSettings(), "Secondary");
         ModernButton? chooseRestoreButton = null;
         if (canRestore)
         {
             chooseRestoreButton =
                 AddAction("Browse for Backup File…", (_, _) => ChooseRestoreFile());
             selectRecoveryButton =
-                AddAction("Use Selected Backup", async (_, _) => await UseSelectedRecoveryPointAsync());
+                AddAction("Select for Restore", async (_, _) => await UseSelectedRecoveryPointAsync(), "Secondary");
             selectCloudCopyButton =
-                AddAction("Use Cloud Copy…", (_, _) => UseSelectedCloudCopy());
+                AddAction("Choose Cloud Copy…", (_, _) => UseSelectedCloudCopy(), "Secondary");
             /* Prevent duplicate restore submissions. */
             restoreButton =
-                AddBusyAction("Restore Data", RestoreNowAsync, "Danger");
+                AddBusyAction("Restore Selected Backup…", RestoreNowAsync, "Danger");
             /* Preserve disabled states when the busy scope restores actions. */
             restoreButton.EnabledChanged += (_, _) => {
                 if ((!restoreAllowed || isBusy) &&
@@ -111,19 +130,19 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                     restoreButton.Enabled = false;
             };
         }
-        refreshHistoryButton = AddBusyAction("Refresh Backups and History", async () => {
+        refreshHistoryButton = AddBusyAction("Refresh Lists", async () => {
             await LoadHistoryAsync();
             await LoadRecoveryCatalogueAsync();
         });
         locateFileButton =
             AddBusyAction("Locate Missing File…", LocateMissingFileAsync, "Secondary");
+        RelocateFromActions(locateFileButton);
         RelocateFromActions(
             chooseBackupButton,
             backupNowButton);
         if (cloudSettingsButton is not null)
             RelocateFromActions(cloudSettingsButton);
-        if (retryPendingButton is not null)
-            RelocateFromActions(retryPendingButton);
+        RelocateFromActions(retryPendingButton);
         if (selectRecoveryButton is not null)
             RelocateFromActions(selectRecoveryButton);
         if (selectCloudCopyButton is not null)
@@ -136,23 +155,24 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         var backupCard = HumanUi.Card("Backup", "Save a verified copy to your backup destinations.");
         var backupStatus = CreatePanelStatus(out backupStatusHeadline, out backupStatusDetail);
         CreatePanelFields(backupCard, "Local Backup Folder", backupFolder,
-            CreateActionRow(chooseBackupButton, backupNowButton),
-            canRestore ? CreateActionRow(cloudSettingsButton!, retryPendingButton!)
-                       : CreateActionRow(retryPendingButton!), backupStatus);
+            CreateActionRow(canRestore ? new[] { cloudSettingsButton!, backupNowButton } : new[] { backupNowButton }),
+            CreateCompactActionRow(chooseBackupButton, retryPendingButton), backupStatus);
         viewCloudStatus.LinkClicked += (_, _) =>
             ModernMessageDialog.ShowInfo(FindForm(), cloudStatusDetails, "Last Cloud Backup");
 
-        // 50% actions above, 50% backup history / recorded file paths below.
-        // The upper half is itself split evenly between Backup and Restore.
+        // Split the available space equally between actions and history.
+        // Show the compact progress row between them during an operation.
         var root = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        operationRow = new RowStyle(SizeType.Absolute, 0);
+        root.RowStyles.Add(operationRow);
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         var upper = new TableLayoutPanel {
             Dock = DockStyle.Fill,
@@ -175,8 +195,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             restoreStatusHeadline = headline;
             restoreStatusDetail = detail;
             CreatePanelFields(restoreCard, "Selected Backup", restoreFile,
-                CreateActionRow(chooseRestoreButton!, restoreButton!),
-                CreateActionRow(selectRecoveryButton!, selectCloudCopyButton!), restoreStatusPanel);
+                CreateActionRow(chooseRestoreButton!, restoreButton!), null, restoreStatusPanel);
             restoreCard.Margin = new Padding(AppMetrics.SpacingXs, 0, 0, 0);
             upper.Controls.Add(restoreCard, 1, 0);
             /* No selected file means unverified, not valid. */
@@ -188,22 +207,33 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var availableTab = new TabPage("Available Backups") { BackColor = AppTheme.PageBackground };
         var activityTab = new TabPage("Activity History") { BackColor = AppTheme.PageBackground };
-        tabs.SelectedIndexChanged += (_, _) => UpdateSelectedBackupAction();
+        tabs.SelectedIndexChanged += (_, _) => {
+            UpdateSelectedBackupAction();
+            ApplyHistoryDependentEnablement();
+        };
         availableBackupsGrid.SelectionChanged += (_, _) => UpdateSelectedBackupAction();
         availableBackupsGrid.CellDoubleClick += async (_, e) => {
             if (e.RowIndex >= 0) await UseSelectedRecoveryPointAsync();
         };
         availableTab.Controls.Add(availableBackupsGrid);
         availableTab.Controls.Add(availableBackupsStatus);
+        if (canRestore)
+        {
+            var selectionActions = CreateCompactActionRow(selectRecoveryButton!, selectCloudCopyButton!);
+            selectionActions.Dock = DockStyle.Top;
+            selectionActions.Height = AppMetrics.ButtonRowHeight;
+            availableTab.Controls.Add(selectionActions);
+        }
         var activityLayout = new TableLayoutPanel {
             Dock = DockStyle.Fill, RowCount = 4, ColumnCount = 1,
             Margin = Padding.Empty, Padding = Padding.Empty
         };
         activityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         activityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 36));
-        activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 64));
+        activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         activityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        ConfigureActivityGrids();
         var activityLinks = new FlowLayoutPanel {
             Dock = DockStyle.Fill, AutoSize = true, Margin = Padding.Empty
         };
@@ -211,10 +241,21 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         toggleTechnicalDetails.Dock = DockStyle.None;
         toggleTechnicalDetails.AutoSize = true;
         activityLinks.Controls.Add(toggleTechnicalDetails);
+        var viewSqlRecord = new LinkLabel {
+            Text = "Selected SQL record details", AutoSize = true,
+            LinkColor = AppTheme.Primary, Enabled = false
+        };
+        viewSqlRecord.LinkClicked += (_, _) => ShowSelectedSqlRecord();
+        Grid.SelectionChanged += (_, _) => {
+            viewSqlRecord.Enabled = SelectedSqlRecord is not null;
+            ApplyHistoryDependentEnablement();
+        };
+        activityLinks.Controls.Add(viewSqlRecord);
+        activityLinks.Controls.Add(locateFileButton);
         activityLayout.Controls.Add(activityLinks, 0, 0);
         activityLayout.Controls.Add(technicalDetails, 0, 1);
-        activityLayout.Controls.Add(recordedCloudActivity, 0, 2);
-        activityLayout.Controls.Add(Grid, 0, 3);
+        activityLayout.Controls.Add(ActivitySection("Recent activity", recordedCloudActivity), 0, 2);
+        activityLayout.Controls.Add(ActivitySection("SQL backup and restore records", Grid), 0, 3);
         toggleTechnicalDetails.LinkClicked += (_, _) => {
             technicalDetails.Visible = !technicalDetails.Visible;
             toggleTechnicalDetails.Text = technicalDetails.Visible
@@ -228,7 +269,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         if (!canRestore)
             upper.SetColumnSpan(backupCard, 2);
         root.Controls.Add(upper, 0, 0);
-        root.Controls.Add(historyCard, 0, 1);
+        root.Controls.Add(CreateOperationPanel(), 0, 1);
+        root.Controls.Add(historyCard, 0, 2);
+        operationTimer.Tick += (_, _) => RenderOperationStats();
+        Disposed += (_, _) => operationTimer.Dispose();
         SetContent(root);
         RefreshCloudStatus();
         LoadBackupFolder();
@@ -240,27 +284,87 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         UpdateSelectedBackupAction();
     }
 
+    private Control CreateOperationPanel()
+    {
+        var panel = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
+            Margin = Padding.Empty, Padding = new Padding(AppMetrics.SpacingSm, 0, AppMetrics.SpacingSm, 0),
+            BackColor = AppTheme.Tint(AppTheme.MutedText, 0.94f)
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 24));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
+        panel.Controls.Add(operationStage, 0, 0);
+        panel.Controls.Add(operationBar, 0, 1);
+        panel.Controls.Add(operationStats, 0, 2);
+        return panel;
+    }
+
+    private void StartOperationProgress(string stage)
+    {
+        operationWatch.Restart();
+        operationRow.Height = 2 * AppMetrics.TextHeight(AppTheme.NormalFont) + AppScale.Scale(24);
+        ReportBackupStage(new BackupProgressUpdate(stage));
+        operationTimer.Start();
+    }
+
+    private void StopOperationProgress()
+    {
+        if (!operationWatch.IsRunning) return;
+        operationWatch.Stop();
+        operationTimer.Stop();
+        operationBar.Style = ProgressBarStyle.Continuous;
+        operationRow.Height = 0;
+    }
+
+    private void RenderOperationStats()
+    {
+        TimeSpan elapsed = operationWatch.Elapsed;
+        string elapsedText = "Elapsed " + TransferMetrics.DurationText(elapsed);
+        if (operationTransfer is not { } transfer)
+        {
+            operationStats.Text = elapsedText;
+            return;
+        }
+
+        string amount = TransferMetrics.SizeText(transfer.Bytes);
+        long? remaining = null;
+        if (transfer.TotalBytes is long total && total > 0)
+        {
+            int percent = (int)Math.Clamp(100d * transfer.Bytes / total, 0, 100);
+            amount = $"{percent}%   ·   {amount} / {TransferMetrics.SizeText(total)}";
+            remaining = Math.Max(0, total - transfer.Bytes);
+        }
+        double speed = elapsed - transferUpdatedAt < TimeSpan.FromSeconds(5) ? transfer.BytesPerSecond : 0;
+        string speedText = speed > 0 ? TransferMetrics.SizeText(speed) + "/s" : "—";
+        TimeSpan? eta = remaining is long bytes ? TransferMetrics.EstimateRemaining(bytes, speed) : null;
+        string timeLeft = eta is TimeSpan estimate ? "~" + TransferMetrics.DurationText(estimate) : "—";
+        operationStats.Text = $"{amount}   ·   {speedText}   ·   {elapsedText}   ·   Time left {timeLeft}";
+    }
+
     private static void CreatePanelFields(HumanCard card, string caption, Control field,
-        Control firstActions, Control secondActions, Control status)
+        Control firstActions, Control? secondActions, Control status)
     {
         int statusHeight = AppMetrics.TextHeight(AppTheme.FontSmallBold) +
             AppMetrics.TextHeight(AppTheme.NormalFont) + 2 * AppMetrics.SpacingSm;
         var fields = new TableLayoutPanel {
             Dock = DockStyle.Top,
             ColumnCount = 1,
-            RowCount = 4,
-            Height = AppMetrics.FieldRowHeight + 2 * AppMetrics.ButtonRowHeight + statusHeight,
+            RowCount = secondActions is null ? 3 : 4,
+            Height = AppMetrics.FieldRowHeight + (secondActions is null ? 1 : 2) * AppMetrics.ButtonRowHeight + statusHeight,
             Margin = Padding.Empty
         };
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
         fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
-        fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
         fields.RowStyles.Add(new RowStyle(SizeType.Absolute, statusHeight));
+        if (secondActions is not null)
+            fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
         fields.Controls.Add(HumanUi.Field(caption, field), 0, 0);
         fields.Controls.Add(firstActions, 0, 1);
-        fields.Controls.Add(secondActions, 0, 2);
-        fields.Controls.Add(status, 0, 3);
+        fields.Controls.Add(status, 0, 2);
+        if (secondActions is not null) fields.Controls.Add(secondActions, 0, 3);
         card.Content.AutoScroll = true;
         card.Content.Controls.Add(fields);
         card.Content.AutoScrollMinSize = new Size(0, fields.Height + card.Content.Padding.Vertical);
@@ -295,6 +399,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         cloudStatusDetails = status.Message;
         viewCloudStatus.Visible = status.Message.Length > 0;
         var settings = CloudBackupSettings.LoadForEditing(out string? warning);
+        retryPendingButton.Visible = CloudBackupCoordinator.HasRetryableDeliveries(settings);
         if (warning is not null)
         {
             backupStatusHeadline.Text = "Backup Settings Need Attention";
@@ -323,7 +428,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         if (selectRecoveryButton is not null)
             selectRecoveryButton.Enabled = canSelect && point is not null;
         if (selectCloudCopyButton is not null)
-            selectCloudCopyButton.Enabled = canSelect && point is { HasLocal: true, CloudCopies.Count: > 0 };
+        {
+            bool canChooseCloudCopy = point is { HasLocal: true, CloudCopies.Count: > 0 };
+            selectCloudCopyButton.Visible = canChooseCloudCopy;
+            selectCloudCopyButton.Enabled = canSelect && canChooseCloudCopy;
+        }
     }
 
     private UnifiedRecoveryPoint? SelectedRecoveryPoint =>
@@ -335,25 +444,120 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     private void RefreshRecordedActivity()
     {
         if (IsDisposed || Disposing) return;
-        recordedCloudActivity.BeginUpdate();
-        try
+        recordedCloudActivity.Rows.Clear();
+        foreach (var item in BackupActivityJournal.ReadRecent().Take(80))
         {
-            recordedCloudActivity.Items.Clear();
-            foreach (var item in BackupActivityJournal.ReadRecent().Take(80))
-                recordedCloudActivity.Items.Add(
-                    item.Utc.ToLocalTime().ToString("dd-MMM HH:mm") + "  |  " +
-                    item.Operation + "  |  " + item.Destination + "  |  " + item.State +
-                    (item.Detail.Length > 0 ? "  |  " + item.Detail : ""));
-            if (recordedCloudActivity.Items.Count == 0)
-                recordedCloudActivity.Items.Add("No recorded cloud delivery or restore activity yet.");
+            int index = recordedCloudActivity.Rows.Add(item.Utc.ToLocalTime(), item.Operation,
+                item.Destination, item.State, item.Detail);
+            recordedCloudActivity.Rows[index].Cells["Details"].ToolTipText = item.Detail;
         }
-        finally { recordedCloudActivity.EndUpdate(); }
+        UiHelper.SetGridEmptyMessage(recordedCloudActivity, "No recent backup or restore activity.");
+        ClearGridSelection(recordedCloudActivity);
+    }
+
+    private static Control ActivitySection(string title, DataGridView grid)
+    {
+        var section = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, AppMetrics.SpacingXs, 0, 0) };
+        var heading = new Label {
+            Text = title, Dock = DockStyle.Top, Font = AppTheme.FontSmallBold,
+            ForeColor = AppTheme.MutedText, Height = AppMetrics.TextHeight(AppTheme.FontSmallBold) + AppMetrics.SpacingXs
+        };
+        section.Controls.Add(grid);
+        section.Controls.Add(heading);
+        return section;
+    }
+
+    private void ConfigureActivityGrids()
+    {
+        const string dateFormat = "dd-MMM-yyyy h:mm:ss tt";
+        AddActivityColumn(recordedCloudActivity, "Time", "", 175, dateFormat);
+        AddActivityColumn(recordedCloudActivity, "Activity", "", 135);
+        AddActivityColumn(recordedCloudActivity, "Destination", "", 120);
+        AddActivityColumn(recordedCloudActivity, "Result", "", 100);
+        AddActivityColumn(recordedCloudActivity, "Details", "", 80, fill: true);
+        HumanUi.ApplyGridStyle(recordedCloudActivity, Accent);
+
+        Grid.AutoGenerateColumns = false;
+        AddActivityColumn(Grid, "Recorded", "BackupDate", 175, dateFormat);
+        AddActivityColumn(Grid, "Operation", "Operation", 80);
+        AddActivityColumn(Grid, "Backup copy", "FileName", 145, fill: true);
+        AddActivityColumn(Grid, "Size", "FileSizeBytes", 85);
+        AddActivityColumn(Grid, "Result", "Status", 85);
+        AddActivityColumn(Grid, "Availability", "FileAvailable", 95);
+        Grid.CellFormatting += FormatSqlHistoryCell;
+    }
+
+    private static void AddActivityColumn(DataGridView grid, string header, string field, int width,
+        string format = "", bool fill = false)
+    {
+        grid.Columns.Add(new DataGridViewTextBoxColumn {
+            HeaderText = header, DataPropertyName = field, Name = header,
+            Width = AppScale.Scale(width), MinimumWidth = AppScale.Scale(fill ? width : 55),
+            AutoSizeMode = fill ? DataGridViewAutoSizeColumnMode.Fill : DataGridViewAutoSizeColumnMode.None,
+            SortMode = DataGridViewColumnSortMode.NotSortable,
+            DefaultCellStyle = new DataGridViewCellStyle { Format = format }
+        });
+    }
+
+    private void FormatSqlHistoryCell(object? sender, DataGridViewCellFormattingEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+        switch (Grid.Columns[e.ColumnIndex].DataPropertyName)
+        {
+            case "FileName" when Grid.Rows[e.RowIndex].DataBoundItem is DataRowView record:
+                string path = Convert.ToString(record["FilePath"]) ?? "";
+                if (Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.Scheme == "cloud")
+                {
+                    e.Value = uri.Host.Equals("GoogleDrive", StringComparison.OrdinalIgnoreCase)
+                        ? "Google Drive" : uri.Host.Equals("Dropbox", StringComparison.OrdinalIgnoreCase)
+                            ? "Dropbox" : "Cloud backup";
+                    e.FormattingApplied = true;
+                }
+                break;
+            case "FileSizeBytes":
+                e.Value = long.TryParse(Convert.ToString(e.Value), out long bytes) && bytes > 0
+                    ? TransferMetrics.SizeText(bytes) : "—";
+                e.FormattingApplied = true;
+                break;
+        }
+    }
+
+    private DataRowView? SelectedSqlRecord => Grid.SelectedRows.Count == 1
+        ? Grid.SelectedRows[0].DataBoundItem as DataRowView : null;
+
+    private void ShowSelectedSqlRecord()
+    {
+        if (SelectedSqlRecord is not { } record) return;
+        var details = new[] {
+            ("Recorded", "BackupDate"), ("Operation", "Operation"), ("Result", "Status"),
+            ("User", "Username"), ("File name", "FileName"), ("Recorded path", "FilePath"),
+            ("Remarks", "Remarks")
+        };
+        string text = string.Join(Environment.NewLine, details
+            .Where(item => record.Row.Table.Columns.Contains(item.Item2))
+            .Select(item => (Label: item.Item1, Value: record[item.Item2]))
+            .Where(item => !string.IsNullOrWhiteSpace(Convert.ToString(item.Value)))
+            .Select(item => item.Label + "  " + item.Value));
+        ModernMessageDialog.ShowInfo(FindForm(), text, "SQL Backup and Restore Record");
     }
 
     private void ReportBackupStage(BackupProgressUpdate update)
     {
-        if (IsDisposed || Disposing) return;
-        SetStatus(update.Display, update.IsError);
+        if (IsDisposed || Disposing || !operationWatch.IsRunning) return;
+        operationStage.Text = update.Display;
+        operationStage.ForeColor = update.IsError ? AppTheme.Warning : AppTheme.MutedText;
+        operationTransfer = update.Transfer;
+        transferUpdatedAt = operationWatch.Elapsed;
+        if (update.Transfer is { TotalBytes: > 0 } transfer)
+        {
+            operationBar.Style = ProgressBarStyle.Continuous;
+            operationBar.Value = (int)Math.Clamp(100d * transfer.Bytes / transfer.TotalBytes.Value, 0, 100);
+        }
+        else
+            operationBar.Style = ProgressBarStyle.Marquee;
+        RenderOperationStats();
+        if (update.IsError && update.Detail.Length > 0)
+            operationStage.Text += " · " + update.Detail;
         if (update.Detail.Length > 0)
         {
             string line = DateTime.Now.ToString("HH:mm:ss") + "  " + update.Display +
@@ -379,15 +583,25 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             BorderStyle = BorderStyle.None
         };
         grid.Columns.Add(new DataGridViewTextBoxColumn {
-            HeaderText = "SQL backup date", Width = AppScale.Scale(170),
+            HeaderText = "SQL backup date", Width = AppScale.Scale(185),
             SortMode = DataGridViewColumnSortMode.NotSortable
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn {
-            HeaderText = "Available copies", Width = AppScale.Scale(200),
+            HeaderText = "Age", Width = AppScale.Scale(80),
+            SortMode = DataGridViewColumnSortMode.NotSortable
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn {
+            HeaderText = "Available copies", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            MinimumWidth = AppScale.Scale(105), FillWeight = 40,
+            SortMode = DataGridViewColumnSortMode.NotSortable
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn {
+            HeaderText = "Copy size", Width = AppScale.Scale(110),
             SortMode = DataGridViewColumnSortMode.NotSortable
         });
         grid.Columns.Add(new DataGridViewTextBoxColumn {
             HeaderText = "Recovery status", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            MinimumWidth = AppScale.Scale(160), FillWeight = 60,
             SortMode = DataGridViewColumnSortMode.NotSortable
         });
         return grid;
@@ -413,6 +627,16 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             button.Margin = new Padding(AppMetrics.SpacingXs, 0, AppMetrics.SpacingXs, 0);
             row.Controls.Add(button, column, 0);
         }
+        return row;
+    }
+
+    private static FlowLayoutPanel CreateCompactActionRow(params ModernButton[] buttons)
+    {
+        var row = new FlowLayoutPanel {
+            Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true, Margin = Padding.Empty,
+            Padding = new Padding(0, AppMetrics.SpacingXs, 0, 0)
+        };
+        row.Controls.AddRange(buttons);
         return row;
     }
     /// <summary>Whether history-dependent actions are currently available.</summary>
@@ -449,7 +673,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     {
         bool usable = HistoryDependentActionsUsable;
         if (locateFileButton is not null)
-            locateFileButton.Enabled = usable;
+        {
+            bool missingLocal = SelectedSqlRecord is { } record && Equals(record["FileAvailable"], "Missing");
+            locateFileButton.Visible = missingLocal;
+            locateFileButton.Enabled = usable && missingLocal;
+        }
         // History-query failures must not disable a separately validated file
         // or cloud recovery point. RestoreBackup enforces SQL identity and safety.
         if (restoreButton is not null)
@@ -526,7 +754,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         isBusy = true;
         busyMessage = "Creating one verified school backup for the enabled destinations.";
         SetBusyState(true);
-        SetStatus("Backing up school data…");
         try
         {
             var settings = CloudBackupSettings.Load();
@@ -537,8 +764,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 return;
             }
             technicalDetails.Clear();
+            StartOperationProgress("Preparing backup");
             var progress = new Progress<BackupProgressUpdate>(ReportBackupStage);
             var result = await CloudBackupCoordinator.CreateAndUploadAsync(progress: progress);
+            StopOperationProgress();
             await LoadHistoryAsync();
             await LoadRecoveryCatalogueAsync();
             RefreshRecordedActivity();
@@ -579,10 +808,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         SetBusyState(true);
         try
         {
-            SetStatus("Retrying pending cloud deliveries…");
             technicalDetails.Clear();
+            StartOperationProgress("Retrying pending cloud deliveries");
             string result = await CloudBackupCoordinator.RetryPendingUploadsNowAsync(
                 progress: new Progress<BackupProgressUpdate>(ReportBackupStage));
+            StopOperationProgress();
             RefreshCloudStatus();
             await LoadRecoveryCatalogueAsync();
             RefreshRecordedActivity();
@@ -608,18 +838,31 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             var inventory = await UnifiedRecoveryInventory.LoadAsync();
             if (IsDisposed || version != recoveryCatalogueVersion) return;
             availableBackupsGrid.Rows.Clear();
+            DateTime nowUtc = DateTime.UtcNow;
             foreach (var point in inventory.Points)
             {
+                var sizes = point.LocalCopies.Select(copy => copy.SizeBytes)
+                    .Concat(point.CloudCopies.Select(copy => (long?)copy.Remote.Size))
+                    .Where(size => size is > 0).Select(size => size!.Value).Order().ToArray();
+                string sizeText = sizes.Length == 0 ? "—" : TransferMetrics.SizeText(sizes[0]);
+                if (sizes.Length > 1 && sizes[0] != sizes[^1])
+                    sizeText = $"{TransferMetrics.SizeText(sizes[0])} – {TransferMetrics.SizeText(sizes[^1])}";
                 int rowIndex = availableBackupsGrid.Rows.Add(
-                    point.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy  hh:mm tt"),
+                    point.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy h:mm:ss tt"),
+                    FormatRecoveryPointAge(nowUtc - point.SqlBackupCreatedUtc),
                     point.AvailableSources,
+                    sizeText,
                     point.VerificationSummary);
-                availableBackupsGrid.Rows[rowIndex].Tag = point;
+                var row = availableBackupsGrid.Rows[rowIndex];
+                row.Tag = point;
+                string copyDetails = FormatRecoveryCopyDetails(point);
+                for (int column = 2; column < row.Cells.Count; column++)
+                    row.Cells[column].ToolTipText = copyDetails;
             }
             availableBackupsGrid.ClearSelection();
             string countText = inventory.Points.Count == 0
                 ? "No backups found. Browse for a backup file or connect a cloud account in Backup Settings."
-                : canRestore ? "Select a backup below, then click Use Selected Backup."
+                : canRestore ? "Select a backup to review it before restoring."
                     : inventory.Points.Count + " available backups.";
             availableBackupsStatus.Text = inventory.Warnings.Count == 0
                 ? countText : countText + "  " + string.Join(" ", inventory.Warnings);
@@ -631,6 +874,25 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             availableBackupsStatus.Text =
                 "Could not refresh available backups. Refresh the list or browse for a backup file.";
         }
+    }
+
+    private static string FormatRecoveryPointAge(TimeSpan age) =>
+        age < TimeSpan.Zero ? "—" :
+        age.TotalDays >= 1 ? $"{(int)age.TotalDays} d" :
+        age.TotalHours >= 1 ? $"{(int)age.TotalHours} h {age.Minutes} m" :
+        age.TotalMinutes >= 1 ? $"{(int)age.TotalMinutes} min" : "<1 min";
+
+    private static string FormatRecoveryCopyDetails(UnifiedRecoveryPoint point)
+    {
+        var local = point.LocalCopies.Select(copy =>
+            $"Local · {Path.GetFileName(copy.FilePath)} · " +
+            (copy.SizeBytes is > 0 ? TransferMetrics.SizeText(copy.SizeBytes.Value) + " · " : "") +
+            "SQL header checked");
+        var cloud = point.CloudCopies.Select(copy =>
+            $"{copy.Remote.Provider} · {TransferMetrics.SizeText(copy.Remote.Size)} · " +
+            (copy.Remote.UploadedUtc == default ? "" : $"Uploaded {copy.Remote.UploadedUtc.ToLocalTime():dd-MMM-yyyy h:mm tt} · ") +
+            (copy.RecoveryTested ? "Recovery-tested" : "Verify before restore"));
+        return string.Join(Environment.NewLine, local.Concat(cloud));
     }
 
     private async Task UseSelectedRecoveryPointAsync()
@@ -753,10 +1015,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         SetBusyState(true);
         try
         {
-            SetStatus("Downloading and verifying encrypted cloud backup…");
+            StartOperationProgress("Preparing cloud restore");
             var result = await CloudBackupCoordinator.RestoreFromCloudAsync(
                 selection.Remote, cloudRecoveryPassphrase, selectedCloudAlternatives,
                 progress: new Progress<BackupProgressUpdate>(ReportBackupStage));
+            StopOperationProgress();
             if (result.Success)
             {
                 // CloudRestoreStaging has already removed the temporary
@@ -1058,10 +1321,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         isBusy = true;
         busyMessage = "A restore is running. Please wait until it finishes.";
         SetBusyState(true);
-        SetStatus("Restoring school data…");
         try
         {
             technicalDetails.Clear();
+            StartOperationProgress("Preparing local restore");
             var stageReporter = new Progress<string>(message =>
                 ReportBackupStage(new BackupProgressUpdate(message, "Validated local SQL restore stage.")));
             DatabaseBackupManager.BackupResult result;
@@ -1112,6 +1375,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             else
                 result = await Task.Run(() => DatabaseBackupManager.RestoreBackup(backupPath,
                     progress: stageReporter));
+            StopOperationProgress();
             if (result.Success)
             {
                 BackupActivityJournal.TryRecord("Restore", beforeSqlFailed ? "Cloud fallback" : "Local", "Completed");
@@ -1229,7 +1493,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     {
         if (isBusy)
             return;
-        if (Grid.SelectedRows.Count == 0 || Grid.SelectedRows[0].DataBoundItem is not DataRowView selected)
+        if (SelectedSqlRecord is not { } selected)
         {
             Warn("Select a row in the history grid first, then choose Locate Missing File.");
             return;
@@ -1238,6 +1502,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         long backupId = Convert.ToInt64(row["BackupId"]);
         string recordedFileName = row["FileName"] as string ?? string.Empty;
         string recordedPath = row["FilePath"] as string ?? string.Empty;
+        if (recordedPath.StartsWith("cloud://", StringComparison.OrdinalIgnoreCase))
+        {
+            Warn("Select a missing local file from the SQL records.");
+            return;
+        }
         if (File.Exists(recordedPath))
         {
             Info($"This backup's recorded file is already available:\n\n{recordedPath}");
@@ -1265,8 +1534,9 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     }
     void SetBusyState(bool busy)
     {
+        if (!busy) StopOperationProgress();
         backupNowButton.Enabled = !busy;
-        if (retryPendingButton != null) retryPendingButton.Enabled = !busy;
+        retryPendingButton.Enabled = !busy;
         if (cloudSettingsButton != null) cloudSettingsButton.Enabled = !busy;
         UpdateSelectedBackupAction();
         /* Keep Refresh History available for retrying a failed read. */

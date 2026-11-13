@@ -19,7 +19,8 @@ internal static class CloudBackupTransport
 
     internal static async Task<CloudRemoteBackup> UploadAsync(
         CloudProvider provider, string encryptedPackage, DateTime sqlBackupCreatedUtc,
-        CancellationToken token = default, string? driveFileId = null, Action<string>? rememberDriveFileId = null)
+        CancellationToken token = default, string? driveFileId = null, Action<string>? rememberDriveFileId = null,
+        Action<long, long?>? reportTransfer = null)
     {
         if (!File.Exists(encryptedPackage))
             throw new FileNotFoundException("Encrypted FMSC backup was not found.", encryptedPackage);
@@ -30,8 +31,9 @@ internal static class CloudBackupTransport
         string name = MakeName(sqlBackupCreatedUtc, sha);
         string access = await CloudBackupOAuth.GetAccessTokenAsync(provider, token);
         return provider == CloudProvider.GoogleDrive
-            ? await DriveUploadAsync(encryptedPackage, name, sha, sqlBackupCreatedUtc, length, access, token, driveFileId, rememberDriveFileId)
-            : await DropboxUploadAsync(encryptedPackage, name, sha, sqlBackupCreatedUtc, length, access, token);
+            ? await DriveUploadAsync(encryptedPackage, name, sha, sqlBackupCreatedUtc, length, access, token,
+                driveFileId, rememberDriveFileId, reportTransfer: reportTransfer)
+            : await DropboxUploadAsync(encryptedPackage, name, sha, sqlBackupCreatedUtc, length, access, token, reportTransfer);
     }
 
     internal static async Task<IReadOnlyList<CloudRemoteBackup>> ListAsync(
@@ -44,7 +46,7 @@ internal static class CloudBackupTransport
     }
 
     internal static async Task DownloadAsync(CloudProvider provider, string remoteId,
-        string destination, CancellationToken token = default)
+        string destination, CancellationToken token = default, Action<long, long?>? reportTransfer = null)
     {
         if (File.Exists(destination)) throw new IOException("Cloud download staging target already exists.");
         string access = await CloudBackupOAuth.GetAccessTokenAsync(provider, token);
@@ -56,11 +58,12 @@ internal static class CloudBackupTransport
         if (provider == CloudProvider.Dropbox)
             request.Headers.TryAddWithoutValidation("Dropbox-API-Arg",
                 JsonSerializer.Serialize(new { path = remoteId }));
-        await DownloadToFileAsync(request, destination, token);
+        await DownloadToFileAsync(request, destination, token, reportTransfer: reportTransfer);
     }
 
     internal static async Task DownloadToFileAsync(HttpRequestMessage request, string destination,
-        CancellationToken token, HttpClient? client = null, TimeSpan? inactivityTimeout = null)
+        CancellationToken token, HttpClient? client = null, TimeSpan? inactivityTimeout = null,
+        Action<long, long?>? reportTransfer = null)
     {
         if (File.Exists(destination)) throw new IOException("Cloud download staging target already exists.");
         string temp = destination + "." + Guid.NewGuid().ToString("N") + ".partial";
@@ -68,6 +71,9 @@ internal static class CloudBackupTransport
         {
             using var response = await (client ?? Http).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
             RequireSuccess(response, "Cloud download");
+            long? total = response.Content.Headers.ContentLength;
+            long received = 0;
+            reportTransfer?.Invoke(received, total);
             await using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 await using var cloud = await response.Content.ReadAsStreamAsync(token);
@@ -90,6 +96,8 @@ internal static class CloudBackupTransport
                         throw new TimeoutException("Cloud download stopped making progress. The incomplete download was discarded; try again when the connection is available.");
                     }
                     if (count == 0) break;
+                    received += count;
+                    reportTransfer?.Invoke(received, total);
                 }
                 await output.FlushAsync(token);
             }
@@ -121,7 +129,7 @@ internal static class CloudBackupTransport
     internal static async Task<CloudRemoteBackup> DriveUploadAsync(
         string path, string name, string sha, DateTime createdUtc, long length,
         string access, CancellationToken token, string? reservedId = null,
-        Action<string>? rememberId = null, HttpClient? client = null)
+        Action<string>? rememberId = null, HttpClient? client = null, Action<long, long?>? reportTransfer = null)
     {
         var http = client ?? Http;
         using var digestStream = File.OpenRead(path);
@@ -172,7 +180,7 @@ internal static class CloudBackupTransport
             var current = await ReadDriveFileAsync(http, access, reservedId, name, sha, createdUtc, length, md5, token);
             if (current.Backup is not null) return current.Backup;
             if (current.Incomplete && !updateIncomplete)
-                return await DriveUploadAsync(path,name,sha,createdUtc,length,access,token,reservedId,rememberId,http);
+                return await DriveUploadAsync(path,name,sha,createdUtc,length,access,token,reservedId,rememberId,http,reportTransfer);
             throw new IOException("Google Drive backup ID exists but cannot be verified; no second copy was created.");
         }
         RequireSuccess(started, "Google Drive upload initiation");
@@ -187,6 +195,7 @@ internal static class CloudBackupTransport
         int stalledResponses = 0;
         JsonDocument? receipt = null;
         byte[] buffer = new byte[ChunkSize];
+        reportTransfer?.Invoke(0, length);
         while (offset < length)
         {
             // A 308 response acknowledges the server's actual committed range,
@@ -224,6 +233,7 @@ internal static class CloudBackupTransport
                 }
                 else stalledResponses = 0;
                 offset = acknowledged;
+                reportTransfer?.Invoke(offset, length);
                 continue;
             }
             RequireSuccess(response, "Google Drive upload");
@@ -231,6 +241,7 @@ internal static class CloudBackupTransport
                 throw new IOException("Google Drive signalled completion before receiving the entire encrypted file.");
             receipt = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
             offset += count;
+            reportTransfer?.Invoke(offset, length);
         }
         if (receipt is null) throw new IOException("Google Drive upload did not finish.");
         using (receipt)
@@ -316,7 +327,7 @@ internal static class CloudBackupTransport
 
     private static async Task<CloudRemoteBackup> DropboxUploadAsync(
         string path, string name, string sha, DateTime createdUtc, long length,
-        string access, CancellationToken token)
+        string access, CancellationToken token, Action<long, long?>? reportTransfer)
     {
         string destination = "/" + name;
         // Dropbox's content_hash is independently computed by the provider.
@@ -332,7 +343,7 @@ internal static class CloudBackupTransport
             using var input = File.OpenRead(path);
             using var request = DropboxContentRequest("files/upload", access,
                 new { path = destination, mode = "add", autorename = false, mute = true },
-                new StreamContent(input));
+                reportTransfer is null ? new StreamContent(input) : new ReportingUploadContent(input, length, reportTransfer));
             using var response = await Http.SendAsync(request, token);
             RequireSuccess(response, "Dropbox upload");
             metadata = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
@@ -349,6 +360,7 @@ internal static class CloudBackupTransport
             await using var input = File.OpenRead(path);
             byte[] buffer = new byte[ChunkSize];
             long offset = 0;
+            reportTransfer?.Invoke(0, length);
             while (offset < length)
             {
                 int count = (int)Math.Min(buffer.Length, length - offset);
@@ -364,6 +376,7 @@ internal static class CloudBackupTransport
                 using var response = await Http.SendAsync(request, token);
                 RequireSuccess(response, "Dropbox chunk upload");
                 offset += count;
+                reportTransfer?.Invoke(offset, length);
             }
             if (offset != length) throw new IOException("Dropbox upload did not transmit the complete package.");
             using var finish = DropboxContentRequest("files/upload_session/finish", access,
@@ -382,6 +395,35 @@ internal static class CloudBackupTransport
                 metadata.RootElement, name, length, contentHash);
             return new CloudRemoteBackup(CloudProvider.Dropbox, id, name, sha, createdUtc,
                 ParseUtc(GetString(metadata.RootElement, "server_modified")), length);
+        }
+    }
+
+    private sealed class ReportingUploadContent(Stream input, long length, Action<long, long?> report) : HttpContent
+    {
+        protected override bool TryComputeLength(out long contentLength)
+        {
+            contentLength = length;
+            return true;
+        }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            SerializeToStreamAsync(stream, context, CancellationToken.None);
+
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context,
+            CancellationToken cancellationToken)
+        {
+            input.Position = 0;
+            long sent = 0;
+            byte[] buffer = new byte[81920];
+            report(sent, length);
+            while (true)
+            {
+                int count = await input.ReadAsync(buffer.AsMemory(), cancellationToken);
+                if (count == 0) break;
+                await stream.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+                sent += count;
+                report(sent, length);
+            }
         }
     }
 

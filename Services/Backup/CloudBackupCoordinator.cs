@@ -388,15 +388,18 @@ internal static class CloudBackupCoordinator
                    (copy.SqlBackupCreatedUtc - source.SqlBackupCreatedUtc).Duration() < TimeSpan.FromSeconds(1))
             .DistinctBy(copy => (copy.Provider, copy.RemoteId)).ToArray();
         var candidates = matching.Select(copy => new CloudRestoreStaging.DownloadCandidate(
-            (destination, ct) => DownloadAndCheckAsync(copy, destination, ct),
+            (destination, ct) => DownloadAndCheckAsync(copy, destination, ct,
+                TrackTransfer(progress, "Downloading backup", copy.Provider)),
             "cloud://" + copy.Provider + "/" + Uri.EscapeDataString(copy.RemoteId),
             copy.Provider.ToString())).ToArray();
         return await CloudRestoreStaging.RestoreWithFallbackAsync(candidates, recoveryPassphrase, token, progress);
     }
 
-    private static async Task DownloadAndCheckAsync(CloudRemoteBackup source, string destination, CancellationToken token)
+    private static async Task DownloadAndCheckAsync(CloudRemoteBackup source, string destination, CancellationToken token,
+        Action<long, long?>? reportTransfer)
     {
-        await CloudBackupTransport.DownloadAsync(source.Provider, source.RemoteId, destination, token);
+        await CloudBackupTransport.DownloadAsync(source.Provider, source.RemoteId, destination, token,
+            reportTransfer is null ? null : (bytes, total) => reportTransfer(bytes, total ?? (source.Size > 0 ? source.Size : null)));
         await using var check = File.OpenRead(destination);
         string actual = Convert.ToHexString(await SHA256.HashDataAsync(check, token)).ToLowerInvariant();
         if (!string.Equals(actual, source.PackageSha256, StringComparison.OrdinalIgnoreCase))
@@ -539,7 +542,8 @@ internal static class CloudBackupCoordinator
             progress?.Report(new BackupProgressUpdate("Uploading encrypted package", "Sending verified ciphertext only.", provider.ToString()));
         copy ??= await CloudBackupTransport.UploadAsync(provider, p.PackageFile,
             p.SqlCreatedUtc, token, p.GoogleDriveUploadId,
-            id => { p.GoogleDriveUploadId = id; SavePending(p); });
+            id => { p.GoogleDriveUploadId = id; SavePending(p); },
+            TrackTransfer(progress, "Uploading encrypted backup", provider));
         if (!string.Equals(copy.PackageSha256, p.Sha256, StringComparison.OrdinalIgnoreCase) ||
             copy.Size != p.Size)
             throw new IOException(provider + " did not confirm an intact encrypted upload.");
@@ -556,10 +560,13 @@ internal static class CloudBackupCoordinator
         SavePending(p);
         // Test downloaded REMOTE ciphertext, decrypted SQL, integrity and an
         // isolated disposable SQL restore, never the local upload source alone.
-        progress?.Report(new BackupProgressUpdate("Recovery testing", "Downloading, decrypting and testing an isolated SQL restore.", provider.ToString()));
+        progress?.Report(new BackupProgressUpdate("Downloading for recovery verification", "", provider.ToString()));
         await CloudRestoreStaging.VerifyRemoteCopyAsync(
-            (destination, ct) => DownloadAndCheckAsync(copy, destination, ct),
-            CloudBackupSettings.OpenRecoveryPassphrase(p.PackageFile + ".dpapi"), p.SqlCreatedUtc, token);
+            (destination, ct) => DownloadAndCheckAsync(copy, destination, ct,
+                TrackTransfer(progress, "Downloading for recovery verification", provider)),
+            CloudBackupSettings.OpenRecoveryPassphrase(p.PackageFile + ".dpapi"), p.SqlCreatedUtc, token,
+            progress is null ? null : () => progress.Report(new BackupProgressUpdate("Testing recovery",
+                "Decrypting the downloaded backup and testing an isolated SQL restore.", provider.ToString())));
         if (provider == CloudProvider.GoogleDrive)
         {
             p.GoogleRecoveryVerified = true;
@@ -753,6 +760,22 @@ internal static class CloudBackupCoordinator
         return outcome;
     }
 
+    internal static bool HasRetryableDeliveries(CloudBackupOptions settings)
+    {
+        if (!settings.GoogleDriveEnabled && !settings.DropboxEnabled) return false;
+        try
+        {
+            return ReadPending().Any(p => File.Exists(p.PackageFile) &&
+                ((settings.GoogleDriveEnabled && StillRequiresDelivery(p, CloudProvider.GoogleDrive, settings)) ||
+                 (settings.DropboxEnabled && StillRequiresDelivery(p, CloudProvider.Dropbox, settings))));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            AppExceptionHandler.LogNonFatal(ex, "Checking for retryable cloud backup deliveries");
+            return true;
+        }
+    }
+
     internal static (string Message, bool Warning) ReadLastRunStatus()
     {
         string path = Path.Combine(Root, "last-run.json");
@@ -800,7 +823,33 @@ internal static class CloudBackupCoordinator
             new DirectoryInfo(path).SetAccessControl(acl);
         }
     }
+    private static Action<long, long?>? TrackTransfer(IProgress<BackupProgressUpdate>? progress,
+        string stage, CloudProvider provider)
+    {
+        if (progress is null) return null;
+        var watch = new System.Diagnostics.Stopwatch();
+        TimeSpan lastReport = TimeSpan.Zero;
+        long lastBytes = -1;
+        return (bytes, total) =>
+        {
+            if (!watch.IsRunning || bytes == 0)
+            {
+                watch.Restart();
+                lastReport = TimeSpan.Zero;
+                lastBytes = -1;
+            }
+            var elapsed = watch.Elapsed;
+            if (bytes == lastBytes || (lastBytes >= 0 && bytes != total &&
+                elapsed - lastReport < TimeSpan.FromMilliseconds(250))) return;
+            lastReport = elapsed;
+            lastBytes = bytes;
+            progress.Report(new BackupProgressUpdate(stage, Destination: provider.ToString(),
+                Transfer: new BackupTransferProgress(bytes, total, TransferMetrics.AverageSpeed(bytes, elapsed))));
+        };
+    }
+
     private static string SafeTransportError(Exception ex) =>
-        ex is HttpRequestException ? ex.Message : ex is InvalidOperationException ? ex.Message :
+        ex is HttpRequestException ? BackupProgressUpdate.NetworkFailureMessage(ex) ?? ex.Message :
+        ex is InvalidOperationException ? ex.Message :
             "Cloud delivery or recovery verification failed; the encrypted package has been retained for retry.";
 }

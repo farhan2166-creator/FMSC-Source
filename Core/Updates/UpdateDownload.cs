@@ -119,10 +119,10 @@ internal sealed class UpdateDownloadMeter
             TimeSpan elapsed = clock();
             bool moving = (phase == UpdateDownloadPhase.Downloading && elapsed - lastNetwork < TimeSpan.FromSeconds(5)) ||
                 phase == UpdateDownloadPhase.Ready;
-            double speed = moving && elapsed.TotalSeconds > 0 ? network / elapsed.TotalSeconds : 0;
+            double speed = moving ? TransferMetrics.AverageSpeed(network, elapsed) : 0;
             long received = Math.Min(total, completed + inFlight);
-            TimeSpan? remaining = speed > 0 && phase == UpdateDownloadPhase.Downloading ? TimeSpan.FromSeconds(Math.Min(TimeSpan.MaxValue.TotalSeconds / 2,
-                (total - received) / speed)) : null;
+            TimeSpan? remaining = phase == UpdateDownloadPhase.Downloading
+                ? TransferMetrics.EstimateRemaining(total - received, speed) : null;
             string text = phase == UpdateDownloadPhase.Retrying
                 ? $"Connection lost. Retrying in {Math.Max(0, (int)Math.Ceiling((retryUntil - elapsed).TotalSeconds))}s " +
                   $"(attempt {attempt}/{UpdateRetry.MaximumAttempts})…" : message;

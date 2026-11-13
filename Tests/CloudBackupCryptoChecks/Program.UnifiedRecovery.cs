@@ -24,6 +24,8 @@ internal static class UnifiedRecoveryChecks
         Require(grouped.Count == 2 && grouped[0].CloudCopies.Count == 2 &&
             grouped[0].LocalCopies.Count == 1 && grouped[0].LocalCopies[0].FilePath == localPath &&
             grouped[0].HasRecoveryTestedCloud, "Same authenticated SQL source was not grouped.");
+        Require(grouped[0].RecoveryTestedCloudCount == 1,
+            "A recovery test for one provider must not count toward another provider's copy.");
         Require(grouped.Single(x => x.LocalCopies.Any(y => y.FilePath == oldPath)).CloudCopies.Count == 0,
             "Legacy file was merged with cloud using only the SQL creation timestamp.");
         var wrongDigest = new[] { local[0] with { SourceBakSha256 = new string('c', 64) } };
