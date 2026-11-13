@@ -31,6 +31,9 @@ jobs:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Retry transient GitHub API 5xx responses while fetching all pages.
+          # No deletion occurs until the complete run inventory is retrieved.
+          retries: 3
           script: |
             const retain = 3;
             const dryRun = process.env.DRY_RUN === 'true';
