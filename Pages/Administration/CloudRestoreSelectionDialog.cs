@@ -3,28 +3,13 @@ using FMSC_SMS.Services.Backup;
 
 namespace FMSC_SMS.Pages.Administration;
 
-/// <summary>
-/// Compact picker within the existing Restore workflow. Multiple cloud copies
-/// of the same encrypted package appear as ONE recovery point; the operator
-/// may explicitly select which connected cloud service to download from.
-/// </summary>
 internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
 {
     private sealed record RecoveryPoint(DateTime SqlCreatedUtc,
-        string Hash, IReadOnlyList<CloudBackupCoordinator.CloudSelection> Copies)
-    {
-        public override string ToString() =>
-            SqlCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy  hh:mm tt") +
-            "   —   " + string.Join(" + ", Copies.Select(x => x.Remote.Provider.ToString()).Distinct());
-    }
-    private readonly ListBox points = new() { Dock = DockStyle.Fill, IntegralHeight = false };
-    private readonly ComboBox provider = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
-    private readonly TextBox passphrase = new() {
-        UseSystemPasswordChar = true, Dock = DockStyle.Fill
-    };
-    private readonly Label details = new() {
-        Dock = DockStyle.Fill, AutoSize = false, ForeColor = AppTheme.MutedText
-    };
+        IReadOnlyList<CloudBackupCoordinator.CloudSelection> Copies);
+
+    private readonly ModernComboBox provider = HumanUi.Combo();
+    private readonly ModernTextBox passphrase = HumanUi.TextBox(maxLength: 32767);
 
     internal CloudBackupCoordinator.CloudSelection? SelectedCopy { get; private set; }
     internal string RecoveryPassphrase { get; private set; } = "";
@@ -32,94 +17,133 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
     internal CloudRestoreSelectionDialog(IReadOnlyList<CloudBackupCoordinator.CloudSelection> all,
         DateTime? latestLocalBackupUtc, IReadOnlyList<string>? warnings = null)
     {
-        Text = "Select a cloud recovery point";
+        Text = "Choose Cloud Backup";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MinimizeBox = MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(AppScale.Scale(680), AppScale.Scale(480));
+        ClientSize = new Size(AppScale.Scale(660), AppScale.Scale(540));
         BackColor = AppTheme.PageBackground;
+        Font = AppTheme.NormalFont;
+        Padding = new Padding(AppMetrics.SpacingMd);
 
-        string warning = warnings is { Count: > 0 } ? string.Join("\n", warnings) : "";
-        var groups = all.GroupBy(x => x.Remote.PackageSha256, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new RecoveryPoint(g.First().Remote.SqlBackupCreatedUtc,
-                g.Key, g.OrderByDescending(x => x.KnownVerifiedUpload).ToArray()))
-            .OrderByDescending(x => x.SqlCreatedUtc).ToArray();
-        foreach (var point in groups) points.Items.Add(point);
-        points.SelectedIndexChanged += (_, _) =>
+        var groups = all.GroupBy(copy => copy.Remote.PackageSha256, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new RecoveryPoint(group.First().Remote.SqlBackupCreatedUtc,
+                group.OrderByDescending(copy => copy.KnownVerifiedUpload).ToArray()))
+            .OrderByDescending(point => point.SqlCreatedUtc)
+            .ToArray();
+
+        var points = HumanUi.Grid();
+        points.AccessibleName = "Cloud recovery points";
+        points.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+        points.AllowUserToResizeColumns = false;
+        points.Columns.Add(new DataGridViewTextBoxColumn {
+            HeaderText = "SQL backup date",
+            FillWeight = 55,
+            SortMode = DataGridViewColumnSortMode.NotSortable
+        });
+        points.Columns.Add(new DataGridViewTextBoxColumn {
+            HeaderText = "Available copies",
+            FillWeight = 45,
+            SortMode = DataGridViewColumnSortMode.NotSortable
+        });
+        foreach (var point in groups)
         {
-            provider.Items.Clear();
-            if (points.SelectedItem is not RecoveryPoint selected) return;
-            foreach (var copy in selected.Copies) provider.Items.Add(copy);
-            if (provider.Items.Count > 0) provider.SelectedIndex = 0;
-            details.Text =
-                "SQL backup created: " + selected.SqlCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt") +
-                " (computer time). Uploaded time does NOT determine the recovery order. " +
-                "The SQL header is independently verified after download, before live restoration."
-                + (warning.Length == 0 ? "" : "\n\n" + warning);
-        };
+            points.Rows.Add(FormatBackupDate(point.SqlCreatedUtc),
+                string.Join(", ", point.Copies.Select(copy => ProviderName(copy.Remote.Provider)).Distinct()));
+        }
+
+        provider.FormattingEnabled = true;
         provider.Format += (_, e) =>
         {
             if (e.ListItem is CloudBackupCoordinator.CloudSelection copy)
-                e.Value = copy.Remote.Provider + "  —  uploaded " +
-                    copy.Remote.UploadedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt");
+                e.Value = $"{ProviderName(copy.Remote.Provider)} · uploaded {FormatBackupDate(copy.Remote.UploadedUtc)}";
         };
-        provider.FormattingEnabled = true;
+        passphrase.UseSystemPasswordChar = true;
+        passphrase.PlaceholderText = "At least 12 characters";
 
-        var confirm = new Button { Text = "Restore selected cloud backup", AutoSize = true };
-        var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
-        var buttonRow = new FlowLayoutPanel {
-            Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft
+        var confirm = new ModernButton { Text = "Select Backup", ThemeRole = "Primary" };
+        var cancel = new ModernButton {
+            Text = UiText.Actions.Cancel, ThemeRole = "Secondary", DialogResult = DialogResult.Cancel
         };
-        buttonRow.Controls.Add(confirm);
-        buttonRow.Controls.Add(cancel);
-        var panel = new TableLayoutPanel {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7,
-            Padding = new Padding(AppScale.Scale(18))
+        var card = HumanUi.Card("Cloud Recovery Points",
+            $"Latest local: {FormatBackupDate(latestLocalBackupUtc)}    |    Latest cloud: {FormatBackupDate(groups.FirstOrDefault()?.SqlCreatedUtc)}");
+        var body = new TableLayoutPanel {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 6,
+            Margin = Padding.Empty
         };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(36)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(42)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(warning.Length == 0 ? 66 : 135)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(44)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(48)));
-        string newestCloud = groups.Length > 0 ? groups[0].SqlCreatedUtc.ToLocalTime().ToString("dd-MMM HH:mm") : "None";
-        string newestLocal = latestLocalBackupUtc?.ToLocalTime().ToString("dd-MMM HH:mm") ?? "None";
-        panel.Controls.Add(new Label { Text = "Latest local: " + newestLocal +
-            "    |    Latest cloud: " + newestCloud + "    (by SQL backup time)"
-            + (warning.Length == 0 ? "" : " — Some cloud accounts could not be checked"),
-            Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
-        panel.Controls.Add(points, 0, 1);
-        panel.Controls.Add(new Label { Text = "Download from", Dock = DockStyle.Fill }, 0, 2);
-        panel.Controls.Add(provider, 0, 3);
-        panel.Controls.Add(details, 0, 4);
-        var secretRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
-        secretRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 41));
-        secretRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 59));
-        secretRow.Controls.Add(new Label { Text = "Cloud recovery passphrase", Dock = DockStyle.Fill }, 0, 0);
-        secretRow.Controls.Add(passphrase, 1, 0);
-        panel.Controls.Add(secretRow, 0, 5);
-        panel.Controls.Add(buttonRow, 0, 6);
-        Controls.Add(panel);
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        body.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
+        body.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
+        body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        points.Margin = new Padding(0, 0, 0, AppMetrics.SpacingXs);
+        points.MinimumSize = new Size(0, AppMetrics.GridHeaderHeight + 2 * AppMetrics.GridRowHeight);
+        body.Controls.Add(points, 0, 0);
+        var warning = new Label {
+            Text = warnings is null ? string.Empty : string.Join(Environment.NewLine, warnings),
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            ForeColor = AppTheme.Warning,
+            Margin = new Padding(0, AppMetrics.SpacingXs, 0, AppMetrics.SpacingSm),
+            UseMnemonic = false
+        };
+        if (warning.Text.Length > 0)
+            body.Controls.Add(warning, 0, 1);
+        body.Controls.Add(HumanUi.Field("Download from", provider), 0, 2);
+        body.Controls.Add(HumanUi.Field("Cloud recovery passphrase", passphrase, required: true), 0, 3);
+        body.Controls.Add(new Label {
+            Text = "FMSC checks the SQL backup after download and before restore.",
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            ForeColor = AppTheme.MutedText,
+            Margin = new Padding(0, 0, 0, AppMetrics.SpacingMd)
+        }, 0, 4);
+        body.Controls.Add(HumanUi.DialogButtons(cancel, confirm), 0, 5);
+        card.Content.Controls.Add(body);
+        Controls.Add(card);
+
+        void UpdateConfirm() => confirm.Enabled = provider.SelectedItem is not null && passphrase.Text.Length >= 12;
+        void SelectPoint(RecoveryPoint point)
+        {
+            provider.Items.Clear();
+            foreach (var copy in point.Copies)
+                provider.Items.Add(copy);
+            provider.SelectedIndex = 0;
+        }
+
+        provider.SelectedIndexChanged += (_, _) => UpdateConfirm();
+        passphrase.TextChanged += (_, _) => UpdateConfirm();
+        if (groups.Length > 0)
+        {
+            points.CurrentCell = points.Rows[0].Cells[0];
+            SelectPoint(groups[0]);
+        }
+        points.RowEnter += (_, e) => SelectPoint(groups[e.RowIndex]);
+        UpdateConfirm();
+        AcceptButton = confirm;
         CancelButton = cancel;
-        if (points.Items.Count > 0) points.SelectedIndex = 0;
         confirm.Click += (_, _) =>
         {
             if (provider.SelectedItem is not CloudBackupCoordinator.CloudSelection selected ||
                 passphrase.Text.Length < 12)
-            {
-                MessageBox.Show(this, "Choose a recovery point and enter its recovery passphrase.",
-                    "Cloud restore", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
-            }
             SelectedCopy = selected;
             RecoveryPassphrase = passphrase.Text;
             passphrase.Clear();
             DialogResult = DialogResult.OK;
-            Close();
         };
         FormClosed += (_, _) => passphrase.Clear();
     }
+
+    private static string FormatBackupDate(DateTime? utc) =>
+        utc?.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt") ?? "None";
+
+    private static string ProviderName(CloudProvider provider) =>
+        provider == CloudProvider.GoogleDrive ? "Google Drive" : provider.ToString();
 }
