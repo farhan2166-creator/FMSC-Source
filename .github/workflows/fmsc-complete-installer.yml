@@ -310,5 +310,5 @@ jobs:
         with:
           name: FMSC_SMS-Complete-Windows-x64-Add-Database-Files
           path: out/complete-installer/
-          retention-days: 14
+          retention-days: 3
           if-no-files-found: error
