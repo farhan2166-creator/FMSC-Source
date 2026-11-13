@@ -27,5 +27,5 @@ $privateHeaders=@{Authorization="Bearer $env:FMSC_SANDBOX_DISPATCH_TOKEN";Accept
 $sandboxApi=(Resolve-FmscGitHubRepository -Repository Sandbox -Token $env:FMSC_SANDBOX_DISPATCH_TOKEN).Api
 Invoke-RestMethod -Uri ($sandboxApi + '/actions/workflows/private-release-acceptance.yml/dispatches') -Method Post -Headers $privateHeaders -ContentType 'application/json' -Body $dispatch | Out-Null
 "previous_status_id=$baseline" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
-Write-Host "Dispatched private SQL, real installer and chaos acceptance for exact Source SHA $SourceSha."
+Write-Host "Dispatched private schema-7 SQL and real installer acceptance for exact Source SHA $SourceSha."
 Write-Host 'No private fixture, SQL contents, Sandbox read token or publication token was transferred.'
