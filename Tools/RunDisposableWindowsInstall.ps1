@@ -639,10 +639,29 @@ VALUES(1,N'Fictional Level 3 Install School',SYSUTCDATETIME(),SYSUTCDATETIME(),@
         $body=[regex]::Replace($assembly.Groups['body'].Value,'(?m)^          ','')
         $originalRoot='$root = Join-Path $env:GITHUB_WORKSPACE ''out/complete-installer'''
         if (-not $body.Contains($originalRoot)) { throw 'Installer assembly root changed; review the acceptance adapter.' }
-        $body=$body.Replace($originalRoot,('$root = '''+$release.Replace("'","''")+''''))
+        $zipSource=$release
+        if ($env:GITHUB_REPOSITORY_ID -ne '1449162585' -and
+            (Test-Path -LiteralPath (Join-Path $app 'CloudBackupGoogleDesktop.json'))) {
+            # The private install fixture needs metadata, but a public artifact
+            # must reject it. Exercise that guard before assembling a separate
+            # public copy; never remove metadata from the installed/private app.
+            $privateBody=$body.Replace($originalRoot,('$root = '''+$release.Replace("'","''")+''''))
+            $refused=$false
+            try { & ([scriptblock]::Create($privateBody)) }
+            catch {
+                if ($_.Exception.Message -ne 'Google Desktop registration cannot be included in the public installer artifact.') { throw }
+                $refused=$true
+            }
+            if (-not $refused) { throw 'The public installer accepted Google registration.' }
+            $zipSource=Join-Path $root 'public-installer'
+            Copy-Item -LiteralPath $release -Destination $zipSource -Recurse
+            Remove-Item -LiteralPath (Join-Path $zipSource 'FMSC_SMS/CloudBackupGoogleDesktop.json') -Force
+            $checks.Add('Public ZIP boundary rejects registration; an isolated public copy omits it while the private install payload remains intact')
+        }
+        $body=$body.Replace($originalRoot,('$root = '''+$zipSource.Replace("'","''")+''''))
         & ([scriptblock]::Create($body))
         $zipPath=Join-Path $root 'installer-synthetic.zip'
-        Compress-Archive -Path (Join-Path $release '*') -DestinationPath $zipPath
+        Compress-Archive -Path (Join-Path $zipSource '*') -DestinationPath $zipPath
         $archive=[IO.Compression.ZipFile]::OpenRead($zipPath)
         try {
             $entries=@($archive.Entries | ForEach-Object { $_.FullName.Replace('\','/') })
@@ -650,8 +669,12 @@ VALUES(1,N'Fictional Level 3 Install School',SYSUTCDATETIME(),SYSUTCDATETIME(),@
                 if ($required -notin $entries) { throw "ZIP is missing $required" }
             }
             if (@($entries | Where-Object { $_ -match '(?i)\.(mdf|ldf|ndf|bak)$' }).Count) { throw 'Database file entered the installer ZIP.' }
+            if ($env:GITHUB_REPOSITORY_ID -ne '1449162585' -and
+                'FMSC_SMS/CloudBackupGoogleDesktop.json' -in $entries) {
+                throw 'Registration entered a public installer ZIP.'
+            }
             $manifest=@{}
-            foreach ($line in Get-Content -LiteralPath (Join-Path $release 'SHA256SUMS.txt')) {
+            foreach ($line in Get-Content -LiteralPath (Join-Path $zipSource 'SHA256SUMS.txt')) {
                 if ($line -notmatch '^([0-9a-fA-F]{64})  (.+)$') { throw 'Invalid installer checksum manifest row.' }
                 $manifest[$Matches[2]]=$Matches[1].ToUpperInvariant()
             }
