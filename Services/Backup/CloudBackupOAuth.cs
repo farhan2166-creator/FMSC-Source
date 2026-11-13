@@ -141,7 +141,6 @@ internal static class CloudBackupOAuth
         string refresh = json.RootElement.TryGetProperty("refresh_token", out var refreshValue)
             ? refreshValue.GetString() ?? "" : "";
         if (refresh.Length < 10) throw new InvalidDataException("Provider did not grant an offline refresh token; connection was not saved.");
-        cancellationToken.ThrowIfCancellationRequested();
         SaveCredential(provider, new Credential(1, provider.ToString(), clientId, refresh));
     }
 

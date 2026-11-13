@@ -6,7 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../Services/Backup/GoogleDesktopRegistration.cs" Link="GoogleDesktopRegistration.cs" />
     <Compile Include="../../Core/Updates/UpdateManifest.cs" Link="UpdateManifest.cs" />
     <Compile Include="../../Core/Updates/UpdateStager.cs" Link="UpdateStager.cs" />
     <Compile Include="../../Core/Updates/UpdateChunks.cs" Link="UpdateChunks.cs" />
