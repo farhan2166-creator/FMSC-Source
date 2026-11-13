@@ -106,8 +106,11 @@ internal static class CloudBackupCoordinator
         if (!(settings.LocalEnabled || settings.GoogleDriveEnabled || settings.DropboxEnabled))
             throw new InvalidOperationException("Enable at least one backup destination.");
         bool needsCloud = settings.GoogleDriveEnabled || settings.DropboxEnabled;
-        if (needsCloud && !CloudBackupSettings.HasLocalRecoveryPassphrase)
-            throw new InvalidOperationException("Enroll and independently retain a recovery passphrase before cloud backups can run.");
+        string? cloudBlocked = needsCloud && !CloudBackupSettings.HasLocalRecoveryPassphrase
+            ? "Enroll and independently retain a recovery passphrase before cloud backups can run."
+            : null;
+        if (!settings.LocalEnabled && cloudBlocked is not null)
+            throw new InvalidOperationException(cloudBlocked);
 
         EnsurePrivateDirectories();
         // The lease survives awaits and may be disposed by any continuation thread.
@@ -117,18 +120,40 @@ internal static class CloudBackupCoordinator
         try
         {
             progress?.Report(new BackupProgressUpdate("Checking pending encrypted deliveries"));
-            var retryIssues = await RetryPendingUploadsCoreAsync(settings, token).ConfigureAwait(false);
+            var retryIssues = new List<string>();
+            if (cloudBlocked is null)
+            {
+                try { retryIssues = await RetryPendingUploadsCoreAsync(settings, token).ConfigureAwait(false); }
+                catch (Exception ex) when (settings.LocalEnabled && (ex is IOException or UnauthorizedAccessException))
+                {
+                    AppExceptionHandler.LogNonFatal(ex, "Checking queued cloud deliveries before local backup");
+                    cloudBlocked = "FMSC could not check pending cloud deliveries. Review the encrypted backup queue.";
+                }
+            }
             if (scheduled && !settings.IsDue(DateTimeOffset.Now, LoadState().LastSuccessfulLocalBackup))
+            {
+                if (cloudBlocked is not null) retryIssues.Add(cloudBlocked);
                 return RecordOutcome(new CloudBackupOutcome(false, false, false,
                     retryIssues.Count == 0 ? "No scheduled backup is due. Pending uploads are complete."
                         : "Cloud upload is pending retry: " + string.Join("; ", retryIssues), retryIssues.Count > 0));
-            if (needsCloud && QueueIsAtCapacity(settings, out string capacityWarning))
+            }
+            if (needsCloud && cloudBlocked is null)
             {
-                // Retry exhausted packages remain intact. The unattended job
-                // exits distinctly rather than accumulating unbounded ciphertext.
+                try
+                {
+                    if (QueueIsAtCapacity(settings, out string capacityWarning)) cloudBlocked = capacityWarning;
+                }
+                catch (IOException ex) when (settings.LocalEnabled)
+                {
+                    AppExceptionHandler.LogNonFatal(ex, "Checking space for an encrypted cloud backup");
+                    cloudBlocked = ex.Message;
+                }
+            }
+            if (!settings.LocalEnabled && cloudBlocked is not null)
+            {
                 if (scheduled) return RecordOutcome(new CloudBackupOutcome(false, false, false,
-                    capacityWarning, UploadsPending: true));
-                throw new IOException(capacityWarning);
+                    cloudBlocked, UploadsPending: true));
+                throw new IOException(cloudBlocked);
             }
 
             string folder = settings.LocalEnabled ? BackupSettings.GetBackupFolder() : Staging;
@@ -159,16 +184,21 @@ internal static class CloudBackupCoordinator
                 throw new InvalidDataException("Verified SQL backup metadata is not readable.");
             DateTime sqlCreated = DateTime.SpecifyKind(info.BackupStartDate, DateTimeKind.Local).ToUniversalTime();
             progress?.Report(new BackupProgressUpdate("SQL backup verified", "SQL header and RESTORE VERIFYONLY completed.", "Local"));
-            if (!needsCloud)
+            if (settings.LocalEnabled)
             {
-                SaveState(new State { LastSuccessfulLocalBackup = DateTimeOffset.Now });
-                await Task.Run(() => PruneLocalManagedBackups(folder, settings.MaximumLocalBackups), token)
+                await Task.Run(() => PruneLocalManagedBackups(folder, settings.MaximumLocalBackups, bak))
                     .ConfigureAwait(false);
-                progress?.Report(new BackupProgressUpdate("Completed", "Verified SQL backup saved.", "Local"));
+                SaveState(new State { LastSuccessfulLocalBackup = DateTimeOffset.Now });
                 BackupActivityJournal.TryRecord("Backup", "Local", "SQL recovery file verified");
+            }
+            if (!needsCloud || cloudBlocked is not null)
+            {
+                if (cloudBlocked is not null)
+                    retryIssues.Insert(0, "No new cloud copy was queued. " + cloudBlocked);
+                progress?.Report(new BackupProgressUpdate("Local backup saved", "Verified SQL backup saved.", "Local"));
                 return RecordOutcome(new CloudBackupOutcome(true, false, false,
                     "Verified local SQL backup saved: " + bak +
-                    (retryIssues.Count == 0 ? "" : ". Pending cloud delivery: " + string.Join("; ", retryIssues)),
+                    (retryIssues.Count == 0 ? "" : ". " + string.Join("; ", retryIssues)),
                     UploadsPending: retryIssues.Count > 0));
             }
             string id = Guid.NewGuid().ToString("N");
@@ -214,9 +244,8 @@ internal static class CloudBackupCoordinator
                         "Review protected FMSC cloud staging before another backup. No cloud copy has been marked successful.", ex);
                 }
             }
-            // A successful local backup is not re-created just because one
-            // provider was temporarily unavailable.
-            SaveState(new State { LastSuccessfulLocalBackup = DateTimeOffset.Now });
+            if (!settings.LocalEnabled)
+                SaveState(new State { LastSuccessfulLocalBackup = DateTimeOffset.Now });
             bool google = false, dropbox = false;
             if (settings.GoogleDriveEnabled)
             {
@@ -239,9 +268,6 @@ internal static class CloudBackupCoordinator
                 }
             }
             RemoveFullyDeliveredPayload(pending, settings);
-            if (settings.LocalEnabled)
-                await Task.Run(() => PruneLocalManagedBackups(folder, settings.MaximumLocalBackups), token)
-                    .ConfigureAwait(false);
             // A newer verified delivery can supersede failures seen at run start.
             var issues = ReadDeliveryIssues(settings);
             string summary = issues.Count == 0
@@ -260,7 +286,7 @@ internal static class CloudBackupCoordinator
         // If the user has not enabled/enrolled the feature, do nothing.
         var settings = CloudBackupSettings.Load();
         if (!settings.AutomaticEnabled) return 0;
-        if ((settings.GoogleDriveEnabled || settings.DropboxEnabled) &&
+        if (!settings.LocalEnabled && (settings.GoogleDriveEnabled || settings.DropboxEnabled) &&
             !CloudBackupSettings.HasLocalRecoveryPassphrase) return 2;
         // Never let a scheduled backup race a pending database migration,
         // interrupted update, or installer activation. Unlike the interactive
@@ -438,7 +464,7 @@ internal static class CloudBackupCoordinator
                 return false;
             warning = "Pending encrypted backups occupy " +
                 (size / (1024d * 1024d * 1024d)).ToString("0.0", CultureInfo.InvariantCulture) +
-                " GB. FMSC paused creation to protect disk space. Reconnect the cloud accounts, " +
+                " GB. FMSC paused cloud backup creation to protect disk space. Reconnect the cloud accounts, " +
                 "use Retry Pending Uploads, or increase the queue limit after verifying free space. " +
                 "No queued package was deleted.";
             return true;
@@ -446,7 +472,7 @@ internal static class CloudBackupCoordinator
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OverflowException or ArgumentException)
         {
             throw new IOException("FMSC could not verify space for another encrypted backup. " +
-                "No new backup was started; check the staging disk and retry.", ex);
+                "Check the staging disk and retry.", ex);
         }
     }
 
@@ -665,9 +691,10 @@ internal static class CloudBackupCoordinator
         // retention decisions even after the queued ciphertext is cleaned up.
     }
 
-    private static void PruneLocalManagedBackups(string folder, int limit)
+    private static void PruneLocalManagedBackups(string folder, int limit, string latestVerifiedPath)
     {
         if (limit < 1) throw new ArgumentOutOfRangeException(nameof(limit));
+        latestVerifiedPath = Path.GetFullPath(latestVerifiedPath);
         // Local file creation/modified times can change when a .bak is copied.
         // Retention chronology, like Restore, is based on the actual SQL
         // backup header. Files with unreadable headers are retained for review.
@@ -676,18 +703,17 @@ internal static class CloudBackupCoordinator
         // historical FMSC_CloudAuto backups remain protected during migration.
         foreach (FileInfo file in new DirectoryInfo(folder).EnumerateFiles("FMSC_Managed_*.bak"))
         {
+            if (string.Equals(file.FullName, latestVerifiedPath, StringComparison.OrdinalIgnoreCase)) continue;
             var info = DatabaseBackupManager.GetBackupInfo(file.FullName);
             if (info?.IsForFmscDatabase == true && info.BackupStartDate != default)
                 valid.Add((file, info.BackupStartDate));
         }
         foreach (var old in valid.OrderByDescending(x => x.SqlCreated)
-                     .Skip(Math.Max(1, limit)))
+                     .Skip(limit - 1))
         {
             try { old.File.Delete(); }
             catch (Exception ex) { AppExceptionHandler.LogNonFatal(ex, "Old automatic local backup cleanup failed"); }
         }
-        // No pre-restore, updater migration, or manually named backup matches
-        // the FMSC_CloudAuto prefix; those recovery files remain untouched.
     }
 
     private static void CreateValidatedSqlBackupHeadless(string backupPath)

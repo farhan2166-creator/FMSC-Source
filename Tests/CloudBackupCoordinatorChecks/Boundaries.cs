@@ -16,7 +16,7 @@ internal enum CloudProvider {GoogleDrive,Dropbox}
 internal sealed record CloudRemoteBackup(CloudProvider Provider,string RemoteId,string Name,string PackageSha256,DateTime SqlBackupCreatedUtc,DateTime UploadedUtc,long Size);
 internal sealed class CloudBackupOptions {
  public bool LocalEnabled {get;set;}=true;public bool GoogleDriveEnabled {get;set;}=true;public bool DropboxEnabled {get;set;}
- public bool AutomaticEnabled {get;set;}=true;public int MaximumPendingQueueMegabytes=>8192;public int MaximumLocalBackups=>7;public int MaximumGoogleDriveBackups=>7;public int MaximumDropboxBackups=>7;
+ public bool AutomaticEnabled {get;set;}=true;public int MaximumPendingQueueMegabytes {get;set;}=8192;public int MaximumLocalBackups {get;set;}=7;public int MaximumGoogleDriveBackups=>7;public int MaximumDropboxBackups=>7;
  internal void Validate(){} internal bool IsDue(DateTimeOffset now,DateTimeOffset? last)=>FixtureRuntime.Due;
 }
 internal static class CloudBackupSettings
@@ -31,10 +31,15 @@ internal static class CloudBackupSettings
 internal static class BackupSettings {internal static string GetBackupFolder()=>FixtureRuntime.LocalFolder;}
 internal static class DatabaseBackupManager {
  internal sealed class BackupResult {public bool Success {get;init;}public string Message{get;init;}="";}
- internal sealed class BackupInfo {public bool IsForFmscDatabase=>true;public DateTime BackupStartDate=>FixtureRuntime.SqlCreated;}
+ internal sealed class BackupInfo {public bool IsForFmscDatabase=>true;public DateTime BackupStartDate {get;init;}}
  internal static string CreateUniqueBackupPath(string a,string b)=>Path.Combine(a,b);
- internal static BackupResult CreateBackup(string p){File.WriteAllBytes(p, new byte[1024]);return new(){Success=true};}
- internal static BackupInfo? GetBackupInfo(string p)=>new();
+ internal static BackupResult CreateBackup(string p)
+ {
+  if (FixtureRuntime.FailBackup) return new(){Message="Synthetic SQL backup failure"};
+  File.WriteAllBytes(p, new byte[1024]);
+  return new(){Success=true};
+ }
+ internal static BackupInfo? GetBackupInfo(string p)=>new(){BackupStartDate=File.GetLastWriteTime(p)};
 }
 internal static class CloudBackupOAuth {internal static bool IsConnected(CloudProvider p)=>FixtureRuntime.Connected;}
 internal static class CloudBackupTransport {
@@ -68,8 +73,7 @@ namespace FMSC_SMS.Services.Backup {
 internal static class FixtureRuntime {
  internal static string LocalFolder="";
  internal static readonly CloudBackupOptions Options=new();
- internal static bool Due,Connected;
+ internal static bool Due,Connected,FailBackup;
  internal static int Verifications;
- internal static readonly DateTime SqlCreated=DateTime.Now;
  internal static readonly Dictionary<string,(CloudRemoteBackup Remote,byte[] Bytes)> Remote=new();
 }}

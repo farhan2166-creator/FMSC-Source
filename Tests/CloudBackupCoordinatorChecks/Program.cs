@@ -66,6 +66,41 @@ try
         outcome = await CloudBackupCoordinator.CreateAndUploadAsync(scheduled: true);
         Check(outcome.UploadsPending && CloudBackupOperations.ScheduledExitCode(outcome) == 4,
             "Scheduled runs must expose missing queued payloads as incomplete.");
+
+        string retainedPayload = Path.Combine(queue, id + ".fmscbackup");
+        Write(id, payload: true, attempts: 4, created: DateTime.UtcNow.AddDays(-1));
+        using (var payload = File.OpenWrite(retainedPayload)) payload.SetLength(1024 * 1024);
+        settings.MaximumPendingQueueMegabytes = 1;
+        settings.MaximumLocalBackups = 1;
+        string previous = Directory.GetFiles(FixtureRuntime.LocalFolder, "FMSC_Managed_*.bak").Single();
+        string separate = Path.Combine(FixtureRuntime.LocalFolder, "manual.bak");
+        File.WriteAllText(separate, "synthetic manually retained backup");
+        FixtureRuntime.FailBackup = true;
+        try
+        {
+            await CloudBackupCoordinator.CreateAndUploadAsync();
+            throw new Exception("Failed SQL backup was reported as successful.");
+        }
+        catch (IOException ex) when (ex.Message == "Synthetic SQL backup failure") { }
+        Check(File.Exists(previous), "A failed new SQL backup must preserve the previous local backup.");
+        FixtureRuntime.FailBackup = false;
+        outcome = await CloudBackupCoordinator.CreateAndUploadAsync();
+        Check(outcome.LocalSucceeded && !outcome.GoogleSucceeded && outcome.UploadsPending,
+            "A full encrypted queue must report local success and incomplete cloud delivery.");
+        Check(!File.Exists(previous) && Directory.GetFiles(FixtureRuntime.LocalFolder, "FMSC_Managed_*.bak").Length == 1,
+            "A verified local replacement must enforce retention even when cloud staging is blocked.");
+        using (var state = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "schedule-state.json"))))
+            Check(state.RootElement.GetProperty("LastSuccessfulLocalBackup").GetDateTimeOffset() >=
+                new DateTimeOffset(File.GetLastWriteTimeUtc(Directory.GetFiles(FixtureRuntime.LocalFolder, "FMSC_Managed_*.bak").Single())),
+                "A verified local backup must advance the schedule even when the cloud queue is full.");
+        settings.GoogleDriveEnabled = false;
+        string combined = Directory.GetFiles(FixtureRuntime.LocalFolder, "FMSC_Managed_*.bak").Single();
+        outcome = await CloudBackupCoordinator.CreateAndUploadAsync();
+        Check(outcome.LocalSucceeded && !File.Exists(combined) &&
+            Directory.GetFiles(FixtureRuntime.LocalFolder, "FMSC_Managed_*.bak").Length == 1,
+            "Local-only backups must enforce the same retention after verifying a replacement.");
+        Check(File.Exists(separate) && Directory.GetFiles(queue, "*.fmscbackup").Single() == retainedPayload,
+            "Local retention must preserve separately named backups and previously queued ciphertext.");
     }
     else Console.WriteLine("SKIP: coordinator ACL, job lease and persisted supersession require Windows; exercised by desktop CI.");
     Console.WriteLine($"PASS: {checks} actual coordinator journal, retry and delivery-health checks.");
