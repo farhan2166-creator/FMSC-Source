@@ -103,14 +103,16 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             "Back up your school data or restore a saved copy.")
     {
         backupFolder.ReadOnly = true;
+        backupFolder.PlaceholderText = "No local folder selected";
         restoreFile.ReadOnly = true;
+        restoreFile.PlaceholderText = "No backup selected";
         var chooseBackupButton =
             AddBusyAction("Local Folder…", ChooseBackupFolderAsync, "Secondary");
         backupNowButton =
             AddBusyAction("Back Up Now", BackupNowAsync, "Success");
         retryPendingButton = AddBusyAction("Retry Pending Uploads", RetryPendingAsync, "Secondary");
         if (canRestore)
-            cloudSettingsButton = AddAction("Backup Settings…", (_, _) => OpenCloudSettings(), "Secondary");
+            cloudSettingsButton = AddAction("Settings…", (_, _) => OpenCloudSettings(), "Secondary");
         ModernButton? chooseRestoreButton = null;
         if (canRestore)
         {
