@@ -134,7 +134,7 @@
 	<ItemGroup>
         <!-- Public IDs and optional publisher-supplied native Google registration; no school tokens. -->
         <Content Include="CloudBackupGoogleDesktop.json" Condition="Exists('CloudBackupGoogleDesktop.json')"
-                 CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+                 CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
         <Content Include="CloudBackupProviders.json" CopyToOutputDirectory="PreserveNewest"
                  CopyToPublishDirectory="PreserveNewest" />
 		<Content Include="Installer/core.ps1" Link="UpdateSupport/core.ps1" CopyToPublishDirectory="PreserveNewest" />
