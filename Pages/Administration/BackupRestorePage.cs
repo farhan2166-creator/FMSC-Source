@@ -35,7 +35,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         ScrollBars = ScrollBars.Vertical, Height = AppScale.Scale(110), Visible = false
     };
     readonly ModernButton retryPendingButton;
-    readonly TableLayoutPanel backupFields;
     ModernButton? cloudSettingsButton;
     ModernButton? selectCloudCopyButton;
     FlowLayoutPanel? cloudCopyActions;
@@ -117,7 +116,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         SetToolTip(browseBackupFolder, folderBrowseLabel);
         backupNowButton =
             AddBusyAction("Back Up Now", BackupNowAsync, "Success");
-        retryPendingButton = AddBusyAction("Retry Pending Uploads", RetryPendingAsync, "Secondary");
         if (canRestore)
         {
             const string fileBrowseLabel = "Browse for a backup file";
@@ -144,11 +142,12 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         });
         if (canRestore)
             cloudSettingsButton = AddAction("Settings…", (_, _) => OpenCloudSettings(), "Secondary");
+        retryPendingButton = AddBusyAction("Retry Pending Uploads", RetryPendingAsync, "Secondary");
+        retryPendingButton.Visible = false;
         locateFileButton =
             AddBusyAction("Locate Missing File…", LocateMissingFileAsync, "Secondary");
         RelocateFromActions(locateFileButton);
         RelocateFromActions(backupNowButton);
-        RelocateFromActions(retryPendingButton);
         if (selectCloudCopyButton is not null)
             RelocateFromActions(selectCloudCopyButton);
         if (restoreButton is not null)
@@ -156,9 +155,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         UseToolbar();
         var backupCard = HumanUi.Card("Backup", "Save a verified copy to your backup destinations.");
         var backupStatus = CreatePanelStatus(out backupStatusHeadline, out backupStatusDetail);
-        backupFields = CreatePanelFields(backupCard, "Local Backup Folder", backupFolder,
-            CreateCenteredActionRow(backupNowButton),
-            CreateCompactActionRow(retryPendingButton), backupStatus);
+        CreatePanelFields(backupCard, "Local Backup Folder", backupFolder,
+            CreateCenteredActionRow(backupNowButton), backupStatus);
         viewCloudStatus.LinkClicked += (_, _) =>
             ModernMessageDialog.ShowInfo(FindForm(), cloudStatusDetails, "Last Cloud Backup");
 
@@ -197,7 +195,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             restoreStatusHeadline = headline;
             restoreStatusDetail = detail;
             CreatePanelFields(restoreCard, "Selected Backup", restoreFile,
-                CreateCenteredActionRow(restoreButton!), null, restoreStatusPanel);
+                CreateCenteredActionRow(restoreButton!), restoreStatusPanel);
             restoreCard.Margin = new Padding(AppMetrics.SpacingXs, 0, 0, 0);
             upper.Controls.Add(restoreCard, 1, 0);
             /* No selected file means unverified, not valid. */
@@ -348,39 +346,28 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         operationStats.Text = $"{amount}   ·   {speedText}   ·   {elapsedText}   ·   Time left {timeLeft}";
     }
 
-    private static TableLayoutPanel CreatePanelFields(HumanCard card, string caption, Control field,
-        Control firstActions, Control? secondActions, Control status)
+    private static void CreatePanelFields(HumanCard card, string caption, Control field,
+        Control actions, Control status)
     {
         int statusHeight = AppMetrics.TextHeight(AppTheme.FontSmallBold) +
             AppMetrics.TextHeight(AppTheme.NormalFont) + 2 * AppMetrics.SpacingSm;
         var fields = new TableLayoutPanel {
             Dock = DockStyle.Top,
             ColumnCount = 1,
-            RowCount = secondActions is null ? 3 : 4,
-            Height = AppMetrics.FieldRowHeight + (secondActions is null ? 1 : 2) * AppMetrics.ButtonRowHeight + statusHeight,
+            RowCount = 3,
+            Height = AppMetrics.FieldRowHeight + AppMetrics.ButtonRowHeight + statusHeight,
             Margin = Padding.Empty
         };
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
         fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
         fields.RowStyles.Add(new RowStyle(SizeType.Absolute, statusHeight));
-        if (secondActions is not null)
-            fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
         fields.Controls.Add(HumanUi.Field(caption, field), 0, 0);
-        fields.Controls.Add(firstActions, 0, 1);
+        fields.Controls.Add(actions, 0, 1);
         fields.Controls.Add(status, 0, 2);
-        if (secondActions is not null) fields.Controls.Add(secondActions, 0, 3);
         card.Content.AutoScroll = true;
         card.Content.Controls.Add(fields);
-        UpdatePanelScrollHeight(fields);
-        return fields;
-    }
-
-    private static void UpdatePanelScrollHeight(TableLayoutPanel fields)
-    {
-        fields.Height = fields.RowStyles.Cast<RowStyle>().Sum(row => (int)row.Height);
-        if (fields.Parent is ScrollableControl content)
-            content.AutoScrollMinSize = new Size(0, fields.Height + content.Padding.Vertical);
+        card.Content.AutoScrollMinSize = new Size(0, fields.Height + card.Content.Padding.Vertical);
     }
 
     private static Panel CreatePanelStatus(out Label headline, out Label detail)
@@ -412,10 +399,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         cloudStatusDetails = status.Message;
         viewCloudStatus.Visible = status.Message.Length > 0;
         var settings = CloudBackupSettings.LoadForEditing(out string? warning);
-        bool showRetry = CloudBackupCoordinator.HasRetryableDeliveries(settings);
-        retryPendingButton.Visible = showRetry;
-        backupFields.RowStyles[backupFields.RowCount - 1].Height = showRetry ? AppMetrics.ButtonRowHeight : 0;
-        UpdatePanelScrollHeight(backupFields);
+        retryPendingButton.Visible = CloudBackupCoordinator.HasRetryableDeliveries(settings);
         if (warning is not null)
         {
             backupStatusHeadline.Text = "Backup Settings Need Attention";
