@@ -9,6 +9,10 @@ on:
         required: false
         type: string
         default: ''
+    secrets:
+      FMSC_GOOGLE_DESKTOP_JSON:
+        description: 'Optional Google Desktop OAuth registration for private Sandbox builds'
+        required: false
 
 permissions:
   contents: read
@@ -90,6 +94,28 @@ jobs:
           & .\Tools\PrepareMaintenanceTools.ps1 -ToolsDirectory (Join-Path $env:GITHUB_WORKSPACE 'out/prerequisites') -DownloadMissing
 
       # This uses the EXISTING PortableRelease publish profile and its genuine
+      - name: Prepare Google Drive registration for the private installer
+        if: github.event.repository.private && github.repository_id == '1449162585'
+        shell: pwsh
+        env:
+          FMSC_GOOGLE_DESKTOP_JSON: ${{ secrets.FMSC_GOOGLE_DESKTOP_JSON }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $json = $env:FMSC_GOOGLE_DESKTOP_JSON
+          if ([string]::IsNullOrWhiteSpace($json)) { return }
+          $providers = Get-Content -LiteralPath CloudBackupProviders.json -Raw | ConvertFrom-Json
+          try { $registration = ConvertFrom-Json -InputObject $json -ErrorAction Stop }
+          catch { throw 'The Google Desktop registration secret is not valid JSON.' }
+          if ([Text.Encoding]::UTF8.GetByteCount($json) -gt 16384 -or
+              $registration.PSObject.Properties['web'] -or
+              $registration.installed.client_id -cne $providers.GoogleClientId -or
+              $providers.GoogleClientId.Length -lt 3 -or $providers.GoogleClientId.Length -gt 250 -or
+              [string]::IsNullOrWhiteSpace($registration.installed.client_secret) -or
+              $registration.installed.client_secret.Length -gt 250) {
+            throw 'The Google Desktop registration secret must match GoogleClientId in the pinned Source commit.'
+          }
+          [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'CloudBackupGoogleDesktop.json'), $json, [Text.UTF8Encoding]::new($false))
+
       # ValidateDeploymentAssets and CopyDeploymentFiles MSBuild targets.
       # Unlike the app-only ZIP, there is NO CIAppOnlyBundle bypass.
       # A deliberately empty input DB folder is allowed: the user supplies
@@ -120,6 +146,17 @@ jobs:
           )
           & dotnet @arguments
           if ($LASTEXITCODE -ne 0) { throw 'Full PortableRelease publishing failed.' }
+          $registration = Join-Path $workspace 'CloudBackupGoogleDesktop.json'
+          if (Test-Path -LiteralPath $registration -PathType Leaf) {
+            if ($env:GITHUB_REPOSITORY_ID -ne '1449162585') {
+              throw 'Google Desktop registration is restricted to the private Sandbox installer.'
+            }
+            $publishedRegistration = Join-Path $application 'CloudBackupGoogleDesktop.json'
+            if (-not (Test-Path -LiteralPath $publishedRegistration -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $registration).Hash -cne (Get-FileHash -LiteralPath $publishedRegistration).Hash) {
+              throw 'The private installer is missing its Google Desktop registration.'
+            }
+          }
           $tools = Join-Path $release 'Tools'
           New-Item -ItemType Directory -Path $tools -Force | Out-Null
           Copy-Item -LiteralPath (Join-Path $workspace 'out/prerequisites/sqlcmd.exe') -Destination (Join-Path $tools 'sqlcmd.exe') -Force
@@ -129,6 +166,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $env:GITHUB_WORKSPACE 'out/complete-installer'
+          if ($env:GITHUB_REPOSITORY_ID -ne '1449162585' -and
+              (Test-Path -LiteralPath (Join-Path $root 'FMSC_SMS/CloudBackupGoogleDesktop.json'))) {
+            throw 'Google Desktop registration cannot be included in the public installer artifact.'
+          }
           $required = @(
             'FMSC_SMS/FMSC_SMS.exe',
             'FMSC_SMS/FMSC_SMS.dll',

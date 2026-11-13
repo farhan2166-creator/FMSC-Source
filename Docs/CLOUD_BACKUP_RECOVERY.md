@@ -55,10 +55,34 @@ passwords, refresh tokens and account credentials never belong in that file or G
 client**, using the limited `drive.file` scope. Keep its public client ID in
 `GoogleClientId`. Download that Desktop client's JSON as
 `CloudBackupGoogleDesktop.json` beside the project before publishing. It is ignored
-by Git and copied to application output/publish only when supplied. For GitHub
-publishing, materialize the same file from a protected publisher build input before
-`dotnet publish`; never print or commit it. Existing installations need this file
-beside the executable as well.
+by Git and copied to application output/publish only when supplied. Existing
+installations need this file beside the executable as well.
+
+To include it in a private complete installer, store the JSON in the
+`FMSC_GOOGLE_DESKTOP_JSON` Actions secret in **FMSC-Sandbox**. A Sandbox workflow
+can call the Source installer workflow and pass the secret explicitly. Replace
+`SOURCE_COMMIT_SHA` in both places with the same full commit SHA that includes
+the matching public client ID and the installer workflow support:
+
+```yaml
+name: Package private installer with Google Drive
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  installer:
+    uses: farhan2166-creator/FMSC-Source/.github/workflows/fmsc-complete-installer.yml@SOURCE_COMMIT_SHA
+    with:
+      source_sha: SOURCE_COMMIT_SHA
+    secrets:
+      FMSC_GOOGLE_DESKTOP_JSON: ${{ secrets.FMSC_GOOGLE_DESKTOP_JSON }}
+```
+
+Save the caller under `.github/workflows/` in FMSC-Sandbox and run it from
+Sandbox's main branch. The downloaded private installer contains the registration
+beside the application. The public Source installer and Workflow 04 candidate
+artifact do not receive this secret. Workflow 04 does not currently bundle it
+into private updates.
 
 The parser accepts Google's `installed` envelope, rejects `web` credentials and
 requires the ID to match `GoogleClientId`. Google Desktop token exchange and refresh
