@@ -139,7 +139,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         UseToolbar();
         var backupCard = HumanUi.Card(
             "Backup",
-            "Create one verified backup and deliver to all enabled destinations.");
+            "Save a verified backup to enabled destinations.");
         var localOnlyNotice = new Label {
             Dock = DockStyle.Top,
             Height = AppScale.Scale(46),
@@ -147,9 +147,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             Font = AppTheme.NormalFont,
             ForeColor = AppTheme.MutedText,
             TextAlign = ContentAlignment.TopLeft,
-            Text = "The live school database stays on this computer. Cloud backups are encrypted " +
-                   "recovery copies, not a second live database or a shared school connection. " +
-                   "Keep verified backups both locally and off this computer."
+            Text = "Live data stays on this PC. Keep local and encrypted cloud backups."
         };
         var backupFields = new TableLayoutPanel {
             Dock = DockStyle.Top,
@@ -216,7 +214,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         string backupNotice = localOnlyNotice.Text;
         refreshCloudStatus = () => {
             var status = CloudBackupCoordinator.ReadLastRunStatus();
-            localOnlyNotice.Text = backupNotice + (status.Message.Length == 0 ? "" : "\n\n" + status.Message);
+            localOnlyNotice.Text = backupNotice + (status.Message.Length == 0 ? "" : "\n" + status.Message);
             FitBackupNotice();
         };
 
@@ -248,7 +246,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         {
             var restoreCard = HumanUi.Card(
                 "Restore",
-                "Replace current school data with a saved backup. Newer records will be replaced.");
+                "Restore a backup. Newer changes will be lost.");
             var restoreFields = new TableLayoutPanel {
                 Dock = DockStyle.Top,
                 ColumnCount = 1,
@@ -982,7 +980,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             default:
                 accent = AppTheme.MutedText;
                 headline = "No Backup Selected";
-                detail = "Choose a .bak file to see whether it is a valid FMSC backup.";
+                detail = "Choose a local or cloud backup.";
                 break;
         }
         restoreStatusHeadline.Text = headline;
