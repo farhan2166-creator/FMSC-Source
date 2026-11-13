@@ -5,6 +5,7 @@ namespace FMSC_SMS.Core
     public class ModernTextBox : Panel, IValidationTarget, IAccessibleInput
     {
         private readonly InnerTextBox _inner;
+        private Button? _browseButton;
         private LiveTextSuggestions? _liveSuggestions;
         private AutoCompleteMode _autoCompleteMode;
         private bool _invalid;
@@ -186,6 +187,26 @@ namespace FMSC_SMS.Core
             get => _inner.PlaceholderText;
             set => _inner.PlaceholderText = value;
         }
+        internal Button AddFolderBrowseButton(string accessibleName, EventHandler click)
+        {
+            var button = new Button {
+                Text = "\uE838",
+                Font = AppTheme.IconFont(12f * AppScale.BodyFontScale),
+                AccessibleName = accessibleName,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.Transparent,
+                ForeColor = AppTheme.Text,
+                UseVisualStyleBackColor = false,
+                Cursor = Cursors.Hand,
+                TabIndex = _inner.TabIndex + 1
+            };
+            button.FlatAppearance.BorderSize = 0;
+            button.Click += click;
+            _browseButton = button;
+            Controls.Add(button);
+            Reposition();
+            return button;
+        }
         public bool UseSystemPasswordChar
         {
             get => _inner.UseSystemPasswordChar;
@@ -337,6 +358,13 @@ namespace FMSC_SMS.Core
             int left = LogicalToDeviceUnits(TextInsetLeft);
             int right = LogicalToDeviceUnits(TextInsetRight);
             int vertical = LogicalToDeviceUnits(MultilineVerticalInset);
+            if (_browseButton is { } browse)
+            {
+                int inset = LogicalToDeviceUnits(3);
+                int size = Math.Max(0, Math.Min(Height - 2 * inset, Width - 2 * inset));
+                browse.SetBounds(Width - inset - size, (Height - size) / 2, size, size);
+                right += size;
+            }
             int innerWidth = Math.Max(0, Width - left - right);
             if (_inner.Multiline)
             {

@@ -7,6 +7,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
 {
     readonly ModernTextBox backupFolder = HumanUi.TextBox(false, 500);
     readonly ModernTextBox restoreFile = HumanUi.TextBox(false, 500);
+    readonly Button browseBackupFolder;
+    readonly Button? browseRestoreFile;
     readonly bool canRestore = CurrentUser.HasPermission("Backup.Restore");
     private readonly Label operationStage = new() {
         Dock = DockStyle.Fill, Font = AppTheme.FontSmallBold, AutoEllipsis = true,
@@ -33,10 +35,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         ScrollBars = ScrollBars.Vertical, Height = AppScale.Scale(110), Visible = false
     };
     readonly ModernButton retryPendingButton;
+    readonly TableLayoutPanel backupFields;
     ModernButton? cloudSettingsButton;
-    ModernButton? selectRecoveryButton;
     ModernButton? selectCloudCopyButton;
-    readonly DataGridView availableBackupsGrid = CreateAvailableBackupsGrid();
+    FlowLayoutPanel? cloudCopyActions;
+    readonly RecoveryPointsGrid availableBackupsGrid = CreateAvailableBackupsGrid();
     readonly Label availableBackupsStatus = new() {
         Dock = DockStyle.Top, Height = AppScale.Scale(42), AutoEllipsis = true,
         ForeColor = AppTheme.MutedText, TextAlign = ContentAlignment.MiddleLeft
@@ -106,25 +109,28 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         backupFolder.PlaceholderText = "No local folder selected";
         restoreFile.ReadOnly = true;
         restoreFile.PlaceholderText = "No backup selected";
-        var chooseBackupButton =
-            AddBusyAction("Local Folder…", ChooseBackupFolderAsync, "Secondary");
+        const string folderBrowseLabel = "Browse for local backup folder";
+        browseBackupFolder = backupFolder.AddFolderBrowseButton(folderBrowseLabel, async (_, _) => {
+            try { await ChooseBackupFolderAsync(); }
+            catch (Exception ex) { Fail(ex); }
+        });
+        SetToolTip(browseBackupFolder, folderBrowseLabel);
         backupNowButton =
             AddBusyAction("Back Up Now", BackupNowAsync, "Success");
         retryPendingButton = AddBusyAction("Retry Pending Uploads", RetryPendingAsync, "Secondary");
         if (canRestore)
-            cloudSettingsButton = AddAction("Settings…", (_, _) => OpenCloudSettings(), "Secondary");
-        ModernButton? chooseRestoreButton = null;
-        if (canRestore)
         {
-            chooseRestoreButton =
-                AddAction("Browse for Backup File…", (_, _) => ChooseRestoreFile());
-            selectRecoveryButton =
-                AddAction("Select for Restore", async (_, _) => await UseSelectedRecoveryPointAsync(), "Secondary");
+            const string fileBrowseLabel = "Browse for a backup file";
+            browseRestoreFile = restoreFile.AddFolderBrowseButton(fileBrowseLabel, (_, _) => {
+                try { ChooseRestoreFile(); }
+                catch (Exception ex) { Fail(ex); }
+            });
+            SetToolTip(browseRestoreFile, fileBrowseLabel);
             selectCloudCopyButton =
                 AddAction("Choose Cloud Copy…", (_, _) => UseSelectedCloudCopy(), "Secondary");
             /* Prevent duplicate restore submissions. */
             restoreButton =
-                AddBusyAction("Restore Selected Backup…", RestoreNowAsync, "Danger");
+                AddBusyAction("Restore Now", RestoreNowAsync, "Danger");
             /* Preserve disabled states when the busy scope restores actions. */
             restoreButton.EnabledChanged += (_, _) => {
                 if ((!restoreAllowed || isBusy) &&
@@ -136,33 +142,27 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             await LoadHistoryAsync();
             await LoadRecoveryCatalogueAsync();
         });
+        if (canRestore)
+            cloudSettingsButton = AddAction("Settings…", (_, _) => OpenCloudSettings(), "Secondary");
         locateFileButton =
             AddBusyAction("Locate Missing File…", LocateMissingFileAsync, "Secondary");
         RelocateFromActions(locateFileButton);
-        RelocateFromActions(
-            chooseBackupButton,
-            backupNowButton);
-        if (cloudSettingsButton is not null)
-            RelocateFromActions(cloudSettingsButton);
+        RelocateFromActions(backupNowButton);
         RelocateFromActions(retryPendingButton);
-        if (selectRecoveryButton is not null)
-            RelocateFromActions(selectRecoveryButton);
         if (selectCloudCopyButton is not null)
             RelocateFromActions(selectCloudCopyButton);
-        if (chooseRestoreButton is not null && restoreButton is not null)
-            RelocateFromActions(
-                chooseRestoreButton,
-                restoreButton);
+        if (restoreButton is not null)
+            RelocateFromActions(restoreButton);
         UseToolbar();
         var backupCard = HumanUi.Card("Backup", "Save a verified copy to your backup destinations.");
         var backupStatus = CreatePanelStatus(out backupStatusHeadline, out backupStatusDetail);
-        CreatePanelFields(backupCard, "Local Backup Folder", backupFolder,
-            CreateActionRow(canRestore ? new[] { cloudSettingsButton!, backupNowButton } : new[] { backupNowButton }),
-            CreateCompactActionRow(chooseBackupButton, retryPendingButton), backupStatus);
+        backupFields = CreatePanelFields(backupCard, "Local Backup Folder", backupFolder,
+            CreateCenteredActionRow(backupNowButton),
+            CreateCompactActionRow(retryPendingButton), backupStatus);
         viewCloudStatus.LinkClicked += (_, _) =>
             ModernMessageDialog.ShowInfo(FindForm(), cloudStatusDetails, "Last Cloud Backup");
 
-        // Split the available space equally between actions and history.
+        // Give history 60% of the space available outside the progress row.
         // Show the compact progress row between them during an operation.
         var root = new TableLayoutPanel {
             Dock = DockStyle.Fill,
@@ -172,10 +172,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             Padding = Padding.Empty
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
         operationRow = new RowStyle(SizeType.Absolute, 0);
         root.RowStyles.Add(operationRow);
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
         var upper = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
@@ -197,7 +197,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             restoreStatusHeadline = headline;
             restoreStatusDetail = detail;
             CreatePanelFields(restoreCard, "Selected Backup", restoreFile,
-                CreateActionRow(chooseRestoreButton!, restoreButton!), null, restoreStatusPanel);
+                CreateCenteredActionRow(restoreButton!), null, restoreStatusPanel);
             restoreCard.Margin = new Padding(AppMetrics.SpacingXs, 0, 0, 0);
             upper.Controls.Add(restoreCard, 1, 0);
             /* No selected file means unverified, not valid. */
@@ -215,16 +215,19 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         };
         availableBackupsGrid.SelectionChanged += (_, _) => UpdateSelectedBackupAction();
         availableBackupsGrid.CellDoubleClick += async (_, e) => {
-            if (e.RowIndex >= 0) await UseSelectedRecoveryPointAsync();
+            if (canRestore && e.RowIndex >= 0) await UseSelectedRecoveryPointAsync();
         };
+        if (canRestore)
+            availableBackupsGrid.LoadSelected += async (_, _) => await UseSelectedRecoveryPointAsync();
         availableTab.Controls.Add(availableBackupsGrid);
         availableTab.Controls.Add(availableBackupsStatus);
         if (canRestore)
         {
-            var selectionActions = CreateCompactActionRow(selectRecoveryButton!, selectCloudCopyButton!);
-            selectionActions.Dock = DockStyle.Top;
-            selectionActions.Height = AppMetrics.ButtonRowHeight;
-            availableTab.Controls.Add(selectionActions);
+            cloudCopyActions = CreateCompactActionRow(selectCloudCopyButton!);
+            cloudCopyActions.Dock = DockStyle.Top;
+            cloudCopyActions.Height = AppMetrics.ButtonRowHeight;
+            cloudCopyActions.Visible = false;
+            availableTab.Controls.Add(cloudCopyActions);
         }
         var activityLayout = new TableLayoutPanel {
             Dock = DockStyle.Fill, RowCount = 4, ColumnCount = 1,
@@ -345,7 +348,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         operationStats.Text = $"{amount}   ·   {speedText}   ·   {elapsedText}   ·   Time left {timeLeft}";
     }
 
-    private static void CreatePanelFields(HumanCard card, string caption, Control field,
+    private static TableLayoutPanel CreatePanelFields(HumanCard card, string caption, Control field,
         Control firstActions, Control? secondActions, Control status)
     {
         int statusHeight = AppMetrics.TextHeight(AppTheme.FontSmallBold) +
@@ -369,7 +372,15 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         if (secondActions is not null) fields.Controls.Add(secondActions, 0, 3);
         card.Content.AutoScroll = true;
         card.Content.Controls.Add(fields);
-        card.Content.AutoScrollMinSize = new Size(0, fields.Height + card.Content.Padding.Vertical);
+        UpdatePanelScrollHeight(fields);
+        return fields;
+    }
+
+    private static void UpdatePanelScrollHeight(TableLayoutPanel fields)
+    {
+        fields.Height = fields.RowStyles.Cast<RowStyle>().Sum(row => (int)row.Height);
+        if (fields.Parent is ScrollableControl content)
+            content.AutoScrollMinSize = new Size(0, fields.Height + content.Padding.Vertical);
     }
 
     private static Panel CreatePanelStatus(out Label headline, out Label detail)
@@ -401,7 +412,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         cloudStatusDetails = status.Message;
         viewCloudStatus.Visible = status.Message.Length > 0;
         var settings = CloudBackupSettings.LoadForEditing(out string? warning);
-        retryPendingButton.Visible = CloudBackupCoordinator.HasRetryableDeliveries(settings);
+        bool showRetry = CloudBackupCoordinator.HasRetryableDeliveries(settings);
+        retryPendingButton.Visible = showRetry;
+        backupFields.RowStyles[backupFields.RowCount - 1].Height = showRetry ? AppMetrics.ButtonRowHeight : 0;
+        UpdatePanelScrollHeight(backupFields);
         if (warning is not null)
         {
             backupStatusHeadline.Text = "Backup Settings Need Attention";
@@ -427,12 +441,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     {
         var point = SelectedRecoveryPoint;
         bool canSelect = !isBusy && !selectingBackup;
-        if (selectRecoveryButton is not null)
-            selectRecoveryButton.Enabled = canSelect && point is not null;
-        if (selectCloudCopyButton is not null)
+        if (cloudCopyActions is not null && selectCloudCopyButton is not null)
         {
             bool canChooseCloudCopy = point is { HasLocal: true, CloudCopies.Count: > 0 };
-            selectCloudCopyButton.Visible = canChooseCloudCopy;
+            cloudCopyActions.Visible = canChooseCloudCopy;
             selectCloudCopyButton.Enabled = canSelect && canChooseCloudCopy;
         }
     }
@@ -569,9 +581,28 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         }
     }
 
-    private static DataGridView CreateAvailableBackupsGrid()
+    private sealed class RecoveryPointsGrid : DataGridView
     {
-        var grid = new DataGridView {
+        internal event EventHandler? LoadSelected;
+
+        protected override bool ProcessDialogKey(Keys keyData) =>
+            TryLoadSelected(keyData) || base.ProcessDialogKey(keyData);
+
+        protected override bool ProcessDataGridViewKey(KeyEventArgs e) =>
+            TryLoadSelected(e.KeyData) || base.ProcessDataGridViewKey(e);
+
+        private bool TryLoadSelected(Keys keyData)
+        {
+            if (keyData != Keys.Enter || SelectedRows.Count != 1 || LoadSelected is null)
+                return false;
+            LoadSelected(this, EventArgs.Empty);
+            return true;
+        }
+    }
+
+    private static RecoveryPointsGrid CreateAvailableBackupsGrid()
+    {
+        var grid = new RecoveryPointsGrid {
             Dock = DockStyle.Fill,
             ReadOnly = true,
             AllowUserToAddRows = false,
@@ -609,26 +640,24 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         return grid;
     }
 
-    static TableLayoutPanel CreateActionRow(params ModernButton[] buttons)
+    private static TableLayoutPanel CreateCenteredActionRow(ModernButton button)
     {
         var row = new TableLayoutPanel {
             Dock = DockStyle.Fill,
-            ColumnCount = buttons.Length,
+            ColumnCount = 3,
             RowCount = 1,
             Margin = new Padding(0),
             Padding = new Padding(0, AppMetrics.SpacingXs, 0, AppMetrics.SpacingXs)
         };
         row.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        for (int column = 0; column < buttons.Length; column++)
-        {
-            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / buttons.Length));
-            ModernButton button = buttons[column];
-            button.AutoSize = false;
-            button.MinimumSize = Size.Empty;
-            button.Dock = DockStyle.Fill;
-            button.Margin = new Padding(AppMetrics.SpacingXs, 0, AppMetrics.SpacingXs, 0);
-            row.Controls.Add(button, column, 0);
-        }
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+        button.AutoSize = false;
+        button.MinimumSize = Size.Empty;
+        button.Dock = DockStyle.Fill;
+        button.Margin = new Padding(AppMetrics.SpacingXs, 0, AppMetrics.SpacingXs, 0);
+        row.Controls.Add(button, 1, 0);
         return row;
     }
 
@@ -864,7 +893,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             availableBackupsGrid.ClearSelection();
             string countText = inventory.Points.Count == 0
                 ? "No backups found. Browse for a backup file or connect a cloud account in Backup Settings."
-                : canRestore ? "Select a backup to review it before restoring."
+                : canRestore ? "Double-click a backup or press Enter to load it for restore."
                     : inventory.Points.Count + " available backups.";
             availableBackupsStatus.Text = inventory.Warnings.Count == 0
                 ? countText : countText + "  " + string.Join(" ", inventory.Warnings);
@@ -1537,6 +1566,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     void SetBusyState(bool busy)
     {
         if (!busy) StopOperationProgress();
+        browseBackupFolder.Enabled = !busy;
+        if (browseRestoreFile is not null) browseRestoreFile.Enabled = !busy;
         backupNowButton.Enabled = !busy;
         retryPendingButton.Enabled = !busy;
         if (cloudSettingsButton != null) cloudSettingsButton.Enabled = !busy;
