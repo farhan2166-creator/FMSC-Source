@@ -8,11 +8,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     readonly ModernTextBox restoreFile = HumanUi.TextBox(false, 500);
     readonly bool canRestore = CurrentUser.HasPermission("Backup.Restore");
     ModernButton backupNowButton = null!;
-    private readonly Label operationStage = new() {
-        Dock = DockStyle.Top, Height = AppScale.Scale(28),
-        ForeColor = AppTheme.Primary, Font = AppTheme.FontSmallBold,
-        Text = "Ready for backup or restore", TextAlign = ContentAlignment.MiddleLeft
-    };
     private readonly LinkLabel toggleTechnicalDetails = new() {
         Dock = DockStyle.Top, Height = AppScale.Scale(24),
         Text = "Show technical details", LinkColor = AppTheme.Primary,
@@ -22,22 +17,17 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         Dock = DockStyle.Top, Multiline = true, ReadOnly = true,
         ScrollBars = ScrollBars.Vertical, Height = AppScale.Scale(110), Visible = false
     };
-    private readonly Label destinationResults = new() {
-        Dock = DockStyle.Top, Height = AppScale.Scale(60),
-        ForeColor = AppTheme.MutedText, AutoEllipsis = false,
-        TextAlign = ContentAlignment.TopLeft,
-        Text = "Configure Local, Google Drive or Dropbox in Backup Settings."
-    };
     ModernButton? retryPendingButton;
     ModernButton? cloudSettingsButton;
-    ModernButton? cloudChooseRestoreButton;
     ModernButton? selectRecoveryButton;
+    ModernButton? selectCloudCopyButton;
     readonly DataGridView availableBackupsGrid = CreateAvailableBackupsGrid();
     readonly Label availableBackupsStatus = new() {
         Dock = DockStyle.Top, Height = AppScale.Scale(42), AutoEllipsis = true,
         ForeColor = AppTheme.MutedText, TextAlign = ContentAlignment.MiddleLeft
     };
     int recoveryCatalogueVersion;
+    bool selectingBackup;
     private readonly ListBox recordedCloudActivity = new() {
         Dock = DockStyle.Fill, IntegralHeight = false, HorizontalScrollbar = true
     };
@@ -45,7 +35,13 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     IReadOnlyList<CloudRemoteBackup> selectedCloudAlternatives = Array.Empty<CloudRemoteBackup>();
     string cloudRecoveryPassphrase = string.Empty;
     string selectedLocalRecoverySha256 = string.Empty;
-    Action? refreshCloudStatus;
+    private string cloudStatusDetails = string.Empty;
+    private readonly LinkLabel viewCloudStatus = new() {
+        Text = "Last cloud backup details", AutoSize = true, LinkColor = AppTheme.Primary,
+        Anchor = AnchorStyles.Left, Visible = false
+    };
+    private Label backupStatusHeadline = null!;
+    private Label backupStatusDetail = null!;
     ModernButton? restoreButton;
     ModernButton? locateFileButton;
     bool isBusy;
@@ -95,16 +91,16 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             AddBusyAction("Back Up Now", BackupNowAsync, "Success");
         retryPendingButton = AddBusyAction("Retry Pending Uploads", RetryPendingAsync, "Secondary");
         if (canRestore)
-            cloudSettingsButton = AddAction("Cloud Settings…", (_, _) => OpenCloudSettings());
+            cloudSettingsButton = AddAction("Backup Settings…", (_, _) => OpenCloudSettings());
         ModernButton? chooseRestoreButton = null;
         if (canRestore)
         {
             chooseRestoreButton =
-                AddAction("Choose Backup File…", (_, _) => ChooseRestoreFile());
-            cloudChooseRestoreButton =
-                AddBusyAction("Choose Cloud Backup…", ChooseCloudRestoreAsync);
+                AddAction("Browse for Backup File…", (_, _) => ChooseRestoreFile());
             selectRecoveryButton =
-                AddBusyAction("Use Selected Recovery Point", UseSelectedRecoveryPointAsync);
+                AddAction("Use Selected Backup", async (_, _) => await UseSelectedRecoveryPointAsync());
+            selectCloudCopyButton =
+                AddAction("Use Cloud Copy…", (_, _) => UseSelectedCloudCopy());
             /* Prevent duplicate restore submissions. */
             restoreButton =
                 AddBusyAction("Restore Data", RestoreNowAsync, "Danger");
@@ -115,7 +111,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                     restoreButton.Enabled = false;
             };
         }
-        refreshHistoryButton = AddBusyAction("Refresh History", async () => {
+        refreshHistoryButton = AddBusyAction("Refresh Backups and History", async () => {
             await LoadHistoryAsync();
             await LoadRecoveryCatalogueAsync();
         });
@@ -128,95 +124,23 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             RelocateFromActions(cloudSettingsButton);
         if (retryPendingButton is not null)
             RelocateFromActions(retryPendingButton);
-        if (cloudChooseRestoreButton is not null)
-            RelocateFromActions(cloudChooseRestoreButton);
         if (selectRecoveryButton is not null)
             RelocateFromActions(selectRecoveryButton);
+        if (selectCloudCopyButton is not null)
+            RelocateFromActions(selectCloudCopyButton);
         if (chooseRestoreButton is not null && restoreButton is not null)
             RelocateFromActions(
                 chooseRestoreButton,
                 restoreButton);
         UseToolbar();
-        var backupCard = HumanUi.Card(
-            "Backup",
-            "Save a verified backup to enabled destinations.");
-        var localOnlyNotice = new Label {
-            Dock = DockStyle.Top,
-            Height = AppScale.Scale(46),
-            AutoEllipsis = false,
-            Font = AppTheme.NormalFont,
-            ForeColor = AppTheme.MutedText,
-            TextAlign = ContentAlignment.TopLeft,
-            Text = "Live data stays on this PC. Keep local and encrypted cloud backups."
-        };
-        var backupFields = new TableLayoutPanel {
-            Dock = DockStyle.Top,
-            Height = AppMetrics.FieldRowHeight + 2 * AppMetrics.ButtonRowHeight + AppMetrics.SpacingXs,
-            ColumnCount = 1,
-            RowCount = 3,
-            Padding = new Padding(2, 4, 2, 0)
-        };
-        backupFields.RowStyles.Add(
-            new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
-        backupFields.RowStyles.Add(
-            new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
-        backupFields.RowStyles.Add(
-            new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
-        backupFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        backupFields.Controls.Add(
-            HumanUi.Field("Local Backup Folder", backupFolder),
-            0,
-            0);
-        backupFields.Controls.Add(
+        var backupCard = HumanUi.Card("Backup", "Save a verified copy to your backup destinations.");
+        var backupStatus = CreatePanelStatus(out backupStatusHeadline, out backupStatusDetail);
+        CreatePanelFields(backupCard, "Local Backup Folder", backupFolder,
             CreateActionRow(chooseBackupButton, backupNowButton),
-            0,
-            1);
-        backupFields.Controls.Add(
             canRestore ? CreateActionRow(cloudSettingsButton!, retryPendingButton!)
-                       : CreateActionRow(retryPendingButton!),
-            0, 2);
-        // Each upper card can scroll independently when the available half-height
-        // is smaller than its actions and warnings (compact windows / high DPI).
-        backupCard.Content.AutoScroll = true;
-        backupCard.Content.Controls.Add(technicalDetails);
-        backupCard.Content.Controls.Add(toggleTechnicalDetails);
-        backupCard.Content.Controls.Add(destinationResults);
-        backupCard.Content.Controls.Add(operationStage);
-        backupCard.Content.Controls.Add(backupFields);
-        backupCard.Content.Controls.Add(localOnlyNotice);
-        toggleTechnicalDetails.LinkClicked += (_, _) => {
-            technicalDetails.Visible = !technicalDetails.Visible;
-            toggleTechnicalDetails.Text = technicalDetails.Visible
-                ? "Hide technical details" : "Show technical details";
-            FitBackupNotice();
-        };
-        void FitBackupNotice()
-        {
-            if (backupCard.Content.ClientSize.Width <= 0)
-                return;
-            int textWidth = Math.Max(1, backupCard.Content.ClientSize.Width -
-                backupCard.Content.Padding.Horizontal - AppMetrics.SpacingLg -
-                SystemInformation.VerticalScrollBarWidth);
-            int textHeight = TextRenderer.MeasureText(
-                localOnlyNotice.Text, localOnlyNotice.Font,
-                new Size(textWidth, int.MaxValue),
-                TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl).Height;
-            localOnlyNotice.Height = Math.Max(
-                AppMetrics.TextHeight(localOnlyNotice.Font),
-                textHeight + AppMetrics.SpacingSm);
-            backupCard.Content.AutoScrollMinSize = new Size(
-                0, localOnlyNotice.Height + backupFields.Height +
-                    operationStage.Height + destinationResults.Height + toggleTechnicalDetails.Height +
-                    (technicalDetails.Visible ? technicalDetails.Height : 0) +
-                    backupCard.Content.Padding.Vertical);
-        }
-        backupCard.Content.SizeChanged += (_, _) => FitBackupNotice();
-        string backupNotice = localOnlyNotice.Text;
-        refreshCloudStatus = () => {
-            var status = CloudBackupCoordinator.ReadLastRunStatus();
-            localOnlyNotice.Text = backupNotice + (status.Message.Length == 0 ? "" : "\n" + status.Message);
-            FitBackupNotice();
-        };
+                       : CreateActionRow(retryPendingButton!), backupStatus);
+        viewCloudStatus.LinkClicked += (_, _) =>
+            ModernMessageDialog.ShowInfo(FindForm(), cloudStatusDetails, "Last Cloud Backup");
 
         // 50% actions above, 50% backup history / recorded file paths below.
         // The upper half is itself split evenly between Backup and Restore.
@@ -247,73 +171,12 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             var restoreCard = HumanUi.Card(
                 "Restore",
                 "Restore a backup. Newer changes will be lost.");
-            var restoreFields = new TableLayoutPanel {
-                Dock = DockStyle.Top,
-                ColumnCount = 1,
-                RowCount = 4,
-                Padding = new Padding(2, 4, 2, 0)
-            };
-            restoreFields.RowStyles.Add(
-                new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
-            /* Show backup eligibility before the restore actions. */
-            int restoreStatusHeight =
-                AppMetrics.TextHeight(AppTheme.FontSmallBold) +
-                AppMetrics.TextHeight(AppTheme.NormalFont) +
-                2 * AppMetrics.SpacingSm;
-            restoreFields.RowStyles.Add(
-                new RowStyle(SizeType.Absolute, restoreStatusHeight));
-            restoreFields.RowStyles.Add(
-                new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
-            restoreFields.RowStyles.Add(
-                new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
-            restoreFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            restoreStatusHeadline = new Label {
-                Dock = DockStyle.Top,
-                Height = AppMetrics.TextHeight(AppTheme.FontSmallBold),
-                Font = AppTheme.FontSmallBold,
-                ForeColor = AppTheme.MutedText,
-                TextAlign = ContentAlignment.MiddleLeft,
-                AutoEllipsis = true
-            };
-            restoreStatusDetail = new Label {
-                Dock = DockStyle.Fill,
-                Font = AppTheme.NormalFont,
-                ForeColor = AppTheme.MutedText,
-                TextAlign = ContentAlignment.MiddleLeft,
-                AutoEllipsis = true
-            };
-            restoreStatusPanel = new Panel {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(
-                    AppMetrics.SpacingSm,
-                    AppMetrics.SpacingXs,
-                    AppMetrics.SpacingSm,
-                    AppMetrics.SpacingXs),
-                BackColor = AppTheme.Tint(AppTheme.MutedText, 0.90f)
-            };
-            /* Add Fill before Top so the headline retains its space. */
-            restoreStatusPanel.Controls.Add(restoreStatusDetail);
-            restoreStatusPanel.Controls.Add(restoreStatusHeadline);
-            restoreFields.Controls.Add(
-                HumanUi.Field("Backup File", restoreFile),
-                0,
-                0);
-            restoreFields.Controls.Add(
-                restoreStatusPanel,
-                0,
-                1);
-            restoreFields.Controls.Add(
+            restoreStatusPanel = CreatePanelStatus(out var headline, out var detail);
+            restoreStatusHeadline = headline;
+            restoreStatusDetail = detail;
+            CreatePanelFields(restoreCard, "Selected Backup", restoreFile,
                 CreateActionRow(chooseRestoreButton!, restoreButton!),
-                0,
-                2);
-            restoreFields.Controls.Add(
-                CreateActionRow(selectRecoveryButton!, cloudChooseRestoreButton!), 0, 3);
-            restoreFields.Height = AppMetrics.FieldRowHeight +
-                restoreStatusHeight + 2 * AppMetrics.ButtonRowHeight + AppMetrics.SpacingXs;
-            restoreCard.Content.AutoScroll = true;
-            restoreCard.Content.Controls.Add(restoreFields);
-            restoreCard.Content.AutoScrollMinSize = new Size(
-                0, restoreFields.Height + restoreCard.Content.Padding.Vertical);
+                CreateActionRow(selectRecoveryButton!, selectCloudCopyButton!), restoreStatusPanel);
             restoreCard.Margin = new Padding(AppMetrics.SpacingXs, 0, 0, 0);
             upper.Controls.Add(restoreCard, 1, 0);
             /* No selected file means unverified, not valid. */
@@ -325,18 +188,38 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var availableTab = new TabPage("Available Backups") { BackColor = AppTheme.PageBackground };
         var activityTab = new TabPage("Activity History") { BackColor = AppTheme.PageBackground };
-        availableBackupsGrid.CellDoubleClick += async (_, _) => await UseSelectedRecoveryPointAsync();
+        tabs.SelectedIndexChanged += (_, _) => UpdateSelectedBackupAction();
+        availableBackupsGrid.SelectionChanged += (_, _) => UpdateSelectedBackupAction();
+        availableBackupsGrid.CellDoubleClick += async (_, e) => {
+            if (e.RowIndex >= 0) await UseSelectedRecoveryPointAsync();
+        };
         availableTab.Controls.Add(availableBackupsGrid);
         availableTab.Controls.Add(availableBackupsStatus);
         var activityLayout = new TableLayoutPanel {
-            Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1,
+            Dock = DockStyle.Fill, RowCount = 4, ColumnCount = 1,
             Margin = Padding.Empty, Padding = Padding.Empty
         };
+        activityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        activityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 36));
         activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 64));
         activityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        activityLayout.Controls.Add(recordedCloudActivity, 0, 0);
-        activityLayout.Controls.Add(Grid, 0, 1);
+        var activityLinks = new FlowLayoutPanel {
+            Dock = DockStyle.Fill, AutoSize = true, Margin = Padding.Empty
+        };
+        activityLinks.Controls.Add(viewCloudStatus);
+        toggleTechnicalDetails.Dock = DockStyle.None;
+        toggleTechnicalDetails.AutoSize = true;
+        activityLinks.Controls.Add(toggleTechnicalDetails);
+        activityLayout.Controls.Add(activityLinks, 0, 0);
+        activityLayout.Controls.Add(technicalDetails, 0, 1);
+        activityLayout.Controls.Add(recordedCloudActivity, 0, 2);
+        activityLayout.Controls.Add(Grid, 0, 3);
+        toggleTechnicalDetails.LinkClicked += (_, _) => {
+            technicalDetails.Visible = !technicalDetails.Visible;
+            toggleTechnicalDetails.Text = technicalDetails.Visible
+                ? "Hide technical details" : "Show technical details";
+        };
         activityTab.Controls.Add(activityLayout);
         tabs.TabPages.Add(availableTab);
         tabs.TabPages.Add(activityTab);
@@ -347,31 +230,107 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         root.Controls.Add(upper, 0, 0);
         root.Controls.Add(historyCard, 0, 1);
         SetContent(root);
-        FitBackupNotice();
+        RefreshCloudStatus();
         LoadBackupFolder();
         /* Keep history-dependent actions disabled until loading succeeds. */
         CloseHistoryDependentActions();
         Defer(LoadHistoryAsync);
         Defer(LoadRecoveryCatalogueAsync);
         RefreshRecordedActivity();
-        RefreshDestinationSummary();
+        UpdateSelectedBackupAction();
     }
 
-    private void RefreshDestinationSummary()
+    private static void CreatePanelFields(HumanCard card, string caption, Control field,
+        Control firstActions, Control secondActions, Control status)
+    {
+        int statusHeight = AppMetrics.TextHeight(AppTheme.FontSmallBold) +
+            AppMetrics.TextHeight(AppTheme.NormalFont) + 2 * AppMetrics.SpacingSm;
+        var fields = new TableLayoutPanel {
+            Dock = DockStyle.Top,
+            ColumnCount = 1,
+            RowCount = 4,
+            Height = AppMetrics.FieldRowHeight + 2 * AppMetrics.ButtonRowHeight + statusHeight,
+            Margin = Padding.Empty
+        };
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
+        fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
+        fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
+        fields.RowStyles.Add(new RowStyle(SizeType.Absolute, statusHeight));
+        fields.Controls.Add(HumanUi.Field(caption, field), 0, 0);
+        fields.Controls.Add(firstActions, 0, 1);
+        fields.Controls.Add(secondActions, 0, 2);
+        fields.Controls.Add(status, 0, 3);
+        card.Content.AutoScroll = true;
+        card.Content.Controls.Add(fields);
+        card.Content.AutoScrollMinSize = new Size(0, fields.Height + card.Content.Padding.Vertical);
+    }
+
+    private static Panel CreatePanelStatus(out Label headline, out Label detail)
+    {
+        headline = new Label {
+            Dock = DockStyle.Top, Height = AppMetrics.TextHeight(AppTheme.FontSmallBold),
+            Font = AppTheme.FontSmallBold, ForeColor = AppTheme.MutedText,
+            TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true
+        };
+        detail = new Label {
+            Dock = DockStyle.Fill, Font = AppTheme.NormalFont, ForeColor = AppTheme.MutedText,
+            TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true
+        };
+        var panel = new Panel {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(AppMetrics.SpacingSm, AppMetrics.SpacingXs,
+                AppMetrics.SpacingSm, AppMetrics.SpacingXs),
+            BackColor = AppTheme.Tint(AppTheme.MutedText, 0.90f)
+        };
+        panel.Controls.Add(detail);
+        panel.Controls.Add(headline);
+        return panel;
+    }
+
+    private void RefreshCloudStatus()
     {
         if (IsDisposed || Disposing) return;
+        var status = CloudBackupCoordinator.ReadLastRunStatus();
+        cloudStatusDetails = status.Message;
+        viewCloudStatus.Visible = status.Message.Length > 0;
         var settings = CloudBackupSettings.LoadForEditing(out string? warning);
         if (warning is not null)
         {
-            destinationResults.Text = "Backup settings need repair — open Backup Settings.";
+            backupStatusHeadline.Text = "Backup Settings Need Attention";
+            backupStatusHeadline.ForeColor = AppTheme.Warning;
+            backupStatusDetail.Text = "Open Backup Settings to repair the configuration.";
             return;
         }
-        destinationResults.Text = "Destinations: " +
+        backupStatusHeadline.Text = status.Warning ? "Cloud Backup Needs Attention" : "Backup Destinations";
+        backupStatusHeadline.ForeColor = status.Warning ? AppTheme.Warning : AppTheme.MutedText;
+        if (status.Warning)
+        {
+            backupStatusDetail.Text = "See Last cloud backup details in Activity History.";
+            return;
+        }
+        backupStatusDetail.Text =
             (settings.LocalEnabled ? "Local · " : "") +
             (settings.GoogleDriveEnabled ? "Google Drive · " : "") +
             (settings.DropboxEnabled ? "Dropbox · " : "") +
             (settings.AutomaticEnabled ? "Scheduled" : "Manual");
     }
+
+    private void UpdateSelectedBackupAction()
+    {
+        var point = SelectedRecoveryPoint;
+        bool canSelect = !isBusy && !selectingBackup;
+        if (selectRecoveryButton is not null)
+            selectRecoveryButton.Enabled = canSelect && point is not null;
+        if (selectCloudCopyButton is not null)
+            selectCloudCopyButton.Enabled = canSelect && point is { HasLocal: true, CloudCopies.Count: > 0 };
+    }
+
+    private UnifiedRecoveryPoint? SelectedRecoveryPoint =>
+        availableBackupsGrid.Parent is TabPage tab && tab.Parent is TabControl tabs &&
+        tabs.SelectedTab == tab && availableBackupsGrid.SelectedRows.Count == 1
+            ? availableBackupsGrid.SelectedRows[0].Tag as UnifiedRecoveryPoint
+            : null;
 
     private void RefreshRecordedActivity()
     {
@@ -394,8 +353,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     private void ReportBackupStage(BackupProgressUpdate update)
     {
         if (IsDisposed || Disposing) return;
-        operationStage.Text = update.Display;
-        operationStage.ForeColor = update.IsError ? AppTheme.Danger : AppTheme.Primary;
+        SetStatus(update.Display, update.IsError);
         if (update.Detail.Length > 0)
         {
             string line = DateTime.Now.ToString("HH:mm:ss") + "  " + update.Display +
@@ -403,8 +361,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             if (technicalDetails.TextLength > 12000) technicalDetails.Clear();
             technicalDetails.AppendText(line);
         }
-        if (restoreStatusDetail is not null && isBusy)
-            restoreStatusDetail.Text = update.Display;
     }
 
     private static DataGridView CreateAvailableBackupsGrid()
@@ -577,24 +533,17 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             if (settings.LocalEnabled &&
                 (string.IsNullOrWhiteSpace(backupFolder.Text) || !Directory.Exists(backupFolder.Text)))
             {
-                Warn("Choose a valid Local Backup Folder or disable the Local destination in Cloud Settings.");
+                Warn("Choose a valid local backup folder or disable local backups in Backup Settings.");
                 return;
             }
             technicalDetails.Clear();
             var progress = new Progress<BackupProgressUpdate>(ReportBackupStage);
             var result = await CloudBackupCoordinator.CreateAndUploadAsync(progress: progress);
-            destinationResults.Text = "Local: " + (settings.LocalEnabled
-                    ? (result.LocalSucceeded ? "Verified" : "Failed") : "Disabled") +
-                "\nGoogle Drive: " + (settings.GoogleDriveEnabled
-                    ? (result.GoogleSucceeded ? "Recovery verified" : "Pending retry") : "Disabled") +
-                "\nDropbox: " + (settings.DropboxEnabled
-                    ? (result.DropboxSucceeded ? "Recovery verified" : "Pending retry") : "Disabled");
             await LoadHistoryAsync();
             await LoadRecoveryCatalogueAsync();
             RefreshRecordedActivity();
-            SetStatus(result.Message, result.UploadsPending);
             if (result.UploadsPending) Warn(result.Message);
-            else ModernMessageDialog.ShowInfo(FindForm(), result.Message);
+            else Info(result.Message);
         }
         catch (Exception ex) { Fail(ex); }
         finally
@@ -615,7 +564,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             if (dialog.ShowDialog(FindForm()) == DialogResult.OK)
             {
                 SetStatus("Backup destination, schedule and retention settings saved.");
-                RefreshDestinationSummary();
+                RefreshCloudStatus();
                 _ = LoadRecoveryCatalogueAsync();
             }
         }
@@ -634,6 +583,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             technicalDetails.Clear();
             string result = await CloudBackupCoordinator.RetryPendingUploadsNowAsync(
                 progress: new Progress<BackupProgressUpdate>(ReportBackupStage));
+            RefreshCloudStatus();
             await LoadRecoveryCatalogueAsync();
             RefreshRecordedActivity();
             SetStatus(result);
@@ -668,8 +618,9 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             }
             availableBackupsGrid.ClearSelection();
             string countText = inventory.Points.Count == 0
-                ? "No available recovery points found. Choose a backup file manually or connect a cloud account."
-                : inventory.Points.Count + " available recovery point(s). Select a row and use 'Use Selected Recovery Point'.";
+                ? "No backups found. Browse for a backup file or connect a cloud account in Backup Settings."
+                : canRestore ? "Select a backup below, then click Use Selected Backup."
+                    : inventory.Points.Count + " available backups.";
             availableBackupsStatus.Text = inventory.Warnings.Count == 0
                 ? countText : countText + "  " + string.Join(" ", inventory.Warnings);
         }
@@ -678,19 +629,20 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             if (IsDisposed || version != recoveryCatalogueVersion) return;
             AppExceptionHandler.LogNonFatal(ex, "Loading unified backup recovery-point catalogue");
             availableBackupsStatus.Text =
-                "Recovery points could not be refreshed. Existing backups were not modified; try Refresh History or Choose Backup File.";
+                "Could not refresh available backups. Refresh the list or browse for a backup file.";
         }
     }
 
     private async Task UseSelectedRecoveryPointAsync()
     {
-        if (isBusy || !canRestore) return;
-        if (availableBackupsGrid.SelectedRows.Count != 1 ||
-            availableBackupsGrid.SelectedRows[0].Tag is not UnifiedRecoveryPoint point)
+        if (isBusy || selectingBackup || !canRestore) return;
+        if (SelectedRecoveryPoint is not { } point)
         {
-            Warn("Select a recovery point in Available Backups, then choose Use Selected Recovery Point.");
+            Warn("Select a row in Available Backups first.");
             return;
         }
+        selectingBackup = true;
+        UpdateSelectedBackupAction();
         try
         {
             RequirePermission("Backup.Restore");
@@ -699,10 +651,14 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 string path = point.LocalCopies[0].FilePath;
                 if (!File.Exists(path))
                 {
-                    Warn("This local backup is no longer available. Refresh the recovery points or select a cloud copy.");
+                    if (point.CloudCopies.Count > 0)
+                        SelectCloudCopy(point);
+                    else
+                        Warn("This local backup is no longer available. Refresh the backup list.");
                     return;
                 }
                 var info = await Task.Run(() => DatabaseBackupManager.GetBackupInfo(path));
+                if (IsDisposed || isBusy || !ReferenceEquals(SelectedRecoveryPoint, point)) return;
                 RestoreFileState state = ClassifyRestoreFile(info);
                 if (state is RestoreFileState.Valid or RestoreFileState.Stale)
                 {
@@ -726,81 +682,52 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 restoreFile.Tag = null; // Re-read the SQL header at final restore confirmation.
                 ShowRestoreFileStatus(state, info);
                 if (state is RestoreFileState.Valid or RestoreFileState.Stale)
-                    SetStatus("Local copy selected. Restore Selected will validate the file again before replacing school data.");
+                    SetStatus("Local backup selected.");
                 else
                     Warn("The selected local file could not be verified as an FMSC database backup.");
                 return;
             }
-            if (point.CloudCopies.Count == 0)
-            {
-                Warn("This recovery point has no currently available copies.");
-                return;
-            }
-            // Ask for the original passphrase only when the chosen source is
-            // encrypted. Do not retrieve secrets from unrelated cloud accounts.
-            var copies = point.CloudCopies.Select(x =>
-                new CloudBackupCoordinator.CloudSelection(x.Remote, x.RecoveryTested, x.SourceBakSha256))
-                .ToArray();
-            using var dialog = new CloudRestoreSelectionDialog(copies, null);
-            if (dialog.ShowDialog(FindForm()) != DialogResult.OK ||
-                dialog.SelectedCopy is not { } selected) return;
-            selectedCloud = selected;
-            selectedCloudAlternatives = point.CloudCopies.Select(x => x.Remote).ToArray();
-            cloudRecoveryPassphrase = dialog.RecoveryPassphrase;
-            selectedRestoreBackupInfo = null;
-            restoreFile.Tag = null;
-            restoreFile.Text = selected.Remote.Provider + " — " +
-                selected.Remote.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt");
-            ShowRestoreFileStatus(RestoreFileState.Valid, null);
-            if (restoreStatusHeadline != null)
-                restoreStatusHeadline.Text = "Cloud Recovery Point Selected";
-            if (restoreStatusDetail != null)
-                restoreStatusDetail.Text = "Remote metadata is provisional; downloaded encryption and SQL integrity are checked before restoration.";
-            SetStatus("Encrypted cloud recovery point selected. Restore Selected will download and validate this exact recovery point.");
+            SelectCloudCopy(point);
+        }
+        catch (Exception ex) { Fail(ex); }
+        finally
+        {
+            selectingBackup = false;
+            if (!IsDisposed) UpdateSelectedBackupAction();
+        }
+    }
+
+    private void UseSelectedCloudCopy()
+    {
+        if (isBusy || selectingBackup ||
+            SelectedRecoveryPoint is not { HasLocal: true, CloudCopies.Count: > 0 } point) return;
+        try
+        {
+            RequirePermission("Backup.Restore");
+            SelectCloudCopy(point);
         }
         catch (Exception ex) { Fail(ex); }
     }
 
-    private async Task ChooseCloudRestoreAsync()
+    private void SelectCloudCopy(UnifiedRecoveryPoint point)
     {
-        if (isBusy) return;
-        try
-        {
-            RequirePermission("Backup.Restore");
-            SetStatus("Checking available cloud recovery points…");
-            var options = await CloudBackupCoordinator.BrowseCloudAsync();
-            if (IsDisposed) return;
-            if (options.Copies.Count == 0)
-            {
-                Warn(options.Warnings.Count > 0 ? string.Join("\n", options.Warnings)
-                    : "No cloud backups are available. Check the connected Google Drive and Dropbox accounts.");
-                return;
-            }
-            DateTime? newestLocal = await Task.Run(DatabaseBackupManager.GetNewestAvailableLocalBackupUtc);
-            using var dialog = new CloudRestoreSelectionDialog(options.Copies, newestLocal, options.Warnings);
-            if (dialog.ShowDialog(FindForm()) != DialogResult.OK ||
-                dialog.SelectedCopy is not { } selected)
-                return;
-            selectedCloud = selected;
-            selectedCloudAlternatives = options.Copies
-                .Where(copy => string.Equals(copy.Remote.PackageSha256, selected.Remote.PackageSha256,
-                    StringComparison.OrdinalIgnoreCase) &&
-                    (copy.Remote.SqlBackupCreatedUtc - selected.Remote.SqlBackupCreatedUtc).Duration() < TimeSpan.FromSeconds(1))
-                .Select(copy => copy.Remote).ToArray();
-            cloudRecoveryPassphrase = dialog.RecoveryPassphrase;
-            selectedRestoreBackupInfo = null;
-            restoreFile.Tag = null;
-            restoreFile.Text = selected.Remote.Provider + " — " +
-                selected.Remote.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt");
-            ShowRestoreFileStatus(RestoreFileState.Valid, null);
-            if (restoreStatusHeadline != null)
-                restoreStatusHeadline.Text = "Cloud Recovery Point Selected";
-            if (restoreStatusDetail != null)
-                restoreStatusDetail.Text =
-                    "Creation time is provisional until the encrypted download and SQL header are verified.";
-            SetStatus("Cloud backup selected. Restore Data will download it to a protected local temporary folder.");
-        }
-        catch (Exception ex) { Fail(ex); }
+        using var dialog = new CloudRestoreSelectionDialog(point);
+        if (dialog.ShowDialog(FindForm()) != DialogResult.OK ||
+            dialog.SelectedCopy is not { } selected) return;
+        selectedCloud = selected;
+        selectedCloudAlternatives = point.CloudCopies.Select(x => x.Remote).ToArray();
+        cloudRecoveryPassphrase = dialog.RecoveryPassphrase;
+        selectedRestoreBackupInfo = null;
+        selectedLocalRecoverySha256 = string.Empty;
+        restoreFile.Tag = null;
+        restoreFile.Text = selected.Remote.Provider + " — " +
+            selected.Remote.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt");
+        ShowRestoreFileStatus(RestoreFileState.Valid, null);
+        if (restoreStatusHeadline != null)
+            restoreStatusHeadline.Text = "Cloud Backup Selected";
+        if (restoreStatusDetail != null)
+            restoreStatusDetail.Text = "FMSC verifies the cloud copy before restoring it.";
+        SetStatus("Cloud backup selected.");
     }
 
     private async Task RestoreCloudNowAsync()
@@ -876,10 +803,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     {
         if (isBusy)
             return;
-        selectedCloud = null;
-        selectedCloudAlternatives = Array.Empty<CloudRemoteBackup>();
-        cloudRecoveryPassphrase = string.Empty;
-        selectedLocalRecoverySha256 = string.Empty;
         using var dialog = new OpenFileDialog {
             Title = "Select FMSC Database Backup",
             Filter = "SQL Server Backup Files (*.bak)|*.bak|All Files (*.*)|*.*",
@@ -889,6 +812,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         };
         if (dialog.ShowDialog(FindForm()) != DialogResult.OK)
             return;
+        selectedCloud = null;
+        selectedCloudAlternatives = Array.Empty<CloudRemoteBackup>();
+        cloudRecoveryPassphrase = string.Empty;
+        selectedLocalRecoverySha256 = string.Empty;
         restoreFile.Text = dialog.FileName;
         selectedRestoreBackupInfo = DatabaseBackupManager.GetBackupInfo(dialog.FileName);
         RestoreFileState state = ClassifyRestoreFile(selectedRestoreBackupInfo);
@@ -980,7 +907,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             default:
                 accent = AppTheme.MutedText;
                 headline = "No Backup Selected";
-                detail = "Choose a local or cloud backup.";
+                detail = "Browse for a file or select a backup below.";
                 break;
         }
         restoreStatusHeadline.Text = headline;
@@ -1251,7 +1178,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     /// <summary>Gate history-dependent actions for the entire read.</summary>
     async Task LoadHistoryAsync()
     {
-        refreshCloudStatus?.Invoke();
+        RefreshCloudStatus();
         int version = ++historyLoadVersion;
         BeginHistoryLoad();
         try
@@ -1341,8 +1268,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         backupNowButton.Enabled = !busy;
         if (retryPendingButton != null) retryPendingButton.Enabled = !busy;
         if (cloudSettingsButton != null) cloudSettingsButton.Enabled = !busy;
-        if (cloudChooseRestoreButton != null) cloudChooseRestoreButton.Enabled = !busy;
-        if (selectRecoveryButton != null) selectRecoveryButton.Enabled = !busy;
+        UpdateSelectedBackupAction();
         /* Keep Refresh History available for retrying a failed read. */
         if (refreshHistoryButton is not null)
             refreshHistoryButton.Enabled = !busy;
