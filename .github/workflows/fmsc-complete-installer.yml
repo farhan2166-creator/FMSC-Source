@@ -56,25 +56,33 @@ jobs:
           # Private reusable packaging can be queued behind other runs. Refuse
           # an already-obsolete Source SHA BEFORE SDK setup and installer assembly.
           # A second check in Sandbox before final package upload remains mandatory.
-          if ($env:GITHUB_REPOSITORY_ID -eq '1449162585') {
-            if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
-              throw 'Read-only GitHub token missing for current Source/main preflight.'
-            }
+          if ($env:GITHUB_REPOSITORY_ID -eq '1449162585' -and $env:GITHUB_TOKEN) {
             $api = "https://api.github.com/repos/$env:GITHUB_REPOSITORY_OWNER/FMSC-Source"
             $headers = @{
               Authorization = "Bearer $env:GITHUB_TOKEN"
               Accept = 'application/vnd.github+json'
               'X-GitHub-Api-Version' = '2022-11-28'
             }
-            $source = Invoke-RestMethod -Uri $api -Headers $headers -MaximumRetryCount 2 -RetryIntervalSec 2
-            if ($source.id -ne 1412760928 -or
-                $source.owner.id -ne 316891609 -or
-                $source.private -ne $false) {
-              throw 'Private installer preflight refused an unexpected Source repository identity.'
+            $source = $null
+            $head = $null
+            try {
+              $source = Invoke-RestMethod -Uri $api -Headers $headers -MaximumRetryCount 2 -RetryIntervalSec 2
+              $head = (Invoke-RestMethod -Uri "$api/branches/main" -Headers $headers -MaximumRetryCount 2 -RetryIntervalSec 2).commit.sha
+            } catch {
+              # The private final packaging step independently checks Source/main
+              # and its trusted repository ID. Network failure here must not
+              # introduce a new failure mode in the previously working builder.
+              Write-Warning 'Optional private installer preflight unavailable; mandatory final Source/main verification remains enabled.'
             }
-            $head = (Invoke-RestMethod -Uri "$api/branches/main" -Headers $headers -MaximumRetryCount 2 -RetryIntervalSec 2).commit.sha
-            if ($head -cne $revision) {
-              throw 'Source/main advanced after private installer dispatch; skip obsolete Windows packaging.'
+            if ($source -and $head) {
+              if ($source.id -ne 1412760928 -or
+                  $source.owner.id -ne 316891609 -or
+                  $source.private -ne $false) {
+                throw 'Private installer preflight refused an unexpected Source repository identity.'
+              }
+              if ($head -cne $revision) {
+                throw 'Source/main advanced after private installer dispatch; skip obsolete Windows packaging.'
+              }
             }
           }
           Write-Host "Checked-out Source revision: $revision"
