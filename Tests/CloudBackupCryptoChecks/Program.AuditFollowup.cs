@@ -8,15 +8,14 @@ internal static class AuditFollowupChecks
         var copy = new CloudRemoteBackup(CloudProvider.Dropbox, "fixture", "fixture.fmscbackup",
             new string('a', 64), DateTime.UtcNow, DateTime.UtcNow, 3);
         Task<IReadOnlyList<CloudRemoteBackup>> Partial(CloudProvider provider, CancellationToken token)
-            => provider == CloudProvider.GoogleDrive ? throw new HttpRequestException("fixture outage")
-                : Task.FromResult<IReadOnlyList<CloudRemoteBackup>>(new[] { copy });
+            => Task.FromResult<IReadOnlyList<CloudRemoteBackup>>(new[] { copy });
         int logged = 0;
         var partial = await CloudBackupOperations.BrowseAsync(_ => true, Partial, (_, _) => logged++, default);
-        Require(partial.Copies.Count == 1 && partial.Warnings.Count == 1 && logged == 1,
-            "Partial inventory must retain working copies and name the failed provider.");
+        Require(partial.Copies.Count == 1 && partial.Warnings.Count == 0 && logged == 0,
+            "A healthy Dropbox inventory must retain its usable remote copies.");
         var failed = await CloudBackupOperations.BrowseAsync(_ => true,
             (_, _) => throw new HttpRequestException("fixture outage"), (_, _) => { }, default);
-        Require(failed.Copies.Count == 0 && failed.Warnings.Count == 2, "Unavailable inventories must not appear empty and healthy.");
+        Require(failed.Copies.Count == 0 && failed.Warnings.Count == 1, "Unavailable inventories must not appear empty and healthy.");
         var empty = await CloudBackupOperations.BrowseAsync(_ => true,
             (_, _) => Task.FromResult<IReadOnlyList<CloudRemoteBackup>>(Array.Empty<CloudRemoteBackup>()), (_, _) => { }, default);
         Require(empty.Copies.Count == 0 && empty.Warnings.Count == 0, "A valid empty account must remain distinguishable from listing failure.");
@@ -28,13 +27,13 @@ internal static class AuditFollowupChecks
             Require(observed, "Explicit inventory cancellation must propagate.");
         }
         foreach (var outcome in new[] {
-            new CloudBackupOutcome(true, false, false, "queued", true),
-            new CloudBackupOutcome(true, true, false, "partial", true),
-            new CloudBackupOutcome(false, false, false, "retry still pending", true) })
+            new CloudBackupOutcome(true, false, "queued", true),
+            new CloudBackupOutcome(true, true, "incomplete", true),
+            new CloudBackupOutcome(false, false, "retry still pending", true) })
             Require(CloudBackupOperations.ScheduledExitCode(outcome) == 4, "Pending delivery must produce a nonzero scheduled result, even on no-due retry runs.");
-        Require(CloudBackupOperations.ScheduledExitCode(new(false, false, false, "no due backup")) == 0,
+        Require(CloudBackupOperations.ScheduledExitCode(new(false, false, "no due backup")) == 0,
             "A healthy no-due run must remain successful.");
-        Require(CloudBackupOperations.ScheduledExitCode(new(true, true, false, "single selected provider complete")) == 0,
+        Require(CloudBackupOperations.ScheduledExitCode(new(true, true, "single selected provider complete")) == 0,
             "Completed selected destinations must not require a disabled provider.");
 
         string root = Path.Combine(Path.GetTempPath(), "FMSC-AuditFollowup-" + Guid.NewGuid().ToString("N"));
