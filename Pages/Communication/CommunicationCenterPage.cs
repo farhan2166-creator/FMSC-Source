@@ -266,10 +266,17 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             if (fitting || navigation.IsDisposed) return;
             int width = navigation.ClientSize.Width - navigation.Padding.Horizontal;
             if (width <= 0) return;
-            int requiredHeight = ButtonRowsHeight(navigation, width)
+            int measuredHeight = ButtonRowsHeight(navigation, width)
                 + navigation.Padding.Vertical;
+            // During a Windows resize the FlowLayoutPanel can position its
+            // wrapped children *after* SizeChanged. Never let its actual
+            // bottommost visible button extend beyond the available row.
+            int actualHeight = navigation.Controls.Cast<Control>()
+                .Where(button => button.Visible)
+                .Select(button => button.Bottom + button.Margin.Bottom)
+                .DefaultIfEmpty(0).Max() + navigation.Padding.Bottom;
             int height = Math.Max(AppMetrics.ButtonHeight + navigation.Padding.Vertical,
-                requiredHeight);
+                Math.Max(measuredHeight, actualHeight));
             if (navigationRow.Height == height) return;
             fitting = true;
             try
@@ -281,6 +288,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         }
         navigation.SizeChanged += (_, _) => FitNavigation();
         navigation.Layout += (_, _) => FitNavigation();
+        // Paint runs after the flow engine has settled each wrap position.
+        navigation.Paint += (_, _) => FitNavigation();
+        SizeChanged += (_, _) => FitNavigation();
         navigation.VisibleChanged += (_, _) => FitNavigation();
         layout.SizeChanged += (_, _) => FitNavigation();
         layout.HandleCreated += (_, _) => FitNavigation();
