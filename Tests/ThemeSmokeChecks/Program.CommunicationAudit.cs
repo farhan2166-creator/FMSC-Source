@@ -73,6 +73,9 @@ internal static partial class Program
         using var host = new Form { ClientSize = new Size(1100, 780), ShowInTaskbar = false };
         page.Dock = DockStyle.Fill; host.Controls.Add(page); ModalPageCloseGuard.Attach(host, page);
         host.Show(); Application.DoEvents();
+        // Explicit school target keeps this synthetic async read independent
+        // of the safer class-by-default choice in the actual user experience.
+        Field<ModernComboBox>(page, "audience").SelectedIndex = (int)CommunicationAudience.School;
         var body = Field<ModernTextBox>(page, "message");
         var next = Field<ModernButton>(page, "next");
         body.Text = "Notice [StudentName] " + new string('x', 600);
@@ -151,6 +154,7 @@ internal static partial class Program
         });
         bulkHost.Controls.Add(bulkPage);
         bulkHost.Show(); Application.DoEvents();
+        Field<ModernComboBox>(bulkPage, "audience").SelectedIndex = (int)CommunicationAudience.School;
         Field<ModernTextBox>(bulkPage, "message").Text = "School notice";
         Field<ModernButton>(bulkPage, "next").PerformClick();
         PumpUntil(() => !bulkPage.IsBusy, "Bulk communication preview finishes");
