@@ -124,7 +124,7 @@ internal static class CloudBackupCoordinator
             if (scheduled && !settings.IsDue(DateTimeOffset.Now, LoadState().LastSuccessfulLocalBackup))
             {
                 if (cloudBlocked is not null) retryIssues.Add(cloudBlocked);
-                return RecordOutcome(new CloudBackupOutcome(false, false, false,
+                return RecordOutcome(new CloudBackupOutcome(false, false,
                     retryIssues.Count == 0 ? "No scheduled backup is due. Pending uploads are complete."
                         : "Cloud upload is pending retry: " + string.Join("; ", retryIssues), retryIssues.Count > 0));
             }
@@ -142,7 +142,7 @@ internal static class CloudBackupCoordinator
             }
             if (!settings.LocalEnabled && cloudBlocked is not null)
             {
-                if (scheduled) return RecordOutcome(new CloudBackupOutcome(false, false, false,
+                if (scheduled) return RecordOutcome(new CloudBackupOutcome(false, false,
                     cloudBlocked, UploadsPending: true));
                 throw new IOException(cloudBlocked);
             }
@@ -187,7 +187,7 @@ internal static class CloudBackupCoordinator
                 if (cloudBlocked is not null)
                     retryIssues.Insert(0, "No new cloud copy was queued. " + cloudBlocked);
                 progress?.Report(new BackupProgressUpdate("Local backup saved", "Verified SQL backup saved.", "Local"));
-                return RecordOutcome(new CloudBackupOutcome(true, false, false,
+                return RecordOutcome(new CloudBackupOutcome(true, false,
                     "Verified local SQL backup saved: " + bak +
                     (retryIssues.Count == 0 ? "" : ". " + string.Join("; ", retryIssues)),
                     UploadsPending: retryIssues.Count > 0));
@@ -289,7 +289,7 @@ internal static class CloudBackupCoordinator
         catch (Exception ex)
         {
             AppExceptionHandler.LogNonFatal(ex, "Unattended encrypted cloud backup failed");
-            try { RecordOutcome(new CloudBackupOutcome(false, false, false, "Cloud backup failed. Check the connection, recovery settings and local backup folder.", true)); }
+            try { RecordOutcome(new CloudBackupOutcome(false, false, "Cloud backup failed. Check the connection, recovery settings and local backup folder.", true)); }
             catch (Exception statusError) { AppExceptionHandler.LogNonFatal(statusError, "Could not retain cloud backup failure status"); }
             return 1;
         }
@@ -546,19 +546,10 @@ internal static class CloudBackupCoordinator
         progress?.Report(new BackupProgressUpdate("Checking account", "Checking cloud authorization and remote receipt.", provider.ToString()));
         if (!CloudBackupOAuth.IsConnected(provider))
             throw new InvalidOperationException(provider + " needs reconnection before its queued backup can be verified.");
-        int attempts;
-        if (provider == CloudProvider.GoogleDrive)
-        {
-            attempts = ++p.GoogleDeliveryAttempts;
-            p.NextGoogleAttemptUtc = CloudBackupQueuePolicy.NextUnattendedAttemptUtc(DateTime.UtcNow, attempts);
-        }
-        else
-        {
-            attempts = ++p.DropboxDeliveryAttempts;
-            p.NextDropboxAttemptUtc = CloudBackupQueuePolicy.NextUnattendedAttemptUtc(DateTime.UtcNow, attempts);
-        }
+        int attempts = ++p.DropboxDeliveryAttempts;
+        p.NextDropboxAttemptUtc = CloudBackupQueuePolicy.NextUnattendedAttemptUtc(DateTime.UtcNow, attempts);
         SavePending(p);
-        string knownId = provider == CloudProvider.GoogleDrive ? p.GoogleDriveId : p.DropboxId;
+        string knownId = p.DropboxId;
         // An upload receipt does not prove recoverability, but avoids uploading
         // duplicate remote objects after a lost verification or network reply.
         CloudRemoteBackup? copy = null;
@@ -573,22 +564,12 @@ internal static class CloudBackupCoordinator
         if (copy is null)
             progress?.Report(new BackupProgressUpdate("Uploading encrypted package", "Sending verified ciphertext only.", provider.ToString()));
         copy ??= await CloudBackupTransport.UploadAsync(provider, p.PackageFile,
-            p.SqlCreatedUtc, token, p.GoogleDriveUploadId,
-            id => { p.GoogleDriveUploadId = id; SavePending(p); },
-            TrackTransfer(progress, "Uploading encrypted backup", provider));
+            p.SqlCreatedUtc, token, reportTransfer: TrackTransfer(progress, "Uploading encrypted backup", provider));
         if (!string.Equals(copy.PackageSha256, p.Sha256, StringComparison.OrdinalIgnoreCase) ||
             copy.Size != p.Size)
             throw new IOException(provider + " did not confirm an intact encrypted upload.");
-        if (provider == CloudProvider.GoogleDrive)
-        {
-            p.GoogleDriveId = copy.RemoteId;
-            p.GoogleDrivePruned = false;
-        }
-        else
-        {
-            p.DropboxId = copy.RemoteId;
-            p.DropboxPruned = false;
-        }
+        p.DropboxId = copy.RemoteId;
+        p.DropboxPruned = false;
         SavePending(p);
         // Test downloaded REMOTE ciphertext, decrypted SQL, integrity and an
         // isolated disposable SQL restore, never the local upload source alone.
@@ -599,16 +580,8 @@ internal static class CloudBackupCoordinator
             CloudBackupSettings.OpenRecoveryPassphrase(p.PackageFile + ".dpapi"), p.SqlCreatedUtc, token,
             progress is null ? null : () => progress.Report(new BackupProgressUpdate("Testing recovery",
                 "Decrypting the downloaded backup and testing an isolated SQL restore.", provider.ToString())));
-        if (provider == CloudProvider.GoogleDrive)
-        {
-            p.GoogleRecoveryVerified = true;
-            p.NextGoogleAttemptUtc = null;
-        }
-        else
-        {
-            p.DropboxRecoveryVerified = true;
-            p.NextDropboxAttemptUtc = null;
-        }
+        p.DropboxRecoveryVerified = true;
+        p.NextDropboxAttemptUtc = null;
         SavePending(p);
         progress?.Report(new BackupProgressUpdate("Recovery verified", "The actual remote copy passed the isolated SQL restore test.", provider.ToString()));
         BackupActivityJournal.TryRecord("Cloud recovery test", provider.ToString(), "Passed");
@@ -622,9 +595,7 @@ internal static class CloudBackupCoordinator
 
     private static void RetireSupersededPending(Pending newer, CloudProvider provider, CloudBackupOptions settings)
     {
-        bool newestVerified = provider == CloudProvider.GoogleDrive
-            ? newer.GoogleRecoveryVerified && !newer.GoogleDrivePruned && newer.GoogleDriveId.Length > 0
-            : newer.DropboxRecoveryVerified && !newer.DropboxPruned && newer.DropboxId.Length > 0;
+        bool newestVerified = newer.DropboxRecoveryVerified && !newer.DropboxPruned && newer.DropboxId.Length > 0;
         if (!newestVerified) return;
         foreach (var older in ReadPending().Where(p => p.Id != newer.Id &&
                      p.SqlCreatedUtc < newer.SqlCreatedUtc))
@@ -634,8 +605,7 @@ internal static class CloudBackupCoordinator
                 originallyRequested: OriginallyRequested(older, provider, settings),
                 alreadyComplete: !StillRequiresDelivery(older, provider, settings)))
                 continue;
-            if (provider == CloudProvider.GoogleDrive) older.GoogleSuperseded = true;
-            else older.DropboxSuperseded = true;
+            older.DropboxSuperseded = true;
             SavePending(older);
             BackupActivityJournal.TryRecord("Encrypted queue", provider.ToString(), "Older pending delivery safely superseded");
             RemoveFullyDeliveredPayload(older, settings);
@@ -645,15 +615,13 @@ internal static class CloudBackupCoordinator
     private static async Task PruneRemoteAsync(CloudProvider provider,
         CloudBackupOptions settings, string newlyConfirmedSha, CancellationToken token)
     {
-        int limit = provider == CloudProvider.GoogleDrive
-            ? settings.MaximumGoogleDriveBackups : settings.MaximumDropboxBackups;
+        int limit = settings.MaximumDropboxBackups;
         var known = ReadPending().Where(p =>
-            (provider == CloudProvider.GoogleDrive ? p.GoogleRecoveryVerified : p.DropboxRecoveryVerified) &&
-            (provider == CloudProvider.GoogleDrive ? p.GoogleDriveId : p.DropboxId).Length > 0).ToArray();
+            p.DropboxRecoveryVerified && p.DropboxId.Length > 0).ToArray();
         var cloud = await CloudBackupTransport.ListAsync(provider, token);
         var copies = known.Select(p =>
         {
-            string id = provider == CloudProvider.GoogleDrive ? p.GoogleDriveId : p.DropboxId;
+            string id = p.DropboxId;
             var remote = cloud.FirstOrDefault(x => x.RemoteId == id &&
                 string.Equals(x.PackageSha256, p.Sha256, StringComparison.OrdinalIgnoreCase));
             return remote is null ? null : new CloudBackupCopy(
@@ -665,19 +633,10 @@ internal static class CloudBackupCoordinator
             // The server returned the matching remote file ID, and a locally
             // recorded successful upload exists. Never delete unknown files.
             await CloudBackupTransport.DeleteAsync(provider, old.RemoteId, token);
-            var original = known.FirstOrDefault(p => (provider == CloudProvider.GoogleDrive
-                ? p.GoogleDriveId : p.DropboxId) == old.RemoteId);
+            var original = known.FirstOrDefault(p => p.DropboxId == old.RemoteId);
             if (original is null) continue;
-            if (provider == CloudProvider.GoogleDrive)
-            {
-                original.GoogleDriveId = "";
-                original.GoogleDrivePruned = true;
-            }
-            else
-            {
-                original.DropboxId = "";
-                original.DropboxPruned = true;
-            }
+            original.DropboxId = "";
+            original.DropboxPruned = true;
             SavePending(original);
         }
     }
@@ -685,8 +644,6 @@ internal static class CloudBackupCoordinator
     private static void RemoveFullyDeliveredPayload(Pending p, CloudBackupOptions settings)
     {
         if (CloudBackupQueuePolicy.CanRelease(
-                OriginallyRequested(p, CloudProvider.GoogleDrive, settings),
-                p.GoogleRecoveryVerified, p.GoogleDrivePruned, p.GoogleSuperseded,
                 OriginallyRequested(p, CloudProvider.Dropbox, settings),
                 p.DropboxRecoveryVerified, p.DropboxPruned, p.DropboxSuperseded))
         {
@@ -794,12 +751,11 @@ internal static class CloudBackupCoordinator
 
     internal static bool HasRetryableDeliveries(CloudBackupOptions settings)
     {
-        if (!settings.GoogleDriveEnabled && !settings.DropboxEnabled) return false;
+        if (!settings.DropboxEnabled) return false;
         try
         {
             return ReadPending().Any(p => File.Exists(p.PackageFile) &&
-                ((settings.GoogleDriveEnabled && StillRequiresDelivery(p, CloudProvider.GoogleDrive, settings)) ||
-                 (settings.DropboxEnabled && StillRequiresDelivery(p, CloudProvider.Dropbox, settings))));
+                settings.DropboxEnabled && StillRequiresDelivery(p, CloudProvider.Dropbox, settings));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
