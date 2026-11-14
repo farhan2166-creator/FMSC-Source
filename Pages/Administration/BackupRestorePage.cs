@@ -211,6 +211,15 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         backupTab.Padding = activityTab.Padding = new Padding(UiDesignSystem.Spacing.Md);
         tabs.Selecting += (_, e) => { if (isBusy) e.Cancel = true; };
         tabs.SelectedIndexChanged += (_, _) => ApplyHistoryDependentEnablement();
+        // A single click opens an inline summary beneath the row; restoring
+        // remains an explicit double-click/Enter action.
+        availableBackupsGrid.CellClick += (_, e) => {
+            if (e.RowIndex < 0 ||
+                availableBackupsGrid.Rows[e.RowIndex].Tag is not UnifiedRecoveryPoint point)
+                return;
+            availableBackupsGrid.ToggleDetails(e.RowIndex,
+                FormatExpandedRecoveryDetails(point, e.RowIndex == 0));
+        };
         availableBackupsGrid.CellDoubleClick += async (_, e) => {
             if (canRestore && e.RowIndex >= 0) await UseSelectedRecoveryPointAsync();
         };
@@ -572,6 +581,77 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     private sealed class RecoveryPointsGrid : DataGridView
     {
         internal event EventHandler? LoadSelected;
+        private DataGridViewRow? expandedRow;
+        private string expandedText = string.Empty;
+        private int originalHeight;
+        private int detailsHeight;
+        private Padding previousPadding;
+        private DataGridViewContentAlignment previousAlignment;
+
+        internal void ToggleDetails(int rowIndex, string details)
+        {
+            if (rowIndex < 0 || rowIndex >= Rows.Count ||
+                Rows[rowIndex].Tag is not UnifiedRecoveryPoint)
+                return;
+            DataGridViewRow row = Rows[rowIndex];
+            if (ReferenceEquals(expandedRow, row))
+            {
+                CollapseDetails();
+                return;
+            }
+            CollapseDetails();
+            expandedRow = row;
+            expandedText = details;
+            originalHeight = row.Height;
+            previousPadding = row.DefaultCellStyle.Padding;
+            previousAlignment = row.DefaultCellStyle.Alignment;
+            // The original cells stay at the top; the extra height belongs
+            // to a full-width read-only detail area underneath them.
+            int lineCount = details.Count(c => c == '\n') + 1;
+            detailsHeight = AppScale.Scale(Math.Min(190, Math.Max(94, lineCount * 22 + 18)));
+            row.DefaultCellStyle.Padding = new Padding(0, 0, 0, detailsHeight);
+            row.DefaultCellStyle.Alignment = DataGridViewContentAlignment.TopLeft;
+            row.Height = originalHeight + detailsHeight;
+            InvalidateRow(rowIndex);
+        }
+
+        internal void CollapseDetails()
+        {
+            var row = expandedRow;
+            expandedRow = null;
+            expandedText = string.Empty;
+            if (row?.DataGridView != this) return;
+            row.DefaultCellStyle.Padding = previousPadding;
+            row.DefaultCellStyle.Alignment = previousAlignment;
+            row.Height = originalHeight;
+            InvalidateRow(row.Index);
+        }
+
+        protected override void OnRowPostPaint(DataGridViewRowPostPaintEventArgs e)
+        {
+            base.OnRowPostPaint(e);
+            if (!ReferenceEquals(expandedRow, Rows[e.RowIndex])) return;
+            int inset = AppScale.Scale(8);
+            var details = new Rectangle(
+                e.RowBounds.Left + inset,
+                e.RowBounds.Bottom - detailsHeight,
+                Math.Max(1, e.RowBounds.Width - inset * 2),
+                detailsHeight);
+            using var background = new SolidBrush(AppTheme.Surface);
+            using var separator = new Pen(AppTheme.Border);
+            e.Graphics.FillRectangle(background, details);
+            e.Graphics.DrawLine(separator, details.Left, details.Top,
+                details.Right, details.Top);
+            var textBounds = new Rectangle(
+                details.Left + inset, details.Top + inset,
+                Math.Max(1, details.Width - inset * 2),
+                Math.Max(1, details.Height - inset * 2));
+            TextRenderer.DrawText(e.Graphics, expandedText, AppTheme.NormalFont,
+                textBounds, AppTheme.Text,
+                TextFormatFlags.Left | TextFormatFlags.Top |
+                TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis |
+                TextFormatFlags.NoPrefix);
+        }
 
         protected override bool ProcessDialogKey(Keys keyData) =>
             TryLoadSelected(keyData) || base.ProcessDialogKey(keyData);
@@ -856,6 +936,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         {
             var inventory = await UnifiedRecoveryInventory.LoadAsync();
             if (IsDisposed || version != recoveryCatalogueVersion) return;
+            availableBackupsGrid.CollapseDetails();
             availableBackupsGrid.Rows.Clear();
             DateTime nowUtc = DateTime.UtcNow;
             foreach (var point in inventory.Points)
@@ -874,6 +955,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                     point.VerificationSummary);
                 var row = availableBackupsGrid.Rows[rowIndex];
                 row.Tag = point;
+                if (rowIndex == 0)
+                    row.DefaultCellStyle.Font = AppTheme.FontSmallBold;
                 string copyDetails = FormatRecoveryCopyDetails(point);
                 for (int column = 2; column < row.Cells.Count; column++)
                     row.Cells[column].ToolTipText = copyDetails;
@@ -881,8 +964,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             availableBackupsGrid.ClearSelection();
             string countText = inventory.Points.Count == 0
                 ? "No backups found. Browse for a backup file or connect a cloud account in Backup Settings."
-                : canRestore ? "Double-click a backup or press Enter to load it for restore."
-                    : inventory.Points.Count + " available backups.";
+                : canRestore ? "Click a row for backup details; double-click or press Enter to load it for restore."
+                    : "Click a row for details. " + inventory.Points.Count + " available backups.";
             availableBackupsStatus.Text = inventory.Warnings.Count == 0
                 ? countText : countText + "  " + string.Join(" ", inventory.Warnings);
         }
@@ -912,6 +995,28 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             (copy.Remote.UploadedUtc == default ? "" : $"Uploaded {copy.Remote.UploadedUtc.ToLocalTime():dd-MMM-yyyy h:mm tt} · ") +
             (copy.RecoveryTested ? "Recovery-tested" : "Verify before restore"));
         return string.Join(Environment.NewLine, local.Concat(cloud));
+    }
+
+    private static string FormatExpandedRecoveryDetails(UnifiedRecoveryPoint point, bool latest)
+    {
+        var lines = new List<string> {
+            (latest ? "LATEST BACKUP" : "BACKUP DETAILS") + "  ·  SQL backup created " +
+            point.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy h:mm:ss tt")
+        };
+        foreach (var copy in point.LocalCopies)
+            lines.Add("Local  ·  " + Path.GetFileName(copy.FilePath) + "  ·  " +
+                (copy.SizeBytes is > 0 ? TransferMetrics.SizeText(copy.SizeBytes.Value) + "  ·  " : "") +
+                "SQL header checked");
+        foreach (var copy in point.CloudCopies)
+            lines.Add(copy.Remote.Provider + "  ·  " +
+                TransferMetrics.SizeText(copy.Remote.Size) +
+                (copy.Remote.UploadedUtc == default ? "" :
+                    "  ·  uploaded " + copy.Remote.UploadedUtc.ToLocalTime().ToString("dd-MMM h:mm tt")) +
+                (copy.RecoveryTested ? "  ·  recovery-tested" : "  ·  verification needed"));
+        // SQL headers and cloud package metadata contain no historical record
+        // counts. Never show today's live database counts for an older backup.
+        lines.Add("Student, admission and fee counts: not recorded for this backup.");
+        return string.Join(Environment.NewLine, lines);
     }
 
     private async Task UseSelectedRecoveryPointAsync()
