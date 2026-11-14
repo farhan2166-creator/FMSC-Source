@@ -18,6 +18,8 @@ on:
       - 'Tests/HelpChecks/**'
       - 'Tests/ReportReadChecks/**'
       - 'Tools/test_permission_policy.py'
+      - 'Tools/audit_ui_test_copy.py'
+      - 'Tools/test_ui_test_copy_audit.py'
       - 'Tools/test_first_run_schema_contract.py'
       - 'Core/MaintenanceTools.cs'
       - 'Core/SqlDependencyRepair.cs'
@@ -81,6 +83,10 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+
+      - name: Inventory UI wording-coupled tests (advisory only)
+        run: python Tools/audit_ui_test_copy.py
+        continue-on-error: true
 
       - name: Validate release versions and permission consumers
         run: python -m unittest discover -s Tools -p 'test_*.py' -v
