@@ -14,7 +14,7 @@ internal static class UnifiedRecoveryChecks
         };
         var remote = new[] {
             new RecoveryCloudCopy(
-                new CloudRemoteBackup(CloudProvider.GoogleDrive, "drive1", "backup", package,
+                new CloudRemoteBackup(CloudProvider.Dropbox, "dropbox-one", "backup", package,
                     when, when.AddMinutes(3), 12345), true, source),
             new RecoveryCloudCopy(
                 new CloudRemoteBackup(CloudProvider.Dropbox, "dropbox1", "backup", package,
@@ -25,7 +25,7 @@ internal static class UnifiedRecoveryChecks
             grouped[0].LocalCopies.Count == 1 && grouped[0].LocalCopies[0].FilePath == localPath &&
             grouped[0].HasRecoveryTestedCloud, "Same authenticated SQL source was not grouped.");
         Require(grouped[0].RecoveryTestedCloudCount == 1,
-            "A recovery test for one provider must not count toward another provider's copy.");
+            "A recovery test for one remote copy must not mark another copy verified.");
         Require(grouped.Single(x => x.LocalCopies.Any(y => y.FilePath == oldPath)).CloudCopies.Count == 0,
             "Legacy file was merged with cloud using only the SQL creation timestamp.");
         var wrongDigest = new[] { local[0] with { SourceBakSha256 = new string('c', 64) } };
