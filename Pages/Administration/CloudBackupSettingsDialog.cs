@@ -42,7 +42,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(AppScale.Scale(740), AppScale.Scale(600));
+        ClientSize = new Size(AppScale.Scale(600), AppScale.Scale(600));
         BackColor = AppTheme.PageBackground;
         Font = AppTheme.NormalFont;
         previous = CloudBackupSettings.LoadForEditing(out settingsWarning);
