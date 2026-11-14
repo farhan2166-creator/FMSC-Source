@@ -167,13 +167,13 @@ internal static partial class Program
         modeRows.Rows.Add("WhatsApp", "WhatsAppBusinessManual", false);
         decorate.Invoke(page, new object[] { modeRows });
         Check(manualActivation.Text == "Resume WhatsApp"
-            && manualActivation.Enabled
+            && manualActivation.Enabled == CurrentUser.HasPermission("Communication.Configure")
             && (string)modeRows.Rows[0]["StatusText"] == "Paused / unavailable",
             "Paused manual WhatsApp offers resumption with one contextual control");
         modeRows.Rows[0]["Enabled"] = true;
         decorate.Invoke(page, new object[] { modeRows });
         Check(manualActivation.Text == "Pause WhatsApp"
-            && manualActivation.Enabled
+            && manualActivation.Enabled == CurrentUser.HasPermission("Communication.Configure")
             && (string)modeRows.Rows[0]["StatusText"] == "Ready for manual chats",
             "Active WhatsApp offers Pause instead of duplicate enable and pause actions");
         Check(!send.Enabled, "An unreviewed page cannot send or open a chat before preview and confirmation");
