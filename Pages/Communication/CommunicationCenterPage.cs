@@ -236,64 +236,59 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
 
     private Control BuildWorkspace()
     {
+        // All five actions live in one responsive navigation row. A FlowLayoutPanel
+        // owns the button positions: the old two-panel bounds calculation could
+        // leave the administration actions clipped to a few pixels on the right.
         var navigation = new FlowLayoutPanel
         {
-            WrapContents = true, Margin = Padding.Empty
-        };
-        navigation.Controls.AddRange(new Control[] { newMessageButton, unfinishedButton, historyButton });
-        var management = new FlowLayoutPanel
-        {
-            WrapContents = true, Margin = Padding.Empty
-        };
-        management.Controls.AddRange(new Control[] { templatesButton, configureButton });
-        var bar = new Panel
-        {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Fill, WrapContents = true, Margin = Padding.Empty,
             BackColor = AppTheme.Surface, Padding = new Padding(AppScale.Scale(6))
         };
-        bar.Controls.Add(navigation);
-        bar.Controls.Add(management);
+        templatesButton.Margin = new Padding(AppScale.Scale(20), 0, AppScale.Scale(3), 0);
+        navigation.Controls.AddRange(new Control[]
+        {
+            newMessageButton, unfinishedButton, historyButton, templatesButton, configureButton
+        });
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        var navigationRow = new RowStyle(SizeType.Absolute, AppMetrics.ButtonHeight + bar.Padding.Vertical);
+        var navigationRow = new RowStyle(SizeType.Absolute,
+            AppMetrics.ButtonHeight + navigation.Padding.Vertical);
         layout.RowStyles.Add(navigationRow);
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.Controls.Add(bar, 0, 0);
+        layout.Controls.Add(navigation, 0, 0);
         layout.Controls.Add(steps, 0, 1);
+        bool fitting = false;
         void FitNavigation()
         {
-            if (!bar.Visible || bar.ClientSize.Width <= bar.Padding.Horizontal) return;
-            int availableWidth = Math.Max(0, bar.ClientSize.Width - bar.Padding.Horizontal);
-            int managementRequired = ButtonRowWidth(management);
-            bool stack = ButtonRowWidth(navigation) + managementRequired > availableWidth;
-            int managementWidth = Math.Min(availableWidth, managementRequired);
-            int navigationWidth = stack ? availableWidth : availableWidth - managementWidth;
-            int navigationHeight = ButtonRowsHeight(navigation, navigationWidth);
-            int managementHeight = ButtonRowsHeight(management, managementWidth);
-            navigation.SetBounds(bar.Padding.Left, bar.Padding.Top, navigationWidth, navigationHeight);
-            management.SetBounds(bar.Padding.Left + availableWidth - managementWidth,
-                bar.Padding.Top + (stack ? navigationHeight : 0), managementWidth, managementHeight);
-            int height = (stack ? navigationHeight + managementHeight : Math.Max(navigationHeight, managementHeight))
-                + bar.Padding.Vertical + bar.Margin.Vertical;
+            if (fitting || navigation.IsDisposed) return;
+            int width = navigation.ClientSize.Width - navigation.Padding.Horizontal;
+            if (width <= 0) return;
+            int requiredHeight = ButtonRowsHeight(navigation, width)
+                + navigation.Padding.Vertical;
+            int height = Math.Max(AppMetrics.ButtonHeight + navigation.Padding.Vertical,
+                requiredHeight);
             if (navigationRow.Height == height) return;
-            navigationRow.Height = height;
-            layout.PerformLayout();
+            fitting = true;
+            try
+            {
+                navigationRow.Height = height;
+                layout.PerformLayout();
+            }
+            finally { fitting = false; }
         }
-        bar.SizeChanged += (_, _) => FitNavigation();
-        bar.VisibleChanged += (_, _) => FitNavigation();
-        foreach (Control button in navigation.Controls.Cast<Control>().Concat(management.Controls.Cast<Control>()))
+        navigation.SizeChanged += (_, _) => FitNavigation();
+        navigation.VisibleChanged += (_, _) => FitNavigation();
+        layout.HandleCreated += (_, _) => FitNavigation();
+        foreach (Control button in navigation.Controls)
         {
             button.SizeChanged += (_, _) => FitNavigation();
             button.VisibleChanged += (_, _) => FitNavigation();
         }
         return layout;
     }
-
-    private static int ButtonRowWidth(FlowLayoutPanel panel) => panel.Controls.Cast<Control>()
-        .Where(button => button.Visible).Sum(button => button.Width + button.Margin.Horizontal);
 
     private static int ButtonRowsHeight(FlowLayoutPanel panel, int availableWidth)
     {
