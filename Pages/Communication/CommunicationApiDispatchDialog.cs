@@ -88,11 +88,8 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
                 "Approve Retry",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
             await this.operations.Retry(Convert.ToInt64(selected["RecipientId"]),reason.Text.Trim());reason.Clear();await RefreshAsync();
         });
-        grid.CurrentCellChanged+=(_,_)=>{
-            messagePreview.Text=(grid.CurrentRow?.DataBoundItem as DataRowView)?.Row is DataRow row
-                && row.Table.Columns.Contains("RenderedBody") ? Convert.ToString(row["RenderedBody"]) ?? "" : "";
-            UpdateActions();
-        };
+        grid.CurrentCellChanged+=(_,_)=>{ShowSelectedMessage();UpdateActions();};
+        grid.DataBindingComplete+=(_,_)=>ShowSelectedMessage();
         Shown+=async(_,_)=>await RunAsync(async()=>{
             lease=CommunicationHandoffLease.Acquire(batch);
             await RefreshAsync();
@@ -119,7 +116,16 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         int failed=rows.Count(r=>Convert.ToString(r["State"])=="Failed");
         progress.Maximum=Math.Max(1,rows.Length);progress.Value=rows.Length-pending;
         status.Text=$"{pending} pending · {accepted} accepted · {delivered} delivered · {failed} failed · {unknown} unknown\nOnly Pending messages can be sent. Stopping keeps the remainder for later.";
+        ShowSelectedMessage();
         UpdateActions();
+    }
+    private void ShowSelectedMessage()
+    {
+        // WinForms can bind the rows after CurrentCellChanged has already
+        // fired. The initial preview must not depend on a second mouse click.
+        DataRow? row=(grid.CurrentRow?.DataBoundItem as DataRowView)?.Row ?? Rows.FirstOrDefault();
+        messagePreview.Text=row is not null && row.Table.Columns.Contains("RenderedBody")
+            ? Convert.ToString(row["RenderedBody"]) ?? "" : "";
     }
     private void Guard()
     {
