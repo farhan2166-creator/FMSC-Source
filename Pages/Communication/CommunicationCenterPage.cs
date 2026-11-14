@@ -58,6 +58,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     };
     private bool manualWhatsAppActive;
     private bool showingUnfinished;
+    private bool updatingHistoryFilter;
     // Built by SettingsCard during the page constructor; cannot be readonly.
     private ModernButton enableFreeWhatsAppButton = null!;
     private CommunicationPreview? preview;
@@ -307,7 +308,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         onlyUnfinished.Visible = CurrentUser.HasPermission("Communication.Send");
         onlyUnfinished.CheckedChanged += async (_, _) =>
         {
-            if (IsDisposed || IsBusy || step != 2) return;
+            if (IsDisposed || updatingHistoryFilter || IsBusy || step != 2) return;
             await RunBusyAsync("Reading communication history…",
                 onlyUnfinished.Checked ? LoadUnfinishedAsync : LoadHistoryAsync, this);
         };
@@ -624,6 +625,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private void ShowHistory(DataTable table, bool unfinished)
     {
         showingUnfinished = unfinished;
+        updatingHistoryFilter = true;
+        try { onlyUnfinished.Checked = unfinished; }
+        finally { updatingHistoryFilter = false; }
         var old = historyGrid.DataSource as DataTable;
         historyGrid.DataSource = table;
         old?.Dispose();
