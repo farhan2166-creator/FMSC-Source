@@ -8,7 +8,7 @@ internal static class CloudSettingsChecks
     internal static void Run(string root)
     {
         var original = new CloudBackupOptions {
-            DropboxEnabled = true, GoogleDriveEnabled = false,
+            DropboxEnabled = true,
             AutomaticEnabled = true, Frequency = CloudBackupFrequency.Weekly,
             LocalScheduledTime = new TimeOnly(13, 17), WeeklyDay = DayOfWeek.Thursday,
             MaximumLocalBackups = 11, MaximumDropboxBackups = 23
