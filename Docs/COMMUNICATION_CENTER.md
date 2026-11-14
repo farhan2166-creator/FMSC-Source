@@ -30,12 +30,20 @@ was installed.
 
 ## Simplified operator workspace (November 2026)
 
-The sending interface now uses one **New Message** workspace: the audience and
-message remain editable when **Review Message** opens an adjacent preview.
-Changing recipients, the selected template, or the message invalidates the
-review immediately; the operator must review the new snapshot before opening
-WhatsApp. The existing confirmation, SQL consent/phone/scope revalidation,
-idempotent batch and manual handoff behavior are unchanged.
+The sending interface uses one **New Message** workspace: choose recipients,
+optionally select a quick message, and write the final text. **Review Recipients**
+opens a concise adjacent preview showing eligible destinations and the exact
+message. Excluded contacts and their reasons can be inspected on demand.
+Changing any audience, template or message field invalidates the review.
+
+A reviewed individual message opens the WhatsApp chat directly. For a group,
+one explicit bulk confirmation records the durable intent **and opens the
+first chat**; there is no redundant first-chat click. In the handoff,
+**I Sent It · Next** or **Skip · Next** records only the current recipient's
+operator action and opens the next eligible chat, subject to fresh SQL checks.
+The last recipient has no Next action. A prepared or opened chat is never
+assumed sent; the operator must press Send in WhatsApp, and FMSC does not
+automatically submit or verify delivery. Pending work is resumable.
 
 **History** includes **Only my unfinished** for permitted senders; no second
 global unfinished-batches navigation button is required. **Settings** shows the
