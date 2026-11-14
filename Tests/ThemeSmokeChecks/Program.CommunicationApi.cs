@@ -37,7 +37,8 @@ internal static partial class Program
         },(_,_)=>throw new Exception("No status polling on open"),(_,_)=>throw new Exception("No retry on open"));
         using(var resume=new CommunicationApiDispatchDialog(batch,operations:operations))
         {
-            resume.Show();PumpUntil(()=>!Field<bool>(resume,"busy"),"Read saved API session");
+            resume.Show();PumpUntil(()=>Field<DataGridView>(resume,"grid").DataSource is DataTable
+                && !Field<bool>(resume,"busy"),"Read saved API session");
             Check(sends==0 && Field<ModernButton>(resume,"send").Enabled,"Opening a saved API batch never dispatches before a fresh decision");
             Check(Field<ModernTextBox>(resume,"messagePreview").ReadOnly
                 && Field<ModernTextBox>(resume,"messagePreview").Text=="Hello Synthetic first",

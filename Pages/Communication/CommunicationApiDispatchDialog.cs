@@ -18,11 +18,11 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
     private readonly Label status=new() {Dock=DockStyle.Fill,AutoEllipsis=true};
     private readonly ProgressBar progress=new() {Dock=DockStyle.Fill};
     private readonly ModernTextBox reason=HumanUi.TextBox(false,200);
-    private readonly ModernButton send=new() {Text="Send Pending",ThemeRole="Primary",Width=AppScale.Scale(160),Height=AppMetrics.ButtonHeight};
+    private readonly ModernButton send=new() {Text="Send Pending",ThemeRole="Primary",Width=AppScale.Scale(160),Height=AppMetrics.ButtonHeight,Enabled=false};
     private readonly ModernButton stop=new() {Text="Stop",ThemeRole="Secondary",Width=AppScale.Scale(100),Height=AppMetrics.ButtonHeight,Enabled=false};
-    private readonly ModernButton check=new() {Text="Check SMS Status",ThemeRole="Secondary",Width=AppScale.Scale(180),Height=AppMetrics.ButtonHeight};
-    private readonly ModernButton retry=new() {Text="Approve Retry",ThemeRole="Secondary",Width=AppScale.Scale(150),Height=AppMetrics.ButtonHeight};
-    private readonly ModernButton cancelPending=new() {Text="Cancel Pending",ThemeRole="Secondary",Width=AppScale.Scale(165),Height=AppMetrics.ButtonHeight};
+    private readonly ModernButton check=new() {Text="Check SMS Status",ThemeRole="Secondary",Width=AppScale.Scale(180),Height=AppMetrics.ButtonHeight,Enabled=false};
+    private readonly ModernButton retry=new() {Text="Approve Retry",ThemeRole="Secondary",Width=AppScale.Scale(150),Height=AppMetrics.ButtonHeight,Enabled=false};
+    private readonly ModernButton cancelPending=new() {Text="Cancel Pending",ThemeRole="Secondary",Width=AppScale.Scale(165),Height=AppMetrics.ButtonHeight,Enabled=false};
     private readonly ModernButton close=new() {Text="Close",ThemeRole="Secondary",Width=AppScale.Scale(100),Height=AppMetrics.ButtonHeight};
     private CancellationTokenSource? cancellation;
     private bool busy,closeRequested;
