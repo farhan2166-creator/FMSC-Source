@@ -101,7 +101,7 @@ public sealed partial class StudentAdmissionPage
         int waiting = siblingsGrid.Columns.Contains("Status") ? siblingsGrid.Rows.Cast<DataGridViewRow>().Count(row => !row.IsNewRow &&
             Convert.ToString(row.Cells["Status"].Value) == "Pending" && Convert.ToInt32(row.Cells["AdmissionId"].Value) != currentAdmissionId) : 0;
         pendingSiblingCount.Visible = currentAdmissionId > 0;
-        pendingSiblingCount.Text = $"Pending siblings: {waiting}";
+        pendingSiblingCount.Text = $"Pending: {waiting}";
         pendingSiblingCount.AccessibleDescription = "Siblings waiting for confirmation of admission.";
         pendingSiblingCount.Width = TextRenderer.MeasureText(pendingSiblingCount.Text, pendingSiblingCount.Font).Width + 16;
         if (!siblingsGrid.Columns.Contains("RegistrationConfirm")) return;

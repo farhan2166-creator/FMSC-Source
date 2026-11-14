@@ -301,6 +301,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
     private int loadedAdmissionCampusId;
     private bool registrationReadyToClose;
     private ModernButton? collectPaymentButton;
+    private bool hasOutstandingAdmissionFees;
     private ModernButton? admissionPrintButton;
     private ModernButton? enrollmentActionsButton;
     /// <summary>The admission form is the largest in the application and had no unsaved-changes protection at all.</summary>
@@ -868,7 +869,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         GateActionAny(saveButton, "Students.Admit", "Students.Administer");
         GateAction(saveAndNewButton, "Students.Admit");
         GateAction(collectPaymentButton, "Fees.Collect");
-        collectPaymentButton.Visible = FeeCollectionAccess.CanUse(CurrentUser.HasPermission);
+        collectPaymentButton.Visible = false;
         UseWrappingToolbar();
         SetActionButtonImage("Find Student", "⌕");
         SetActionButtonImage("Clear / New", "＋");
@@ -2082,8 +2083,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         UpdateRegistrationActions();
         UpdatePhotoActions();
         bool savedStudentReady = currentAdmissionId > 0 && !IsBusy;
-        if (collectPaymentButton is not null)
-            collectPaymentButton.Enabled = savedStudentReady && _navigate is not null && FeeCollectionAccess.CanUse(CurrentUser.HasPermission);
+        UpdateCollectPaymentAction();
         if (admissionPrintButton is not null)
             admissionPrintButton.Enabled = savedStudentReady;
         if (messageStudentButton is not null)
@@ -2772,11 +2772,45 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
     }
     /* The load generation for the edit form. */
     private int admissionLoadVersion;
+
+    private void UpdateCollectPaymentAction()
+    {
+        if (collectPaymentButton is null) return;
+        bool available = !registrationReview && !IsCancelledRegistration && currentAdmissionId > 0
+            && hasOutstandingAdmissionFees && _navigate is not null
+            && FeeCollectionAccess.CanUse(CurrentUser.HasPermission);
+        collectPaymentButton.Visible = available;
+        collectPaymentButton.Enabled = available && !IsBusy && pendingPlacementId <= 0;
+    }
+
+    private async Task RefreshCollectPaymentAvailabilityAsync(int admissionId, int version)
+    {
+        if (registrationReview || IsCancelledRegistration || _navigate is null
+            || !FeeCollectionAccess.CanUse(CurrentUser.HasPermission)) return;
+        int actor = CurrentUser.UserId;
+        try
+        {
+            object? balance = await DatabaseHelper.ScalarUserAsync("GetStudentProfileOutstandingBalance",
+                DatabaseHelper.Int("@AdmissionId", admissionId));
+            if (IsDisposed || version != admissionLoadVersion || currentAdmissionId != admissionId
+                || actor != CurrentUser.UserId) return;
+            hasOutstandingAdmissionFees = balance is not null and not DBNull && Convert.ToDecimal(balance) > 0m;
+            UpdateCollectPaymentAction();
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed && version == admissionLoadVersion)
+                AppExceptionHandler.LogNonFatal(ex, "Checking outstanding fees for the Admission payment action");
+        }
+    }
+
     private async Task<bool> LoadStudentForEditAsync(int admissionId)
     {
         pendingPlacementId = -1; // Fail closed while placement confirmation state is loading.
         if (confirmReturnButton is not null) confirmReturnButton.Visible = false;
         int version = ++admissionLoadVersion;
+        hasOutstandingAdmissionFees = false;
+        UpdateCollectPaymentAction();
         photoRead.Cancel();
         /* Clear an unsaved photo when switching to another student. */
         if (admissionId != currentAdmissionId)
@@ -3171,6 +3205,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         /* Capture the clean baseline after the record has settled. */
         CaptureAdmissionBaseline();
         Defer(() => RefreshConfirmReturnAvailabilityAsync(admissionId, version));
+        Defer(() => RefreshCollectPaymentAvailabilityAsync(admissionId, version));
         return true;
     }
     private void UpdateQuickStudentToLoadedRecord(DataRow row)
@@ -3464,6 +3499,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
             Alert("Fee Collection could not be opened from here.");
             return;
         }
+        if (!hasOutstandingAdmissionFees || IsBusy || registrationReview || IsCancelledRegistration) return;
         int admissionId = currentAdmissionId;
         _navigate(
             () => new FeeCollectionPage(admissionId),
@@ -3641,6 +3677,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
             if (IsDisposed || version != admissionLoadVersion || currentAdmissionId != admissionId) return;
             pendingPlacementId = !IsPendingRegistration && !legacySetupPending && placement.Rows.Count > 0 && placement.Rows[0]["PlacementConfirmedAt"] == DBNull.Value
                 ? Convert.ToInt32(placement.Rows[0]["EnrollmentId"]) : 0;
+            UpdateCollectPaymentAction();
             if (pendingPlacementId > 0) SetStatus($"Draft · {AdmissionNumbers.ForId(admissionId)}");
             if (CurrentUser.HasPermission("Students.Administer"))
             {
@@ -4650,6 +4687,7 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
     {
         /* Invalidate student reads before clearing the form. */
         admissionLoadVersion++;
+        hasOutstandingAdmissionFees = false;
         unconfirmedAdmission = null;
         photoRead.Cancel();
         pendingPlacementId = 0;

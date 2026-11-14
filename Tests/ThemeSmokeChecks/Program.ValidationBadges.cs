@@ -11,7 +11,8 @@ internal static partial class Program
         try
         {
             CurrentUser.SignIn(7777, "Layout fixture", "Administrator", false, Array.Empty<string>());
-            using var admission = new StudentAdmissionPage();
+            using var admission = new StudentAdmissionPage((_, _, _) => { }, 0, false, false,
+                (_, _, _, _) => Task.CompletedTask, (_, _) => Task.FromResult(new DataTable()), initialize: false);
             var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
             var source = (FlowLayoutPanel)typeof(V2Page).GetField("Actions", flags)!.GetValue(admission)!;
             using var actions = new FlowLayoutPanel();
@@ -22,9 +23,18 @@ internal static partial class Program
             // Verify required operations and fit without freezing the toolbar to
             // a historical button count; optional messaging can coexist here.
             var visibleActions = actions.Controls.OfType<ModernButton>().Where(b=>b.Visible).Select(b=>b.Text).ToArray();
-            Check(new[] { "Actions ▾", "Admit Sibling", "Clear / New", "Collect Payment", "Find Student", "Print ▾", UiText.Actions.Save }
+            Check(new[] { "Actions ▾", "Admit Sibling", "Clear / New", "Find Student", "Print ▾", UiText.Actions.Save }
                 .All(visibleActions.Contains) && visibleActions.Distinct().Count() == visibleActions.Length,
                 "Admission toolbar retains all ordinary operations without duplicate actions");
+            var collect = Field<ModernButton>(admission, "collectPaymentButton");
+            Check(!collect.Visible, "Admission offers no collection action before a student is saved");
+            SetField(admission, "currentAdmissionId", 42);
+            var refreshPayment = typeof(StudentAdmissionPage).GetMethod("UpdateCollectPaymentAction", flags)!;
+            refreshPayment.Invoke(admission, null);
+            Check(!collect.Visible, "Admission hides collection without a positive outstanding balance");
+            SetField(admission, "hasOutstandingAdmissionFees", true);
+            refreshPayment.Invoke(admission, null);
+            Check(collect.Visible && collect.Enabled, "An authorized operator can collect a saved student's outstanding fees");
             Check(visibleActions.Contains("Message Student…"), "An authorized operator can reach optional saved-student messaging");
             Check(!actions.Controls.OfType<ModernButton>().Single(b=>b.Text=="Save & New").Visible,
                 "Admission Save & New stays temporarily hidden to leave room for Print");
