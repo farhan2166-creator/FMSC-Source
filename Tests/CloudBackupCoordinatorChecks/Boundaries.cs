@@ -15,7 +15,7 @@ namespace FMSC_SMS.Services.Backup {
 internal enum CloudProvider {Dropbox}
 internal sealed record CloudRemoteBackup(CloudProvider Provider,string RemoteId,string Name,string PackageSha256,DateTime SqlBackupCreatedUtc,DateTime UploadedUtc,long Size);
 internal sealed class CloudBackupOptions {
- public bool LocalEnabled {get;set;}=true;public bool DropboxEnabled {get;set;}=true;=true;
+ public bool LocalEnabled {get;set;}=true;public bool DropboxEnabled {get;set;}=true;
  public bool AutomaticEnabled {get;set;}=true;public int MaximumPendingQueueMegabytes {get;set;}=8192;public int MaximumLocalBackups {get;set;}=7;public int MaximumDropboxBackups {get;set;}=7;
  internal void Validate(){} internal bool IsDue(DateTimeOffset now,DateTimeOffset? last)=>FixtureRuntime.Due;
 }
