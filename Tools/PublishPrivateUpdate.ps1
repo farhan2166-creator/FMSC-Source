@@ -39,11 +39,10 @@ foreach ($key in @('GIT_CONFIG_COUNT','GIT_CONFIG_KEY_0','GIT_CONFIG_VALUE_0','G
 }
 try {
     # Keep the verified candidate unchanged and never upload this private copy
-    # as a Source artifact. Only native registration and its inventory differ;
-    # all code, release identity and Sandbox acceptance remain unchanged.
+    # as a Source artifact. The code, release identity and Sandbox
+    # acceptance remain unchanged.
     $app = Join-Path $work 'application'
     Copy-Item -LiteralPath $candidate -Destination $app -Recurse
-    Package @('--prepare-google-registration',$app)
     $env:GIT_CONFIG_COUNT = '1'
     $env:GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader'
     $env:GIT_CONFIG_VALUE_0 = 'AUTHORIZATION: basic ' + $encoded
