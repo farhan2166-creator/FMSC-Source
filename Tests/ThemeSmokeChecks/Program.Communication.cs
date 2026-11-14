@@ -190,7 +190,10 @@ internal static partial class Program
         Check(ButtonsFit(), "All communication actions are fully visible, not clipped by the navigation container");
         host.ClientSize = new Size(670, 780);
         Application.DoEvents();
-        Check(ButtonsFit(), "Communication actions wrap without clipping on a narrower page");
+        Check(ButtonsFit(), "Communication actions wrap without clipping on a narrower page. " +
+            $"Host={host.ClientSize}, page={page.ClientSize}; " +
+            string.Join("; ", navigation.Select(button =>
+                $"{button.Name}: button={button.Bounds}, panel={button.Parent?.ClientRectangle}")));
         host.ClientSize = new Size(1200, 780);
         Application.DoEvents();
         Check(Descendants(page).Single(control => control.Name == "communicationUnfinishedGrid").Visible,
