@@ -277,7 +277,9 @@
 		<MakeDir Directories="$(ReleaseRoot)Migrations" />
 		<ItemGroup>
 			<MigrationFiles Include="$(DeploymentMigrationDirectory)\*.sql" />
-			<MigrationApplierFiles Include="$(MSBuildProjectDirectory)\Migrations\Apply-Migrations.ps1;$(MSBuildProjectDirectory)\Migrations\Apply-Migrations.bat;$(MSBuildProjectDirectory)\Migrations\README.md" />
+			<MigrationApplierFiles Include="$(MSBuildProjectDirectory)\Migrations\Apply-Migrations.ps1;$(MSBuildProjectDirectory)\Migrations\Apply-Migrations.bat" />
+            <MigrationApplierFiles Include="$(MSBuildProjectDirectory)\Migrations\README.md"
+                                   Condition="Exists('$(MSBuildProjectDirectory)\Migrations\README.md')" />
 			<RetiredReleaseMigrationFiles Include="$(ReleaseRoot)Migrations\*.sql" Exclude="@(MigrationFiles->'$(ReleaseRoot)Migrations\%(Filename)%(Extension)')" />
 			<CurrentUpdateMigrationFiles Include="$(MSBuildProjectDirectory)\Migrations\*.sql" />
 			<RetiredUpdateMigrationFiles Include="$(PublishDir)UpdateSupport\Migrations\*.sql" Exclude="@(CurrentUpdateMigrationFiles->'$(PublishDir)UpdateSupport\Migrations\%(Filename)%(Extension)')" />
