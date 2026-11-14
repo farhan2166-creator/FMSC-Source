@@ -49,7 +49,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts/fee-documents | Out-Null
-          Copy-Item Docs/FEE_DOCUMENT_REVIEW_PACK.md artifacts/fee-documents/README.md
+          @(
+            'Fee document review: fictional data rendered through production report code.'
+            'Inspect the generated documents across the included scenarios.'
+            'Rendering is not physical-printer or real-school acceptance.'
+          ) | Set-Content -LiteralPath artifacts/fee-documents/README.md -Encoding UTF8
           dotnet run --project Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release -- --fee-document-review-pack 2>&1 | Tee-Object -FilePath artifacts/fee-documents/render.log
           $renderExit = $LASTEXITCODE
           if ($renderExit -ne 0) {

@@ -1,6 +1,5 @@
 namespace FMSC_SMS.Core
 {
-    // UI tuning index: ../Docs/Design/UI_TUNING_GUIDE.md links each visual adjustment to its owner.
     public static class AppMetrics
     {
         public static int PagePadding =>

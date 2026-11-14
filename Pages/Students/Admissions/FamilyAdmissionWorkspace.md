@@ -53,10 +53,8 @@ to discard them. Recorded money and receipt snapshots remain saved.
 
 ## Delivery and verification
 
-Migration `27.sql` adds permission-checked, read-only waiver evidence for this bill
-path. It requires schema 26 and advances to 27; it does not rewrite student,
-financial or historical document records. Apply it through the existing verified
-backup/transaction deployment process. The application and installer require 27.
+The required schema comes from `Installer/core.ps1`. Apply supported versioned
+migrations through the existing verified backup/transaction deployment process.
 
 Focused native checks: `ThemeSmokeChecks --family-admission-workspace`.
 Owned SQL/native/RDLC checks: `Tools/Run-Level2.ps1 -FamilyCounterOnly`.

@@ -37,7 +37,7 @@ communication module, when present, gets a permission-checked contact-linking
 procedure plus pre-send consent revalidation. No messages send automatically and
 the migration does not install the optional module.
 
-Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed **2.sql–18.sql** production chain where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts. See [the historical baseline decision](../Docs/FIRST_RELEASE_BASELINE.md).
+Disposable tests publish the complete **record-free** schema-1 baseline, then exercise the committed numbered production chain through the installer-required schema where applicable. Earlier, unrelated **pre-baseline development migrations** remain retired and must not be replayed. The current numbered production migrations are not those retired scripts.
 
 # Apply migrations without the installer
 
@@ -95,7 +95,7 @@ must be checked separately. If `sqlcmd.exe` is missing, the same pinned and
 SHA-256-checked Microsoft go-sqlcmd build as the installer is obtained.
 
 **This is a database mutation tool. Test on a disposable copy first.**
-See `Docs/BACKUP_RECOVERY.md` for recovery guidance.
+Keep the verified backup and test restoration before applying changes to school data.
 
 ## Schema 8 — Retired Communication Center (committed destructive migration)
 
@@ -130,8 +130,7 @@ The migration adds durable batches, recipient snapshots, attempts, provider rece
 correlation, channel suppression, templates and audit evidence. All changes are
 executed under the installer's existing transaction with pre-migration backup.
 The application must not expose sending until SQL writers, authorization, provider
-validation, verified callbacks and recovery checks are complete. See
-[Communication rebuild contract](../Docs/COMMUNICATION_REBUILD_V2.md).
+validation, verified callbacks and recovery checks are complete.
 
 ## Schema 10 — Provider-neutral groundwork and manual WhatsApp (historical feature milestone)
 

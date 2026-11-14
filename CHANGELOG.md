@@ -1,5 +1,8 @@
 # Changelog
 
+Historical entries describe their own release state. Current versions and requirements come from `Installer/core.ps1`, the compatibility contracts and current code.
+
+
 ## Unreleased — One interactive app per computer
 
 - Refuse a second interactive FMSC process across Windows sessions, bring the existing window or its active dialog forward when possible, and release the guard on exit or crash. Scheduled backups and headless installation verification keep their existing behavior. Backup restore relaunches only after the previous interactive session releases its guard.
@@ -258,7 +261,7 @@ Notable user-facing, database, installer, and operational changes will be tracke
 - Upgrade schema 20 to 21 without rewriting school records; remove audit-only preparation from revised procedures.
 - Review fee rates and concessions together for monthly, annual and individual purchase bills, including closed placements. Retain credit unless its use is explicitly selected; show credit before/use/remaining in the review.
 - Make carrying monthly concessions through promotion an explicit choice; remove the unused amount editor while retaining its SQL compatibility API.
-- Document the operator choices and remaining school-PC acceptance in Docs/OPERATOR_CONTROL.md.
+- Document the operator choices and remaining school-PC acceptance in the operator guidance available at that time.
 
 ## [1.1.0-rc.1] - 2026-10-18
 
@@ -310,7 +313,7 @@ Notable user-facing, database, installer, and operational changes will be tracke
 
 - Added a manually dispatchable, DACPAC-triggered, schema-only reference extractor. It stores complete per-object model XML and SQL module bodies, tracks changed definitions and proposes a draft synchronization PR without importing data or approving changes.
 
-- Optional Communication Center with explicit guardian/staff consent, reviewed English/Urdu templates, draft/approval/scheduling controls, a durable SQL queue, safe simulation, Twilio SMS and official Meta template adapters. Live mode defaults disabled; the additive database module requires separate owner review/deployment. No Accountant grants, financial procedures, installer upgrades or approved DACPAC changes are included. See [setup and remaining external acceptance](Docs/COMMUNICATION_CENTER.md).
+- Optional Communication Center with explicit guardian/staff consent, reviewed English/Urdu templates, draft/approval/scheduling controls, a durable SQL queue, safe simulation, Twilio SMS and official Meta template adapters. Live mode defaults disabled; the additive database module requires separate owner review/deployment. No Accountant grants, financial procedures, installer upgrades or approved DACPAC changes are included. See setup and remaining external acceptance.
 
 - [PR #18](https://github.com/farhan2166-creator/FMSC-Database/pull/18) adds conservative DACPAC refresh comparison and trusted default-branch synchronization PR automation. Exact full-model/module/data matching, sanitized refusal reports and synthetic safety regressions preserve existing approval/security/SQL-isolation rules; no automatic merge or material-change override.
 - Generated [PR #17](https://github.com/farhan2166-creator/FMSC-Database/pull/17) aligns the verified metadata-only `91ec136` refresh across three approval/provenance records, preserving the refreshed DACPAC and reusing the schema-only fixture.
@@ -369,7 +372,7 @@ The following end-user-flow corrections are proposed in [PR #8](https://github.c
 ### Documentation
 - Added a project overview and operator, installation, recovery, architecture, release-readiness, and development-workflow guides.
 - Added a pull-request template prompting contributors and Codex to explain behavior changes, safety implications, tests, and manual acceptance requirements.
-- Established a single current [master audit](Audit/FMSC_MASTER_AUDIT.md) with a [historical index](Audit/Archive/FMSC_HISTORICAL_AUDITS.md) for earlier investigations.
+- Established a single current master audit with a historical index for earlier investigations.
 
 ### Build and delivery
 - Existing Windows desktop CI and manually triggered private application-only and complete-installer artifact workflows are documented. **Workflow existence does not mean a complete installer has passed deployment acceptance.**
@@ -377,11 +380,11 @@ The following end-user-flow corrections are proposed in [PR #8](https://github.c
 
 ## Versioning policy
 
-The application assembly version in `FMSC_SMS.csproj` and the database's required schema version are **different concepts**. The current runtime contract requires **database schema 6**. A version should not be tagged or described as a production-approved school release until the tests and checks in [RELEASE_CHECKLIST.md](Docs/RELEASE_CHECKLIST.md) are recorded.
+The application assembly version in `FMSC_SMS.csproj` and the database's required schema version are **different concepts**. The current runtime contract requires **database schema 6**. A version should not be tagged or described as a production-approved school release until the tests and checks in RELEASE_CHECKLIST.md are recorded.
 
 When a pull request changes behavior, add an Unreleased entry describing the operator-visible result and a PR link. Move entries to a dated version section only after an actual release approval.
 
-For the original fixes, implementation passes, schema verification and historical decisions, see the [historical audit index](Audit/Archive/FMSC_HISTORICAL_AUDITS.md) and commit history.
+For the original fixes, implementation passes, schema verification and historical decisions, see the historical audit index and commit history.
 
 - Legacy student setup applies the School Profile cutoff to the selected billing start and shows the resulting monthly fee period. Historical class placement stays independent. Migration 29 corrects the earlier placement-based rule in migration 28 without rewriting existing charges.
 

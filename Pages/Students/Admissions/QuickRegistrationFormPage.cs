@@ -324,7 +324,6 @@ internal sealed partial class QuickRegistrationFormPage : V2Page, IUnsavedChange
     // confirmation of official admission is a separate review step. Printing an
     // outstanding bill and collecting money are also separate actions. An uncertain
     // save outcome must be reconciled before another write (recoveryBlocked).
-    // See Audit/OWNER_DECISIONS_AND_INVARIANTS.md.
     private bool ReadyToSave=>!recoveryBlocked&&!needsRefresh&&!busy&&!loadingFamily&&!loadingFees&&feesLoaded&&(savedStudent==0||(savedStatus=="Pending"&&savedSnapshot.Length>0))&&(family.SelectedId<=0||family.SelectedId==familyAnchor)
         &&(savedStudent==0&&familyAnchor==0||CurrentUser.HasPermission("Students.Administer"));
     private string[] BasicValues()=>new[]{name.Text.Trim(),parent.Text.Trim(),contact.Text.Trim(),address.Text.Trim()};
