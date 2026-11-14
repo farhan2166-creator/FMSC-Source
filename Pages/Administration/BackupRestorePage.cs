@@ -213,12 +213,23 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         tabs.SelectedIndexChanged += (_, _) => ApplyHistoryDependentEnablement();
         // A single click opens an inline summary beneath the row; restoring
         // remains an explicit double-click/Enter action.
-        availableBackupsGrid.CellClick += (_, e) => {
+        availableBackupsGrid.CellClick += async (_, e) => {
             if (e.RowIndex < 0 ||
                 availableBackupsGrid.Rows[e.RowIndex].Tag is not UnifiedRecoveryPoint point)
                 return;
-            availableBackupsGrid.ToggleDetails(e.RowIndex,
-                FormatExpandedRecoveryDetails(point, e.RowIndex == 0));
+            var row = availableBackupsGrid.Rows[e.RowIndex];
+            bool latest = e.RowIndex == 0;
+            if (!availableBackupsGrid.ToggleDetails(e.RowIndex,
+                    FormatExpandedRecoveryDetails(point, latest, null) +
+                    Environment.NewLine + "Reading this backup's contents…"))
+                return;
+            // Never inspect or restore a .bak on the WinForms message pump.
+            // An older local backup is verified in a disposable SQL catalog;
+            // cloud-only legacy backups without local metadata show unavailable.
+            var summary = await Task.Run(() => BackupContentsSummary.FindOrInspect(point));
+            if (!IsDisposed)
+                availableBackupsGrid.UpdateDetails(row,
+                    FormatExpandedRecoveryDetails(point, latest, summary));
         };
         availableBackupsGrid.CellDoubleClick += async (_, e) => {
             if (canRestore && e.RowIndex >= 0) await UseSelectedRecoveryPointAsync();
@@ -588,31 +599,38 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         private Padding previousPadding;
         private DataGridViewContentAlignment previousAlignment;
 
-        internal void ToggleDetails(int rowIndex, string details)
+        internal bool ToggleDetails(int rowIndex, string details)
         {
             if (rowIndex < 0 || rowIndex >= Rows.Count ||
                 Rows[rowIndex].Tag is not UnifiedRecoveryPoint)
-                return;
+                return false;
             DataGridViewRow row = Rows[rowIndex];
             if (ReferenceEquals(expandedRow, row))
             {
                 CollapseDetails();
-                return;
+                return false;
             }
             CollapseDetails();
             expandedRow = row;
-            expandedText = details;
             originalHeight = row.Height;
             previousPadding = row.DefaultCellStyle.Padding;
             previousAlignment = row.DefaultCellStyle.Alignment;
-            // The original cells stay at the top; the extra height belongs
-            // to a full-width read-only detail area underneath them.
-            int lineCount = details.Count(c => c == '\n') + 1;
-            detailsHeight = AppScale.Scale(Math.Min(190, Math.Max(94, lineCount * 22 + 18)));
-            row.DefaultCellStyle.Padding = new Padding(0, 0, 0, detailsHeight);
             row.DefaultCellStyle.Alignment = DataGridViewContentAlignment.TopLeft;
+            UpdateDetails(row, details);
+            return true;
+        }
+
+        internal void UpdateDetails(DataGridViewRow row, string details)
+        {
+            if (!ReferenceEquals(expandedRow, row) || row.DataGridView != this) return;
+            expandedText = details;
+            // The existing cells remain at the top; extra height is dedicated
+            // to a single full-width read-only preview beneath the selected row.
+            int lines = details.Count(c => c == '\n') + 1;
+            detailsHeight = AppScale.Scale(Math.Min(250, Math.Max(94, lines * 22 + 18)));
+            row.DefaultCellStyle.Padding = new Padding(0, 0, 0, detailsHeight);
             row.Height = originalHeight + detailsHeight;
-            InvalidateRow(rowIndex);
+            InvalidateRow(row.Index);
         }
 
         internal void CollapseDetails()
@@ -997,7 +1015,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         return string.Join(Environment.NewLine, local.Concat(cloud));
     }
 
-    private static string FormatExpandedRecoveryDetails(UnifiedRecoveryPoint point, bool latest)
+    private static string FormatExpandedRecoveryDetails(UnifiedRecoveryPoint point, bool latest,
+        BackupContentsSummary.Snapshot? summary)
     {
         var lines = new List<string> {
             (latest ? "LATEST BACKUP" : "BACKUP DETAILS") + "  ·  SQL backup created " +
@@ -1013,9 +1032,15 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 (copy.Remote.UploadedUtc == default ? "" :
                     "  ·  uploaded " + copy.Remote.UploadedUtc.ToLocalTime().ToString("dd-MMM h:mm tt")) +
                 (copy.RecoveryTested ? "  ·  recovery-tested" : "  ·  verification needed"));
-        // SQL headers and cloud package metadata contain no historical record
-        // counts. Never show today's live database counts for an older backup.
-        lines.Add("Student, admission and fee counts: not recorded for this backup.");
+        // All numbers are taken from an isolated restoration of THIS SQL .bak.
+        // Never substitute counts from the current live school database.
+        if (summary is null)
+            lines.Add("Database contents: not yet available for this recovery point.");
+        else
+        {
+            lines.Add($"Students/admissions: {summary.Students:N0}  ·  Active students: {summary.ActiveStudents:N0}");
+            lines.Add($"Fee payment entries: {summary.FeePayments:N0}  ·  Billing charges: {summary.BillingCharges:N0}  ·  Schema: {summary.SchemaVersion}");
+        }
         return string.Join(Environment.NewLine, lines);
     }
 
