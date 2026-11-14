@@ -100,9 +100,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                 using var dialog = new CommunicationManualHandoffDialog(batch, openFirstChat: openFirstChat);
                 dialog.ShowDialog(FindForm());
             },
-            () => Confirm("FMSC will open one WhatsApp chat at a time. YOU must press Send "
-                + "in your school's WhatsApp Business account; FMSC cannot verify delivery. "
-                + "Your progress will be recorded for later resumption. Continue?", "Start Manual WhatsApp", false));
+            () => Confirm("Open the reviewed WhatsApp chats one at a time? "
+                + "You will press Send in WhatsApp yourself. You can finish the remaining chats later.",
+                "Start WhatsApp Chats", false));
         sampleMessage.ReadOnly = true;
         sampleMessage.ScrollBars = ScrollBars.Vertical;
         sampleMessage.Dock = DockStyle.Bottom;
@@ -139,10 +139,10 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         steps.Controls.Add(composerLayout);
         steps.Controls.Add(cards[2]);
         steps.Controls.Add(cards[3]);
-        next = AddBusyAction("Review Message", () => RunBusyAsync(BusyMessage, ContinueAsync, this), "Primary");
+        next = AddBusyAction("Review Recipients", () => RunBusyAsync(BusyMessage, ContinueAsync, this), "Primary");
         next.MinimumSize = new Size(AppScale.Scale(165), AppMetrics.ButtonHeight);
         next.Width = AppScale.Scale(165);
-        confirm = AddBusyAction("Open WhatsApp Chats", () => RunBusyAsync("Confirming the reviewed manual batch…", StartManualHandoffAsync, this), "Primary");
+        confirm = AddBusyAction("Continue to WhatsApp", () => RunBusyAsync("Confirming the reviewed manual batch…", StartManualHandoffAsync, this), "Primary");
         confirm.MinimumSize = new Size(AppScale.Scale(230), AppMetrics.ButtonHeight);
         confirm.Width = AppScale.Scale(230);
         // Only the operator-controlled handoff may be activated in this version.
@@ -216,7 +216,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     private HumanCard TargetCard()
     {
-        var card = HumanUi.Card("New Message");
+        var card = HumanUi.Card("New Message",
+            "Choose recipients, write your message, then review before opening WhatsApp.");
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         // The message expands into unused space instead of leaving a short
         // form above a large blank region. Narrow or short windows can scroll.
@@ -231,8 +232,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         {
             HumanUi.Field("Send to", audience, true),
             campusField, classField, studentField, staffField,
-            HumanUi.Field("Prepared message (optional)", templateChoice),
-            HumanUi.Field("Message", message, true)
+            HumanUi.Field("Quick message (optional)", templateChoice),
+            HumanUi.Field("Your message", message, true)
         };
         for (int row = 0; row < fields.Length; row++)
         {
@@ -251,7 +252,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private HumanCard PreviewCard()
     {
         var card = HumanUi.Card("Review",
-            "Recipients and message are checked before opening WhatsApp.");
+            "Check the recipients and exact message. Nothing has been sent.");
         previewGrid.AutoGenerateColumns = false;
         foreach (var (field, name, size) in new[]
         {
@@ -298,7 +299,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             });
         var resume = new ModernButton
         {
-            Text = "Resume Manual WhatsApp", ThemeRole = "Secondary",
+            Text = "Continue WhatsApp Chats", ThemeRole = "Secondary",
             Width = AppScale.Scale(225), Height = AppMetrics.ButtonHeight,
             Enabled = CurrentUser.HasPermission("Communication.Send")
         };
@@ -813,7 +814,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
         next.Visible = compose && step == 0;
         confirm.Visible = compose && step == 1;
-        confirm.Text = preview?.Included == 1 ? "Open WhatsApp Chat" : "Open WhatsApp Chats";
+        confirm.Text = preview?.Included == 1 ? "Open in WhatsApp" : "Start WhatsApp Chats";
         confirm.Enabled = step == 1 && manualModeAvailable && preview is { Included: > 0 }
             && CurrentUser.HasPermission("Communication.Send");
         historyButton.Visible = CurrentUser.HasPermission("Communication.View") && step != 2;
@@ -850,7 +851,11 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                 Warn("The reviewed batch was saved, but the current message changed. Review that batch in History; no chat was opened.");
                 return;
             }
-            operations.OpenHandoff(saved.BatchId, single && individual && !saved.AlreadyConfirmed);
+            // The operator has reviewed and confirmed this batch. Open the first
+            // chat now rather than requiring another redundant click. No message
+            // is sent by FMSC; every WhatsApp send remains operator-controlled.
+            // A previously confirmed batch is never auto-reopened on retry.
+            operations.OpenHandoff(saved.BatchId, !saved.AlreadyConfirmed);
             if (!IsDisposed && CurrentUser.HasPermission("Communication.View"))
                 await LoadHistoryAsync();
             else if (!IsDisposed) await LoadUnfinishedAsync();
@@ -955,24 +960,25 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         showExcluded.Checked = result.Included == 0;
         BindPreviewRows();
         bool single = IsIndividualTarget(target) && result.Included == 1 && result.Excluded == 0;
-        previewGrid.Visible = showExcluded.Visible = !single;
+        // Show the useful decision first; leave detailed exclusion reasons in
+        // the recipient grid instead of turning the confirmation into a report.
+        previewGrid.Visible = !single;
+        showExcluded.Visible = !single && result.Excluded > 0;
+        showExcluded.Text = $"Review excluded contacts ({result.Excluded})";
         sampleMessage.Dock = single ? DockStyle.Fill : DockStyle.Bottom;
         sampleMessage.Height = AppScale.Scale(150);
-        summary.Height = AppScale.Scale(single ? 52 : 116);
-        summary.Text = "Send to: " + AudienceDescription(target)
-            + (single ? Environment.NewLine + "WhatsApp number ending in " + result.Entries[0].PhoneE164?[^4..]
-            : Environment.NewLine + "Eligible destinations: " + result.Included
-            + "   |   Excluded: " + result.Excluded
-            + Environment.NewLine + "No consent recorded: " + result.NotRecorded
-            + "   |   Declined: " + result.Declined
-            + "   |   Invalid mobile: " + result.InvalidNumber
-            + Environment.NewLine + "Opted out: " + result.Suppressed
-            + "   |   Duplicate phone: " + result.Duplicates);
+        summary.Height = AppScale.Scale(72);
+        summary.Text = "To: " + AudienceDescription(target)
+            + (single
+                ? Environment.NewLine + "WhatsApp number ending in " + result.Entries[0].PhoneE164?[^4..]
+                : Environment.NewLine + $"{result.Included} eligible destination(s)"
+                  + (result.Excluded > 0 ? $"  ·  {result.Excluded} excluded" : ""))
+            + Environment.NewLine + "You press Send in WhatsApp; FMSC does not send automatically.";
         ShowSelectedMessage();
         SetStep(1);
-        SetStatus(result.Included == 0 ? "No eligible recipients. Check the exclusions below."
-            : manualModeAvailable ? "Ready to open WhatsApp. You press Send in WhatsApp."
-            : "An administrator can enable WhatsApp in Settings.");
+        SetStatus(result.Included == 0 ? "No eligible recipients. Review excluded contacts."
+            : manualModeAvailable ? "Ready. Continue to WhatsApp when your message looks correct."
+            : "WhatsApp is paused. An administrator can enable it in Settings.");
     }
 
     private void BindPreviewRows()
