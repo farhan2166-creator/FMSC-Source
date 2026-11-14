@@ -180,6 +180,19 @@ internal static partial class Program
         Check(navigation.All(button => button.Visible)
             && navigation[2].PointToScreen(Point.Empty).X < navigation[3].PointToScreen(Point.Empty).X,
             "Daily tabs and separate administration actions are visible in the navigation");
+        bool ButtonsFit() => navigation.All(button =>
+        {
+            var parent = button.Parent;
+            return parent is not null
+                && parent.RectangleToScreen(parent.ClientRectangle)
+                    .Contains(button.RectangleToScreen(button.ClientRectangle));
+        });
+        Check(ButtonsFit(), "All communication actions are fully visible, not clipped by the navigation container");
+        host.ClientSize = new Size(670, 780);
+        Application.DoEvents();
+        Check(ButtonsFit(), "Communication actions wrap without clipping on a narrower page");
+        host.ClientSize = new Size(1200, 780);
+        Application.DoEvents();
         Check(Descendants(page).Single(control => control.Name == "communicationUnfinishedGrid").Visible,
             "The center opens on the dedicated unfinished queue");
         var unfinishedSearch = page.Controls.Find("communicationUnfinishedSearch", true).Single();
