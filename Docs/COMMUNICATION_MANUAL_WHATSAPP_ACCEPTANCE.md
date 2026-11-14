@@ -1,7 +1,7 @@
 # Free WhatsApp Business — Release acceptance checklist
 
 This checklist applies only to the manually operated `WhatsAppBusinessManual`
-delivery method on PR #131. An external WhatsApp account or app is **not**
+delivery method. An external WhatsApp account or app is **not**
 required for synthetic tests. These instructions do not authorize sending
 messages to real guardians during QA.
 
@@ -24,6 +24,14 @@ messages to real guardians during QA.
 - [ ] The native handoff dialog opens exactly one `wa.me` chat containing the
   reviewed destination and URL-encoded text. Nothing is sent automatically.
   The user must verify their logged-in school account and press Send.
+- [ ] One reviewed individual opens the first chat without a redundant bulk
+  prompt. A bulk preview requires one explicit confirmation, then opens only
+  its first eligible chat. Reconfirming an already saved batch never silently
+  reopens a chat.
+- [ ] An explicit **I Sent It · Next** or **Skip · Next** action records
+  only the current recipient and opens the next after a fresh eligibility
+  check. The next recipient remains Pending/Opened, never ReportedSent.
+  Network or shell failures do not fabricate progress.
 - [ ] `I Sent It` requires a prior opened chat and is explicitly
   **operator-reported**, never delivered. `Skip` does not send. Both choices
   survive application restart and can be viewed in History.
@@ -66,13 +74,34 @@ approval. Neither SMTP nor Meta Cloud API is yet enabled in this PR.
 
 ## WinForms visibility and local acceptance (do not send real messages)
 
-**Release provenance prerequisite:** See [Audit Issue 04](../Audit/Reviews/FMSC_RELEASE_INSTALLED_ACCEPTANCE_2026-11-08.md) and run `Tools/VerifyInstalledFmscRelease.ps1` under the actual FMSC Windows account. The published version 1.0.16 is grounded in Source SHA `4abe2d037f9ce51c0922875e7c0241cb112ac88d`, not in the newer source HEAD. A matching file version alone does not prove newer merged fixes are included. Do not declare local acceptance until the executable, schema-10 verifier, and actual UI are all reviewed.
+Acceptance uses the actual installed executable and a disposable synthetic
+school database. Tests assert **behavior and reachable controls**, not exact
+captions, a fixed button count, historical version numbers or cosmetic card
+positions. See the release-provenance checks under
+[installed-release acceptance](../Audit/Reviews/FMSC_RELEASE_INSTALLED_ACCEPTANCE_2026-11-08.md).
 
-1. Verify the **running executable** from Windows Task Manager or PowerShell, not merely the SQL migration number. An uninstalled source commit or schema 10 alone cannot change a 1.0.15 desktop UI.
-2. Open the dashboard **Communication Center** with `Communication.View`. The composer must default to **WhatsApp Business (manual)**; **SMS (unavailable)** remains non-send-capable.
-3. As an administrator with `Communication.Configure`, choose **Settings**. Confirm that **Use Free WhatsApp**, **Configure Provider**, **New Template** and **Edit Selected** are all visible at normal and 125%/150% Windows display scaling. Provider controls and template controls occupy separate rows. Confirm **Email** is marked unavailable.
-4. On a disposable, consented synthetic dataset, activate **Use Free WhatsApp** once. Settings now reads **Free WhatsApp Active** (disabled). Pause using **Pause WhatsApp**; Settings changes to **Resume Free WhatsApp**. Resume and verify that no existing school records were changed.
-5. Select a school, campus or class audience **without choosing individual students**, then compose, preview and confirm. Confirm remains unavailable for SMS, unavailable/unconfigured WhatsApp, or zero eligible recipients. A valid manual preview enables **Open WhatsApp Chats** only with `Communication.Send`.
-6. With only test recipients, open one chat and **do not press Send**. Close the handoff; confirm History shows an opened unfinished recipient, not Delivered. Resume and use **Skip**. Repeat with a separate synthetic recipient and deliberately report **I Sent It**; it must count as operator-reported, not provider-delivered.
-7. Test account without Send, withdrawn Admission Yes, invalid phone, changed number, WhatsApp suppression, fee permission failure, application restart and paused mode. No chat should open when eligibility or authorization fails. Use the existing disposable SQL test harness; do not use production school contacts for this acceptance.
-8. Do not publish Workflow 04 until the resulting exact source commit has passed Windows UI smoke checks and the private Sandbox gate. Historical acceptance for source `2f29f3dcdfeb234616cb86ec4c7f5c7490d10546` remains evidence for that commit only.
+1. Confirm the executable is from the intended exact commit, then open
+   Communication Center with sender permission and verify the message composer
+   is directly usable; History and Settings remain permission-gated.
+2. With authorized test recipients, choose campus/class without individually
+   selecting students, select a quick message or write one, and review. Check
+   complete per-recipient text, masked contacts and accessible exclusion reasons.
+3. Edit the message or change a recipient after review. The old confirmation
+   must become invalid, and a new preview must be required.
+4. For one reviewed individual, continue directly into one unsent WhatsApp
+   chat. For a reviewed group, cancel the bulk prompt: no batch or chat may
+   appear. Confirm on the second attempt and check that exactly the first chat
+   opens without another button press.
+5. Explicitly report the first synthetic chat as sent. Check that the **next**
+   chat opens but is not marked sent or delivered. Skip another recipient and
+   confirm progress and history counts. Finish Later and resume without
+   duplicates or automatic re-opening of uncertain chats.
+6. Exercise unavailable provider, missing permission, withdrawn Admission Yes,
+   invalid or changed number, opt-out, inactive school membership, paused
+   mode, failed browser launch and interrupted/recovered session. Every case
+   must fail closed without fabricated sent/delivered evidence.
+7. Check form usability at ordinary and increased Windows display scaling and
+   smaller window heights: every essential action must remain reachable without
+   clipped controls. Never use a production WhatsApp account or live contacts.
+8. Publish only after the current exact-commit Windows behavioral checks,
+   disposable SQL suite, security checks and private Sandbox acceptance pass.
