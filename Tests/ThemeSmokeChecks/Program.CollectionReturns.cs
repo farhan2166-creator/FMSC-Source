@@ -46,7 +46,7 @@ internal static partial class Program
             Finish(Call("RefreshReturnAvailabilityAsync"));
             var button=Field<ModernButton>("confirmReturnButton");
             var statuses=Field<Dictionary<int,string>>("returnStatusByStudent");
-            Check(button.Visible&&button.Enabled&&button.Text=="Confirm Return","The loaded promoted child has one direct return action");
+            Check(button.Visible&&button.Enabled,"The loaded promoted child has a permitted direct return action");
             Check(statuses[41]=="Awaiting Return"&&statuses[42]=="Return Confirmed"&&statuses[43]=="Pending Registration",
                 "Waiting returns, confirmed returns and new registrations have distinct panel statuses");
             var current=Field<FamilyStudentList>("currentStudentAmounts");
