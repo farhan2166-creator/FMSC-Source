@@ -280,7 +280,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             finally { fitting = false; }
         }
         navigation.SizeChanged += (_, _) => FitNavigation();
+        navigation.Layout += (_, _) => FitNavigation();
         navigation.VisibleChanged += (_, _) => FitNavigation();
+        layout.SizeChanged += (_, _) => FitNavigation();
         layout.HandleCreated += (_, _) => FitNavigation();
         foreach (Control button in navigation.Controls)
         {
