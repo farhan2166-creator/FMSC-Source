@@ -5,10 +5,9 @@ internal static class StudentSearchMatcher
 {
     public static List<DataRow> Find(DataTable source, string? searchText, int maxRows = 0, Func<DataRow, bool>? additionalFilter = null)
     {
-        string term = (searchText ?? string.Empty).Trim();
-        string rawTerm = term;
-        if (AdmissionNumbers.TryNormalize(term, out string normalizedNumber)) term = normalizedNumber;
-        bool numeric = AdmissionNumbers.TryNormalize(term, out _);
+        string rawTerm = (searchText ?? string.Empty).Trim();
+        bool numeric = AdmissionNumbers.TryNormalize(rawTerm, out string normalizedNumber);
+        string term = numeric ? normalizedNumber : rawTerm;
         DataColumn? admissionColumn = source.Columns.Contains("AdmissionNumber")
             ? source.Columns["AdmissionNumber"]
             : null;
@@ -21,17 +20,10 @@ internal static class StudentSearchMatcher
         DataColumn? registrationColumn = source.Columns.Contains("RegistrationNumber")
             ? source.Columns["RegistrationNumber"]
             : null;
-        bool StartsWith(DataRow row, DataColumn? column, string prefix) =>
-            column is not null &&
-            row[column] != DBNull.Value &&
-            (Convert.ToString(row[column], CultureInfo.InvariantCulture) ?? string.Empty)
-                .TrimStart().StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
-        bool MatchesText(DataRow row)
-        {
-            return StartsWith(row, nameColumn, rawTerm) ||
-                StartsWith(row, fatherColumn, rawTerm) ||
-                StartsWith(row, registrationColumn, rawTerm);
-        }
+        bool MatchesText(DataRow row) =>
+            Text(row, registrationColumn).TrimStart().StartsWith(rawTerm, StringComparison.OrdinalIgnoreCase) ||
+            (!numeric && (Text(row, nameColumn).Contains(rawTerm, StringComparison.OrdinalIgnoreCase) ||
+                Text(row, fatherColumn).Contains(rawTerm, StringComparison.OrdinalIgnoreCase)));
         bool MatchesAdmissionPrefix(DataRow row)
         {
             if (admissionColumn is null || row[admissionColumn] == DBNull.Value)

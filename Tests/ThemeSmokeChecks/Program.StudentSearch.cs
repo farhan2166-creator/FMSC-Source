@@ -9,6 +9,7 @@ internal static partial class Program
 {
     private static void CheckStudentSearchModes()
     {
+        CheckStudentPickerMatching();
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
         var previous = (CurrentUser.UserId, CurrentUser.Username, CurrentUser.RoleName,
             CurrentUser.MustChangePassword, CurrentUser.GetPermissions().ToArray());
@@ -130,5 +131,31 @@ internal static partial class Program
             loading.Close();
         }
         finally { CurrentUser.SignIn(previous.UserId, previous.Username, previous.RoleName, previous.MustChangePassword, previous.Item5); }
+    }
+
+    private static void CheckStudentPickerMatching()
+    {
+        using var source = new DataTable();
+        source.Columns.Add("AdmissionId", typeof(int));
+        foreach (string field in new[] { "AdmissionNumber", "StudentName", "FatherName", "RegistrationNumber" })
+            source.Columns.Add(field);
+        source.Rows.Add(41, "9100", "Synthetic Ava", "Muhammad Sajid", "REG-41");
+        source.Rows.Add(42, "91002", "Synthetic Ben", "Synthetic Guardian", "REG-42");
+        source.Rows.Add(43, "29100", "Fixture 9100", DBNull.Value, DBNull.Value);
+        source.Rows.Add(44, "9100a", "Fixture Sara", "Fixture Father", "REG-44");
+        using var picker = new StudentPicker();
+        int[] Matches(string term) => picker.FindMatches(source, term).Entries.Select(entry => entry.Id).ToArray();
+
+        Check(Matches("  aVA ").SequenceEqual(new[] { 41 }),
+            "Student Picker matches a name anywhere regardless of case or surrounding search spaces");
+        Check(Matches("aji").SequenceEqual(new[] { 41 }),
+            "Student Picker matches an interior substring of a father's name");
+        Check(Matches("9100").SequenceEqual(new[] { 41, 44, 42 }) &&
+            Matches("09100").SequenceEqual(new[] { 41, 44, 42 }),
+            "Student Picker puts the exact admission number first and only matches admission numbers from the start");
+        Check(Matches("9100A").SequenceEqual(new[] { 44 }),
+            "Student Picker accepts the admission number suffix regardless of case");
+        Check(Matches("reg-4").SequenceEqual(new[] { 41, 44, 42 }) && Matches("G-41").Length == 0,
+            "Student Picker retains registration number prefix matching");
     }
 }

@@ -1,9 +1,0 @@
-Fictional final financial snapshot after student status; SQL owner and private file gates passed.
-UI-created records only; no changes made by this query.
-StudentName|Status|Charged|Paid|Allocated|Outstanding
------------|------|-------|----|---------|-----------
-Fictional Example Sibling|Left|7000.00|.00|.00|7000.00
-Fictional Example Student|Active|21400.00|21400.00|21400.00|.00
-AllocationOwnershipErrors
--------------------------
-0

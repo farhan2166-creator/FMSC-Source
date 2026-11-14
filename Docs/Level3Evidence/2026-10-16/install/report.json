@@ -1,9 +1,0 @@
-{
-  "sourceCommit": "84d019cb3ec9a904f97312b16cf80d21f1ba7b67",
-  "result": "BLOCKED",
-  "lastStage": "GitHub runner allocation: no runner and zero executed steps",
-  "cleanup": "NOT_REQUIRED",
-  "checksPassed": [],
-  "html_url": "https://github.com/farhan2166-creator/FMSC-Database/actions/runs/38848906575",
-  "source": "Normalized GitHub API metadata; the installer harness never started. This is not an installer-produced artifact."
-}
