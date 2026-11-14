@@ -255,10 +255,10 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         previewGrid.AutoGenerateColumns = false;
         foreach (var (field, name, size) in new[]
         {
-            ("RecordName", "School record", 190),
-            ("Kind", "Type", 80),
-            ("Mobile", "Destination", 135),
-            ("Reason", "Eligibility", 180)
+            ("RecordName", "School record", 145),
+            ("Kind", "Type", 65),
+            ("Mobile", "Destination", 95),
+            ("Reason", "Eligibility", 125)
         })
             previewGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -309,8 +309,11 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         onlyUnfinished.CheckedChanged += async (_, _) =>
         {
             if (IsDisposed || updatingHistoryFilter || IsBusy || step != 2) return;
-            await RunBusyAsync("Reading communication history…",
-                onlyUnfinished.Checked ? LoadUnfinishedAsync : LoadHistoryAsync, this);
+            await RunBusyAsync("Reading communication history…", async () =>
+            {
+                if (onlyUnfinished.Checked) await LoadUnfinishedAsync();
+                else await LoadHistoryAsync();
+            }, this);
         };
         card.Content.Controls.Add(historyGrid);
         card.Content.Controls.Add(footer);
@@ -759,7 +762,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         staffField.Visible = showStaff;
         // Hidden rows must not reserve empty vertical space; table row
         // positioning remains stable even after switching audiences.
-        int rowHeight = AppScale.Scale(72);
+        int rowHeight = AppScale.Scale(68);
         targetFieldsLayout.RowStyles[1].Height = showCampus ? rowHeight : 0;
         targetFieldsLayout.RowStyles[2].Height = showClass ? rowHeight : 0;
         targetFieldsLayout.RowStyles[3].Height = showStudent ? rowHeight : 0;
