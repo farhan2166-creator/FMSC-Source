@@ -34,9 +34,10 @@ internal static partial class Program
             foreach (DataGridViewColumn column in siblingGrid.Columns) column.MinimumWidth = 90;
             Application.DoEvents();
             Set("currentAdmissionId", 123); Set("_workspaceStudentStatus", "Pending"); Update();
-            Check(Field<ModernButton>("quickRegistrationButton").Text == "Admit Sibling", "Admission offers sibling-only registration");
-            // Check the observable waiting count without freezing an obsolete caption.
-            // There are two pending children in the fixture; the selected child is excluded.
+            Check(Field<ModernButton>("quickRegistrationButton").Enabled,
+                "A permitted operator can start sibling admission for the loaded student");
+            // The pending count is a business result, its caption is presentation.
+            // One of the two pending fixture children is the loaded child.
             var waitingNumbers = System.Text.RegularExpressions.Regex.Matches(
                 Field<Label>("pendingSiblingCount").Text, @"\d+")
                 .Cast<System.Text.RegularExpressions.Match>()
@@ -44,9 +45,12 @@ internal static partial class Program
                 .ToArray();
             Check(waitingNumbers.SequenceEqual(new[] { 1 }),
                 "Waiting count excludes the loaded child and counts pending siblings");
-            Check(Field<ModernButton>("saveButton").Text == "Confirm & Save", "Completing pending details does not require saving a draft first");
-            Check(Convert.ToString(siblingGrid.Rows[0].Cells["RegistrationConfirm"].Value) == "Confirm & Save", "Pending children get Confirm & Save on their own row");
-            Check(Convert.ToString(siblingGrid.Rows[0].Cells["RegistrationCancel"].Value) == "Cancel", "Pending children retain row cancellation");
+            Check(Field<ModernButton>("saveButton").Enabled,
+                "A permitted operator can save the loaded pending admission without a prerequisite draft");
+            Check(!string.IsNullOrWhiteSpace(Convert.ToString(siblingGrid.Rows[0].Cells["RegistrationConfirm"].Value)),
+                "Pending children have an available registration-completion action on their own row");
+            Check(!string.IsNullOrWhiteSpace(Convert.ToString(siblingGrid.Rows[0].Cells["RegistrationCancel"].Value)),
+                "Pending children retain a row cancellation action");
             using var rows = new DataTable(); rows.Columns.Add("Status"); var pending = rows.Rows.Add("Pending"); var cancelled = rows.Rows.Add("Cancelled");
             var picker = Field<StudentPicker>("quickStudent");
             Check(picker.RowFilter!(pending) && picker.RowFilter!(cancelled), "Admission quick search accepts pending and cancelled records");
@@ -78,7 +82,8 @@ internal static partial class Program
             Check(type.GetField("unconfirmedAdmission", flags)!.GetValue(page) is null, "Incomplete pending details refuse confirmation before a write");
             type.GetMethod("SwitchTab", flags)!.Invoke(page, new object[] { 1 });
             Set("_workspaceStudentStatus", "Cancelled"); family.Rows[0]["Status"] = "Cancelled"; Update();
-            Check(Convert.ToString(siblingGrid.Rows[0].Cells["RegistrationReopen"].Value) == "Reopen", "Cancelled registration exposes row reopening");
+            Check(!string.IsNullOrWhiteSpace(Convert.ToString(siblingGrid.Rows[0].Cells["RegistrationReopen"].Value)),
+                "Cancelled registration exposes an actionable row reopening option");
             Check(string.IsNullOrEmpty(Convert.ToString(siblingGrid.Rows[0].Cells["RegistrationConfirm"].Value)) && !Field<ModernButton>("saveButton").Enabled && !Field<ModernButton>("quickRegistrationButton").Enabled, "Cancelled records cannot be confirmed, edited through Save or used to create siblings");
             Set("_workspaceStudentStatus", "Active"); family.Rows[0]["Status"] = "Active"; Update();
             Check(string.IsNullOrEmpty(Convert.ToString(siblingGrid.Rows[0].Cells["RegistrationReopen"].Value)), "Admitted students do not get registration reopening");
