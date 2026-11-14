@@ -91,7 +91,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         : this(true, target, body, display, null) { }
     private CommunicationCenterPage(bool initialize, CommunicationTarget? initialTarget, string? initialBody,
         string? initialDisplay, Operations? operations)
-        : base("Communication Center", "Prepare and review school messages.")
+        : base("Communication Center", "Send a message to the people you choose.")
     {
         this.operations = operations ?? new Operations(CommunicationRecipientResolver.ReadAsync,
             CommunicationManualHandoffStore.IsEnabledAsync,
@@ -217,7 +217,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private HumanCard TargetCard()
     {
         var card = HumanUi.Card("New Message",
-            "Choose recipients, write your message, then review before opening WhatsApp.");
+            "Choose recipients, then write your message.");
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         // The message expands into unused space instead of leaving a short
         // form above a large blank region. Narrow or short windows can scroll.
@@ -252,7 +252,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private HumanCard PreviewCard()
     {
         var card = HumanUi.Card("Review",
-            "Check the recipients and exact message. Nothing has been sent.");
+            "Check the recipients and message.");
         previewGrid.AutoGenerateColumns = false;
         foreach (var (field, name, size) in new[]
         {
@@ -967,17 +967,16 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         showExcluded.Text = $"Review excluded contacts ({result.Excluded})";
         sampleMessage.Dock = single ? DockStyle.Fill : DockStyle.Bottom;
         sampleMessage.Height = AppScale.Scale(150);
-        summary.Height = AppScale.Scale(92);
+        summary.Height = AppScale.Scale(72);
         summary.Text = "To: " + AudienceDescription(target)
             + (single
                 ? Environment.NewLine + "WhatsApp number ending in " + result.Entries[0].PhoneE164?[^4..]
                 : Environment.NewLine + $"{result.Included} eligible destination(s)"
-                  + (result.Excluded > 0 ? $"  ·  {result.Excluded} excluded" : ""))
-            + Environment.NewLine + "You press Send in WhatsApp; FMSC does not send automatically.";
+                  + (result.Excluded > 0 ? $"  ·  {result.Excluded} excluded" : ""));
         ShowSelectedMessage();
         SetStep(1);
         SetStatus(result.Included == 0 ? "No eligible recipients. Review excluded contacts."
-            : manualModeAvailable ? "Ready. Continue to WhatsApp when your message looks correct."
+            : manualModeAvailable ? "Review complete. Continue when ready."
             : "WhatsApp is paused. An administrator can enable it in Settings.");
     }
 
