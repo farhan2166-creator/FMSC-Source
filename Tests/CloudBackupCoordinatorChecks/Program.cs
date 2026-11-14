@@ -17,14 +17,14 @@ int checks = 0;
 void Check(bool okay, string message) { if (!okay) throw new Exception(message); checks++; }
 object? Call(string name, params object?[] arguments) => type.GetMethod(name, flags)!.Invoke(null, arguments);
 string Write(string id, bool verified = false, bool superseded = false, bool payload = false,
-    bool google = true, bool dropbox = false, int attempts = 0, DateTime? created = null)
+    bool dropbox = true, int attempts = 0, DateTime? created = null)
 {
     string file = Path.Combine(journal, id + ".json");
     File.WriteAllText(file, JsonSerializer.Serialize(new {
         Id = id, Sha256 = new string('a',64), PackageFile = Path.Combine(queue,id+".fmscbackup"),
-        SqlCreatedUtc = created ?? DateTime.UtcNow, RequestedGoogle = google, RequestedDropbox = dropbox,
-        GoogleRecoveryVerified = verified, GoogleSuperseded = superseded, GoogleDeliveryAttempts = attempts,
-        GoogleDriveId = verified ? "verified-remote" : ""
+        SqlCreatedUtc = created ?? DateTime.UtcNow, RequestedDropbox = dropbox,
+        DropboxRecoveryVerified = verified, DropboxSuperseded = superseded, DropboxDeliveryAttempts = attempts,
+        DropboxId = verified ? "verified-remote" : ""
     }));
     if (payload) File.WriteAllText(Path.Combine(queue,id+".fmscbackup"), "synthetic ciphertext");
     return file;
@@ -41,8 +41,10 @@ try
     Check((await Retry()).Count == 0, "A verified delivery can release its local ciphertext without becoming pending.");
     Write(id, superseded: true);
     Check(Issues().Count == 0, "Safely superseded deliveries must not retain a stale pending status.");
-    Write(id, google: false, dropbox: true);
-    Check(Issues().Count == 1 && Issues()[0].StartsWith("Dropbox"), "Disabled destinations remain an unfulfilled independent obligation.");
+    Write(id, dropbox: false);
+    Check(Issues().Count == 0, "A destination never selected must not generate retry obligations.");
+    Write(id, dropbox: true);
+    Check(Issues().Count == 1 && Issues()[0].StartsWith("Dropbox"), "An unfinished requested Dropbox delivery must be reported.");
     File.Delete(path);
     File.WriteAllText(Path.Combine(journal, "unreadable.json"), "{");
     Check((await Retry()).Count > 0, "Unreadable journals must not produce healthy delivery status.");
@@ -55,7 +57,7 @@ try
         FixtureRuntime.Connected = true;
         FixtureRuntime.Due = true;
         var outcome = await CloudBackupCoordinator.CreateAndUploadAsync();
-        Check(outcome.GoogleSucceeded && !outcome.UploadsPending && FixtureRuntime.Verifications == 1,
+        Check(outcome.DropboxSucceeded && !outcome.UploadsPending && FixtureRuntime.Verifications == 1,
             "A newly recovery-verified delivery must clear older exhausted failures in the same create/upload run.");
         Check(Issues().Count == 0, "Final health must reconcile durable supersession rather than old retry errors.");
         Check(!File.Exists(Path.Combine(queue,id+".fmscbackup")), "Only superseded ciphertext can be released.");
@@ -85,7 +87,7 @@ try
         Check(File.Exists(previous), "A failed new SQL backup must preserve the previous local backup.");
         FixtureRuntime.FailBackup = false;
         outcome = await CloudBackupCoordinator.CreateAndUploadAsync();
-        Check(outcome.LocalSucceeded && !outcome.GoogleSucceeded && outcome.UploadsPending,
+        Check(outcome.LocalSucceeded && !outcome.DropboxSucceeded && outcome.UploadsPending,
             "A full encrypted queue must report local success and incomplete cloud delivery.");
         Check(!File.Exists(previous) && Directory.GetFiles(FixtureRuntime.LocalFolder, "FMSC_Managed_*.bak").Length == 1,
             "A verified local replacement must enforce retention even when cloud staging is blocked.");
@@ -93,7 +95,7 @@ try
             Check(state.RootElement.GetProperty("LastSuccessfulLocalBackup").GetDateTimeOffset() >=
                 new DateTimeOffset(File.GetLastWriteTimeUtc(Directory.GetFiles(FixtureRuntime.LocalFolder, "FMSC_Managed_*.bak").Single())),
                 "A verified local backup must advance the schedule even when the cloud queue is full.");
-        settings.GoogleDriveEnabled = false;
+        settings.DropboxEnabled = false;
         string combined = Directory.GetFiles(FixtureRuntime.LocalFolder, "FMSC_Managed_*.bak").Single();
         outcome = await CloudBackupCoordinator.CreateAndUploadAsync();
         Check(outcome.LocalSucceeded && !File.Exists(combined) &&
@@ -103,27 +105,23 @@ try
             "Local retention must preserve separately named backups and previously queued ciphertext.");
 
         settings.MaximumPendingQueueMegabytes = 8192;
-        settings.MaximumGoogleDriveBackups = 1;
-        settings.GoogleDriveEnabled = true;
+        settings.MaximumDropboxBackups = 1;
+        settings.DropboxEnabled = true;
         FixtureRuntime.Connected = false;
         outcome = await CloudBackupCoordinator.CreateAndUploadAsync();
-        string googleOnly = Directory.GetFiles(queue, "*.fmscbackup").Single();
-        Check(outcome.LocalSucceeded && outcome.UploadsPending && googleOnly != retainedPayload,
-            "A verified new offline package must replace the oldest pending package at the provider limit.");
-
-        settings.DropboxEnabled = true;
+        string firstOffline = Directory.GetFiles(queue, "*.fmscbackup").Single();
+        Check(outcome.LocalSucceeded && outcome.UploadsPending && firstOffline != retainedPayload,
+            "The newest Dropbox pending package must replace an older one at its configured limit.");
         outcome = await CloudBackupCoordinator.CreateAndUploadAsync();
-        string shared = Directory.GetFiles(queue, "*.fmscbackup").Single();
-        Check(outcome.LocalSucceeded && outcome.UploadsPending && shared != googleOnly,
-            "Both providers must receive the new pending backup when one is at its limit.");
-        await CloudBackupCoordinator.CreateAndUploadAsync();
-        Check(File.Exists(shared) && Directory.GetFiles(queue, "*.fmscbackup").Length == 2,
-            "A package retired for Google Drive must remain while Dropbox still needs it.");
+        string newestOffline = Directory.GetFiles(queue, "*.fmscbackup").Single();
+        Check(outcome.LocalSucceeded && outcome.UploadsPending && newestOffline != firstOffline,
+            "Offline Dropbox queue must safely supersede older packages without unbounded growth.");
+        Check(!File.Exists(firstOffline) && File.Exists(newestOffline),
+            "Supersession must retain the newest encrypted backup package.");
         using (var entry = JsonDocument.Parse(File.ReadAllText(Path.Combine(journal,
-            Path.GetFileNameWithoutExtension(shared) + ".json"))))
-            Check(entry.RootElement.GetProperty("GoogleSuperseded").GetBoolean() &&
-                !entry.RootElement.GetProperty("DropboxSuperseded").GetBoolean(),
-                "Pending rotation must be tracked separately for each provider.");
+            Path.GetFileNameWithoutExtension(firstOffline) + ".json"))))
+            Check(entry.RootElement.GetProperty("DropboxSuperseded").GetBoolean(),
+                "Dropbox pending rotation must be recorded in its immutable journal.");
     }
     else Console.WriteLine("SKIP: coordinator ACL, job lease and persisted supersession require Windows; exercised by desktop CI.");
     Console.WriteLine($"PASS: {checks} actual coordinator journal, retry and delivery-health checks.");
