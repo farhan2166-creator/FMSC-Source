@@ -471,3 +471,9 @@ Database/*.bak
 !/Services/Backup/
 !/Services/Backup/*.cs
 !/Tests/SafetySqlChecks/run.py
+
+# Communication adapter regressions: source only; no generated results.
+!/Tests/CommunicationTransportChecks/
+/Tests/CommunicationTransportChecks/*
+!/Tests/CommunicationTransportChecks/*.cs
+!/Tests/CommunicationTransportChecks/*.csproj

@@ -5,7 +5,7 @@ using Microsoft.Data.SqlClient;
 namespace FMSC_SMS.Core;
 
 /// <summary>
-/// Provider-neutral one-at-a-time manual dispatch boundary. No background worker,
+/// Provider-neutral, explicitly confirmed API dispatch boundary. No background worker,
 /// no automatic retry, no UI activation, and no sender startup side effects.
 /// Each outbound attempt is persisted by SQL BEFORE HTTP is invoked.
 /// </summary>
@@ -20,8 +20,10 @@ internal static class CommunicationDispatchStore
         if (channel is not ("Sms" or "WhatsApp"))
             throw new ArgumentException("Unknown messaging channel.",nameof(channel));
         if (!CurrentUser.HasPermission("Communication.Send"))
-            throw new UnauthorizedAccessException("Manual school message sending is not authorized.");
+            throw new UnauthorizedAccessException("School message sending is not authorized.");
+        token.ThrowIfCancellationRequested();
         int actor=CurrentUser.UserId;
+        var prepared=await CommunicationApiBatchStore.PrepareRecipientAsync(recipientId,token);
         // The stored channel profile is authoritative. Never select a provider
         // merely from the local credential file or a hard-coded Twilio constant.
         DataTable providerRows=await DatabaseHelper.QueryUserAsync("msg.ReadDispatchProvider",
@@ -29,8 +31,11 @@ internal static class CommunicationDispatchStore
         if (actor!=CurrentUser.UserId || providerRows.Rows.Count!=1)
             throw new InvalidOperationException("Channel authorization or signed-in account changed.");
         string providerCode=Convert.ToString(providerRows.Rows[0]["ProviderCode"]) ?? "";
+        if(providerCode!=prepared.ProviderCode)
+            throw new CommunicationValidationException("The sending method changed. Review the saved batch before sending.");
         ICommunicationTransportAdapter adapter=CommunicationTransportRegistry.ResolveForDispatch(
             channel,providerCode);
+        token.ThrowIfCancellationRequested();
         Guid attemptKey=Guid.NewGuid();
         // A claim moves Pending to Unknown and records the attempt under lock.
         DataTable claim=await DatabaseHelper.QueryUserAsync("msg.ClaimRecipient",
@@ -57,16 +62,19 @@ internal static class CommunicationDispatchStore
         using (var client=new HttpClient(handler) { Timeout=TimeSpan.FromSeconds(25) })
             outcome=await adapter.SendOnceAsync(
                 Convert.ToString(row["PhoneE164"])!,
-                Convert.ToString(row["Body"])!,client,token).ConfigureAwait(false);
+                prepared.Payload,client,token).ConfigureAwait(false);
 
         // Persist response using a non-cancelled bounded DB operation.
         // An interrupted or failed write leaves the pre-existing Unknown
         // attempt and must never trigger a second HTTP POST.
+        string? failureCode=outcome.FailureCode;
+        if(failureCode is not null && (failureCode.Length>50 || !failureCode.All(c=>char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
+            failureCode="ProviderRejected";
         await DatabaseHelper.QueryUserAsync("msg.RecordProviderResult",
             DatabaseHelper.P("@AttemptKey",attemptKey),
             DatabaseHelper.P("@Outcome",outcome.State),
             DatabaseHelper.P("@ProviderMessageId",outcome.ProviderMessageId),
-            DatabaseHelper.P("@FailureCode",outcome.FailureCode)).ConfigureAwait(false);
+            DatabaseHelper.P("@FailureCode",failureCode)).ConfigureAwait(false);
         return new DispatchResult(true,attemptId,outcome.State,null);
     }
 

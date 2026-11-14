@@ -11,6 +11,9 @@ on:
       - 'Core/CertificateSignature.cs'
       - 'Services/Backup/**'
       - 'Tests/CloudBackupCryptoChecks/**'
+      - 'Core/Communication*.cs'
+      - 'Pages/Communication/**'
+      - 'Tests/CommunicationTransportChecks/**'
       - 'Tests/CloudBackupCoordinatorChecks/**'
       - 'Pages/Administration/BackupRestorePage.cs'
       - 'Pages/Administration/CloudBackupSettingsDialog.cs'
@@ -122,6 +125,9 @@ jobs:
 
       - name: Verify authenticated cloud-backup roundtrip and corruption rejection
         run: dotnet run --project Tests/CloudBackupCryptoChecks/CloudBackupCryptoChecks.csproj -c Release
+
+      - name: Communication adapters and exact reviewed content (synthetic HTTP only)
+        run: dotnet run --project Tests/CommunicationTransportChecks/CommunicationTransportChecks.csproj -c Release
 
       - name: Verify durable coordinator queue health and supersession
         run: dotnet run --project Tests/CloudBackupCoordinatorChecks/CloudBackupCoordinatorChecks.csproj -c Release

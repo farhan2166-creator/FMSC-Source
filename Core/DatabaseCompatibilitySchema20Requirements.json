@@ -1,0 +1,118 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "ApiBatch",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "EnableApiChannel",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ConfirmReviewedApiBatch",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadApiBatch",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_ManualBatch_RejectApi",
+      "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "CancelPendingApiMessages",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_Attempt_RejectManualProvider",
+      "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "RecordChannelOptOut",
+      "type": "P"
+    }
+  ],
+  "columns": [
+    {
+      "schema": "msg",
+      "objectName": "ApiBatch",
+      "name": "BatchId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApiBatch",
+      "name": "ProviderCode",
+      "type": "varchar",
+      "maxLength": 40,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApiBatch",
+      "name": "ProfileHash",
+      "type": "varchar",
+      "maxLength": 64,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApiBatch",
+      "name": "ReviewJson",
+      "type": "nvarchar",
+      "maxLength": -1,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ApiBatch",
+      "name": "TemplateJson",
+      "type": "nvarchar",
+      "maxLength": -1,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    }
+  ],
+  "foreignKeys": [
+    {
+      "schema": "msg",
+      "objectName": "ApiBatch",
+      "referencedSchema": "msg",
+      "referencedObject": "Batch",
+      "columns": "BatchId",
+      "referencedColumns": "BatchId",
+      "deleteAction": 0,
+      "updateAction": 0
+    }
+  ]
+}

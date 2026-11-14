@@ -27,7 +27,7 @@ internal sealed record CommunicationDeliveryProfile(
 
 /// <summary>
 /// Central whitelist shared by settings and dispatch. A listed profile is a
-/// possible future integration, not a production-enabled adapter. Manual
+/// catalog entry, not proof of a configured or enabled adapter. Manual
 /// handoffs use a separate, operator-reviewed workflow; they cannot implement
 /// the HTTP submit interface or claim a provider-delivered outcome.
 /// </summary>
@@ -61,11 +61,28 @@ internal static class CommunicationTransportRegistry
             ?? throw new InvalidOperationException("Unsupported school communication channel/provider pair.");
         if (profile.Mode==CommunicationDeliveryMode.OperatorHandoff)
             throw new NotSupportedException("An operator handoff is not an API send or delivery receipt.");
+        if (providerCode=="MetaCloud")
+        {
+            var meta=CommunicationProviderCredentialStore.LoadForDispatch(channel,providerCode);
+            CommunicationMetaTransport.ValidateCredentials(meta);
+            return new MetaAdapter(meta);
+        }
         if (providerCode!="Twilio")
             throw new NotSupportedException("This messaging provider has no accepted live transport. Sending remains unavailable.");
         var credential=CommunicationProviderCredentialStore.LoadForDispatch(channel,providerCode);
         CommunicationTwilioTransport.ValidateCredentials(credential);
         return new TwilioAdapter(credential);
+    }
+
+    private sealed class MetaAdapter(CommunicationProviderCredentialStore.Credential credential) : ICommunicationTransportAdapter
+    {
+        public string ProviderCode => "MetaCloud";
+        public Task<CommunicationDeliveryOutcome> SendOnceAsync(string destination,string body,HttpClient client,CancellationToken token)
+            => CommunicationMetaTransport.SendOnceAsync(credential,destination,body,client,token);
+        // Meta offers delivery webhooks, not a message-status GET. This desktop
+        // deliberately claims acceptance only and does not invent a receipt.
+        public Task<CommunicationDeliveryOutcome> ReadStatusAsync(string providerMessageId,HttpClient client,CancellationToken token)
+            => Task.FromResult(new CommunicationDeliveryOutcome("Unknown",providerMessageId,"DeliveryReceiptUnavailable"));
     }
 
     private sealed class TwilioAdapter(

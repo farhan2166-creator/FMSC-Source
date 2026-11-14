@@ -36,6 +36,7 @@ internal static partial class Program
             CheckProviderBodyDeadline();
             CheckCommunicationAsyncAndCancellation();
             CheckManualLaunchAndReporting();
+            CheckCommunicationApiWorkflow();
             CheckOptionalCommunicationEntries();
             CurrentUser.SignIn(7202, "Read-only fixture", "Messaging viewer", false, new[] { "Communication.View" });
             using var reader = new CommunicationCenterPage(false);
@@ -178,6 +179,8 @@ internal static partial class Program
             _ => warnings++);
         using var dialog = new CommunicationManualHandoffDialog(Guid.NewGuid(), operations);
         dialog.Show(); Application.DoEvents();
+        Check(Field<ProgressBar>(dialog, "processedProgress").Value == 0,
+            "A pending recipient has no completed processing progress");
         var open = Field<ModernButton>(dialog, "open");
         var report = Field<ModernButton>(dialog, "reported");
         open.PerformClick(); Application.DoEvents();
@@ -189,9 +192,13 @@ internal static partial class Program
         failLaunch = false; open.PerformClick(); Application.DoEvents();
         Check(launches == 1 && report.Enabled && Field<ModernTextBox>(dialog,"preparedMessage").Text == message,
             "Successful reopening exposes the exact handed-off message and permits explicit reporting");
+        Check(Field<ProgressBar>(dialog, "processedProgress").Value == 0,
+            "Opening a chat alone does not advance completed processing or imply sending");
         report.PerformClick(); Application.DoEvents();
         Check(marks == 1 && state == "ReportedSent" && !report.Enabled,
             "One explicit report finishes the recipient without a second confirmation or a delivery claim");
+        Check(Field<ProgressBar>(dialog, "processedProgress").Value == 1,
+            "Explicit operator reporting advances the processed-recipient progress");
         dialog.Close();
 
         int recoveredReports = 0;

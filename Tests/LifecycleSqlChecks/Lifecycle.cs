@@ -23,6 +23,8 @@ internal sealed class Lifecycle(Fixture f, Report r)
             () => CommunicationV2SqlChecks.Run(f,r,student), a);
         await r.Stage("Communication audit: real recipients, fee values, scope and completion",
             () => CommunicationAuditSqlChecks.Run(f,r), a);
+        await r.Stage("Communication API: enrollment, immutable review, cancellation and honest status",
+            () => CommunicationApiSqlChecks.Run(f,r), a);
     }
 
     private Task Admission()
