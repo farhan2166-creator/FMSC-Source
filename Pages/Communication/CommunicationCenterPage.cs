@@ -238,35 +238,81 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     {
         var navigation = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Margin = Padding.Empty
+            WrapContents = true, Margin = Padding.Empty
         };
         navigation.Controls.AddRange(new Control[] { newMessageButton, unfinishedButton, historyButton });
         var management = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill, AutoSize = true, WrapContents = false,
-            FlowDirection = FlowDirection.RightToLeft, Margin = Padding.Empty
+            WrapContents = true, Margin = Padding.Empty
         };
-        management.Controls.AddRange(new Control[] { configureButton, templatesButton });
-        var bar = new TableLayoutPanel
+        management.Controls.AddRange(new Control[] { templatesButton, configureButton });
+        var bar = new Panel
         {
-            Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, RowCount = 1,
+            Dock = DockStyle.Fill,
             BackColor = AppTheme.Surface, Padding = new Padding(AppScale.Scale(6))
         };
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.Controls.Add(navigation, 0, 0);
-        bar.Controls.Add(management, 1, 0);
+        bar.Controls.Add(navigation);
+        bar.Controls.Add(management);
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var navigationRow = new RowStyle(SizeType.Absolute, AppMetrics.ButtonHeight + bar.Padding.Vertical);
+        layout.RowStyles.Add(navigationRow);
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.Controls.Add(bar, 0, 0);
         layout.Controls.Add(steps, 0, 1);
+        void FitNavigation()
+        {
+            if (!bar.Visible || bar.ClientSize.Width <= bar.Padding.Horizontal) return;
+            int availableWidth = Math.Max(0, bar.ClientSize.Width - bar.Padding.Horizontal);
+            int managementRequired = ButtonRowWidth(management);
+            bool stack = ButtonRowWidth(navigation) + managementRequired > availableWidth;
+            int managementWidth = Math.Min(availableWidth, managementRequired);
+            int navigationWidth = stack ? availableWidth : availableWidth - managementWidth;
+            int navigationHeight = ButtonRowsHeight(navigation, navigationWidth);
+            int managementHeight = ButtonRowsHeight(management, managementWidth);
+            navigation.SetBounds(bar.Padding.Left, bar.Padding.Top, navigationWidth, navigationHeight);
+            management.SetBounds(bar.Padding.Left + availableWidth - managementWidth,
+                bar.Padding.Top + (stack ? navigationHeight : 0), managementWidth, managementHeight);
+            int height = (stack ? navigationHeight + managementHeight : Math.Max(navigationHeight, managementHeight))
+                + bar.Padding.Vertical + bar.Margin.Vertical;
+            if (navigationRow.Height == height) return;
+            navigationRow.Height = height;
+            layout.PerformLayout();
+        }
+        bar.SizeChanged += (_, _) => FitNavigation();
+        bar.VisibleChanged += (_, _) => FitNavigation();
+        foreach (Control button in navigation.Controls.Cast<Control>().Concat(management.Controls.Cast<Control>()))
+        {
+            button.SizeChanged += (_, _) => FitNavigation();
+            button.VisibleChanged += (_, _) => FitNavigation();
+        }
         return layout;
     }
+
+    private static int ButtonRowWidth(FlowLayoutPanel panel) => panel.Controls.Cast<Control>()
+        .Where(button => button.Visible).Sum(button => button.Width + button.Margin.Horizontal);
+
+    private static int ButtonRowsHeight(FlowLayoutPanel panel, int availableWidth)
+    {
+        int height = 0, rowHeight = 0, rowWidth = 0;
+        foreach (Control button in panel.Controls)
+        {
+            if (!button.Visible) continue;
+            int width = button.Width + button.Margin.Horizontal;
+            if (rowWidth > 0 && rowWidth + width > availableWidth)
+            {
+                height += rowHeight;
+                rowHeight = rowWidth = 0;
+            }
+            rowWidth += width;
+            rowHeight = Math.Max(rowHeight, button.Height + button.Margin.Vertical);
+        }
+        return height + rowHeight;
+    }
+
     private HumanCard TargetCard()
     {
         var card = HumanUi.Card("New Message");

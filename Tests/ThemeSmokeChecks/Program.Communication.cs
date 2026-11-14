@@ -182,6 +182,11 @@ internal static partial class Program
             "Daily tabs and separate administration actions are visible in the navigation");
         Check(Descendants(page).Single(control => control.Name == "communicationUnfinishedGrid").Visible,
             "The center opens on the dedicated unfinished queue");
+        var unfinishedSearch = page.Controls.Find("communicationUnfinishedSearch", true).Single();
+        int buttonBottom = navigation.Max(button => button.RectangleToScreen(button.ClientRectangle).Bottom);
+        int gap = unfinishedSearch.PointToScreen(Point.Empty).Y - buttonBottom;
+        Check(gap >= 0 && gap < navigation[0].Height,
+            $"The session search starts directly below the navigation, with a gap smaller than a button (gap: {gap}px).");
         ((ModernButton)navigation[0]).PerformClick();
         Application.DoEvents();
         var workspace = (TableLayoutPanel)type.GetField("composerLayout",
