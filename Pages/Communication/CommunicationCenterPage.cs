@@ -967,7 +967,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         showExcluded.Text = $"Review excluded contacts ({result.Excluded})";
         sampleMessage.Dock = single ? DockStyle.Fill : DockStyle.Bottom;
         sampleMessage.Height = AppScale.Scale(150);
-        summary.Height = AppScale.Scale(72);
+        summary.Height = AppScale.Scale(92);
         summary.Text = "To: " + AudienceDescription(target)
             + (single
                 ? Environment.NewLine + "WhatsApp number ending in " + result.Entries[0].PhoneE164?[^4..]
