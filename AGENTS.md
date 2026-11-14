@@ -36,8 +36,7 @@ unnecessary complexity and can imply deleting a record or undoing leaving and
 fees. Do not reintroduce it without a new explicit owner decision. The owner subsequently approved permanently dropping the cancellation columns
 from code and SQL after restoring a clean schema-48 database. Migration 52 removes
 them; refuse other snapshots containing cancelled copies rather than reviving them. The normal flow uses Create, Save Changes before collection,
-Print, Mark Collected and Issue Again. See
-`Docs/Decisions/CERTIFICATE_CANCELLATION_REMOVED.md` for the rationale.
+Print, Mark Collected and Issue Again.
 
 
 # Regression tests must validate behavior, not incidental UI wording
@@ -63,4 +62,3 @@ permission enforcement, finances, data integrity, admissions, cloud-backup
 recoverability, installer/updater recovery, publication exact-commit gates,
 consent, idempotency, and message delivery status. The audit script for legacy
 copy-coupled tests is advisory and must never substitute for these validations.
-See `Docs/BEHAVIORAL_UI_TEST_CONTRACTS.md`.

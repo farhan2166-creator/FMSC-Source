@@ -110,9 +110,6 @@ Check(dashboard.Contains("new HelpCenterPage()"), "Existing navigation integrati
 Check(dashboard.Contains("(_, _) => OpenHelpCenterAfterAccountMenuCloses()") &&
     dashboard.Contains("NavigateTo(() => new HelpCenterPage(), \"Account\", \"Help & FAQ\")"),
     "Help remains available through the existing account menu");
-Check(File.ReadAllText(Path.Combine(root, "Docs/HELP_CENTER.md")).Contains($"{entries.Count} questions"), "Documented catalog count stays aligned");
-string matrix = File.ReadAllText(Path.Combine(root, "Docs/FAQ_COVERAGE_MATRIX.md"));
-foreach (var entry in entries) Check(matrix.Contains($"| {entry.Id} | {entry.Question} |"), entry.Id + " coverage inventory matches current question");
 Check(typeof(HelpCatalog).Assembly.GetReferencedAssemblies().All(a => a.Name is not null && !a.Name.Contains("SqlClient") && !a.Name.Contains("Windows.Forms")), "Portable catalog has no SQL or UI assembly dependency");
 var watch = Stopwatch.StartNew();
 for (int i = 0; i < 2000; i++) _ = HelpCatalog.Find("payment", "Collection", HelpRule.Recovery).ToArray();

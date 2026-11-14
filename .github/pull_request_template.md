@@ -34,7 +34,7 @@
 
 - [ ] `CHANGELOG.md` updated for behavior or operational changes, or reason omitted is stated.
 - [ ] Operator / installer / backup / architecture documentation updated as needed.
-- [ ] Relevant `Audit/FMSC_MASTER_AUDIT.md` finding status updated **only with evidence**.
+- [ ] Findings and remaining verification limits are recorded in this PR with actual evidence.
 
 ## Reviewer checklist
 
@@ -43,4 +43,4 @@
 **How to reproduce / manually verify the new behavior:**  
 **Related issue(s):**  
 
-> A merged PR or passing CI is **not** school-deployment sign-off. Refer to `Docs/RELEASE_CHECKLIST.md`.
+> A merged PR or passing CI is **not** school-deployment sign-off. Verify actual school-PC installation, recovery and operator workflows before deployment.
