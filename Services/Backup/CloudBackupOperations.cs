@@ -1,6 +1,6 @@
 namespace FMSC_SMS.Services.Backup;
 
-internal sealed record CloudBackupOutcome(bool LocalSucceeded, bool GoogleSucceeded,
+internal sealed record CloudBackupOutcome(bool LocalSucceeded,
     bool DropboxSucceeded, string Message, bool UploadsPending = false);
 
 internal sealed record CloudBackupInventory(IReadOnlyList<CloudRemoteBackup> Copies,
@@ -19,7 +19,7 @@ internal static class CloudBackupOperations
     {
         var copies = new List<CloudRemoteBackup>();
         var warnings = new List<string>();
-        foreach (var provider in new[] { CloudProvider.GoogleDrive, CloudProvider.Dropbox })
+        foreach (var provider in new[] { CloudProvider.Dropbox })
         {
             token.ThrowIfCancellationRequested();
             if (!connected(provider)) continue;
