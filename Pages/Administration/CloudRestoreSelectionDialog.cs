@@ -94,5 +94,5 @@ internal sealed class CloudRestoreSelectionDialog : ApplicationWindowForm
         utc.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt");
 
     private static string ProviderName(CloudProvider provider) =>
-        provider == CloudProvider.GoogleDrive ? "Google Drive" : provider.ToString();
+        provider.ToString();
 }
