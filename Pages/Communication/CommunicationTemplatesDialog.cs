@@ -22,8 +22,10 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         StartPosition = FormStartPosition.CenterParent;
         ShowInTaskbar = false;
         MinimizeBox = false;
-        ClientSize = new Size(AppScale.Scale(720), AppScale.Scale(480));
-        MinimumSize = new Size(AppScale.Scale(535), AppScale.Scale(380));
+        // Keep the list, the complete body preview and actions comfortably visible,
+        // while allowing the administrator to resize the window if needed.
+        ClientSize = new Size(AppScale.Scale(1000), AppScale.Scale(680));
+        MinimumSize = new Size(AppScale.Scale(760), AppScale.Scale(540));
         BackColor = AppTheme.PageBackground;
         templates.AutoGenerateColumns = false;
         foreach (var (field, title, weight) in new[]
@@ -56,8 +58,8 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(AppScale.Scale(14))
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonHeight + AppScale.Scale(10)));
         layout.Controls.Add(templates, 0, 0);
