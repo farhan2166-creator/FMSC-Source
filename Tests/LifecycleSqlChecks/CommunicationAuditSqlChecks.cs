@@ -165,15 +165,25 @@ internal static class CommunicationAuditSqlChecks
         r.Check(movedRefused, "Prepared-message reads recheck campus/class membership even after SQL prepared an opened handoff.");
         Sql.Query("UPDATE dbo.Enrollments SET ClassSectionId=@Class WHERE EnrollmentId=@Id", Sql.P("@Class", f.Placement6), Sql.P("@Id", a.Enrollment));
         var feeBatch = Confirm(fees, feePreview, "[StudentName] [AdmissionNumber] [OutstandingAmount]");
-        long feeRecipient = Recipient((Guid)feeBatch.Rows[0]["BatchId"]);
+        Guid feeBatchId = (Guid)feeBatch.Rows[0]["BatchId"];
+        long feeRecipient = Recipient(feeBatchId);
         // Simulate a pre-upgrade bulk fee batch that retained an unused picker ID.
         // Its default marker must keep the reviewed bulk meaning after upgrade.
-        Sql.Query("UPDATE msg.Batch SET StudentId=@Student WHERE BatchId=@Batch", Sql.P("@Student", b.Id), Sql.P("@Batch", (Guid)feeBatch.Rows[0]["BatchId"]));
+        Sql.Query("UPDATE msg.Batch SET StudentId=@Student WHERE BatchId=@Batch", Sql.P("@Student", b.Id), Sql.P("@Batch", feeBatchId));
         long bill = Convert.ToInt64(Sql.Scalar("SELECT TOP(1) BillingChargeId FROM dbo.BillingCharges WHERE EnrollmentId=@E AND FeeTypeId=@F", Sql.P("@E", a.Enrollment), Sql.P("@F", f.Tuition)));
         await CollectionDiscountWriter.CollectAsync("ProcessFeeTransaction", Array.Empty<CollectionDiscountWriter.Edit>(), "Synthetic messaging balance check",
             Lifecycle.CollectionArgs(a.Id, a.Enrollment, DateTime.Today, 500m, new[] { (bill, 500m) }));
+        string pendingMessage = await CommunicationPreparedMessages.ReadManualPreviewAsync(feeBatchId, feeRecipient);
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND State='Pending' AND OpenCount=0;",
+            Sql.P("@Id", feeRecipient)) == 1, "Previewing an unfinished message leaves the pending handoff untouched.");
         Sql.Proc("msg.OpenManualHandoff", Sql.P("@UserId", f.Admin), Sql.P("@RecipientId", feeRecipient));
         var current = await CommunicationPreparedMessages.ReadLiveAsync(feeRecipient, true);
+        string resumedMessage = await CommunicationPreparedMessages.ReadManualPreviewAsync(feeBatchId, feeRecipient);
+        r.Check(pendingMessage == resumedMessage
+            && resumedMessage == CommunicationPreparedMessages.Render("[StudentName] [AdmissionNumber] [OutstandingAmount]", current)
+            && Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND State='Opened' AND OpenCount=1 AND ShellHandoffUtc IS NULL;",
+                Sql.P("@Id", feeRecipient)) == 1,
+            "A saved fee message previews the same current content as WhatsApp without recording another open or shell handoff.");
         r.Check(current.Outstanding == combined.Outstanding - 500m && current.Outstanding == Due(a.Id) + Due(b.Id),
             "A resumed fee handoff refreshes real remaining balances after payment, rather than quoting gross charges or stale totals.");
         r.Check(current.RecordName.Contains("Audit A") && current.RecordName.Contains("Audit B"),

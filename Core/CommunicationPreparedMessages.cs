@@ -159,42 +159,26 @@ internal static class CommunicationPreparedMessages
         ) F
         WHERE R.RecipientId=@RecipientId
           AND B.Audience='OutstandingFees'
-          AND H.State='Opened' AND R.State='Pending'
+          AND (H.State='Opened' OR (@PreviewBatchId=B.BatchId AND H.State='Pending'))
+          AND R.State='Pending' AND B.State IN ('Confirmed','Sending')
           AND S.Status=N'Active' AND S.SchoolMessageConsent=1
           AND E.Status=N'Active'
-          AND (@CampusFilter=0 OR CCS.CampusId=@CampusFilter)
-          AND (@ClassFilter=0 OR CCS.ClassId=@ClassFilter)
-          AND (@StudentFilter=0 OR S.AdmissionId=@StudentFilter)
+          AND (B.CampusId=0 OR CCS.CampusId=B.CampusId)
+          AND (B.ClassId=0 OR CCS.ClassId=B.ClassId)
+          AND (B.SingleStudentScope=0 OR B.StudentId=0 OR S.AdmissionId=B.StudentId)
           AND F.Outstanding>0
           AND NOT EXISTS (SELECT 1 FROM msg.Suppression O
                           WHERE O.Channel='WhatsApp' AND O.PhoneE164=R.PhoneE164)
         ORDER BY S.StudentName,S.AdmissionId;
         """;
 
-    private static async Task<Values> ReadSharedFeeValuesAsync(long recipientId, int actor, Values selected)
+    private static async Task<Values> ReadSharedFeeValuesAsync(
+        long recipientId, int actor, Values selected, Guid? previewBatchId)
     {
-        // Campus/class filters are read from the confirmed batch by SQL, not
-        // supplied or overridden by a client-side picker after confirmation.
-        const string scoped = """
-            EXEC dbo.RequirePermission @UserId,N'Communication.Send';
-            EXEC dbo.RequirePermission @UserId,N'Students.View';
-            EXEC dbo.RequirePermission @UserId,N'Fees.View';
-            SELECT B.CampusId,B.ClassId,CASE WHEN B.SingleStudentScope=1 THEN B.StudentId ELSE 0 END StudentId FROM msg.ManualHandoff H
-            JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
-            JOIN msg.Batch B ON B.BatchId=R.BatchId
-            WHERE R.RecipientId=@RecipientId AND H.State='Opened'
-              AND R.State='Pending' AND B.Audience='OutstandingFees';
-            """;
-        using DataTable scope = await DatabaseHelper.QuerySqlAsync(scoped,
-            DatabaseHelper.Int("@UserId",actor),DatabaseHelper.P("@RecipientId",recipientId));
-        if (actor != CurrentUser.UserId || scope.Rows.Count != 1)
-            throw new CommunicationValidationException("Fee reminder scope changed. Review the recipients again.");
         using DataTable rows = await DatabaseHelper.QuerySqlAsync(SharedFeeRecordsSql,
             DatabaseHelper.Int("@UserId",actor),
             DatabaseHelper.P("@RecipientId",recipientId),
-            DatabaseHelper.Int("@CampusFilter",Convert.ToInt32(scope.Rows[0]["CampusId"])),
-            DatabaseHelper.Int("@ClassFilter",Convert.ToInt32(scope.Rows[0]["ClassId"])),
-            DatabaseHelper.Int("@StudentFilter",Convert.ToInt32(scope.Rows[0]["StudentId"])));
+            DatabaseHelper.P("@PreviewBatchId",previewBatchId));
         if (actor != CurrentUser.UserId)
             throw new CommunicationValidationException("Signed-in account changed. Review the recipient again.");
         if (rows.Rows.Count == 0 || Convert.ToInt32(rows.Rows[0]["ReviewedCount"]) != rows.Rows.Count
@@ -209,37 +193,48 @@ internal static class CommunicationPreparedMessages
                 Convert.ToBoolean(row["SameFamily"])) { AdmissionDate = row.IsNull("AdmissionDate") ? null : Convert.ToDateTime(row["AdmissionDate"]) }).ToArray());
     }
 
-    /// <summary>
-    /// Called only AFTER msg.OpenManualHandoff has revalidated current consent,
-    /// recipient scope, opt-out, destination and sender authorization. Query
-    /// admission/fee facts fresh before opening a browser chat, never on send.
-    /// </summary>
-    internal static async Task<Values> ReadLiveAsync(long recipientId, bool needsFees)
+    // Previewing a saved message leaves the handoff ledger untouched. Opening
+    // the chat still requires msg.OpenManualHandoff to validate and record it.
+    internal static async Task<string> ReadManualPreviewAsync(Guid batchId, long recipientId)
+    {
+        var (values, body) = await ReadManualRecipientAsync(recipientId, needsFees: false, previewBatchId: batchId);
+        return Render(body, values);
+    }
+
+    internal static async Task<Values> ReadLiveAsync(long recipientId, bool needsFees) =>
+        (await ReadManualRecipientAsync(recipientId, needsFees, previewBatchId: null)).Values;
+
+    private static async Task<(Values Values, string Body)> ReadManualRecipientAsync(
+        long recipientId, bool needsFees, Guid? previewBatchId)
     {
         const string sql = """
+            SET NOCOUNT ON;
             EXEC dbo.RequirePermission @UserId,N'Communication.Send';
-            DECLARE @Audience varchar(20), @CampusId int, @ClassId int, @StudentId int, @StaffId int;
-            SELECT @Audience=B.Audience,@CampusId=B.CampusId,@ClassId=B.ClassId,@StudentId=CASE WHEN B.Audience='OutstandingFees' AND B.SingleStudentScope=0 THEN 0 ELSE B.StudentId END,@StaffId=B.StaffId
+            DECLARE @Audience varchar(20), @CampusId int, @ClassId int, @StudentId int,
+                @StaffId int, @Owner int, @Body nvarchar(1600);
+            SELECT @Audience=B.Audience,@CampusId=B.CampusId,@ClassId=B.ClassId,
+                @StudentId=CASE WHEN B.Audience='OutstandingFees' AND B.SingleStudentScope=0 THEN 0 ELSE B.StudentId END,
+                @StaffId=B.StaffId,@Owner=M.CreatedBy,@Body=B.Body
             FROM msg.ManualHandoff H
             JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
             JOIN msg.Batch B ON B.BatchId=R.BatchId
-            WHERE H.RecipientId=@RecipientId AND H.State='Opened'
-              AND R.State='Pending';
+            JOIN msg.ManualBatch M ON M.BatchId=B.BatchId
+            WHERE H.RecipientId=@RecipientId AND (@PreviewBatchId IS NULL OR B.BatchId=@PreviewBatchId)
+              AND (H.State='Opened' OR (@PreviewBatchId IS NOT NULL AND H.State='Pending'))
+              AND R.State='Pending' AND B.State IN ('Confirmed','Sending');
             IF @Audience IS NULL
                 THROW 51120,'Manual recipient is no longer available.',1;
+            IF @Owner<>@UserId EXEC dbo.RequirePermission @UserId,N'Communication.View';
             IF @Audience='Staff' EXEC dbo.RequirePermission @UserId,N'Staff.View';
             ELSE EXEC dbo.RequirePermission @UserId,N'Students.View';
-            IF @NeedFees=1
-            BEGIN
-                IF @Audience<>'OutstandingFees'
-                    THROW 51120,'Fee amounts require the outstanding-fee audience.',1;
-                EXEC dbo.RequirePermission @UserId,N'Fees.View';
-            END;
+            IF @NeedFees=1 AND @Audience<>'OutstandingFees'
+                THROW 51120,'Fee amounts require the outstanding-fee audience.',1;
+            IF @Audience='OutstandingFees' EXEC dbo.RequirePermission @UserId,N'Fees.View';
             SELECT COALESCE(R.AdmissionId,R.StaffId) RecordId,
                 COALESCE(NULLIF(LTRIM(RTRIM(S.StudentName)),N''),
                          NULLIF(LTRIM(RTRIM(T.StaffName)),N''),N'') RecordName,
                 S.AdmissionNumber,S.AdmissionDate,
-                F.Outstanding,@Audience AS Audience
+                F.Outstanding,@Audience AS Audience,@Body AS Body
             FROM msg.ManualHandoff H
             JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
             LEFT JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
@@ -254,7 +249,8 @@ internal static class CommunicationPreparedMessages
                 WHERE (@NeedFees=1 OR @Audience='OutstandingFees') AND C.AdmissionId=S.AdmissionId
                   AND C.Status<>N'Cancelled'
             ) F
-            WHERE H.RecipientId=@RecipientId AND H.State='Opened'
+            WHERE H.RecipientId=@RecipientId
+              AND (H.State='Opened' OR (@PreviewBatchId IS NOT NULL AND H.State='Pending'))
               AND R.State='Pending'
               AND NOT EXISTS (
                   SELECT 1 FROM msg.Suppression O
@@ -279,6 +275,7 @@ internal static class CommunicationPreparedMessages
         using DataTable table = await DatabaseHelper.QuerySqlAsync(sql,
             DatabaseHelper.Int("@UserId", actor),
             DatabaseHelper.P("@RecipientId", recipientId),
+            DatabaseHelper.P("@PreviewBatchId", previewBatchId),
             DatabaseHelper.P("@NeedFees", needsFees));
         if (actor != CurrentUser.UserId || table.Rows.Count != 1)
             throw new CommunicationValidationException("School records or signed-in account changed. Review the WhatsApp recipient again.");
@@ -289,8 +286,8 @@ internal static class CommunicationPreparedMessages
             row.IsNull("AdmissionNumber") ? null : Convert.ToString(row["AdmissionNumber"]),
             row.IsNull("AdmissionDate") ? null : Convert.ToDateTime(row["AdmissionDate"]),
             row.IsNull("Outstanding") ? null : Convert.ToDecimal(row["Outstanding"]));
-        return string.Equals(Convert.ToString(row["Audience"]), "OutstandingFees", StringComparison.Ordinal)
-            ? await ReadSharedFeeValuesAsync(recipientId, actor, selected)
-            : selected;
+        if (string.Equals(Convert.ToString(row["Audience"]), "OutstandingFees", StringComparison.Ordinal))
+            selected = await ReadSharedFeeValuesAsync(recipientId, actor, selected, previewBatchId);
+        return (selected, (string)row["Body"]);
     }
 }

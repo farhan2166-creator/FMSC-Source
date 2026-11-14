@@ -201,16 +201,18 @@ internal static partial class Program
     private static void CheckManualLaunchAndReporting()
     {
         string state = "Pending";
+        Guid batchId = Guid.NewGuid();
         int marks = 0, launches = 0, warnings = 0;
         bool failLaunch = true;
         string message = "Current prepared message & اطلاع";
         var operations = new CommunicationManualHandoffDialog.Operations(
             _ => Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(new[] { new CommunicationManualRecipient(1,"Synthetic child","4567",state) }),
+            (_, _) => Task.FromResult(message),
             _ => { state = "Opened"; return Task.FromResult(new CommunicationManualOpen(true, new Uri("https://wa.me/923001234567?text=fixture"), null, message)); },
             (_, result) => { marks++; state = result; return Task.CompletedTask; },
             _ => { if (failLaunch) throw new System.ComponentModel.Win32Exception("Synthetic missing browser"); launches++; },
             _ => warnings++);
-        using var dialog = new CommunicationManualHandoffDialog(Guid.NewGuid(), operations);
+        using var dialog = new CommunicationManualHandoffDialog(batchId, operations);
         dialog.Show(); Application.DoEvents();
         Check(Field<ProgressBar>(dialog, "processedProgress").Value == 0,
             "A pending recipient has no completed processing progress");
@@ -227,12 +229,21 @@ internal static partial class Program
             "Successful reopening exposes the exact handed-off message and permits explicit reporting");
         Check(Field<ProgressBar>(dialog, "processedProgress").Value == 0,
             "Opening a chat alone does not advance completed processing or imply sending");
+        Field<ModernButton>(dialog, "close").PerformClick();
+
+        using var reopened = new CommunicationManualHandoffDialog(batchId, operations);
+        reopened.Show(); Application.DoEvents();
+        Check(Field<ModernTextBox>(reopened, "preparedMessage").Text == message
+            && launches == 1 && marks == 0,
+            "Reopening after Finish Later restores the message before any browser launch or operator report");
+        report = Field<ModernButton>(reopened, "reported");
         report.PerformClick(); Application.DoEvents();
         Check(marks == 1 && state == "ReportedSent" && !report.Enabled,
             "One explicit report finishes the recipient without a second confirmation or a delivery claim");
-        Check(Field<ProgressBar>(dialog, "processedProgress").Value == 1,
+        Check(Field<ProgressBar>(reopened, "processedProgress").Value == 1
+            && Field<ModernTextBox>(reopened, "preparedMessage").Text.Length == 0,
             "Explicit operator reporting advances the processed-recipient progress");
-        dialog.Close();
+        reopened.Close();
 
         int recoveredReports = 0;
         bool checkedWhatsApp = false;

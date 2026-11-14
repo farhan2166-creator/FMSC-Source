@@ -13,6 +13,8 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private readonly Guid batchId;
     private readonly int actorId;
     private readonly bool openFirstChat;
+    private const string HandoffInstructions = "Check the school WhatsApp account and press Send there. "
+        + "FMSC only records your report; it cannot verify delivery.";
     private readonly Label progress=new()
     {
         Dock=DockStyle.Fill,AutoEllipsis=true,
@@ -33,8 +35,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     {
         Dock=DockStyle.Fill,AutoEllipsis=true,
         TextAlign=ContentAlignment.TopLeft,Font=AppTheme.NormalFont,
-        Text="Check the school WhatsApp account and press Send there. "
-           +"FMSC only records your report; it cannot verify delivery."
+        Text=HandoffInstructions
     };
     private readonly ModernTextBox preparedMessage = HumanUi.TextBox(true, 1600);
     private readonly ModernButton open=new()
@@ -64,6 +65,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private readonly HashSet<long> failedOpen = new();
     internal sealed record Operations(
         Func<Guid, Task<IReadOnlyList<CommunicationManualRecipient>>> Read,
+        Func<Guid, long, Task<string>> ReadPreview,
         Func<long, Task<CommunicationManualOpen>> Open,
         Func<long, string, Task> Mark,
         Action<Uri> Launch,
@@ -79,6 +81,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     internal CommunicationManualHandoffDialog(Guid batchId, Operations? operations, bool openFirstChat = false)
     {
         this.operations = operations ?? new Operations(CommunicationManualHandoffStore.ReadAsync,
+            CommunicationPreparedMessages.ReadManualPreviewAsync,
             CommunicationManualHandoffStore.OpenAsync, (id, outcome) => CommunicationManualHandoffStore.MarkAsync(id, outcome, false),
             uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }),
             message => ModernMessageDialog.Show(this, message, "Manual WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Warning),
@@ -176,7 +179,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             if(actorId!=CurrentUser.UserId)
                 throw new InvalidOperationException("Signed-in account changed. Close this handoff.");
             var nextRecipient=entries.FirstOrDefault(e=>e.State is "Pending" or "Opened");
-            if (current?.RecipientId != nextRecipient?.RecipientId) preparedMessage.Text = "";
+            bool recipientChanged = current?.RecipientId != nextRecipient?.RecipientId;
             current=nextRecipient;
             int reportedCount=entries.Count(e=>e.State=="ReportedSent");
             int skippedCount=entries.Count(e=>e.State is "Skipped" or "Excluded");
@@ -192,6 +195,25 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             destination.Text=current is null
                 ? "No unprocessed recipients remain. You can close this window."
                 : $"{current.RecordName}   •••• {current.LastFour}   ({DisplayState(current)})";
+            if (recipientChanged)
+            {
+                preparedMessage.Clear();
+                explanation.Text = HandoffInstructions;
+                if (nextRecipient is not null)
+                {
+                    try
+                    {
+                        string preview = await operations.ReadPreview(batchId, nextRecipient.RecipientId);
+                        if (!IsDisposed && actorId == CurrentUser.UserId)
+                            preparedMessage.Text = preview;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!IsDisposed)
+                            explanation.Text = DbMessage.UserMessage(ex, "Message preview unavailable.");
+                    }
+                }
+            }
         }
         catch(Exception ex)
         {
@@ -221,6 +243,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             if(!IsDisposed && handoff.Allowed && handoff.Link is not null)
             {
                 preparedMessage.Text = handoff.Message ?? "";
+                explanation.Text = HandoffInstructions;
                 // Browser or linked app opens only after SQL has persisted
                 // Opened. No automatic Send or delivery acknowledgement.
                 try { operations.Launch(handoff.Link); }
