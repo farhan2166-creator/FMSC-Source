@@ -36,17 +36,12 @@ internal static class CloudBackupCoordinator
         public string Sha256 { get; set; } = "";
         public string PackageFile { get; set; } = "";
         public DateTime SqlCreatedUtc { get; set; }
-        public string GoogleDriveId { get; set; } = "";
-        public string GoogleDriveUploadId { get; set; } = "";
         public string DropboxId { get; set; } = "";
         // Old journals intentionally deserialize as unverified; they remain
         // discoverable without being incorrectly called recovery-tested.
-        public bool GoogleRecoveryVerified { get; set; }
         public bool DropboxRecoveryVerified { get; set; }
-        public int GoogleDeliveryAttempts { get; set; }
         public int DropboxDeliveryAttempts { get; set; }
         // Missing properties in old journal JSON default false.
-        public bool GoogleDrivePruned { get; set; }
         public bool DropboxPruned { get; set; }
         public long Size { get; set; }
         // New journals include a digest of the original plaintext .bak. Old
@@ -54,11 +49,8 @@ internal static class CloudBackupCoordinator
         public string SourceBakSha256 { get; set; } = "";
         public string LocalBakPath { get; set; } = "";
         // Nullable flags preserve the old journal semantics after an upgrade.
-        public bool? RequestedGoogle { get; set; }
         public bool? RequestedDropbox { get; set; }
-        public bool GoogleSuperseded { get; set; }
         public bool DropboxSuperseded { get; set; }
-        public DateTime? NextGoogleAttemptUtc { get; set; }
         public DateTime? NextDropboxAttemptUtc { get; set; }
     }
     private sealed class State { public DateTimeOffset? LastSuccessfulLocalBackup { get; set; } }
@@ -79,8 +71,7 @@ internal static class CloudBackupCoordinator
             foreach (var pending in ReadPending(error => throw new IOException(
                 "A pending backup journal could not be read. The recovery passphrase was not changed.", error)))
             {
-                if (StillRequiresDelivery(pending, CloudProvider.GoogleDrive, settings) ||
-                    StillRequiresDelivery(pending, CloudProvider.Dropbox, settings))
+                if (StillRequiresDelivery(pending, CloudProvider.Dropbox, settings))
                     CloudBackupSettings.PreserveQueuedPassphrase(pending.PackageFile + ".dpapi");
             }
         }
@@ -103,9 +94,9 @@ internal static class CloudBackupCoordinator
         settings.Validate();
         if (!scheduled && !CurrentUser.HasPermission("Backup.Create"))
             throw new UnauthorizedAccessException("Creating backups requires Backup.Create permission.");
-        if (!(settings.LocalEnabled || settings.GoogleDriveEnabled || settings.DropboxEnabled))
+        if (!(settings.LocalEnabled || settings.DropboxEnabled))
             throw new InvalidOperationException("Enable at least one backup destination.");
-        bool needsCloud = settings.GoogleDriveEnabled || settings.DropboxEnabled;
+        bool needsCloud = settings.DropboxEnabled;
         string? cloudBlocked = needsCloud && !CloudBackupSettings.HasLocalRecoveryPassphrase
             ? "Enroll and independently retain a recovery passphrase before cloud backups can run."
             : null;
@@ -228,7 +219,6 @@ internal static class CloudBackupCoordinator
                 SqlCreatedUtc = sqlCreated, Size = new FileInfo(packaged).Length,
                 SourceBakSha256 = sourceDigest,
                 LocalBakPath = settings.LocalEnabled ? bak : "",
-                RequestedGoogle = settings.GoogleDriveEnabled,
                 RequestedDropbox = settings.DropboxEnabled
             };
             SavePending(pending);
@@ -255,17 +245,7 @@ internal static class CloudBackupCoordinator
             }
             if (!settings.LocalEnabled)
                 SaveState(new State { LastSuccessfulLocalBackup = DateTimeOffset.Now });
-            bool google = false, dropbox = false;
-            if (StillRequiresDelivery(pending, CloudProvider.GoogleDrive, settings))
-            {
-                try { google = await UploadOneAsync(pending, CloudProvider.GoogleDrive, settings, token, progress); }
-                catch (Exception ex)
-                {
-                    token.ThrowIfCancellationRequested();
-                    progress?.Report(new BackupProgressUpdate("Pending retry", SafeTransportError(ex), "Google Drive", true));
-                    AppExceptionHandler.LogNonFatal(ex, "Google Drive delivery or recovery verification pending");
-                }
-            }
+            bool dropbox = false;
             if (StillRequiresDelivery(pending, CloudProvider.Dropbox, settings))
             {
                 try { dropbox = await UploadOneAsync(pending, CloudProvider.Dropbox, settings, token, progress); }
@@ -284,7 +264,7 @@ internal static class CloudBackupCoordinator
                 : (settings.LocalEnabled ? "Local backup saved. " : "Cloud backup remains incomplete. ") +
                     "Some cloud destinations still require delivery: " + string.Join("; ", issues);
             progress?.Report(new BackupProgressUpdate(issues.Count == 0 ? "Completed" : "Completed with pending deliveries", summary));
-            return RecordOutcome(new CloudBackupOutcome(settings.LocalEnabled, google, dropbox, summary, issues.Count > 0));
+            return RecordOutcome(new CloudBackupOutcome(settings.LocalEnabled, dropbox, summary, issues.Count > 0));
         }
         finally { /* jobLease is disposed on exit, including exceptions */ }
     }
@@ -295,7 +275,7 @@ internal static class CloudBackupCoordinator
         // If the user has not enabled/enrolled the feature, do nothing.
         var settings = CloudBackupSettings.Load();
         if (!settings.AutomaticEnabled) return 0;
-        if (!settings.LocalEnabled && (settings.GoogleDriveEnabled || settings.DropboxEnabled) &&
+        if (!settings.LocalEnabled && settings.DropboxEnabled &&
             !CloudBackupSettings.HasLocalRecoveryPassphrase) return 2;
         // Never let a scheduled backup race a pending database migration,
         // interrupted update, or installer activation. Unlike the interactive
@@ -367,23 +347,20 @@ internal static class CloudBackupCoordinator
         // bounded unattended retry budget was exhausted.
         foreach (var p in ReadPending().Where(p => File.Exists(p.PackageFile)))
         {
-            p.GoogleDeliveryAttempts = Math.Min(p.GoogleDeliveryAttempts, MaximumAutomaticDeliveryAttempts - 1);
             p.DropboxDeliveryAttempts = Math.Min(p.DropboxDeliveryAttempts, MaximumAutomaticDeliveryAttempts - 1);
-            p.NextGoogleAttemptUtc = null;
             p.NextDropboxAttemptUtc = null;
             SavePending(p);
         }
         progress?.Report(new BackupProgressUpdate("Retrying encrypted deliveries", "Only unfinished requested destinations are retried."));
         var issues = await RetryPendingUploadsCoreAsync(settings, token, progress).ConfigureAwait(false);
         int waiting = ReadPending().Count(p =>
-            StillRequiresDelivery(p, CloudProvider.GoogleDrive, settings) ||
             StillRequiresDelivery(p, CloudProvider.Dropbox, settings));
         string message = waiting == 0
             ? "No enabled cloud deliveries are waiting for retry."
             : waiting + " encrypted backup package(s) still await upload.";
         if (issues.Count > 0) message += " " + string.Join("; ", issues);
         progress?.Report(new BackupProgressUpdate(waiting > 0 || issues.Count > 0 ? "Pending deliveries remain" : "Delivery retry complete", message));
-        RecordOutcome(new CloudBackupOutcome(false, false, false, message, waiting > 0 || issues.Count > 0));
+        RecordOutcome(new CloudBackupOutcome(false, false, message, waiting > 0 || issues.Count > 0));
         return message;
     }
 
@@ -396,12 +373,11 @@ internal static class CloudBackupCoordinator
         var copies = inventory.Copies.Select(item =>
         {
             var matchingJournal = known.FirstOrDefault(p =>
-                (item.Provider == CloudProvider.GoogleDrive ? p.GoogleDriveId : p.DropboxId) == item.RemoteId &&
+                p.DropboxId == item.RemoteId &&
                 string.Equals(p.Sha256, item.PackageSha256, StringComparison.OrdinalIgnoreCase) &&
                 (p.SqlCreatedUtc - item.SqlBackupCreatedUtc).Duration() < TimeSpan.FromSeconds(1));
             bool recoveryTested = matchingJournal is not null &&
-                (item.Provider == CloudProvider.GoogleDrive ?
-                    matchingJournal.GoogleRecoveryVerified : matchingJournal.DropboxRecoveryVerified);
+                matchingJournal.DropboxRecoveryVerified;
             return new CloudSelection(item, recoveryTested,
                 matchingJournal is not null && UnifiedRecoveryCatalog.IsSha256(matchingJournal.SourceBakSha256)
                     ? matchingJournal.SourceBakSha256 : "");
@@ -445,16 +421,12 @@ internal static class CloudBackupCoordinator
         // Old journal entries never recorded initial destination enrollment.
         // A later disabled provider is NOT proof it was unrequested, so keep
         // those encrypted packages until verified delivery or explicit review.
-        provider == CloudProvider.GoogleDrive
-            ? p.RequestedGoogle ?? true
-            : p.RequestedDropbox ?? true;
+        p.RequestedDropbox ?? true;
 
     private static bool StillRequiresDelivery(Pending p, CloudProvider provider, CloudBackupOptions settings)
     {
         if (!OriginallyRequested(p, provider, settings)) return false;
-        return provider == CloudProvider.GoogleDrive
-            ? !p.GoogleRecoveryVerified && !p.GoogleDrivePruned && !p.GoogleSuperseded
-            : !p.DropboxRecoveryVerified && !p.DropboxPruned && !p.DropboxSuperseded;
+        return !p.DropboxRecoveryVerified && !p.DropboxPruned && !p.DropboxSuperseded;
     }
 
     private static void EnforcePendingRetention(Pending newestSaved, CloudBackupOptions settings)
@@ -466,16 +438,14 @@ internal static class CloudBackupCoordinator
             .ThenByDescending(p => p.Id == newestSaved.Id)
             .ThenByDescending(p => p.Id, StringComparer.Ordinal)
             .ToArray();
-        foreach (var provider in new[] { CloudProvider.GoogleDrive, CloudProvider.Dropbox })
+        foreach (var provider in new[] { CloudProvider.Dropbox })
         {
             if (!StillRequiresDelivery(newestSaved, provider, settings)) continue;
-            int limit = provider == CloudProvider.GoogleDrive
-                ? settings.MaximumGoogleDriveBackups : settings.MaximumDropboxBackups;
+            int limit = settings.MaximumDropboxBackups;
             var excess = queued.Where(p => StillRequiresDelivery(p, provider, settings)).Skip(limit).ToArray();
             foreach (var older in excess)
             {
-                if (provider == CloudProvider.GoogleDrive) older.GoogleSuperseded = true;
-                else older.DropboxSuperseded = true;
+                older.DropboxSuperseded = true;
                 SavePending(older);
                 RemoveFullyDeliveredPayload(older, settings);
                 BackupActivityJournal.TryRecord("Encrypted queue", provider.ToString(), "Pending backup limit applied");
@@ -522,16 +492,13 @@ internal static class CloudBackupCoordinator
             // Never overwrite them with an earlier in-memory journal snapshot.
             var p = ReadPending().SingleOrDefault(p => p.Id == id);
             if (p is null || !File.Exists(p.PackageFile)) continue;
-            foreach (var provider in new[] { CloudProvider.GoogleDrive, CloudProvider.Dropbox })
+            foreach (var provider in new[] { CloudProvider.Dropbox })
             {
                 if (!StillRequiresDelivery(p, provider, settings)) continue;
-                bool enabled = provider == CloudProvider.GoogleDrive
-                    ? settings.GoogleDriveEnabled : settings.DropboxEnabled;
+                bool enabled = settings.DropboxEnabled;
                 if (!enabled) continue;
-                int attempts = provider == CloudProvider.GoogleDrive
-                    ? p.GoogleDeliveryAttempts : p.DropboxDeliveryAttempts;
-                DateTime? next = provider == CloudProvider.GoogleDrive
-                    ? p.NextGoogleAttemptUtc : p.NextDropboxAttemptUtc;
+                int attempts = p.DropboxDeliveryAttempts;
+                DateTime? next = p.NextDropboxAttemptUtc;
                 if (attempts >= MaximumAutomaticDeliveryAttempts ||
                     !CloudBackupQueuePolicy.RetryIsDue(next, DateTime.UtcNow)) continue;
                 try { await UploadOneAsync(p, provider, settings, token, progress); }
@@ -552,17 +519,16 @@ internal static class CloudBackupCoordinator
     {
         var issues = new List<string>();
         var pending = ReadPending(error => issues.Add("A cloud backup journal could not be read. Review the protected queue before trusting delivery status."));
-        foreach (var provider in new[] { CloudProvider.GoogleDrive, CloudProvider.Dropbox })
+        foreach (var provider in new[] { CloudProvider.Dropbox })
         {
             var deliveries = pending.Where(p => StillRequiresDelivery(p, provider, settings)).ToArray();
             if (deliveries.Length == 0) continue;
 
-            bool google = provider == CloudProvider.GoogleDrive;
-            string name = google ? "Google Drive" : "Dropbox";
-            bool enabled = google ? settings.GoogleDriveEnabled : settings.DropboxEnabled;
+            const string name = "Dropbox";
+            bool enabled = settings.DropboxEnabled;
             int missing = deliveries.Count(p => !File.Exists(p.PackageFile));
             int exhausted = deliveries.Count(p => File.Exists(p.PackageFile) &&
-                (google ? p.GoogleDeliveryAttempts : p.DropboxDeliveryAttempts) >= MaximumAutomaticDeliveryAttempts);
+                p.DropboxDeliveryAttempts >= MaximumAutomaticDeliveryAttempts);
 
             string summary = $"{name}: {deliveries.Length} pending";
             if (!enabled) summary += ", destination disabled";
