@@ -34,6 +34,11 @@
       "schema": "msg",
       "name": "TR_Attempt_RejectManualProvider",
       "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "RecordChannelOptOut",
+      "type": "P"
     }
   ],
   "columns": [

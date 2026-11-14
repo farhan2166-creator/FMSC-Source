@@ -99,6 +99,16 @@ internal static class CommunicationApiSqlChecks
         var excluded=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",withdrawnId),Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));
         r.Check(!Convert.ToBoolean(excluded.Rows[0]["Claimed"]),"Admission consent withdrawal remains authoritative after API confirmation.");
         Sql.Proc("msg.PauseChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"));
+        var smsTarget=new CommunicationTarget(CommunicationAudience.Student,0,0,sibling,0,"Sms");
+        r.Check((await CommunicationRecipientResolver.ReadAsync(smsTarget)).Included==1,"Consenting sibling is independently eligible before an SMS opt-out.");
+        await r.Refused("SMS opt-outs require communication configuration permission",()=>{
+            Sql.Proc("msg.RecordChannelOptOut",Sql.P("@UserId",f.Restricted),Sql.P("@Channel","Sms"),Sql.P("@Phone","03008000077"));return Task.CompletedTask;
+        },50003);
+        Sql.Proc("msg.RecordChannelOptOut",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),Sql.P("@Phone","03008000077"));
+        Sql.Proc("msg.RecordChannelOptOut",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),Sql.P("@Phone","03008000077"));
+        r.Check((await CommunicationRecipientResolver.ReadAsync(smsTarget)).Included==0
+            && (await CommunicationRecipientResolver.ReadAsync(smsTarget with {Channel="WhatsApp"})).Included==1,
+            "SMS opt-out is idempotent, applies to the shared number and does not invent a WhatsApp opt-out.");
         Sql.Proc("msg.ConfigureChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","WhatsApp"),Sql.P("@ProviderCode","MetaCloud"));
         await r.Refused("Switching to Meta cannot reinterpret unfinished manual chats as API messages",()=>{
             Sql.Proc("msg.EnableApiChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","WhatsApp"),Sql.P("@ProviderCode","MetaCloud"));return Task.CompletedTask;

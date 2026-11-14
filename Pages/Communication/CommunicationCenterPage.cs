@@ -472,14 +472,16 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private async Task RecordOptOutAsync()
     {
         RequirePermission("Communication.Configure");
+        string channel=settingsGrid.CurrentRow?.DataBoundItem is DataRowView selected
+            ? Convert.ToString(selected["Channel"]) ?? "WhatsApp" : "WhatsApp";
         using var dialog = new ApplicationWindowForm
         {
-            Text = "Record WhatsApp Opt-Out", StartPosition = FormStartPosition.CenterParent,
+            Text = "Record " + channel + " Opt-Out", StartPosition = FormStartPosition.CenterParent,
             ClientSize = new Size(AppScale.Scale(510), AppScale.Scale(175)),
             FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false
         };
         var phone = HumanUi.TextBox(false, 100);
-        var save = new ModernButton { Text = "Block WhatsApp Messages", DialogResult = DialogResult.OK, ThemeRole = "Primary" };
+        var save = new ModernButton { Text = "Block " + channel + " Messages", DialogResult = DialogResult.OK, ThemeRole = "Primary" };
         var cancel = new ModernButton { Text = "Cancel", DialogResult = DialogResult.Cancel };
         var actions = HumanUi.DialogButtons(save, cancel);
         actions.Dock = DockStyle.Bottom;
@@ -496,8 +498,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             Warn("Enter a valid Pakistan mobile number to record the opt-out.");
             return;
         }
-        await CommunicationManagementStore.RecordWhatsAppOptOutAsync(number);
-        if (!IsDisposed) SetStatus("WhatsApp opt-out recorded for the phone number.");
+        await CommunicationManagementStore.RecordChannelOptOutAsync(channel,number);
+        if (!IsDisposed) SetStatus(channel + " opt-out recorded for the phone number.");
     }
 
     private async Task EnableFreeWhatsAppAsync()

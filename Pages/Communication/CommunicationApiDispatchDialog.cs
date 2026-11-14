@@ -37,7 +37,7 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         ClientSize=new Size(AppScale.Scale(950),AppScale.Scale(570));MinimumSize=new Size(AppScale.Scale(800),AppScale.Scale(500));
         BackColor=AppTheme.PageBackground;
         grid.AutoGenerateColumns=false;
-        foreach(var (field,title,width) in new[]{("RecipientName","School record",210),("Destination","Number ending",110),("State","Status",130)})
+        foreach(var (field,title,width) in new[]{("RecipientName","School record",210),("Destination","Number ending",110),("State","Status",105),("OutcomeDetail","Details",230)})
             grid.Columns.Add(new DataGridViewTextBoxColumn {Name=field,DataPropertyName=field,HeaderText=title,
                 MinimumWidth=width,AutoSizeMode=DataGridViewAutoSizeColumnMode.Fill,SortMode=DataGridViewColumnSortMode.NotSortable});
         cancelPending.Click+=async(_,_)=>await RunAsync(async()=>{
@@ -105,6 +105,22 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         var table=await operations.Read(batch);
         if(IsDisposed || actor!=CurrentUser.UserId){table.Dispose();throw new UnauthorizedAccessException("The signed-in user changed.");}
         if(table.Rows.Count==0){table.Dispose();throw new CommunicationValidationException("This batch has no reviewed API messages.");}
+        table.Columns.Add("OutcomeDetail",typeof(string));
+        foreach(DataRow row in table.Rows)
+        {
+            string? code=table.Columns.Contains("FailureCode") ? Convert.ToString(row["FailureCode"]) : null;
+            row["OutcomeDetail"]=code switch {
+                "HTTP401" or "HTTP403"=>"Provider access denied. Check the token and permissions in Settings.",
+                "HTTP404"=>"Provider account or sender not found. Check Settings.",
+                "HTTP400" or "HTTP422"=>"Provider rejected the message. Check the template, sender and destination.",
+                "TransportUncertain"=>"No definite response. Check the provider before further action.",
+                _=>Convert.ToString(row["State"])=="Unknown" ? "Unverified result; do not blindly resend."
+                    : Convert.ToString(row["State"])=="Failed" ? "Provider rejected the message"
+                        + (code is { Length: >0 and <=50 } && code.All(c=>char.IsAsciiLetterOrDigit(c) || c is '-' or '_') ? " ("+code+")" : "")
+                        + ". Check the provider account for details."
+                    : ""
+            };
+        }
         table.Columns.Add("Destination",typeof(string));
         foreach(DataRow row in table.Rows)row["Destination"]="•••• "+Convert.ToString(row["PhoneE164"])![^4..];
         var old=grid.DataSource as DataTable;grid.DataSource=table;old?.Dispose();

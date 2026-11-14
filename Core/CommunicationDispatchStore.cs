@@ -67,11 +67,14 @@ internal static class CommunicationDispatchStore
         // Persist response using a non-cancelled bounded DB operation.
         // An interrupted or failed write leaves the pre-existing Unknown
         // attempt and must never trigger a second HTTP POST.
+        string? failureCode=outcome.FailureCode;
+        if(failureCode is not null && (failureCode.Length>50 || !failureCode.All(c=>char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
+            failureCode="ProviderRejected";
         await DatabaseHelper.QueryUserAsync("msg.RecordProviderResult",
             DatabaseHelper.P("@AttemptKey",attemptKey),
             DatabaseHelper.P("@Outcome",outcome.State),
             DatabaseHelper.P("@ProviderMessageId",outcome.ProviderMessageId),
-            DatabaseHelper.P("@FailureCode",outcome.FailureCode)).ConfigureAwait(false);
+            DatabaseHelper.P("@FailureCode",failureCode)).ConfigureAwait(false);
         return new DispatchResult(true,attemptId,outcome.State,null);
     }
 

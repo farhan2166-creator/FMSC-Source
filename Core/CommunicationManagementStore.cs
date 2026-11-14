@@ -27,8 +27,8 @@ internal static class CommunicationManagementStore
     internal static Task<DataTable> ReadMyUnfinishedBatchesAsync() =>
         DatabaseHelper.QueryUserAsync("msg.ReadMyUnfinishedBatches");
 
-    internal static Task RecordWhatsAppOptOutAsync(string phone) =>
-        DatabaseHelper.ExecuteUserAsync("msg.RecordWhatsAppOptOut", DatabaseHelper.P("@Phone", phone));
+    internal static Task RecordChannelOptOutAsync(string channel,string phone) =>
+        DatabaseHelper.ExecuteUserAsync("msg.RecordChannelOptOut",DatabaseHelper.P("@Channel",channel),DatabaseHelper.P("@Phone",phone));
 
     internal static async Task<DataTable> ReadComposeTemplatesAsync()
     {

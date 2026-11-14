@@ -102,13 +102,13 @@ BEGIN
  A.ProviderCode,A.ProfileHash,A.ReviewJson,A.TemplateJson,
  R.RecipientId,R.RecipientKind,COALESCE(R.AdmissionId,R.StaffId) RecordId,R.PhoneE164,R.State,J.Text RenderedBody,
  COALESCE(S.StudentName,T.StaffName,N''School record'') RecipientName,
- LastAttempt.AttemptId,LastAttempt.ProviderMessageId
+ LastAttempt.AttemptId,LastAttempt.ProviderMessageId,LastAttempt.FailureCode
  FROM msg.ApiBatch A JOIN msg.Batch B ON B.BatchId=A.BatchId
  JOIN msg.Recipient R ON R.BatchId=B.BatchId
  CROSS APPLY OPENJSON(A.ReviewJson) WITH(Kind varchar(8),RecordId int,Phone varchar(16),Text nvarchar(1600)) J
  LEFT JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
  LEFT JOIN dbo.Staff T ON T.StaffId=R.StaffId
- OUTER APPLY(SELECT TOP(1) AttemptId,ProviderMessageId FROM msg.Attempt X
+ OUTER APPLY(SELECT TOP(1) AttemptId,ProviderMessageId,FailureCode FROM msg.Attempt X
   WHERE X.RecipientId=R.RecipientId ORDER BY X.AttemptNumber DESC) LastAttempt
  WHERE B.BatchId=@BatchId AND J.Kind=R.RecipientKind AND J.RecordId=COALESCE(R.AdmissionId,R.StaffId) AND J.Phone=R.PhoneE164 ORDER BY R.RecipientId;
 END');
@@ -249,4 +249,20 @@ BEGIN
   UPDATE msg.Batch SET State=''Completed'' WHERE BatchId=@BatchId;
  COMMIT;
 END');
+EXEC(N'CREATE PROCEDURE msg.RecordChannelOptOut @UserId int,@Channel varchar(10),@Phone nvarchar(100)
+AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @Channel IS NULL OR @Channel NOT IN (''Sms'',''WhatsApp'')
+  THROW 51134,''Choose SMS or WhatsApp for the requested opt-out.'',1;
+ DECLARE @Number varchar(16)=msg.NormalizeMobile(@Phone);
+ IF @Number IS NULL THROW 51134,''Enter a valid Pakistan mobile number.'',1;
+ BEGIN TRANSACTION;
+ IF NOT EXISTS(SELECT 1 FROM msg.Suppression WITH(UPDLOCK,HOLDLOCK) WHERE Channel=@Channel AND PhoneE164=@Number)
+  INSERT msg.Suppression(Channel,PhoneE164,Source,Reason)
+  VALUES(@Channel,@Number,''OptOut'',N''Phone contact requested no messages on this channel.'');
+ COMMIT;
+END');
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes) VALUES(N'20',SYSDATETIME(),SUSER_SNAME(),N'Explicit API channels and immutable reviewed communication batches');
