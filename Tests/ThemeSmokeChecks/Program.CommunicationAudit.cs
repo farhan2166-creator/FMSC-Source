@@ -40,11 +40,11 @@ internal static partial class Program
             CurrentUser.SignIn(7202, "Read-only fixture", "Messaging viewer", false, new[] { "Communication.View" });
             using var reader = new CommunicationCenterPage(false);
             Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission) && !CommunicationAccess.CanCompose(CurrentUser.HasPermission)
-                && Field<int>(reader, "step") == 3 && !Field<ModernButton>(reader, "next").Visible,
+                && Field<int>(reader, "step") == 2 && !Field<ModernButton>(reader, "next").Visible,
                 "History-only access does not expose a composing/sending action");
             CurrentUser.SignIn(7203, "Settings fixture", "Messaging configuration", false, new[] { "Communication.Configure" });
             using var settings = new CommunicationCenterPage(false);
-            Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission) && Field<int>(settings, "step") == 4,
+            Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission) && Field<int>(settings, "step") == 3,
                 "A configuration-only operator opens Settings without student or history access");
         }
         finally { CurrentUser.SignIn(previous.UserId, previous.Username, previous.RoleName, previous.MustChangePassword, previous.Item5); }
@@ -68,7 +68,7 @@ internal static partial class Program
         var operations = new CommunicationCenterPage.Operations(
             _ => { reads++; return delayed ? read.Task : Task.FromResult(entries); },
             () => Task.FromResult(true),
-            (_, _, _, _) => { writes++; return confirm.Task; }, _ => opens++, () => approve);
+            (_, _, _, _) => { writes++; return confirm.Task; }, (_, _) => opens++, () => approve);
         using var page = new CommunicationCenterPage(false, operations);
         using var host = new Form { ClientSize = new Size(1100, 780), ShowInTaskbar = false };
         page.Dock = DockStyle.Fill; host.Controls.Add(page); ModalPageCloseGuard.Attach(host, page);
@@ -96,8 +96,8 @@ internal static partial class Program
         Check(sample.ReadOnly && sample.ScrollBars == ScrollBars.Vertical, "The complete recipient preview is read-only and scrollable");
         Check(sample.Text.Contains("Z Synthetic child"), "Preview follows the current recipient after the cell changes: " + sample.Text[..Math.Min(140, sample.Text.Length)]);
         Check(sample.Text.Contains(new string('x', 600)), "The complete rendered message remains available without ellipsis");
-        next.PerformClick(); PumpUntil(() => !page.IsBusy, "Manual mode is checked");
         var start = Field<ModernButton>(page, "confirm");
+        Check(start.Visible && start.Enabled, "The reviewed message can proceed directly to WhatsApp");
         start.PerformClick(); PumpUntil(() => !page.IsBusy, "Canceled confirmation returns");
         Check(writes == 0 && opens == 0, "Cancel before confirmation persists no batch and launches no handoff");
         approve = true;
@@ -109,20 +109,41 @@ internal static partial class Program
         PumpUntil(() => !page.IsBusy, "Delayed confirmation finishes");
         Check(opens == 0 && writes == 1, "A late completion never opens a different/stale message after the current intent changes");
         host.Close();
+
+        int bulkPrompts = 0;
+        bool requestedDirectChat = false;
+        CommunicationCenterPage? singlePage = null;
+        using var singleHost = new Form { ClientSize = new Size(1100, 780), ShowInTaskbar = false };
+        singlePage = new CommunicationCenterPage(false, operations with
+        {
+            ReadRecipients = _ => Task.FromResult(new CommunicationPreview(new[] { entries.Entries[0] })),
+            ConfirmBatch = (_, _, _, _) => Task.FromResult(new CommunicationConfirmation(Guid.NewGuid(), 1, false)),
+            OpenHandoff = (_, openFirstChat) => { requestedDirectChat = openFirstChat; singlePage!.Dispose(); },
+            ConfirmStart = () => { bulkPrompts++; return false; }
+        });
+        singleHost.Controls.Add(singlePage);
+        singleHost.Show(); Application.DoEvents();
+        Field<ModernComboBox>(singlePage, "audience").SelectedIndex = (int)CommunicationAudience.Student;
+        Field<StudentPicker>(singlePage, "student").SetStudent(42, "Synthetic child");
+        Field<ModernTextBox>(singlePage, "message").Text = "Hello [StudentName]";
+        Field<ModernButton>(singlePage, "next").PerformClick();
+        PumpUntil(() => !singlePage.IsBusy, "Single recipient preview finishes");
+        Field<ModernButton>(singlePage, "confirm").PerformClick();
+        Check(requestedDirectChat && bulkPrompts == 0, "One reviewed student opens WhatsApp directly with no bulk prompt");
     }
 
     private static void CheckManualLaunchAndReporting()
     {
         string state = "Pending";
         int marks = 0, launches = 0, warnings = 0;
-        bool failLaunch = true, approveReport = false;
+        bool failLaunch = true;
         string message = "Current prepared message & اطلاع";
         var operations = new CommunicationManualHandoffDialog.Operations(
             _ => Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(new[] { new CommunicationManualRecipient(1,"Synthetic child","4567",state) }),
             _ => { state = "Opened"; return Task.FromResult(new CommunicationManualOpen(true, new Uri("https://wa.me/923001234567?text=fixture"), null, message)); },
             (_, result) => { marks++; state = result; return Task.CompletedTask; },
             _ => { if (failLaunch) throw new System.ComponentModel.Win32Exception("Synthetic missing browser"); launches++; },
-            () => approveReport, _ => warnings++);
+            _ => warnings++);
         using var dialog = new CommunicationManualHandoffDialog(Guid.NewGuid(), operations);
         dialog.Show(); Application.DoEvents();
         var open = Field<ModernButton>(dialog, "open");
@@ -137,10 +158,8 @@ internal static partial class Program
         Check(launches == 1 && report.Enabled && Field<ModernTextBox>(dialog,"preparedMessage").Text == message,
             "Successful reopening exposes the exact handed-off message and permits explicit reporting");
         report.PerformClick(); Application.DoEvents();
-        Check(marks == 0, "Canceling I Sent It records no success");
-        approveReport = true; report.PerformClick(); Application.DoEvents();
         Check(marks == 1 && state == "ReportedSent" && !report.Enabled,
-            "Only an explicit report finishes the recipient; no delivery claim is fabricated");
+            "One explicit report finishes the recipient without a second confirmation or a delivery claim");
         dialog.Close();
 
         int recoveredReports = 0;
@@ -161,6 +180,14 @@ internal static partial class Program
         Check(recoveredReports == 1 && marks == 1,
             "An interrupted launch records a sent report only through the explicit recovery action.");
         resumed.Close();
+
+        state = "Pending";
+        using var direct = new CommunicationManualHandoffDialog(Guid.NewGuid(), operations, openFirstChat: true);
+        direct.Show(); Application.DoEvents();
+        Check(launches == 2 && state == "Opened" && marks == 1,
+            "A new single-recipient handoff opens the chat without a second Open click");
+        Field<ModernButton>(direct, "reported").PerformClick(); Application.DoEvents();
+        Check(marks == 2 && !direct.Visible, "Reporting the single message closes its completed handoff");
     }
 
     private static void CheckProviderBodyDeadline()

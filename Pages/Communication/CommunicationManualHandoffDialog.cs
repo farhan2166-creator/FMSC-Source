@@ -12,6 +12,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
 {
     private readonly Guid batchId;
     private readonly int actorId;
+    private readonly bool openFirstChat;
     private readonly Label progress=new()
     {
         Dock=DockStyle.Fill,AutoEllipsis=true,
@@ -60,7 +61,6 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         Func<long, Task<CommunicationManualOpen>> Open,
         Func<long, string, Task> Mark,
         Action<Uri> Launch,
-        Func<bool> ConfirmSent,
         Action<string> Notify,
         Func<long, Task>? RecordShellHandoff = null,
         Func<bool>? ConfirmRecoveredSend = null,
@@ -68,15 +68,13 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private readonly Operations operations;
 
 
-    internal CommunicationManualHandoffDialog(Guid batchId) : this(batchId, null) { }
-    internal CommunicationManualHandoffDialog(Guid batchId, Operations? operations)
+    internal CommunicationManualHandoffDialog(Guid batchId, bool openFirstChat = false)
+        : this(batchId, null, openFirstChat) { }
+    internal CommunicationManualHandoffDialog(Guid batchId, Operations? operations, bool openFirstChat = false)
     {
         this.operations = operations ?? new Operations(CommunicationManualHandoffStore.ReadAsync,
             CommunicationManualHandoffStore.OpenAsync, (id, outcome) => CommunicationManualHandoffStore.MarkAsync(id, outcome, false),
             uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }),
-            () => ModernMessageDialog.Show(this,
-                "Confirm you actually pressed Send in WhatsApp. FMSC cannot verify delivery.",
-                "Operator report", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes,
             message => ModernMessageDialog.Show(this, message, "Manual WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Warning),
             CommunicationManualHandoffStore.RecordShellHandoffAsync,
             () => ModernMessageDialog.Show(this,
@@ -84,6 +82,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
                 "Check WhatsApp", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes,
             id => CommunicationManualHandoffStore.MarkAsync(id, "ReportedSent", true));
         this.batchId=batchId;
+        this.openFirstChat = openFirstChat;
         actorId=CurrentUser.UserId;
         Text="Manual WhatsApp Business · School Communication";
         StartPosition=FormStartPosition.CenterParent;
@@ -128,6 +127,8 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             try { batchLease=CommunicationHandoffLease.Acquire(batchId); }
             catch(Exception ex) { Warn(ex.Message); Close(); return; }
             await RefreshAsync();
+            if (openFirstChat && !IsDisposed && current?.State == "Pending")
+                await OpenAsync();
         };
         FormClosing+=(_,e)=> { if(busy)e.Cancel=true; };
         Disposed+=(_,_)=> { batchLease?.Dispose(); batchLease=null; };
@@ -230,7 +231,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         bool recoveredReport = state == "ReportedSent" && !current.ShellHandoffRecorded
             && operations.ConfirmRecoveredSend is not null;
         if (state=="ReportedSent" && (current.State!="Opened" || failedOpen.Contains(current.RecipientId)
-            || !(recoveredReport ? operations.ConfirmRecoveredSend!() : operations.ConfirmSent()))) return;
+            || (recoveredReport && !operations.ConfirmRecoveredSend!()))) return;
         long id=current.RecipientId;
         busy=true;
         ApplyAvailability();
@@ -247,7 +248,11 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         finally
         {
             busy=false;
-            if(!IsDisposed)await RefreshAsync();
+            if(!IsDisposed)
+            {
+                await RefreshAsync();
+                if (openFirstChat && current is null) Close();
+            }
         }
     }
 

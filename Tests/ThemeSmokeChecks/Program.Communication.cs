@@ -186,7 +186,7 @@ internal static partial class Program
         // Render the Settings workspace to verify user-visible, unclipped
         // actions without freezing its internal panel or row structure.
         var setStep = type.GetMethod("SetStep", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        setStep.Invoke(page, new object[] { 4 });
+        setStep.Invoke(page, new object[] { 3 });
         Application.DoEvents();
         var settingsScroller = settingsCard.Content.Controls.OfType<ScrollableControl>()
             .SingleOrDefault(control => control.AutoScroll);
