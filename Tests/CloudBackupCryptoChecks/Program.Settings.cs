@@ -8,7 +8,7 @@ internal static class CloudSettingsChecks
     internal static void Run(string root)
     {
         var original = new CloudBackupOptions {
-            DropboxEnabled = true, GoogleDriveEnabled = false,
+            DropboxEnabled = true,
             AutomaticEnabled = true, Frequency = CloudBackupFrequency.Weekly,
             LocalScheduledTime = new TimeOnly(13, 17), WeeklyDay = DayOfWeek.Thursday,
             MaximumLocalBackups = 11, MaximumDropboxBackups = 23
@@ -41,6 +41,21 @@ internal static class CloudSettingsChecks
         string oldFormat = json.Replace("\"LocalEnabled\":true,", "");
         if (oldFormat == json || !CloudBackupSettings.Deserialize(Encoding.UTF8.GetBytes(oldFormat)).LocalEnabled)
             throw new Exception("Legacy backup settings lost the local backup destination.");
+        // School settings written before the Google Drive provider was retired
+        // remain readable without enabling a removed cloud destination.
+        string withRetiredGoogle = json.Replace("\"DropboxEnabled\":true,",
+            "\"GoogleDriveEnabled\":true,\"DropboxEnabled\":true,")
+            .Replace("\"MaximumDropboxBackups\":23,",
+                "\"MaximumGoogleDriveBackups\":7,\"MaximumDropboxBackups\":23,");
+        if (withRetiredGoogle == json)
+            throw new Exception("Retired Google fixture was not constructed.");
+        RequireUnchanged(CloudBackupSettings.Deserialize(Encoding.UTF8.GetBytes(withRetiredGoogle)), json);
+        string googleOnly = withRetiredGoogle.Replace("\"LocalEnabled\":true", "\"LocalEnabled\":false")
+            .Replace("\"DropboxEnabled\":true", "\"DropboxEnabled\":false");
+        try {
+            CloudBackupSettings.Deserialize(Encoding.UTF8.GetBytes(googleOnly));
+            throw new Exception("Obsolete Google-only enrollment must not enable unattended backups.");
+        } catch (InvalidDataException) { }
         original.LocalEnabled = false;
         var remoteOnly = CloudBackupSettings.Deserialize(JsonSerializer.SerializeToUtf8Bytes(original));
         if (remoteOnly.LocalEnabled || !remoteOnly.DropboxEnabled)

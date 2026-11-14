@@ -9,7 +9,7 @@ internal static partial class Program
 {
     private static void CheckCloudConnectionCancellation()
     {
-        if (CloudBackupOAuth.IsConnected(CloudProvider.GoogleDrive))
+        if (CloudBackupOAuth.IsConnected(CloudProvider.Dropbox))
             throw new Exception("Cloud sign-in regression requires a disposable Windows profile without a real account.");
         const BindingFlags methods = BindingFlags.Instance | BindingFlags.NonPublic;
         int cancelled = 0, callbacks = 0;
@@ -47,10 +47,10 @@ internal static partial class Program
         using (var settings = new CloudBackupSettingsDialog())
         {
             settings.ConnectAccountAsync = noBrowser;
-            var connect = Field<ModernButton>(settings,"driveConnect");
+            var connect = Field<ModernButton>(settings,"dropboxConnect");
             Exercise(settings, Field<ModernButton>(settings,"cancel"), connect,
                 () => (Task)typeof(CloudBackupSettingsDialog).GetMethod("ToggleProviderAsync",methods)!
-                    .Invoke(settings,new object[]{CloudProvider.GoogleDrive,connect})!,
+                    .Invoke(settings,new object[]{CloudProvider.Dropbox,connect})!,
                 () => Field<Label>(settings,"connectionStatus").Text);
         }
         using (var recovery = new RestoreExistingSchoolForm())
@@ -61,7 +61,7 @@ internal static partial class Program
                 () => (Task)typeof(RestoreExistingSchoolForm).GetMethod("ConnectCloudAsync",methods)!.Invoke(recovery,null)!,
                 () => Field<Label>(recovery,"status").Text);
         }
-        Check(callbacks == 4 && cancelled == 4 && !CloudBackupOAuth.IsConnected(CloudProvider.GoogleDrive),
+        Check(callbacks == 4 && cancelled == 4 && !CloudBackupOAuth.IsConnected(CloudProvider.Dropbox),
             "Cancel and window close release each pending sign-in without saving cloud credentials");
     }
 }

@@ -435,7 +435,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         }
         backupStatusDetail.Text =
             (settings.LocalEnabled ? "Local · " : "") +
-            (settings.GoogleDriveEnabled ? "Google Drive · " : "") +
             (settings.DropboxEnabled ? "Dropbox · " : "") +
             (settings.AutomaticEnabled ? "Scheduled" : "Manual");
     }
@@ -512,9 +511,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 string path = Convert.ToString(record["FilePath"]) ?? "";
                 if (Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.Scheme == "cloud")
                 {
-                    e.Value = uri.Host.Equals("GoogleDrive", StringComparison.OrdinalIgnoreCase)
-                        ? "Google Drive" : uri.Host.Equals("Dropbox", StringComparison.OrdinalIgnoreCase)
-                            ? "Dropbox" : "Cloud backup";
+                    e.Value = uri.Host.Equals("Dropbox", StringComparison.OrdinalIgnoreCase)
+                        ? "Dropbox" : "Cloud backup";
                     e.FormattingApplied = true;
                 }
                 break;

@@ -19,12 +19,10 @@ internal static class CloudBackupDeliveryPolicy
     internal static bool RequiresRecoveryVerification(bool enabled, bool verified, bool pruned)
         => enabled && !verified && !pruned;
 
-    internal static bool MayReleaseQueuedPackage(bool gEnabled, bool gVerified, bool gPruned,
-        bool dEnabled, bool dVerified, bool dPruned)
+    internal static bool MayReleaseQueuedPackage(bool enabled, bool verified, bool pruned)
     {
-        bool allRequestedCompleted = (!gEnabled || gVerified || gPruned) &&
-            (!dEnabled || dVerified || dPruned);
-        // Disabling an unverified provider cannot destroy the only ciphertext.
-        return allRequestedCompleted && (gVerified || dVerified);
+        // A disabled destination or an upload receipt alone is never evidence
+        // that a queued ciphertext is safe to delete.
+        return (!enabled || verified || pruned) && verified;
     }
 }

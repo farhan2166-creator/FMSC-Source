@@ -57,87 +57,9 @@ internal static class ReleaseReviewChecks
             }
             using (var resumed = CommunicationHandoffLease.Acquire(batch,root)) { }
 
-            string package = Path.Combine(root,"encrypted.fixture");
-            byte[] bytes = Encoding.UTF8.GetBytes("synthetic ciphertext only");
-            await File.WriteAllBytesAsync(package,bytes);
-            string md5 = Convert.ToHexString(MD5.HashData(bytes)).ToLowerInvariant();
-            string sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-            var server = new DriveServer(bytes.Length,md5);
-            using var http = new HttpClient(server);
-            string? journalId = null;
-            bool lost = false;
-            try { await Upload(); } catch (HttpRequestException) { lost = true; }
-            if (!lost || journalId != "reserved-file" || server.Creates != 1)
-                throw new Exception("Uncertain upload did not retain its reserved ID.");
-            var reconciled = await Upload();
-            if (reconciled.RemoteId != journalId || server.Creates != 1 || server.Reservations != 1)
-                throw new Exception("A lost successful upload was duplicated on retry.");
-            server.WrongChecksum = true;
-            bool refused = false;
-            try { await Upload(); } catch (IOException) { refused = true; }
-            if (!refused || server.Creates != 1) throw new Exception("Different remote bytes were accepted or overwritten.");
-
-            // A partially created zero-byte placeholder is updated in place.
-            var partial = new DriveServer(bytes.Length,md5) { IncompleteSha = sha };
-            using var partialHttp = new HttpClient(partial);
-            try { await CloudBackupTransport.DriveUploadAsync(package,"FMSC-test.fmscbackup",sha,
-                DateTime.UtcNow,bytes.Length,"fixture",default,"reserved-file",_ => { },partialHttp); }
-            catch(HttpRequestException) { }
-            if(partial.Creates != 0 || partial.Patches != 1)
-                throw new Exception("An owned incomplete upload was duplicated instead of updated in place.");
-
-            // A failed journal write must prevent files.create entirely.
-            var noJournal = new DriveServer(bytes.Length,md5);
-            using var otherHttp = new HttpClient(noJournal);
-            try {
-                await CloudBackupTransport.DriveUploadAsync(package,"FMSC-test.fmscbackup",sha,
-                    DateTime.UtcNow,bytes.Length,"fixture",default,null,
-                    _ => throw new IOException("injected journal failure"),otherHttp);
-            } catch (IOException) { }
-            if (noJournal.Creates != 0) throw new Exception("Upload started without durable ID persistence.");
-
-            Task<CloudRemoteBackup> Upload() => CloudBackupTransport.DriveUploadAsync(
-                package,"FMSC-test.fmscbackup",sha,DateTime.UtcNow,bytes.Length,"fixture",default,
-                journalId,id => journalId=id,http);
         }
         finally { Directory.Delete(root,true); }
-        Console.WriteLine("PASS: 12-hour schedule matrix, VC prerequisite repair, exclusive/resumable handoff and Drive lost-receipt/journal/integrity checks.");
+        Console.WriteLine("PASS: 12-hour schedule matrix, VC prerequisite repair and exclusive/resumable handoff checks.");
     }
 
-    private sealed class DriveServer(long size,string md5) : HttpMessageHandler
-    {
-        internal int Creates, Reservations, Patches;
-        internal bool Completed, WrongChecksum;
-        internal string? IncompleteSha;
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken token)
-        {
-            string uri = request.RequestUri!.AbsoluteUri;
-            if (uri.Contains("generateIds")) { Reservations++; return Json(new { ids=new[]{"reserved-file"} }); }
-            if (uri.Contains("uploadType=resumable"))
-            {
-                using var payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
-                if(request.Method == HttpMethod.Patch)
-                {
-                    if(payload.RootElement.TryGetProperty("id",out _))throw new Exception("PATCH attempted to change a file ID.");
-                    Patches++;
-                }
-                else
-                {
-                    if (payload.RootElement.GetProperty("id").GetString() != "reserved-file")
-                        throw new Exception("files.create did not reuse its reserved ID.");
-                    Creates++;
-                }
-                var response = Json(new { }); response.Headers.Location=new Uri("https://www.googleapis.com/upload-session"); return response;
-            }
-            if (uri.EndsWith("upload-session")) { Completed=true; throw new HttpRequestException("lost completion response"); }
-            if (uri.Contains("/files/reserved-file"))
-                return Completed ? Json(new { id="reserved-file",name="FMSC-test.fmscbackup",size=size.ToString(),md5Checksum=WrongChecksum?"bad":md5 })
-                    : IncompleteSha is not null ? Json(new { id="reserved-file",name="FMSC-test.fmscbackup",size="0",appProperties=new { fmscPackageSha256=IncompleteSha } })
-                    : new HttpResponseMessage(HttpStatusCode.NotFound);
-            if (uri.Contains("/drive/v3/files?")) return Json(new { files=Array.Empty<object>() });
-            throw new Exception("Unexpected provider request: "+uri);
-        }
-        private static HttpResponseMessage Json(object body) => new(HttpStatusCode.OK)
-            { Content=new StringContent(JsonSerializer.Serialize(body),Encoding.UTF8,"application/json") };
-    }
 }

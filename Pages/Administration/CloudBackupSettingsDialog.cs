@@ -11,17 +11,14 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
 {
     private readonly ModernCheckBox automatic = Option("Enable automatic backups");
     private readonly ModernCheckBox local = Option("Keep local SQL backups");
-    private readonly ModernCheckBox google = Option("Upload encrypted backups");
     private readonly ModernCheckBox dropbox = Option("Upload encrypted backups");
     private readonly ModernComboBox frequency = HumanUi.Combo();
     private readonly ModernComboBox weeklyDay = HumanUi.Combo();
     private readonly ModernDatePicker scheduleTime = new() { TimeOnly = true };
-    private readonly ModernNumericTextBox localMax = Limit(), googleMax = Limit(), dropboxMax = Limit();
+    private readonly ModernNumericTextBox localMax = Limit(), dropboxMax = Limit();
     private readonly ModernNumericTextBox maximumQueueMb = new() {
         Minimum = 512, Maximum = 1_048_576, ThousandsSeparator = true
     };
-    private readonly ModernButton driveConnect = ActionButton("Connect Google Drive");
-    private readonly ModernButton driveRepair = ActionButton("Verify / Reconnect Drive");
     private readonly ModernButton dropboxConnect = ActionButton("Connect Dropbox");
     private readonly ModernButton dropboxRepair = ActionButton("Verify / Reconnect Dropbox");
     private readonly Label recoveryStatus = Note("");
@@ -59,10 +56,8 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         weeklyDay.SelectedIndex = (int)previous.WeeklyDay;
         automatic.Checked = previous.AutomaticEnabled;
         local.Checked = previous.LocalEnabled;
-        google.Checked = previous.GoogleDriveEnabled;
         dropbox.Checked = previous.DropboxEnabled;
         localMax.Value = previous.MaximumLocalBackups;
-        googleMax.Value = previous.MaximumGoogleDriveBackups;
         dropboxMax.Value = previous.MaximumDropboxBackups;
         maximumQueueMb.Value = previous.MaximumPendingQueueMegabytes;
 
@@ -75,9 +70,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
                 ModernMessageDialog.ShowWarning(this, settingsWarning, "Backup Settings Need Repair");
         };
 
-        driveConnect.Click += async (_, _) => await ToggleProviderAsync(CloudProvider.GoogleDrive, driveConnect);
         dropboxConnect.Click += async (_, _) => await ToggleProviderAsync(CloudProvider.Dropbox, dropboxConnect);
-        driveRepair.Click += async (_, _) => await VerifyOrReconnectAsync(CloudProvider.GoogleDrive);
         dropboxRepair.Click += async (_, _) => await VerifyOrReconnectAsync(CloudProvider.Dropbox);
         passphraseButton.Click += (_, _) => SetRecoveryPassphrase();
         save.Click += async (_, _) => await SaveAsync();
@@ -100,10 +93,9 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         var tabs = new TabControl { Dock = DockStyle.Fill, Margin = Padding.Empty };
         var destinations = new TableLayoutPanel {
             AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Top, ColumnCount = 2, RowCount = 2, Margin = Padding.Empty
+            Dock = DockStyle.Top, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty
         };
-        destinations.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        destinations.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        destinations.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         destinations.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         destinations.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
@@ -111,14 +103,9 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
             Field("Maximum local backups", localMax));
         localSettings.Margin = new Padding(0, 0, 0, AppMetrics.SpacingMd);
         destinations.Controls.Add(localSettings, 0, 0);
-        destinations.SetColumnSpan(localSettings, 2);
 
-        var driveSettings = Section("Google Drive", google,
-            Field("Maximum cloud backups", googleMax), driveConnect, driveRepair);
-        driveSettings.Margin = new Padding(0, 0, AppMetrics.SpacingSm, 0);
-        destinations.Controls.Add(driveSettings, 0, 1);
         destinations.Controls.Add(Section("Dropbox", dropbox,
-            Field("Maximum cloud backups", dropboxMax), dropboxConnect, dropboxRepair), 1, 1);
+            Field("Maximum cloud backups", dropboxMax), dropboxConnect, dropboxRepair), 0, 1);
 
         AddTab(tabs, "Schedule", Section("Automatic Backups", automatic,
             Field("Frequency", frequency), Field("Backup time (local)", scheduleTime),
@@ -204,8 +191,6 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
             : "";
         cancel.Text = allowCancellation ? "Cancel Connection" : "Cancel";
         cancel.DialogResult = allowCancellation ? DialogResult.None : DialogResult.Cancel;
-        driveConnect.Enabled = false;
-        driveRepair.Enabled = false;
         dropboxConnect.Enabled = false;
         dropboxRepair.Enabled = false;
         save.Enabled = false;
@@ -220,8 +205,6 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         accountCancellation?.Dispose();
         accountCancellation = null;
         if (IsDisposed || Disposing) return;
-        driveConnect.Enabled = true;
-        driveRepair.Enabled = true;
         dropboxConnect.Enabled = true;
         dropboxRepair.Enabled = true;
         save.Enabled = true;
@@ -413,26 +396,23 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
         if (!TryBeginOperation()) return;
         try
         {
-            if (google.Checked && !CloudBackupOAuth.IsConnected(CloudProvider.GoogleDrive))
-                throw new InvalidOperationException("Connect Google Drive before enabling it.");
             if (dropbox.Checked && !CloudBackupOAuth.IsConnected(CloudProvider.Dropbox))
                 throw new InvalidOperationException("Connect Dropbox before enabling it.");
-            if (!local.Checked && !google.Checked && !dropbox.Checked)
+            if (!local.Checked && !dropbox.Checked)
                 throw new InvalidOperationException("Choose at least one backup destination.");
             if (automatic.Checked && frequency.SelectedIndex == 0)
                 throw new InvalidOperationException("Select a scheduled frequency or disable automatic backup.");
-            if ((google.Checked || dropbox.Checked) &&
+            if (dropbox.Checked &&
                 !CloudBackupSettings.HasLocalRecoveryPassphrase)
                 throw new InvalidOperationException("Set and independently retain a recovery passphrase first.");
             var newSettings = new CloudBackupOptions {
                 AutomaticEnabled = automatic.Checked,
                 LocalEnabled = local.Checked,
-                GoogleDriveEnabled = google.Checked, DropboxEnabled = dropbox.Checked,
+                DropboxEnabled = dropbox.Checked,
                 Frequency = (CloudBackupFrequency)frequency.SelectedIndex,
                 LocalScheduledTime = TimeOnly.FromDateTime(scheduleTime.Value),
                 WeeklyDay = (DayOfWeek)weeklyDay.SelectedIndex,
                 MaximumLocalBackups = (int)localMax.Value,
-                MaximumGoogleDriveBackups = (int)googleMax.Value,
                 MaximumDropboxBackups = (int)dropboxMax.Value,
                 MaximumPendingQueueMegabytes = (int)maximumQueueMb.Value
             };
@@ -470,8 +450,6 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
 
     private void RefreshConnectionState()
     {
-        driveConnect.Text = CloudBackupOAuth.IsConnected(CloudProvider.GoogleDrive)
-            ? "Disconnect Google Drive" : "Connect Google Drive";
         dropboxConnect.Text = CloudBackupOAuth.IsConnected(CloudProvider.Dropbox)
             ? "Disconnect Dropbox" : "Connect Dropbox";
         recoveryStatus.Text = CloudBackupSettings.HasLocalRecoveryPassphrase

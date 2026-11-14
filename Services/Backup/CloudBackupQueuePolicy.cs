@@ -14,14 +14,13 @@ internal static class CloudBackupQueuePolicy
            newerStillAvailable && olderSqlUtc != default && newerSqlUtc != default &&
            newerSqlUtc > olderSqlUtc;
 
-    internal static bool CanRelease(bool googleRequested, bool googleVerified,
-        bool googlePruned, bool googleSuperseded, bool dRequested,
-        bool dVerified, bool dPruned, bool dSuperseded)
+    internal static bool CanRelease(bool requested, bool verified, bool pruned, bool superseded)
     {
-        bool googleDone = !googleRequested || googleVerified || googlePruned || googleSuperseded;
-        bool dropboxDone = !dRequested || dVerified || dPruned || dSuperseded;
-        return googleDone && dropboxDone &&
-               (googleVerified || googleSuperseded || dVerified || dSuperseded);
+        // Never delete the only encrypted package merely because a destination
+        // is disabled or no longer configured. Only recovery-tested delivery,
+        // or an explicitly safely-superseded package, permits release.
+        bool completed = !requested || verified || pruned || superseded;
+        return completed && (verified || superseded);
     }
 
     internal static bool ShouldPauseCreation(long queueBytes, long maximumBytes,

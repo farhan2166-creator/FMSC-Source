@@ -151,8 +151,8 @@ try
     string invalid = Path.Combine(root, "invalid.fmscbackup");
     File.WriteAllBytes(invalid, Array.Empty<byte>());
     MustReject(() => CloudBackupCrypto.Decrypt(invalid, restored, passphrase), "empty package");
-    // DSA-03: a retained local ciphertext pending to another provider must
-    // never re-upload its intentionally pruned Google/Dropbox remote copy.
+    // DSA-03: a retained local ciphertext must never re-upload its
+    // intentionally pruned Dropbox remote copy.
     if (CloudBackupDeliveryPolicy.RequiresUpload(true, "", true) ||
         !CloudBackupDeliveryPolicy.RequiresUpload(true, "", false) ||
         CloudBackupDeliveryPolicy.RequiresUpload(true, "id:present", false) ||
@@ -169,14 +169,10 @@ try
     if (!CloudBackupDeliveryPolicy.RequiresRecoveryVerification(true, false, false) ||
         CloudBackupDeliveryPolicy.RequiresRecoveryVerification(false, false, false) ||
         CloudBackupDeliveryPolicy.RequiresRecoveryVerification(true, false, true) ||
-        CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(false, false, false,
-            false, false, false) ||
-        CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(true, false, false,
-            false, false, false) ||
-        CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(true, true, false,
-            true, false, false) ||
-        !CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(true, true, false,
-            true, true, false))
+        CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(false, false, false) ||
+        CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(true, false, false) ||
+        CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(true, false, true) ||
+        !CloudBackupDeliveryPolicy.MayReleaseQueuedPackage(true, true, false))
         throw new Exception("Unverified cloud delivery was treated as recovery-tested or released from its retry queue.");
 
     var h1 = new string('a', 64);
@@ -185,14 +181,14 @@ try
     var latestCreated = earliestCreated.AddHours(4);
     var laterUploaded = earliestCreated.AddHours(10);
     var copies = new[] {
-        new CloudBackupCopy("GoogleDrive", "old", h1, earliestCreated, laterUploaded, 123, true),
+        new CloudBackupCopy("Dropbox", "old", h1, earliestCreated, laterUploaded, 123, true),
         new CloudBackupCopy("Dropbox", "old-copy", h1, earliestCreated, laterUploaded.AddHours(1), 123, true),
         new CloudBackupCopy("Local", "new", h2, latestCreated, latestCreated.AddMinutes(1), 125, true)
     };
     var recovery = CloudBackupCatalog.GroupRecoveryPoints(copies);
     if (recovery.Count != 2 || recovery[0].PackageSha256 != h2 || recovery[1].Copies.Count != 2)
         throw new Exception("Recovery comparison used upload time or did not group matching copies.");
-    if (CloudBackupCatalog.CopiesEligibleForDeletion(copies, "GoogleDrive", 1, h2).Count != 0)
+    if (CloudBackupCatalog.CopiesEligibleForDeletion(copies, "Dropbox", 1, h2).Count != 0)
         throw new Exception("Retention deleted data before upload confirmation.");
     if (CloudBackupCatalog.CopiesEligibleForDeletion(copies, "Dropbox", 1, h1).Count != 0)
         throw new Exception("Retention should not delete the only verified copy.");

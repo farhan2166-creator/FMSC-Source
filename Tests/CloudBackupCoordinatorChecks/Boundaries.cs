@@ -12,11 +12,11 @@ internal static class AppExceptionHandler {internal static void LogNonFatal(Exce
 }
 namespace FMSC_SMS.Core.Updates {internal static class UpdateStartupGuard {internal static bool RequiresRecovery(byte[] b)=>throw new Exception("Update inspection forbidden");}}
 namespace FMSC_SMS.Services.Backup {
-internal enum CloudProvider {GoogleDrive,Dropbox}
+internal enum CloudProvider {Dropbox}
 internal sealed record CloudRemoteBackup(CloudProvider Provider,string RemoteId,string Name,string PackageSha256,DateTime SqlBackupCreatedUtc,DateTime UploadedUtc,long Size);
 internal sealed class CloudBackupOptions {
- public bool LocalEnabled {get;set;}=true;public bool GoogleDriveEnabled {get;set;}=true;public bool DropboxEnabled {get;set;}
- public bool AutomaticEnabled {get;set;}=true;public int MaximumPendingQueueMegabytes {get;set;}=8192;public int MaximumLocalBackups {get;set;}=7;public int MaximumGoogleDriveBackups {get;set;}=7;public int MaximumDropboxBackups=>7;
+ public bool LocalEnabled {get;set;}=true;public bool DropboxEnabled {get;set;}=true;
+ public bool AutomaticEnabled {get;set;}=true;public int MaximumPendingQueueMegabytes {get;set;}=8192;public int MaximumLocalBackups {get;set;}=7;public int MaximumDropboxBackups {get;set;}=7;
  internal void Validate(){} internal bool IsDue(DateTimeOffset now,DateTimeOffset? last)=>FixtureRuntime.Due;
 }
 internal static class CloudBackupSettings
@@ -46,7 +46,7 @@ internal static class CloudBackupTransport {
  internal static Task<IReadOnlyList<CloudRemoteBackup>> ListAsync(CloudProvider p,CancellationToken t)=>Task.FromResult<IReadOnlyList<CloudRemoteBackup>>(FixtureRuntime.Remote.Values.Select(x=>x.Remote).Where(x=>x.Provider==p).ToArray());
  internal static Task DownloadAsync(CloudProvider p,string id,string path,CancellationToken t,Action<long,long?>? report=null)=>File.WriteAllBytesAsync(path,FixtureRuntime.Remote[id].Bytes,t);
  internal static Task DeleteAsync(CloudProvider p,string id,CancellationToken t)=>throw new Exception("Network forbidden");
- internal static Task<CloudRemoteBackup> UploadAsync(CloudProvider p,string path,DateTime d,CancellationToken t,string? id,Action<string> save,Action<long,long?>? report=null)
+ internal static Task<CloudRemoteBackup> UploadAsync(CloudProvider p,string path,DateTime d,CancellationToken t,Action<long,long?>? reportTransfer=null)
  {
   byte[] bytes=File.ReadAllBytes(path);
   var remote=new CloudRemoteBackup(p,Guid.NewGuid().ToString("N"),"synthetic",Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant(),d,DateTime.UtcNow,bytes.Length);

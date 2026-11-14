@@ -30,7 +30,7 @@ internal static class CloudBackupCatalog
         return copies
             .Where(x => x.EncryptedSizeBytes > 0 && x.PackageSha256.Length == 64 &&
                 x.PackageSha256.All(Uri.IsHexDigit) &&
-                x.SqlBackupCreatedUtc != default && x.Provider is "GoogleDrive" or "Dropbox" or "Local")
+                x.SqlBackupCreatedUtc != default && x.Provider is "Dropbox" or "Local")
             .GroupBy(x => x.PackageSha256, StringComparer.OrdinalIgnoreCase)
             .Select(group =>
             {

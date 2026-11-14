@@ -103,7 +103,7 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
             Font = AppTheme.PageTitleFont, ForeColor = AppTheme.Primary
         }, 0);
         Full(authorize, 1);
-        source.Items.AddRange(new object[] { "Local .bak file", "Google Drive", "Dropbox" });
+        source.Items.AddRange(new object[] { "Local .bak file", "Dropbox" });
         source.SelectedIndex = 0;
         Field(2, "Backup location", source);
         var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3 };
@@ -165,9 +165,8 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
         Shown += (_, _) => administrator.Focus();
     }
 
-    private CloudProvider SelectedProvider =>
-        source.SelectedIndex == 1 ? CloudProvider.GoogleDrive : CloudProvider.Dropbox;
-    private bool IsCloud => source.SelectedIndex is 1 or 2;
+    private CloudProvider SelectedProvider => CloudProvider.Dropbox;
+    private bool IsCloud => source.SelectedIndex == 1;
     private void RefreshSourceDisplay()
     {
         chooseLocal.Enabled = !busy && !IsCloud;
