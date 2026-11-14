@@ -1,5 +1,6 @@
 using System.Reflection;
 using FMSC_SMS.Core;
+using FMSC_SMS.Pages.Security;
 
 internal static partial class Program
 {
@@ -166,15 +167,16 @@ internal static partial class Program
         modeRows.Columns.Add("Enabled", typeof(bool));
         modeRows.Rows.Add("WhatsApp", "WhatsAppBusinessManual", false);
         decorate.Invoke(page, new object[] { modeRows });
-        Check(manualActivation.Text == "Resume Free WhatsApp"
+        Check(manualActivation.Text == "Resume WhatsApp"
+            && manualActivation.Enabled == CurrentUser.HasPermission("Communication.Configure")
             && (string)modeRows.Rows[0]["StatusText"] == "Paused / unavailable",
-            "Paused manual WhatsApp clearly offers resumption without implying delivery");
+            "Paused manual WhatsApp offers resumption with one contextual control");
         modeRows.Rows[0]["Enabled"] = true;
         decorate.Invoke(page, new object[] { modeRows });
-        Check(manualActivation.Text == "Free WhatsApp Active"
-            && !manualActivation.Enabled
+        Check(manualActivation.Text == "Pause WhatsApp"
+            && manualActivation.Enabled == CurrentUser.HasPermission("Communication.Configure")
             && (string)modeRows.Rows[0]["StatusText"] == "Ready for manual chats",
-            "Already active manual WhatsApp is displayed plainly and cannot be re-enabled by mistake");
+            "Active WhatsApp offers Pause instead of duplicate enable and pause actions");
         Check(!send.Enabled, "An unreviewed page cannot send or open a chat before preview and confirmation");
 
         // Render at dashboard scale. Merely having seven audience options in
@@ -209,6 +211,24 @@ internal static partial class Program
                 + button.Text + "; bounds=" + bounds + "; exposed=" + exposed
                 + "; viewport=" + visibleContent);
         }
+        setStep.Invoke(page, new object[] { 0 });
+        Application.DoEvents();
+        var workspace = (TableLayoutPanel)type.GetField("composerLayout",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        Check(workspace.Visible && targetCard.Visible
+            && workspace.Controls.Contains(targetCard)
+            && workspace.ColumnStyles[0].Width == 100,
+            "New Message uses the whole workspace rather than a short form beside an empty preview");
+        setStep.Invoke(page, new object[] { 1 });
+        Application.DoEvents();
+        var review = Descendants(page).OfType<HumanCard>()
+            .Single(card => Descendants(card).OfType<DataGridView>().Any(grid =>
+                ReferenceEquals(grid, type.GetField("previewGrid",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page))));
+        Check(workspace.Visible && targetCard.Visible && review.Visible
+            && workspace.Controls.Contains(review)
+            && workspace.ColumnStyles[1].Width > 0,
+            "Review appears beside the editable message, without replacing the composer");
         setStep.Invoke(page, new object[] { 0 });
         Application.DoEvents();
         // The production formatter is internal: exercise it through reflection

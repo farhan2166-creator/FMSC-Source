@@ -35,7 +35,15 @@ internal static partial class Program
             Application.DoEvents();
             Set("currentAdmissionId", 123); Set("_workspaceStudentStatus", "Pending"); Update();
             Check(Field<ModernButton>("quickRegistrationButton").Text == "Admit Sibling", "Admission offers sibling-only registration");
-            Check(Field<Label>("pendingSiblingCount").Text == "Pending siblings: 1", "Waiting count excludes the loaded child and counts pending siblings");
+            // Check the observable waiting count without freezing an obsolete caption.
+            // There are two pending children in the fixture; the selected child is excluded.
+            var waitingNumbers = System.Text.RegularExpressions.Regex.Matches(
+                Field<Label>("pendingSiblingCount").Text, @"\d+")
+                .Cast<System.Text.RegularExpressions.Match>()
+                .Select(match => int.Parse(match.Value, System.Globalization.CultureInfo.InvariantCulture))
+                .ToArray();
+            Check(waitingNumbers.SequenceEqual(new[] { 1 }),
+                "Waiting count excludes the loaded child and counts pending siblings");
             Check(Field<ModernButton>("saveButton").Text == "Confirm & Save", "Completing pending details does not require saving a draft first");
             Check(Convert.ToString(siblingGrid.Rows[0].Cells["RegistrationConfirm"].Value) == "Confirm & Save", "Pending children get Confirm & Save on their own row");
             Check(Convert.ToString(siblingGrid.Rows[0].Cells["RegistrationCancel"].Value) == "Cancel", "Pending children retain row cancellation");

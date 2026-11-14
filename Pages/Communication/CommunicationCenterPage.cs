@@ -43,10 +43,22 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private readonly List<HumanCard> cards = new();
     private readonly Panel campusField, classField, studentField, staffField;
     private TableLayoutPanel targetFieldsLayout = null!;
-    private readonly ModernButton previous, next, confirm, historyButton, settingsButton,
-        newMessageButton, pauseSmsButton, unfinishedButton;
-    private readonly ModernButton pauseWhatsAppButton = new() { Text = "Pause WhatsApp", ThemeRole = "Secondary", Width = AppScale.Scale(180), Height = AppMetrics.ButtonHeight, Enabled = false };
+    private readonly ModernButton next, confirm, historyButton, settingsButton, newMessageButton;
+    // Compose and review share one workspace. Nothing is sent until the reviewed
+    // snapshot is confirmed, just as in the former full-screen review step.
+    private readonly TableLayoutPanel composerLayout = new()
+    {
+        Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty
+    };
+    private readonly CheckBox onlyUnfinished = new()
+    {
+        Text = "Only my unfinished", Dock = DockStyle.Top,
+        Height = AppScale.Scale(35), ForeColor = AppTheme.Text,
+        Padding = new Padding(AppScale.Scale(12), 0, 0, 0)
+    };
+    private bool manualWhatsAppActive;
     private bool showingUnfinished;
+    private bool updatingHistoryFilter;
     // Built by SettingsCard during the page constructor; cannot be readonly.
     private ModernButton enableFreeWhatsAppButton = null!;
     private CommunicationPreview? preview;
@@ -79,7 +91,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         : this(true, target, body, display, null) { }
     private CommunicationCenterPage(bool initialize, CommunicationTarget? initialTarget, string? initialBody,
         string? initialDisplay, Operations? operations)
-        : base("Communication Center", "Prepare WhatsApp Business messages and send them manually.")
+        : base("Communication Center", "Prepare and review school messages.")
     {
         this.operations = operations ?? new Operations(CommunicationRecipientResolver.ReadAsync,
             CommunicationManualHandoffStore.IsEnabledAsync,
@@ -118,16 +130,16 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         cards.Add(PreviewCard());
         cards.Add(HistoryCard());
         cards.Add(SettingsCard());
-        foreach (var card in cards)
-        {
-            card.Dock = DockStyle.Fill;
-            steps.Controls.Add(card);
-        }
-        previous = AddAction("Back", (_, _) =>
-        {
-            if (!IsBusy && step > 0) SetStep(step - 1);
-        }, "Secondary");
-        next = AddBusyAction("Preview Recipients", () => RunBusyAsync(BusyMessage, ContinueAsync, this), "Primary");
+        foreach (var card in cards) card.Dock = DockStyle.Fill;
+        composerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        composerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        composerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 0));
+        composerLayout.Controls.Add(cards[0], 0, 0);
+        composerLayout.Controls.Add(cards[1], 1, 0);
+        steps.Controls.Add(composerLayout);
+        steps.Controls.Add(cards[2]);
+        steps.Controls.Add(cards[3]);
+        next = AddBusyAction("Review Message", () => RunBusyAsync(BusyMessage, ContinueAsync, this), "Primary");
         next.MinimumSize = new Size(AppScale.Scale(165), AppMetrics.ButtonHeight);
         next.Width = AppScale.Scale(165);
         confirm = AddBusyAction("Open WhatsApp Chats", () => RunBusyAsync("Confirming the reviewed manual batch…", StartManualHandoffAsync, this), "Primary");
@@ -136,22 +148,18 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         // Only the operator-controlled handoff may be activated in this version.
         confirm.Enabled = false;
         historyButton = AddBusyAction("History", () => RunBusyAsync("Reading communication history…", LoadHistoryAsync, this), "Secondary");
-        unfinishedButton = AddBusyAction("My Unfinished Batches",
-            () => RunBusyAsync("Reading unfinished WhatsApp batches.", LoadUnfinishedAsync, this), "Secondary");
-        unfinishedButton.Width = AppScale.Scale(200);
-        GateAction(unfinishedButton, "Communication.Send");
         settingsButton = AddBusyAction("Settings", () => RunBusyAsync("Reading communication settings…", LoadSettingsAsync, this), "Secondary");
         newMessageButton = AddAction("New Message", (_, _) =>
         {
             if (IsBusy) return;
             InvalidatePreview();
+            message.Text = "";
+            templateChoice.SelectedIndex = 0;
+            audience.SelectedIndex = 0;
             SetStep(0);
         }, "Secondary");
-        pauseSmsButton = AddBusyAction("Pause SMS", () => RunBusyAsync("Pausing SMS…", () => PauseChannelAsync("Sms"), this), "Secondary");
-        pauseWhatsAppButton.Click += async (_, _) => await RunBusyAsync("Pausing WhatsApp.", () => PauseChannelAsync("WhatsApp"), this);
         GateAction(historyButton, "Communication.View");
         GateAction(settingsButton, "Communication.Configure");
-        GateAction(pauseSmsButton, "Communication.Configure");
         SetContent(steps);
 
         audience.SelectedIndexChanged += (_, _) => {
@@ -208,14 +216,15 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     private HumanCard TargetCard()
     {
-        var card = HumanUi.Card("Write Message");
+        var card = HumanUi.Card("New Message");
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        // The message expands into unused space instead of leaving a short
+        // form above a large blank region. Narrow or short windows can scroll.
         targetFieldsLayout = new TableLayoutPanel
         {
-            Dock = DockStyle.Top, AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 1, RowCount = 8, Padding = new Padding(12),
-            Margin = Padding.Empty
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7,
+            MinimumSize = new Size(0, AppScale.Scale(525)),
+            Padding = new Padding(AppScale.Scale(12)), Margin = Padding.Empty
         };
         targetFieldsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         var fields = new Control[]
@@ -229,18 +238,11 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         {
             fields[row].Dock = DockStyle.Fill;
             fields[row].Margin = Padding.Empty;
-            targetFieldsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,
-                AppScale.Scale(row == 6 ? 240 : 72)));
+            targetFieldsLayout.RowStyles.Add(row == 6
+                ? new RowStyle(SizeType.Percent, 100)
+                : new RowStyle(SizeType.Absolute, AppScale.Scale(68)));
             targetFieldsLayout.Controls.Add(fields[row], 0, row);
         }
-        targetFieldsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(46)));
-        targetFieldsLayout.Controls.Add(new Label
-        {
-            Text = "Prepared fields: [StudentName], [AdmissionNumber], [AdmissionDate], [OutstandingAmount]. " +
-                   "Amounts and admission details come from current school records.",
-            Dock = DockStyle.Fill, AutoEllipsis = true,
-            ForeColor = AppTheme.MutedText
-        }, 0, 7);
         scroll.Controls.Add(targetFieldsLayout);
         card.Content.Controls.Add(scroll);
         return card;
@@ -248,15 +250,15 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
     private HumanCard PreviewCard()
     {
-        var card = HumanUi.Card("Review Message",
-            "Live school records and Admission consent determine eligibility; shared phone numbers appear once.");
+        var card = HumanUi.Card("Review",
+            "Recipients and message are checked before opening WhatsApp.");
         previewGrid.AutoGenerateColumns = false;
         foreach (var (field, name, size) in new[]
         {
-            ("RecordName", "School record", 190),
-            ("Kind", "Type", 80),
-            ("Mobile", "Destination", 135),
-            ("Reason", "Eligibility", 180)
+            ("RecordName", "School record", 145),
+            ("Kind", "Type", 65),
+            ("Mobile", "Destination", 95),
+            ("Reason", "Eligibility", 125)
         })
             previewGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -276,7 +278,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private HumanCard HistoryCard()
     {
         var card = HumanUi.Card("History",
-            "Confirmed is not Delivered. Distinguish pending, provider acknowledgements, failures and unknown outcomes.");
+            "Manual WhatsApp reports are not verified delivery receipts.");
         historyGrid.AutoGenerateColumns = false;
         foreach (var (field, caption, width) in new[]
         {
@@ -303,15 +305,25 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         resume.Click += async (_, _) => await RunBusyAsync("Opening the saved manual session…", ResumeManualFromHistoryAsync, this);
         var footer = HumanUi.ButtonRow(resume);
         footer.Dock = DockStyle.Bottom;
+        onlyUnfinished.Visible = CurrentUser.HasPermission("Communication.Send");
+        onlyUnfinished.CheckedChanged += async (_, _) =>
+        {
+            if (IsDisposed || updatingHistoryFilter || IsBusy || step != 2) return;
+            await RunBusyAsync("Reading communication history…", async () =>
+            {
+                if (onlyUnfinished.Checked) await LoadUnfinishedAsync();
+                else await LoadHistoryAsync();
+            }, this);
+        };
         card.Content.Controls.Add(historyGrid);
         card.Content.Controls.Add(footer);
+        card.Content.Controls.Add(onlyUnfinished);
         return card;
     }
 
     private HumanCard SettingsCard()
     {
-        var card = HumanUi.Card("Settings",
-            "Review manual WhatsApp and prepared templates. Provider API and school email sending are unavailable.");
+        var card = HumanUi.Card("Settings", "WhatsApp and prepared messages.");
         settingsGrid.AutoGenerateColumns = false;
         foreach (var (field, caption, width) in new[]
         {
@@ -351,18 +363,10 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         // shared wrapping button layout cannot hide a second line of controls.
         tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(64)));
         tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(64)));
-        tables.Controls.Add(HumanUi.GroupHeading("Sending methods — only manual WhatsApp can be activated"), 0, 0);
+        tables.Controls.Add(HumanUi.GroupHeading("WhatsApp Business (manual)"), 0, 0);
         tables.Controls.Add(settingsGrid, 0, 1);
-        tables.Controls.Add(HumanUi.GroupHeading(
-            "Message templates — use [StudentName], [AdmissionNumber], [AdmissionDate] or [OutstandingAmount]"), 0, 2);
+        tables.Controls.Add(HumanUi.GroupHeading("Prepared messages"), 0, 2);
         tables.Controls.Add(templateGrid, 0, 3);
-        var configureProvider = new ModernButton
-        {
-            Text = "Configure Provider", ThemeRole = "Secondary",
-            Width = AppScale.Scale(160), Height = AppMetrics.ButtonHeight
-        };
-        configureProvider.Enabled = CurrentUser.HasPermission("Communication.Configure");
-        configureProvider.Click += async (_, _) => await RunBusyAsync("Saving provider settings…", ConfigureProviderAsync, this);
         enableFreeWhatsAppButton = new ModernButton
         {
             Text = "Use Free WhatsApp", ThemeRole = "Primary",
@@ -370,7 +374,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             Height = AppMetrics.ButtonHeight,
             Enabled = CurrentUser.HasPermission("Communication.Configure")
         };
-        enableFreeWhatsAppButton.Click += async (_, _) => await RunBusyAsync("Saving manual WhatsApp settings…", EnableFreeWhatsAppAsync, this);
+        enableFreeWhatsAppButton.Click += async (_, _) => await RunBusyAsync(
+            "Updating WhatsApp settings…",
+            () => manualWhatsAppActive ? PauseChannelAsync("WhatsApp") : EnableFreeWhatsAppAsync(), this);
         var addTemplate = new ModernButton
         {
             Text = "New Template", ThemeRole = "Primary",
@@ -393,11 +399,10 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             WrapContents = false, AutoScroll = true, Margin = Padding.Empty
         };
         modeActions.Controls.Add(enableFreeWhatsAppButton);
-        modeActions.Controls.Add(pauseWhatsAppButton);
         var optOut = new ModernButton
         {
-            Text = "Record Phone Opt-Out", ThemeRole = "Secondary",
-            Width = AppScale.Scale(190), Height = AppMetrics.ButtonHeight,
+            Text = "Block a Number", ThemeRole = "Secondary",
+            Width = AppScale.Scale(170), Height = AppMetrics.ButtonHeight,
             Enabled = CurrentUser.HasPermission("Communication.Configure")
         };
         optOut.Click += async (_, _) => await RunBusyAsync("Recording a WhatsApp opt-out.", RecordOptOutAsync, this);
@@ -623,13 +628,17 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private void ShowHistory(DataTable table, bool unfinished)
     {
         showingUnfinished = unfinished;
+        updatingHistoryFilter = true;
+        try { onlyUnfinished.Checked = unfinished; }
+        finally { updatingHistoryFilter = false; }
         var old = historyGrid.DataSource as DataTable;
         historyGrid.DataSource = table;
         old?.Dispose();
         foreach (string column in new[] { "OperatorName", "StateText", "ManualReported", "ManualSkipped" })
             historyGrid.Columns[column].Visible = !unfinished;
-        cards[2].SetHeaderText(unfinished ? "My Unfinished WhatsApp Batches" : "History",
-            "WhatsApp reports are recorded by the operator. Delivery is unverified.");
+        cards[2].SetHeaderText("History",
+            unfinished ? "Only your unfinished WhatsApp chats are shown."
+                       : "Manual WhatsApp reports are not verified delivery receipts.");
         SetStep(2);
     }
 
@@ -648,6 +657,11 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                 channels.Dispose(); templates.Dispose(); return;
             }
             PrepareSettingsForDisplay(channels);
+            // Future/inactive transport adapters are not operator settings.
+            // Keep the SQL profiles unchanged; filter only this display table.
+            foreach (DataRow unused in channels.Select("Channel <> 'WhatsApp'"))
+                unused.Delete();
+            channels.AcceptChanges();
             // Built-in formats are always available; choosing Edit Selected
             // creates a custom copy instead of changing shipped examples.
             foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
@@ -685,7 +699,6 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             channels.Columns.Add("StatusText", typeof(string));
 
         bool whatsappActive = false, whatsappManual = false;
-        bool smsActive = false;
         foreach (DataRow row in channels.Rows)
         {
             string name = Convert.ToString(row["Channel"]) ?? "";
@@ -710,18 +723,13 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                 whatsappActive = enabled;
                 whatsappManual = provider == "WhatsAppBusinessManual";
             }
-            if (name == "Sms") smsActive = enabled;
         }
-        enableFreeWhatsAppButton.Text = whatsappActive && whatsappManual
-            ? "Free WhatsApp Active"
-            : whatsappManual ? "Resume Free WhatsApp" : "Use Free WhatsApp";
+        manualWhatsAppActive = whatsappActive && whatsappManual;
+        enableFreeWhatsAppButton.Text = manualWhatsAppActive
+            ? "Pause WhatsApp"
+            : whatsappManual ? "Resume WhatsApp" : "Use Free WhatsApp";
         enableFreeWhatsAppButton.Width = AppScale.Scale(245);
-        enableFreeWhatsAppButton.Enabled = CurrentUser.HasPermission("Communication.Configure")
-            && !(whatsappActive && whatsappManual);
-        pauseWhatsAppButton.Enabled = CurrentUser.HasPermission("Communication.Configure")
-            && whatsappActive;
-        pauseSmsButton.Enabled = CurrentUser.HasPermission("Communication.Configure")
-            && smsActive;
+        enableFreeWhatsAppButton.Enabled = CurrentUser.HasPermission("Communication.Configure");
     }
 
     private async Task PauseChannelAsync(string name)
@@ -754,7 +762,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         staffField.Visible = showStaff;
         // Hidden rows must not reserve empty vertical space; table row
         // positioning remains stable even after switching audiences.
-        int rowHeight = AppScale.Scale(72);
+        int rowHeight = AppScale.Scale(68);
         targetFieldsLayout.RowStyles[1].Height = showCampus ? rowHeight : 0;
         targetFieldsLayout.RowStyles[2].Height = showClass ? rowHeight : 0;
         targetFieldsLayout.RowStyles[3].Height = showStudent ? rowHeight : 0;
@@ -770,6 +778,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         manualModeAvailable = false;
         manualRequestId = Guid.Empty;
         previewReadVersion++;
+        // Editing the target or text returns to editable composition without a
+        // Back button; stale preview and confirmation are immediately invalid.
+        if (step == 1) SetStep(0);
     }
 
     private CommunicationTarget CurrentTarget()
@@ -785,19 +796,29 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private void SetStep(int number)
     {
         step = Math.Clamp(number, 0, cards.Count - 1);
-        for (int i = 0; i < cards.Count; i++) cards[i].Visible = i == step;
-        cards[step].BringToFront();
+        bool composing = step <= 1;
+        // Review appears next to the editable draft rather than replacing it
+        // with another full-screen wizard page.
+        composerLayout.SuspendLayout();
+        composerLayout.ColumnStyles[0].Width = step == 1 ? 48 : 100;
+        composerLayout.ColumnStyles[1].Width = step == 1 ? 52 : 0;
+        cards[0].Visible = composing;
+        cards[1].Visible = step == 1;
+        composerLayout.ResumeLayout(true);
+        composerLayout.Visible = composing;
+        cards[2].Visible = step == 2;
+        cards[3].Visible = step == 3;
+        (composing ? (Control)composerLayout : cards[step]).BringToFront();
+
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
-        previous.Visible = compose && step == 1;
-        previous.Enabled = step == 1;
         next.Visible = compose && step == 0;
         confirm.Visible = compose && step == 1;
         confirm.Text = preview?.Included == 1 ? "Open WhatsApp Chat" : "Open WhatsApp Chats";
         confirm.Enabled = step == 1 && manualModeAvailable && preview is { Included: > 0 }
             && CurrentUser.HasPermission("Communication.Send");
+        historyButton.Visible = CurrentUser.HasPermission("Communication.View") && step != 2;
+        settingsButton.Visible = CurrentUser.HasPermission("Communication.Configure") && step != 3;
         newMessageButton.Visible = compose && step >= 2;
-        // SMS cannot be activated in this release, so do not display a dead action.
-        pauseSmsButton.Visible = false;
     }
 
     private async Task StartManualHandoffAsync()
@@ -950,7 +971,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         ShowSelectedMessage();
         SetStep(1);
         SetStatus(result.Included == 0 ? "No eligible recipients. Check the exclusions below."
-            : manualModeAvailable ? "Review the message, then open WhatsApp and press Send there."
+            : manualModeAvailable ? "Ready to open WhatsApp. You press Send in WhatsApp."
             : "An administrator can enable WhatsApp in Settings.");
     }
 
@@ -987,9 +1008,8 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             : preview.Entries.FirstOrDefault(row => row.RecordId == id);
         sampleMessage.Text = entry is null ? "No eligible recipient. No chat can be opened."
             : !entry.Included ? entry.RecordName + ": " + entry.Reason
-            : "Message preview (" + entry.RecordName + "):" + Environment.NewLine
-              + CommunicationPreparedMessages.Render(previewMessage, CommunicationPreparedMessages.FromPreview(entry))
-              + Environment.NewLine + "Current school values are checked again when the chat opens. You press Send yourself.";
+            : entry.RecordName + ":" + Environment.NewLine
+              + CommunicationPreparedMessages.Render(previewMessage, CommunicationPreparedMessages.FromPreview(entry));
     }
 
     private async Task BindLookupsAsync()
