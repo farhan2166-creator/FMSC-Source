@@ -220,8 +220,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             var row = availableBackupsGrid.Rows[e.RowIndex];
             bool latest = e.RowIndex == 0;
             if (!availableBackupsGrid.ToggleDetails(e.RowIndex,
-                    FormatExpandedRecoveryDetails(point, latest, null) +
-                    Environment.NewLine + "Reading this backup's contents…"))
+                    FormatExpandedRecoveryDetails(point, latest, null, loading: true)))
                 return;
             // Never inspect or restore a .bak on the WinForms message pump.
             // An older local backup is verified in a disposable SQL catalog;
@@ -589,17 +588,22 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         }
     }
 
+    // A structured presentation keeps labels and values aligned at any font
+    // scale; backup facts and restore identities are unchanged.
+    private sealed record RecoveryDetails(
+        string Heading, IReadOnlyList<(string Label, string Value)> Rows);
+
     private sealed class RecoveryPointsGrid : DataGridView
     {
         internal event EventHandler? LoadSelected;
         private DataGridViewRow? expandedRow;
-        private string expandedText = string.Empty;
+        private RecoveryDetails? expandedDetails;
         private int originalHeight;
         private int detailsHeight;
         private Padding previousPadding;
         private DataGridViewContentAlignment previousAlignment;
 
-        internal bool ToggleDetails(int rowIndex, string details)
+        internal bool ToggleDetails(int rowIndex, RecoveryDetails details)
         {
             if (rowIndex < 0 || rowIndex >= Rows.Count ||
                 Rows[rowIndex].Tag is not UnifiedRecoveryPoint)
@@ -620,14 +624,15 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             return true;
         }
 
-        internal void UpdateDetails(DataGridViewRow row, string details)
+        internal void UpdateDetails(DataGridViewRow row, RecoveryDetails details)
         {
             if (!ReferenceEquals(expandedRow, row) || row.DataGridView != this) return;
-            expandedText = details;
-            // The existing cells remain at the top; extra height is dedicated
-            // to a single full-width read-only preview beneath the selected row.
-            int lines = details.Count(c => c == '\n') + 1;
-            detailsHeight = AppScale.Scale(Math.Min(250, Math.Max(94, lines * 22 + 18)));
+            expandedDetails = details;
+            // Reserve exactly one header and one line per property, using the
+            // real body font height so DPI or theme changes do not clip text.
+            int lineHeight = Math.Max(AppScale.Scale(22),
+                AppMetrics.TextHeight(AppTheme.NormalFont) + AppScale.Scale(4));
+            detailsHeight = AppScale.Scale(20) + (details.Rows.Count + 1) * lineHeight;
             row.DefaultCellStyle.Padding = new Padding(0, 0, 0, detailsHeight);
             row.Height = originalHeight + detailsHeight;
             InvalidateRow(row.Index);
@@ -637,7 +642,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         {
             var row = expandedRow;
             expandedRow = null;
-            expandedText = string.Empty;
+            expandedDetails = null;
             if (row?.DataGridView != this) return;
             row.DefaultCellStyle.Padding = previousPadding;
             row.DefaultCellStyle.Alignment = previousAlignment;
@@ -648,27 +653,48 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         protected override void OnRowPostPaint(DataGridViewRowPostPaintEventArgs e)
         {
             base.OnRowPostPaint(e);
-            if (!ReferenceEquals(expandedRow, Rows[e.RowIndex])) return;
-            int inset = AppScale.Scale(8);
-            var details = new Rectangle(
-                e.RowBounds.Left + inset,
+            if (!ReferenceEquals(expandedRow, Rows[e.RowIndex]) ||
+                expandedDetails is not { } presentation) return;
+
+            int inset = AppScale.Scale(10);
+            var panel = new Rectangle(
+                e.RowBounds.Left + AppScale.Scale(8),
                 e.RowBounds.Bottom - detailsHeight,
-                Math.Max(1, e.RowBounds.Width - inset * 2),
+                Math.Max(1, e.RowBounds.Width - AppScale.Scale(16)),
                 detailsHeight);
             using var background = new SolidBrush(AppTheme.Surface);
             using var separator = new Pen(AppTheme.Border);
-            e.Graphics.FillRectangle(background, details);
-            e.Graphics.DrawLine(separator, details.Left, details.Top,
-                details.Right, details.Top);
-            var textBounds = new Rectangle(
-                details.Left + inset, details.Top + inset,
-                Math.Max(1, details.Width - inset * 2),
-                Math.Max(1, details.Height - inset * 2));
-            TextRenderer.DrawText(e.Graphics, expandedText, AppTheme.NormalFont,
-                textBounds, AppTheme.Text,
-                TextFormatFlags.Left | TextFormatFlags.Top |
-                TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis |
-                TextFormatFlags.NoPrefix);
+            e.Graphics.FillRectangle(background, panel);
+            e.Graphics.DrawLine(separator, panel.Left, panel.Top, panel.Right, panel.Top);
+
+            int lineHeight = Math.Max(AppScale.Scale(22),
+                AppMetrics.TextHeight(AppTheme.NormalFont) + AppScale.Scale(4));
+            int left = panel.Left + inset;
+            int usableWidth = Math.Max(1, panel.Width - 2 * inset);
+            int y = panel.Top + AppScale.Scale(7);
+            const TextFormatFlags flags = TextFormatFlags.Left |
+                TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
+                TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+
+            // The heading uses the regular body size (bold only); the labels
+            // start at a fixed x-position, and every value starts at the same x.
+            TextRenderer.DrawText(e.Graphics, presentation.Heading,
+                AppTheme.BodyBoldFont, new Rectangle(left, y, usableWidth, lineHeight),
+                AppTheme.Text, flags);
+            y += lineHeight;
+            int labelWidth = Math.Min(AppScale.Scale(180),
+                Math.Max(AppScale.Scale(110), usableWidth / 3));
+            foreach (var item in presentation.Rows)
+            {
+                TextRenderer.DrawText(e.Graphics, item.Label, AppTheme.NormalFont,
+                    new Rectangle(left, y, labelWidth, lineHeight),
+                    AppTheme.MutedText, flags);
+                TextRenderer.DrawText(e.Graphics, item.Value, AppTheme.NormalFont,
+                    new Rectangle(left + labelWidth, y,
+                        Math.Max(1, usableWidth - labelWidth), lineHeight),
+                    AppTheme.Text, flags);
+                y += lineHeight;
+            }
         }
 
         protected override bool ProcessDialogKey(Keys keyData) =>
@@ -973,8 +999,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                     point.VerificationSummary);
                 var row = availableBackupsGrid.Rows[rowIndex];
                 row.Tag = point;
-                if (rowIndex == 0)
-                    row.DefaultCellStyle.Font = AppTheme.FontSmallBold;
                 string copyDetails = FormatRecoveryCopyDetails(point);
                 for (int column = 2; column < row.Cells.Count; column++)
                     row.Cells[column].ToolTipText = copyDetails;
@@ -1015,33 +1039,41 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         return string.Join(Environment.NewLine, local.Concat(cloud));
     }
 
-    private static string FormatExpandedRecoveryDetails(UnifiedRecoveryPoint point, bool latest,
-        BackupContentsSummary.Snapshot? summary)
+    private static RecoveryDetails FormatExpandedRecoveryDetails(
+        UnifiedRecoveryPoint point, bool latest,
+        BackupContentsSummary.Snapshot? summary, bool loading = false)
     {
-        var lines = new List<string> {
-            (latest ? "LATEST BACKUP" : "BACKUP DETAILS") + "  ·  SQL backup created " +
-            point.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy h:mm:ss tt")
+        var rows = new List<(string Label, string Value)> {
+            ("SQL backup date",
+                point.SqlBackupCreatedUtc.ToLocalTime().ToString("dd-MMM-yyyy h:mm:ss tt"))
         };
         foreach (var copy in point.LocalCopies)
-            lines.Add("Local  ·  " + Path.GetFileName(copy.FilePath) + "  ·  " +
-                (copy.SizeBytes is > 0 ? TransferMetrics.SizeText(copy.SizeBytes.Value) + "  ·  " : "") +
-                "SQL header checked");
+            rows.Add(("Local copy",
+                Path.GetFileName(copy.FilePath) +
+                (copy.SizeBytes is > 0 ? "  ·  " + TransferMetrics.SizeText(copy.SizeBytes.Value) : "") +
+                "  ·  SQL header checked"));
         foreach (var copy in point.CloudCopies)
-            lines.Add(copy.Remote.Provider + "  ·  " +
+            rows.Add((copy.Remote.Provider + " copy",
                 TransferMetrics.SizeText(copy.Remote.Size) +
                 (copy.Remote.UploadedUtc == default ? "" :
                     "  ·  uploaded " + copy.Remote.UploadedUtc.ToLocalTime().ToString("dd-MMM h:mm tt")) +
-                (copy.RecoveryTested ? "  ·  recovery-tested" : "  ·  verification needed"));
-        // All numbers are taken from an isolated restoration of THIS SQL .bak.
-        // Never substitute counts from the current live school database.
-        if (summary is null)
-            lines.Add("Database contents: not yet available for this recovery point.");
-        else
+                (copy.RecoveryTested ? "  ·  recovery-tested" : "  ·  verification needed")));
+
+        // Every count belongs to the original SQL recovery point; never show
+        // values taken from the live database in a historical backup preview.
+        if (summary is not null)
         {
-            lines.Add($"Student records: {summary.Students:N0}  ·  Admissions numbered: {summary.NumberedAdmissions:N0}  ·  Active enrollments: {summary.ActiveStudents:N0}");
-            lines.Add($"Fee payment entries: {summary.FeePayments:N0}  ·  Billing charges: {summary.BillingCharges:N0}  ·  Schema: {summary.SchemaVersion}");
+            rows.Add(("Student records",
+                $"{summary.Students:N0}  ·  Admissions numbered: {summary.NumberedAdmissions:N0}  ·  Active enrollments: {summary.ActiveStudents:N0}"));
+            rows.Add(("Finance",
+                $"Fee payment entries: {summary.FeePayments:N0}  ·  Billing charges: {summary.BillingCharges:N0}  ·  Schema: {summary.SchemaVersion}"));
         }
-        return string.Join(Environment.NewLine, lines);
+        else
+            rows.Add(("Database contents", loading
+                ? "Reading this backup's saved records…"
+                : "Summary unavailable for this recovery point."));
+
+        return new RecoveryDetails(latest ? "LATEST BACKUP" : "BACKUP DETAILS", rows);
     }
 
     private async Task UseSelectedRecoveryPointAsync()
