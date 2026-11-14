@@ -35,6 +35,13 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         ScrollBars = ScrollBars.Vertical, Height = AppScale.Scale(110), Visible = false
     };
     readonly ModernButton retryPendingButton;
+    readonly ModernButton refreshListsButton;
+    readonly Label historyCount = new() {
+        Dock = DockStyle.Fill, AutoSize = true, AutoEllipsis = true,
+        TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.MutedText
+    };
+    readonly TabControl tabs = new() { Dock = DockStyle.Fill };
+    readonly TabPage backupTab = new("Backup / Restore") { BackColor = AppTheme.Surface };
     ModernButton? cloudSettingsButton;
     ModernButton? selectCloudCopyButton;
     FlowLayoutPanel? cloudCopyActions;
@@ -75,7 +82,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             ? "Work is running on this page. Please wait until it finishes."
             : busyMessage;
     /* Hold Refresh History during backup and restore. */
-    ModernButton? refreshHistoryButton;
+    readonly ModernButton refreshHistoryButton;
     /* Only the latest history read may bind results. */
     int historyLoadVersion;
     bool historyLoadedLatest;
@@ -136,18 +143,20 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                     restoreButton.Enabled = false;
             };
         }
-        refreshHistoryButton = AddBusyAction("Refresh Lists", async () => {
+        refreshListsButton = AddBusyAction("Refresh Lists", async () => {
             await LoadHistoryAsync();
             await LoadRecoveryCatalogueAsync();
         });
+        refreshHistoryButton = AddBusyAction("Refresh History", LoadHistoryAsync);
         if (canRestore)
             cloudSettingsButton = AddAction("Settings…", (_, _) => OpenCloudSettings(), "Secondary");
         retryPendingButton = AddBusyAction("Retry Pending Uploads", RetryPendingAsync, "Secondary");
         retryPendingButton.Visible = false;
         locateFileButton =
             AddBusyAction("Locate Missing File…", LocateMissingFileAsync, "Secondary");
-        RelocateFromActions(locateFileButton);
-        RelocateFromActions(backupNowButton);
+        RelocateFromActions(refreshListsButton, refreshHistoryButton, retryPendingButton, locateFileButton, backupNowButton);
+        if (cloudSettingsButton is not null)
+            RelocateFromActions(cloudSettingsButton);
         if (selectCloudCopyButton is not null)
             RelocateFromActions(selectCloudCopyButton);
         if (restoreButton is not null)
@@ -160,16 +169,16 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         viewCloudStatus.LinkClicked += (_, _) =>
             ModernMessageDialog.ShowInfo(FindForm(), cloudStatusDetails, "Last Cloud Backup");
 
-        // Give history 60% of the space available outside the progress row.
-        // Show the compact progress row between them during an operation.
+        // Leave most of the backup tab for the recovery list.
         var root = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.PageActionBarHeight));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
         operationRow = new RowStyle(SizeType.Absolute, 0);
         root.RowStyles.Add(operationRow);
@@ -201,12 +210,12 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             /* No selected file means unverified, not valid. */
             ShowRestoreFileStatus(RestoreFileState.None, null);
         }
-        var historyCard = HumanUi.Card(
-            "Available Backups & Activity History",
-            "Choose a recovery point from available destinations, or review past operations.");
-        var tabs = new TabControl { Dock = DockStyle.Fill };
-        var availableTab = new TabPage("Available Backups") { BackColor = AppTheme.PageBackground };
-        var activityTab = new TabPage("Activity History") { BackColor = AppTheme.PageBackground };
+        var recoveryList = new Panel {
+            Dock = DockStyle.Fill, Margin = new Padding(0, AppMetrics.SpacingXs, 0, 0)
+        };
+        var activityTab = new TabPage("Activity History") { BackColor = AppTheme.Surface };
+        backupTab.Padding = activityTab.Padding = new Padding(UiDesignSystem.Spacing.Md);
+        tabs.Selecting += (_, e) => { if (isBusy) e.Cancel = true; };
         tabs.SelectedIndexChanged += (_, _) => {
             UpdateSelectedBackupAction();
             ApplyHistoryDependentEnablement();
@@ -217,20 +226,21 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         };
         if (canRestore)
             availableBackupsGrid.LoadSelected += async (_, _) => await UseSelectedRecoveryPointAsync();
-        availableTab.Controls.Add(availableBackupsGrid);
-        availableTab.Controls.Add(availableBackupsStatus);
+        recoveryList.Controls.Add(availableBackupsGrid);
+        recoveryList.Controls.Add(availableBackupsStatus);
         if (canRestore)
         {
             cloudCopyActions = CreateCompactActionRow(selectCloudCopyButton!);
             cloudCopyActions.Dock = DockStyle.Top;
             cloudCopyActions.Height = AppMetrics.ButtonRowHeight;
             cloudCopyActions.Visible = false;
-            availableTab.Controls.Add(cloudCopyActions);
+            recoveryList.Controls.Add(cloudCopyActions);
         }
         var activityLayout = new TableLayoutPanel {
-            Dock = DockStyle.Fill, RowCount = 4, ColumnCount = 1,
+            Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1,
             Margin = Padding.Empty, Padding = Padding.Empty
         };
+        activityLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.PageActionBarHeight));
         activityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         activityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
@@ -254,29 +264,44 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             ApplyHistoryDependentEnablement();
         };
         activityLinks.Controls.Add(viewSqlRecord);
-        activityLinks.Controls.Add(locateFileButton);
-        activityLayout.Controls.Add(activityLinks, 0, 0);
-        activityLayout.Controls.Add(technicalDetails, 0, 1);
-        activityLayout.Controls.Add(ActivitySection("Recent activity", recordedCloudActivity), 0, 2);
-        activityLayout.Controls.Add(ActivitySection("SQL backup and restore records", Grid), 0, 3);
+        var historyToolbar = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty
+        };
+        historyToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        historyToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        historyToolbar.Controls.Add(CreateCompactActionRow(refreshHistoryButton, locateFileButton), 0, 0);
+        historyToolbar.Controls.Add(historyCount, 1, 0);
+        activityLayout.Controls.Add(historyToolbar, 0, 0);
+        activityLayout.Controls.Add(activityLinks, 0, 1);
+        activityLayout.Controls.Add(technicalDetails, 0, 2);
+        activityLayout.Controls.Add(ActivitySection("Recent activity", recordedCloudActivity), 0, 3);
+        activityLayout.Controls.Add(ActivitySection("SQL backup and restore records", Grid), 0, 4);
         toggleTechnicalDetails.LinkClicked += (_, _) => {
             technicalDetails.Visible = !technicalDetails.Visible;
             toggleTechnicalDetails.Text = technicalDetails.Visible
                 ? "Hide technical details" : "Show technical details";
         };
         activityTab.Controls.Add(activityLayout);
-        tabs.TabPages.Add(availableTab);
-        tabs.TabPages.Add(activityTab);
-        historyCard.Content.Controls.Add(tabs);
-        historyCard.Margin = new Padding(0, AppMetrics.SpacingXs, 0, 0);
         if (!canRestore)
             upper.SetColumnSpan(backupCard, 2);
-        root.Controls.Add(upper, 0, 0);
-        root.Controls.Add(CreateOperationPanel(), 0, 1);
-        root.Controls.Add(historyCard, 0, 2);
+        var backupToolbar = cloudSettingsButton is null
+            ? CreateCompactActionRow(refreshListsButton, retryPendingButton)
+            : CreateCompactActionRow(refreshListsButton, cloudSettingsButton, retryPendingButton);
+        root.Controls.Add(backupToolbar, 0, 0);
+        root.Controls.Add(upper, 0, 1);
+        root.Controls.Add(CreateOperationPanel(), 0, 2);
+        root.Controls.Add(recoveryList, 0, 3);
+        backupTab.Controls.Add(root);
+        tabs.TabPages.Add(backupTab);
+        tabs.TabPages.Add(activityTab);
+        TabStrip.Apply(tabs, Accent);
+        AppTheme.ThemeChanged += RepaintTabs;
         operationTimer.Tick += (_, _) => RenderOperationStats();
-        Disposed += (_, _) => operationTimer.Dispose();
-        SetContent(root);
+        Disposed += (_, _) => {
+            AppTheme.ThemeChanged -= RepaintTabs;
+            operationTimer.Dispose();
+        };
+        SetContent(TabStrip.CreateHost(tabs));
         RefreshCloudStatus();
         LoadBackupFolder();
         /* Keep history-dependent actions disabled until loading succeeds. */
@@ -286,6 +311,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         RefreshRecordedActivity();
         UpdateSelectedBackupAction();
     }
+
+    private void RepaintTabs(object? sender, EventArgs e) => TabStrip.Repaint(tabs);
 
     private Control CreateOperationPanel()
     {
@@ -434,8 +461,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     }
 
     private UnifiedRecoveryPoint? SelectedRecoveryPoint =>
-        availableBackupsGrid.Parent is TabPage tab && tab.Parent is TabControl tabs &&
-        tabs.SelectedTab == tab && availableBackupsGrid.SelectedRows.Count == 1
+        tabs.SelectedTab == backupTab && availableBackupsGrid.SelectedRows.Count == 1
             ? availableBackupsGrid.SelectedRows[0].Tag as UnifiedRecoveryPoint
             : null;
 
@@ -1470,10 +1496,12 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             /* Superseded history reads must not bind results or update eligibility. */
             if (version == historyLoadVersion)
             {
-                Bind(history);
+                Grid.DataSource = history;
+                ReportGridStyler.Apply(Grid, Accent);
+                ClearGridSelection(Grid);
+                historyCount.Text = $"{history.Rows.Count:N0} SQL record(s)";
                 historyLoadedLatest = true;
                 RefreshRecordedActivity();
-                /* Report after binding, which overwrites the status with its row count. */
                 if (pruned.removed > 0)
                 {
                     SetStatus(
@@ -1557,8 +1585,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         if (cloudSettingsButton != null) cloudSettingsButton.Enabled = !busy;
         UpdateSelectedBackupAction();
         /* Keep Refresh History available for retrying a failed read. */
-        if (refreshHistoryButton is not null)
-            refreshHistoryButton.Enabled = !busy;
+        refreshListsButton.Enabled = !busy;
+        refreshHistoryButton.Enabled = !busy;
         if (busy)
         {
             if (restoreButton != null)
