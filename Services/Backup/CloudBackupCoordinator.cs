@@ -279,7 +279,7 @@ internal static class CloudBackupCoordinator
             string summary = issues.Count == 0
                 ? (settings.LocalEnabled ? "Local backup saved. " : "") + "Encrypted backup uploaded to the selected cloud destinations."
                 : (settings.LocalEnabled ? "Local backup saved. " : "Cloud backup remains incomplete. ") +
-                    "Some cloud destinations still require delivery: " + string.Join("; ", issues);
+                    "Cloud destination still require delivery: " + string.Join("; ", issues);
             progress?.Report(new BackupProgressUpdate(issues.Count == 0 ? "Completed" : "Completed with pending deliveries", summary));
             return RecordOutcome(new CloudBackupOutcome(settings.LocalEnabled, dropbox, summary, issues.Count > 0));
         }
