@@ -304,6 +304,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         resume.Click += async (_, _) => await RunBusyAsync("Opening the saved manual session…", ResumeManualFromHistoryAsync, this);
         var footer = HumanUi.ButtonRow(resume);
         footer.Dock = DockStyle.Bottom;
+        onlyUnfinished.Visible = CurrentUser.HasPermission("Communication.Send");
         onlyUnfinished.CheckedChanged += async (_, _) =>
         {
             if (IsDisposed || IsBusy || step != 2) return;
