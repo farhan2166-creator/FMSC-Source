@@ -22,10 +22,8 @@ internal sealed class CloudBackupOptions
     public DayOfWeek WeeklyDay { get; set; } = DayOfWeek.Friday;
     // Absent in existing schedule.json files: preserve their historical local-backup behavior.
     public bool LocalEnabled { get; set; } = true;
-    public bool GoogleDriveEnabled { get; set; }
     public bool DropboxEnabled { get; set; }
     public int MaximumLocalBackups { get; set; } = 7;
-    public int MaximumGoogleDriveBackups { get; set; } = 7;
     public int MaximumDropboxBackups { get; set; } = 7;
     // The encrypted pending queue is independent of permanent Local backups.
     // Existing settings without this property use the safe 8-GiB default.
@@ -33,10 +31,9 @@ internal sealed class CloudBackupOptions
 
     public void Validate()
     {
-        if ((!LocalEnabled && !GoogleDriveEnabled && !DropboxEnabled) ||
+        if ((!LocalEnabled && !DropboxEnabled) ||
             Format != CurrentFormat || !Enum.IsDefined(Frequency) || !Enum.IsDefined(WeeklyDay)
             || MaximumLocalBackups is < 1 or > 365
-            || MaximumGoogleDriveBackups is < 1 or > 365
             || MaximumDropboxBackups is < 1 or > 365
             || MaximumPendingQueueMegabytes is < 512 or > 1_048_576)
             throw new InvalidDataException("Saved cloud backup schedule or retention settings are invalid.");
@@ -111,6 +108,10 @@ internal static class CloudBackupSettings
             data = data[Encoding.UTF8.Preamble.Length..];
         var settings = JsonSerializer.Deserialize<CloudBackupOptions>(data)
             ?? throw new InvalidDataException("Cloud backup settings are empty.");
+        // Existing JSON may include obsolete GoogleDriveEnabled. Ignore that
+        // field and fail closed if Google was the only configured destination.
+        // Preserve the original file so an administrator can explicitly choose
+        // Local and/or Dropbox without losing existing recovery metadata.
         settings.Validate();
         return settings;
     }
