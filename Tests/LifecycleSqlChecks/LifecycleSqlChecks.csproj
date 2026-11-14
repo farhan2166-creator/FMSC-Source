@@ -25,6 +25,7 @@
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema10Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema10Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema12Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema12Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema18Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema18Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema19Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema19Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema17Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema17Requirements.json" />
     <EmbeddedResource Include="../../Core/PermissionCatalog.json" LogicalName="FMSC_SMS.Core.PermissionCatalog.json" />
     <Using Include="System.Data" /><Using Include="FMSC_SMS" /><Using Include="FMSC_SMS.Core" />

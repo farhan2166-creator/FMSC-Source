@@ -219,10 +219,11 @@ internal static class CommunicationRecipientResolver
     {
         // Match the live handoff's family/consent/scope aggregation before the
         // operator confirms. The TVP still contains one representative per phone.
+        var byPhone = preview.Entries.Where(row => row.EligiblePhone is not null)
+            .ToLookup(row => row.EligiblePhone, StringComparer.Ordinal);
         var entries = preview.Entries.Select(selected => {
             if (!selected.Included) return selected;
-            var group = preview.Entries.Where(row => row.EligiblePhone == selected.EligiblePhone
-                && row.EligiblePhone is not null).Select(row => new CommunicationPreparedMessages.FeeStudent(
+            var group = byPhone[selected.EligiblePhone].Select(row => new CommunicationPreparedMessages.FeeStudent(
                     row.RecordId, row.RecordName, row.AdmissionNumber, row.Outstanding ?? 0,
                     selected.FamilyId.HasValue && row.FamilyId == selected.FamilyId) { AdmissionDate = row.AdmissionDate }).ToArray();
             var values = CommunicationPreparedMessages.AggregateFeeReminder(

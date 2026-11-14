@@ -26,12 +26,13 @@ internal static class AdmissionConsentStore
     internal static Task RecordAsync(int admissionId, bool consent)
     {
         if (admissionId <= 0) throw new ArgumentOutOfRangeException(nameof(admissionId));
-        // Both permissions are checked by SQL; the caller cannot bypass either one.
-        string authority = CurrentUser.HasPermission("Students.Admit")
-            ? "Students.Admit" : "Students.Administer";
-        return DatabaseHelper.ExecuteUserAsync("msg.RecordAdmissionConsent",
+        return DatabaseHelper.ExecuteUserAsync("msg.RecordAdmissionConsent", Parameters(admissionId, consent));
+    }
+
+    internal static Microsoft.Data.SqlClient.SqlParameter[] Parameters(int admissionId, bool consent) =>
+        [
             DatabaseHelper.Int("@AdmissionId", admissionId),
             DatabaseHelper.Bit("@Consent", consent),
-            DatabaseHelper.P("@Authority", authority));
-    }
+            DatabaseHelper.P("@Authority", CurrentUser.HasPermission("Students.Admit") ? "Students.Admit" : "Students.Administer")
+        ];
 }

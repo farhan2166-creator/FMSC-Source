@@ -132,6 +132,10 @@ internal static class CommunicationPreparedMessages
         EXEC dbo.RequirePermission @UserId,N'Fees.View';
         SELECT S.AdmissionId RecordId,S.StudentName RecordName,
                S.AdmissionNumber,S.AdmissionDate,F.Outstanding,
+               CONVERT(bit,CASE WHEN EXISTS (SELECT 1 FROM msg.ReviewedFeeStudent Reviewed
+                   WHERE Reviewed.RecipientId=R.RecipientId AND Reviewed.AdmissionId=S.AdmissionId)
+                   THEN 1 ELSE 0 END) Reviewed,
+               (SELECT COUNT(*) FROM msg.ReviewedFeeStudent Reviewed WHERE Reviewed.RecipientId=R.RecipientId) ReviewedCount,
                CONVERT(bit,CASE WHEN EXISTS (
                    SELECT 1 FROM dbo.FamilyMembers Selected
                    JOIN dbo.FamilyMembers Related ON Related.FamilyId=Selected.FamilyId
@@ -193,6 +197,10 @@ internal static class CommunicationPreparedMessages
             DatabaseHelper.Int("@StudentFilter",Convert.ToInt32(scope.Rows[0]["StudentId"])));
         if (actor != CurrentUser.UserId)
             throw new CommunicationValidationException("Signed-in account changed. Review the recipient again.");
+        if (rows.Rows.Count == 0 || Convert.ToInt32(rows.Rows[0]["ReviewedCount"]) != rows.Rows.Count
+            || rows.AsEnumerable().Any(row => !Convert.ToBoolean(row["Reviewed"])))
+            throw new CommunicationValidationException(
+                "The students in this fee reminder differ from the saved review. Skip this chat and preview a new reminder.");
         return AggregateFeeReminder(selected, rows.AsEnumerable().Select(row =>
             new FeeStudent(Convert.ToInt32(row["RecordId"]),
                 CommunicationRecipientResolver.DisplayName("Student", Convert.ToInt32(row["RecordId"]), Convert.ToString(row["RecordName"])),

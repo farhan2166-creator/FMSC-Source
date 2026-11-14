@@ -142,6 +142,25 @@ internal static partial class Program
         Check(marks == 1 && state == "ReportedSent" && !report.Enabled,
             "Only an explicit report finishes the recipient; no delivery claim is fabricated");
         dialog.Close();
+
+        int recoveredReports = 0;
+        bool checkedWhatsApp = false;
+        using var resumed = new CommunicationManualHandoffDialog(Guid.NewGuid(), operations with
+        {
+            Read = _ => Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(
+                new[] { new CommunicationManualRecipient(1, "Synthetic child", "4567", "Opened") }),
+            ConfirmRecoveredSend = () => checkedWhatsApp,
+            MarkRecovered = _ => { recoveredReports++; return Task.CompletedTask; }
+        });
+        resumed.Show(); Application.DoEvents();
+        var recovered = Field<ModernButton>(resumed, "reported");
+        recovered.PerformClick();
+        Check(recoveredReports == 0, "A prior preparation without shell acknowledgement requires the operator to check WhatsApp.");
+        checkedWhatsApp = true;
+        recovered.PerformClick();
+        Check(recoveredReports == 1 && marks == 1,
+            "An interrupted launch records a sent report only through the explicit recovery action.");
+        resumed.Close();
     }
 
     private static void CheckProviderBodyDeadline()

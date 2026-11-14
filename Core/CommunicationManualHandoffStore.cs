@@ -8,7 +8,7 @@ namespace FMSC_SMS.Core;
 /// Opening a link is never submission or proof of delivery.
 /// </summary>
 internal sealed record CommunicationManualRecipient(
-    long RecipientId, string RecordName, string LastFour, string State);
+    long RecipientId, string RecordName, string LastFour, string State, bool ShellHandoffRecorded = false);
 
 internal sealed record CommunicationManualOpen(
     bool Allowed, Uri? Link, string? ExclusionCode, string? Message = null);
@@ -31,7 +31,8 @@ internal static class CommunicationManualHandoffStore
             Convert.ToInt64(row["RecipientId"]),
             Convert.ToString(row["RecipientName"])??"School record",
             Convert.ToString(row["PhoneLast4"])??"",
-            Convert.ToString(row["State"])??"Pending")).ToArray();
+            Convert.ToString(row["State"])??"Pending",
+            !row.IsNull("ShellHandoffUtc"))).ToArray();
     }
 
     /// <summary>Server marks Opened before any external shell launch.</summary>
@@ -50,7 +51,8 @@ internal static class CommunicationManualHandoffStore
         string body=Convert.ToString(row["Body"])
             ?? throw new InvalidOperationException("No reviewed WhatsApp message.");
         CommunicationPreparedMessages.ValidateFormat(body);
-        if (CommunicationPreparedMessages.HasFields(body))
+        if (CommunicationPreparedMessages.HasFields(body)
+            || string.Equals(Convert.ToString(row["Audience"]), "OutstandingFees", StringComparison.Ordinal))
         {
             bool feeAmount = body.Contains("[OutstandingAmount]", StringComparison.Ordinal);
             var fields = await CommunicationPreparedMessages.ReadLiveAsync(recipientId, feeAmount);
@@ -59,15 +61,19 @@ internal static class CommunicationManualHandoffStore
         return new CommunicationManualOpen(true,BuildClickToChatLink(phone,body),null,body);
     }
 
-    internal static Task MarkAsync(long recipientId,string result)
+    internal static Task MarkAsync(long recipientId,string result, bool recoveredReport)
     {
         RequireSender();
         if(result is not ("ReportedSent" or "Skipped"))
             throw new ArgumentException("Only explicit operator report or skip is allowed.",nameof(result));
         return DatabaseHelper.ExecuteUserAsync("msg.MarkManualHandoff",
             DatabaseHelper.P("@RecipientId",recipientId),
-            DatabaseHelper.P("@Outcome",result));
+            DatabaseHelper.P("@Outcome",result),
+            DatabaseHelper.Bit("@RecoveredReport", recoveredReport));
     }
+
+    internal static Task RecordShellHandoffAsync(long recipientId) =>
+        DatabaseHelper.ExecuteUserAsync("msg.RecordShellHandoff", DatabaseHelper.BigInt("@RecipientId", recipientId));
 
     /// <summary>
     /// Official WhatsApp click-to-chat URL: digits-only E.164 and a pre-filled

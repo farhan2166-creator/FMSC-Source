@@ -41,14 +41,8 @@ internal static class CommunicationBatchStore
             if (item.PhoneE164 is null) throw new InvalidOperationException("Preview has no verified mobile.");
             destinations.Rows.Add(item.Kind, item.RecordId, item.PhoneE164);
         }
-        var parameter = new SqlParameter("@Recipients", SqlDbType.Structured)
+        var parameters = new List<SqlParameter>
         {
-            TypeName = "msg.RecipientSelection",
-            Value = destinations
-        };
-        int actor = CurrentUser.UserId;
-        DataTable result = await DatabaseHelper.QueryUserAsync(
-            manualWhatsApp ? "msg.ConfirmManualBatch" : "msg.ConfirmBatch",
             DatabaseHelper.P("@ClientRequestId", clientRequestId),
             DatabaseHelper.P("@Channel", target.Channel),
             DatabaseHelper.P("@Purpose", purpose),
@@ -58,7 +52,20 @@ internal static class CommunicationBatchStore
             DatabaseHelper.Int("@ClassId", target.ClassId),
             DatabaseHelper.Int("@StudentId", target.StudentId),
             DatabaseHelper.Int("@StaffId", target.StaffId),
-            parameter);
+            new("@Recipients", SqlDbType.Structured) { TypeName = "msg.RecipientSelection", Value = destinations }
+        };
+        using var reviewedFees = destinations.Clone();
+        if (manualWhatsApp)
+        {
+            if (target.Audience == CommunicationAudience.OutstandingFees)
+                foreach (var item in preview.Entries.Where(item => item.EligiblePhone is not null))
+                    reviewedFees.Rows.Add(item.Kind, item.RecordId, item.EligiblePhone);
+            parameters.Add(new("@ReviewedFees", SqlDbType.Structured)
+                { TypeName = "msg.RecipientSelection", Value = reviewedFees });
+        }
+        int actor = CurrentUser.UserId;
+        using DataTable result = await DatabaseHelper.QueryUserAsync(
+            manualWhatsApp ? "msg.ConfirmReviewedManualBatch" : "msg.ConfirmBatch", parameters.ToArray());
         if (actor != CurrentUser.UserId)
             throw new InvalidOperationException("Signed-in account changed while confirming the batch.");
         if (result.Rows.Count != 1)

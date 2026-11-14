@@ -3693,7 +3693,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                     Warn("Admission was not confirmed. Your edits have been kept.\n\n" + DbMessage.UserMessage(refused));
                     return;
                 }
-                await ApplyAdmissionConfirmationAsync(submitted, confirmation, RequestedSchoolMessageConsent);
+                await ApplyAdmissionConfirmationAsync(submitted, confirmation, desiredConsent: null);
             }, this);
         }
         catch (Exception ex)
@@ -4411,9 +4411,7 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
         List<(int assignmentId, decimal discount)> feeDiscounts,
         string? completionNumber = null)
     {
-        await SaveAdmissionRecordAsync(
-            "SaveStudentDetailsWithFirstEnrollment",
-            admissionId,
+        Microsoft.Data.SqlClient.SqlParameter[] parameters = [
             DatabaseHelper.P("@AdmissionNumber", completionNumber ?? (IsPendingRegistration ? null : admissionIdValue.Text.Trim())),
             DatabaseHelper.Bit("@CompleteRegistration", completionNumber is not null),
             DatabaseHelper.Int(
@@ -4479,7 +4477,10 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
                 System.Data.SqlDbType.Structured) {
                 TypeName = "dbo.StudentFeeDiscountType",
                 Value = Tvp.StudentFeeDiscounts(feeDiscounts)
-            });
+            }];
+        using DataSet result = RequestedSchoolMessageConsent is bool consent
+            ? await DatabaseHelper.SaveStudentDetailsWithConsentAsync(admissionId, consent, parameters)
+            : await SaveAdmissionRecordAsync("SaveStudentDetailsWithFirstEnrollment", admissionId, parameters);
     }
     private async Task SaveExistingAsync()
     {
@@ -4520,9 +4521,6 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
                 studentName,
                 bloodGroup,
                 feeDiscounts);
-            // No automatic send: this only persists an explicit Admission choice.
-            if (RequestedSchoolMessageConsent is bool decision)
-                await AdmissionConsentStore.RecordAsync(savedStudent, decision);
             StudentSearchCache.Invalidate();
             if (IsDisposed || currentAdmissionId != savedStudent || admissionLoadVersion != savedVersion) return;
             AddSuggestionIfNew(fatherOccupation, fatherOccupation.Text);

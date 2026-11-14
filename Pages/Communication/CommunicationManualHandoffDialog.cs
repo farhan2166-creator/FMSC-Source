@@ -39,7 +39,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private readonly ModernButton reported=new()
     {
         Text="I Sent It",ThemeRole="Success",
-        Width=AppScale.Scale(125),Height=AppMetrics.ButtonHeight
+        Width=AppScale.Scale(150),Height=AppMetrics.ButtonHeight
     };
     private readonly ModernButton skip=new()
     {
@@ -61,7 +61,10 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         Func<long, string, Task> Mark,
         Action<Uri> Launch,
         Func<bool> ConfirmSent,
-        Action<string> Notify);
+        Action<string> Notify,
+        Func<long, Task>? RecordShellHandoff = null,
+        Func<bool>? ConfirmRecoveredSend = null,
+        Func<long, Task>? MarkRecovered = null);
     private readonly Operations operations;
 
 
@@ -69,12 +72,17 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     internal CommunicationManualHandoffDialog(Guid batchId, Operations? operations)
     {
         this.operations = operations ?? new Operations(CommunicationManualHandoffStore.ReadAsync,
-            CommunicationManualHandoffStore.OpenAsync, CommunicationManualHandoffStore.MarkAsync,
+            CommunicationManualHandoffStore.OpenAsync, (id, outcome) => CommunicationManualHandoffStore.MarkAsync(id, outcome, false),
             uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }),
             () => ModernMessageDialog.Show(this,
                 "Confirm you actually pressed Send in WhatsApp. FMSC cannot verify delivery.",
                 "Operator report", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes,
-            message => ModernMessageDialog.Show(this, message, "Manual WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Warning));
+            message => ModernMessageDialog.Show(this, message, "Manual WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Warning),
+            CommunicationManualHandoffStore.RecordShellHandoffAsync,
+            () => ModernMessageDialog.Show(this,
+                "FMSC could not confirm the chat opened. Check the conversation in WhatsApp. Did you already send this message?",
+                "Check WhatsApp", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes,
+            id => CommunicationManualHandoffStore.MarkAsync(id, "ReportedSent", true));
         this.batchId=batchId;
         actorId=CurrentUser.UserId;
         Text="Manual WhatsApp Business · School Communication";
@@ -130,7 +138,10 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     {
         bool allowed=!busy && actorId==CurrentUser.UserId;
         open.Enabled=allowed && (current?.State is "Pending" or "Opened");
-        reported.Enabled=allowed && current?.State=="Opened" && !failedOpen.Contains(current.RecipientId);
+        bool canReport = current?.State=="Opened" && !failedOpen.Contains(current.RecipientId);
+        reported.Enabled=allowed && canReport;
+        reported.Text=canReport && !current!.ShellHandoffRecorded && operations.ConfirmRecoveredSend is not null
+            ? "Check & Report" : "I Sent It";
         skip.Enabled=allowed && (current?.State is "Pending" or "Opened");
         close.Enabled=!busy;
     }
@@ -155,7 +166,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             progress.Text=$"Manual WhatsApp · {reportedCount} operator-reported · {skippedCount} skipped/excluded · {entries.Count} total";
             destination.Text=current is null
                 ? "No unprocessed recipients remain. You can close this window."
-                : $"{current.RecordName}   •••• {current.LastFour}   ({current.State})";
+                : $"{current.RecordName}   •••• {current.LastFour}   ({DisplayState(current)})";
         }
         catch(Exception ex)
         {
@@ -167,6 +178,11 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private async Task OpenAsync()
     {
         if(busy||current is null)return;
+        if (current.State == "Opened" && !current.ShellHandoffRecorded
+            && !failedOpen.Contains(current.RecipientId) && operations.ConfirmRecoveredSend is not null
+            && ModernMessageDialog.Show(this, "Check WhatsApp first. Reopen only if you still need to send this message.",
+                "Reopen WhatsApp Chat", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
         long id=current.RecipientId;
         busy=true;
         ApplyAvailability();
@@ -182,14 +198,25 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
                 preparedMessage.Text = handoff.Message ?? "";
                 // Browser or linked app opens only after SQL has persisted
                 // Opened. No automatic Send or delivery acknowledgement.
-                operations.Launch(handoff.Link);
+                try { operations.Launch(handoff.Link); }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+                {
+                    throw new CommunicationValidationException("Windows could not open the WhatsApp link.");
+                }
                 failedOpen.Remove(id);
+                if (operations.RecordShellHandoff is not null)
+                    await operations.RecordShellHandoff(id);
             }
             else if(!IsDisposed&&!handoff.Allowed)
                 Warn("Recipient is no longer eligible: "+handoff.ExclusionCode+".");
         }
-        catch(Exception ex){failedOpen.Add(id);if(!IsDisposed)Warn("Could not open WhatsApp: "+ex.Message+
-            " You may reopen this chat without marking it sent.");}
+        catch(Exception ex)
+        {
+            failedOpen.Add(id);
+            if (!IsDisposed)
+                Warn("Could not confirm the WhatsApp handoff: " + DbMessage.UserMessage(ex) +
+                    " Check WhatsApp before trying again.");
+        }
         finally
         {
             busy=false;
@@ -200,8 +227,10 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private async Task MarkAsync(string state)
     {
         if(busy||current is null)return;
+        bool recoveredReport = state == "ReportedSent" && !current.ShellHandoffRecorded
+            && operations.ConfirmRecoveredSend is not null;
         if (state=="ReportedSent" && (current.State!="Opened" || failedOpen.Contains(current.RecipientId)
-            || !operations.ConfirmSent())) return;
+            || !(recoveredReport ? operations.ConfirmRecoveredSend!() : operations.ConfirmSent()))) return;
         long id=current.RecipientId;
         busy=true;
         ApplyAvailability();
@@ -209,7 +238,10 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         {
             if(actorId!=CurrentUser.UserId)
                 throw new InvalidOperationException("Signed-in account changed.");
-            await operations.Mark(id,state);
+            if (recoveredReport && operations.MarkRecovered is not null)
+                await operations.MarkRecovered(id);
+            else
+                await operations.Mark(id,state);
         }
         catch(Exception ex){if(!IsDisposed)Warn(ex.Message);}
         finally
@@ -220,4 +252,8 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     }
 
     private void Warn(string message) => operations.Notify(message);
+
+    private static string DisplayState(CommunicationManualRecipient recipient) =>
+        recipient.State == "Opened" && !recipient.ShellHandoffRecorded
+            ? "Check WhatsApp before reopening" : recipient.State;
 }

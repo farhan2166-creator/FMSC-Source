@@ -475,6 +475,11 @@ internal static class CommunicationV2SqlChecks
             && Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND State='Opened' AND OpenCount=1;",
                 Sql.P("@Id",manualRecipient))==1,
             "Opening a single eligible chat records Opened, never Accepted or Delivered.");
+        await r.Refused("Preparing a chat does not permit an ordinary sent report",
+            () => { Sql.Proc("msg.MarkManualHandoff", Sql.P("@UserId",f.Admin),
+                Sql.P("@RecipientId",manualRecipient),Sql.P("@Outcome","ReportedSent"));
+                return Task.CompletedTask; },51115);
+        Sql.Proc("msg.RecordShellHandoff", Sql.P("@UserId",f.Admin), Sql.P("@RecipientId",manualRecipient));
         Sql.Proc("msg.MarkManualHandoff",
             Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualRecipient),
             Sql.P("@Outcome","ReportedSent"));

@@ -83,10 +83,15 @@ internal static class CommunicationAuditSqlChecks
         {
             using var rows = new DataTable(); rows.Columns.Add("RecipientKind"); rows.Columns.Add("RecordId", typeof(int)); rows.Columns.Add("PhoneE164");
             foreach (var entry in reviewed.Entries.Where(e => e.Included)) rows.Rows.Add(entry.Kind, entry.RecordId, entry.PhoneE164);
-            return Sql.Proc("msg.ConfirmManualBatch", Sql.P("@UserId", actor ?? f.Admin), Sql.P("@ClientRequestId", key ?? Guid.NewGuid()),
+            using var feeMembers = rows.Clone();
+            if (scope.Audience == CommunicationAudience.OutstandingFees)
+                foreach (var entry in reviewed.Entries.Where(e => e.EligiblePhone is not null))
+                    feeMembers.Rows.Add(entry.Kind, entry.RecordId, entry.EligiblePhone);
+            return Sql.Proc("msg.ConfirmReviewedManualBatch", Sql.P("@UserId", actor ?? f.Admin), Sql.P("@ClientRequestId", key ?? Guid.NewGuid()),
                 Sql.P("@Channel", scope.Channel), Sql.P("@Purpose", scope.Purpose), Sql.P("@Body", body), Sql.P("@Audience", scope.Audience.ToString()),
                 Sql.P("@CampusId", scope.CampusId), Sql.P("@ClassId", scope.ClassId), Sql.P("@StudentId", scope.StudentId), Sql.P("@StaffId", scope.StaffId),
-                new SqlParameter("@Recipients", SqlDbType.Structured) { TypeName = "msg.RecipientSelection", Value = rows });
+                new SqlParameter("@Recipients", SqlDbType.Structured) { TypeName = "msg.RecipientSelection", Value = rows },
+                new SqlParameter("@ReviewedFees", SqlDbType.Structured) { TypeName = "msg.RecipientSelection", Value = feeMembers });
         }
         long Recipient(Guid batch) => Convert.ToInt64(Sql.Scalar("SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Id", Sql.P("@Id", batch)));
         await r.Refused("A non-sender cannot confirm or create a manual batch", () => { Confirm(target, preview, actor: f.Restricted); return Task.CompletedTask; }, 50003);
@@ -123,14 +128,18 @@ internal static class CommunicationAuditSqlChecks
             "Simultaneous confirmations serialize to one persisted manual batch");
         var optedBatch = Confirm(target, preview);
         long optedRecipient = Recipient((Guid)optedBatch.Rows[0]["BatchId"]);
-        Sql.Query("INSERT msg.Suppression(Channel,PhoneE164,Source) VALUES('WhatsApp','+923008000001','Administrator')");
+        await r.Refused("A non-administrator cannot record a WhatsApp phone opt-out",
+            () => { Sql.Proc("msg.RecordWhatsAppOptOut", Sql.P("@UserId", f.Restricted),
+                Sql.P("@Phone", "03008000001")); return Task.CompletedTask; }, 50003);
+        Sql.Proc("msg.RecordWhatsAppOptOut", Sql.P("@UserId", f.Admin), Sql.P("@Phone", "03008000001"));
+        Sql.Proc("msg.RecordWhatsAppOptOut", Sql.P("@UserId", f.Admin), Sql.P("@Phone", "+923008000001"));
         var optedPreview = await CommunicationRecipientResolver.ReadAsync(target);
         r.Check(optedPreview.Included == 0 && optedPreview.Suppressed >= 2,
             "Explicit channel opt-out suppresses the whole shared destination without a second consent workflow");
         var optedOpen = Sql.Proc("msg.OpenManualHandoff", Sql.P("@UserId", f.Admin), Sql.P("@RecipientId", optedRecipient));
         r.Check(!Convert.ToBoolean(optedOpen.Rows[0]["Opened"]) && Convert.ToString(optedOpen.Rows[0]["ExclusionCode"]) == "ChannelOptOut",
             "A channel opt-out added after confirmation blocks handoff before exposing its destination");
-        Sql.Query("DELETE msg.Suppression WHERE Channel='WhatsApp' AND PhoneE164='+923008000001' AND Source='Administrator'");
+        Sql.Query("DELETE msg.Suppression WHERE Channel='WhatsApp' AND PhoneE164='+923008000001' AND Source='OptOut'");
         var template = Sql.Proc("msg.SaveTemplate", Sql.P("@UserId", f.Admin), Sql.P("@TemplateId", 0), Sql.P("@Name", "Audit template"),
             Sql.P("@Channel", "WhatsApp"), Sql.P("@Purpose", "Announcement"), Sql.P("@Body", "Old synthetic notice"), Sql.P("@Active", true));
         int templateId = Convert.ToInt32(template.Rows[0]["TemplateId"]);
@@ -169,6 +178,17 @@ internal static class CommunicationAuditSqlChecks
             "A resumed fee handoff refreshes real remaining balances after payment, rather than quoting gross charges or stale totals.");
         r.Check(current.RecordName.Contains("Audit A") && current.RecordName.Contains("Audit B"),
             "Existing bulk fee batches retain their original scope despite a historical unused student-picker ID.");
+        Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin), Sql.P("@AdmissionId", declined.Id), Sql.P("@Consent", true), Sql.P("@Authority", "Students.Admit"));
+        bool addedSiblingRefused = false;
+        try { await CommunicationPreparedMessages.ReadLiveAsync(feeRecipient, true); }
+        catch (CommunicationValidationException) { addedSiblingRefused = true; }
+        r.Check(addedSiblingRefused, "A newly eligible sibling cannot be added to a reviewed WhatsApp fee message.");
+        Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin), Sql.P("@AdmissionId", declined.Id), Sql.P("@Consent", false), Sql.P("@Authority", "Students.Admit"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND ShellHandoffUtc IS NULL",
+            Sql.P("@Id", recipient)) == 1, "SQL preparation does not acknowledge a browser handoff.");
+        Sql.Proc("msg.RecordShellHandoff", Sql.P("@UserId", f.Admin), Sql.P("@RecipientId", recipient));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND ShellHandoffUtc IS NOT NULL",
+            Sql.P("@Id", recipient)) == 1, "Acknowledging the shell handoff is durable for resumed sessions.");
         Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin), Sql.P("@AdmissionId", a.Id), Sql.P("@Consent", false), Sql.P("@Authority", "Students.Admit"));
         var excluded = Sql.Proc("msg.OpenManualHandoff", Sql.P("@UserId", f.Admin), Sql.P("@RecipientId", recipient));
         r.Check(!Convert.ToBoolean(excluded.Rows[0]["Opened"]), "Withdrawal between preparation and reopening exposes neither destination nor message.");

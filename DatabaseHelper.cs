@@ -559,12 +559,20 @@ FOR ATTACH;";
     }
 
     private static async Task<DataSet> QueryUserSetCoreAsync(string procedure, int timeout, CancellationToken token,
-        SqlParameter[] parameters, bool singleResult = false)
+        SqlParameter[] parameters, bool singleResult = false, SqlParameter[]? admissionConsent = null)
     {
         token.ThrowIfCancellationRequested();
         using var cn = GetConnection();
         using var cmd = CreateUserCommand(procedure, timeout, parameters, cn);
         await OpenConnectionAsync(cn, token).ConfigureAwait(false);
+        using var transaction = admissionConsent is null ? null : cn.BeginTransaction();
+        if (admissionConsent is not null)
+        {
+            cmd.Transaction = transaction;
+            using var consentCommand = CreateUserCommand("msg.RecordAdmissionConsent", timeout, admissionConsent, cn);
+            consentCommand.Transaction = transaction;
+            await consentCommand.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }
         var result = new DataSet();
         using (var reader = await cmd.ExecuteReaderAsync(token).ConfigureAwait(false))
         {
@@ -582,6 +590,7 @@ FOR ATTACH;";
                 result.Tables.Add(table);
             } while (await reader.NextResultAsync(token).ConfigureAwait(false));
         }
+        transaction?.Commit();
         Core.LookupDataCache.OperationCompleted(procedure);
         // Close the reader before issuing the admission-number lookup on this connection.
         foreach (DataTable table in result.Tables) {
@@ -591,6 +600,11 @@ FOR ATTACH;";
         token.ThrowIfCancellationRequested();
         return result;
     }
+
+    internal static Task<DataSet> SaveStudentDetailsWithConsentAsync(int admissionId, bool consent,
+        params SqlParameter[] parameters) =>
+        QueryUserSetCoreAsync("SaveStudentDetailsWithFirstEnrollment", 120, CancellationToken.None,
+            WithCurrentUser(parameters), admissionConsent: WithCurrentUser(Core.AdmissionConsentStore.Parameters(admissionId, consent)));
 
     private static async Task<int> ExecuteUserCoreAsync(string procedure, int timeout, CancellationToken token, SqlParameter[] parameters)
     {

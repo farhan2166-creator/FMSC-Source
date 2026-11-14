@@ -1,0 +1,12 @@
+{
+  "objects": [
+    { "schema": "msg", "name": "ReviewedFeeStudent", "type": "U" },
+    { "schema": "msg", "name": "ConfirmReviewedManualBatch", "type": "P" },
+    { "schema": "msg", "name": "RecordShellHandoff", "type": "P" },
+    { "schema": "msg", "name": "ReadMyUnfinishedBatches", "type": "P" },
+    { "schema": "msg", "name": "RecordWhatsAppOptOut", "type": "P" }
+  ],
+  "columns": [
+    { "schema": "msg", "objectName": "ManualHandoff", "name": "ShellHandoffUtc", "type": "datetime2", "maxLength": 7, "precision": 23, "scale": 3, "isNullable": true, "isIdentity": false, "isComputed": false }
+  ]
+}
