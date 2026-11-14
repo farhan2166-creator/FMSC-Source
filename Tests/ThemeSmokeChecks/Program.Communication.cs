@@ -1,5 +1,6 @@
 using System.Reflection;
 using FMSC_SMS.Core;
+using FMSC_SMS.Pages.Security;
 
 internal static partial class Program
 {
