@@ -7,14 +7,13 @@ namespace FMSC_SMS.Pages.Communication;
 /// One audience, message and reviewed confirmation flow for manual WhatsApp,
 /// approved Meta templates and SMS. Nothing sends merely by opening this page.
 /// </summary>
-public sealed class CommunicationCenterPage : V2Page, IBusyPage
+public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
 {
     private readonly ModernComboBox audience = HumanUi.Combo();
     private readonly LookupBox campus = new(), cls = new();
     private readonly StudentPicker student = new();
     private readonly StaffPicker staff = new();
     private readonly ModernComboBox deliveryMethod = HumanUi.Combo();
-    private readonly ModernTextBox historySearch = HumanUi.TextBox(false,100);
     private CommunicationMetaTransport.Selection? metaSelection;
     private bool IsManual => deliveryMethod.SelectedIndex == 0;
     private bool IsMeta => deliveryMethod.SelectedIndex == 1;
@@ -47,33 +46,20 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private bool methodChanged;
     private readonly DataGridView previewGrid = HumanUi.Grid(false);
     private readonly DataGridView historyGrid = HumanUi.Grid(false);
-    private readonly DataGridView settingsGrid = HumanUi.Grid(false);
-    private readonly DataGridView templateGrid = HumanUi.Grid(false);
+    private readonly DataGridView unfinishedGrid = HumanUi.Grid(false);
     private readonly Panel steps = new() { Dock = DockStyle.Fill };
     private readonly List<HumanCard> cards = new();
     private readonly Panel campusField, classField, studentField, staffField;
     private TableLayoutPanel targetFieldsLayout = null!;
     private readonly ModernButton next = PageButton("communicationReviewMessage", "Review Message", 165, "Primary");
     private readonly ModernButton confirm = PageButton("communicationConfirmMessage", "Open in WhatsApp", 230, "Primary");
-    private readonly ModernButton historyButton, settingsButton, newMessageButton;
+    private readonly ModernButton historyButton, unfinishedButton, newMessageButton, templatesButton, configureButton;
     // Compose and review share one workspace. Nothing is sent until the reviewed
     // snapshot is confirmed, just as in the former full-screen review step.
     private readonly TableLayoutPanel composerLayout = new()
     {
         Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty
     };
-    private readonly CheckBox onlyUnfinished = new()
-    {
-        Text = "Only my unfinished", Dock = DockStyle.Top,
-        Height = AppScale.Scale(35), ForeColor = AppTheme.Text,
-        Padding = new Padding(AppScale.Scale(12), 0, 0, 0)
-    };
-    private bool showingUnfinished;
-    private bool updatingHistoryFilter;
-    // Built by SettingsCard during the page constructor; cannot be readonly.
-    private ModernButton enableFreeWhatsAppButton = null!;
-    private ModernButton configureProviderButton = null!, verifyProviderButton = null!, pauseApiButton = null!;
-    private ModernButton blockNumberButton = null!, editTemplateButton = null!;
     private CommunicationPreview? preview;
     private CommunicationTarget? previewTarget;
     private string? previewMessage;
@@ -82,13 +68,15 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     private Guid manualRequestId = Guid.Empty;
     private int step;
     private int previewReadVersion;
-    private int managementReadVersion;
+    private const int HistoryStep = 2, UnfinishedStep = 3, AdministrationStep = 4;
     internal sealed record Operations(
         Func<CommunicationTarget, Task<CommunicationPreview>> ReadRecipients,
         Func<Task<bool>> ReadManualMode,
         Func<CommunicationTarget, CommunicationPreview, string, Guid, Task<CommunicationConfirmation>> ConfirmBatch,
         Action<Guid, bool> OpenHandoff,
-        Func<bool> ConfirmStart);
+        Func<bool> ConfirmStart,
+        Func<bool, Task<DataTable>>? ReadSessions = null,
+        Func<CommunicationSessionRow, CommunicationHistoryDraft?>? ViewHistory = null);
     private readonly Operations operations;
 
 
@@ -143,8 +131,9 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
 
         cards.Add(TargetCard());
         cards.Add(PreviewCard());
-        cards.Add(HistoryCard());
-        cards.Add(SettingsCard());
+        cards.Add(SessionsCard(historyGrid, unfinished: false));
+        cards.Add(SessionsCard(unfinishedGrid, unfinished: true));
+        cards.Add(HumanUi.Card("Communication Administration"));
         foreach (var card in cards) card.Dock = DockStyle.Fill;
         composerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         composerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -152,8 +141,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         composerLayout.Controls.Add(cards[0], 0, 0);
         composerLayout.Controls.Add(cards[1], 1, 0);
         steps.Controls.Add(composerLayout);
-        steps.Controls.Add(cards[2]);
-        steps.Controls.Add(cards[3]);
+        foreach (var card in cards.Skip(HistoryStep)) steps.Controls.Add(card);
         next.Click += async (_, _) =>
         {
             if (ValidateDraft())
@@ -161,31 +149,21 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         };
         confirm.Click += async (_, _) => await RunBusyAsync(
             "Confirming the reviewed message…", StartReviewedMessageAsync, this);
-        newMessageButton = AddAction("New Message", (_, _) =>
+        newMessageButton = PageButton("communicationNewMessage", "New Message", 140, "TabInactive");
+        unfinishedButton = PageButton("communicationUnfinished", "Unfinished", 140, "TabInactive");
+        historyButton = PageButton("communicationHistory", "History", 120, "TabInactive");
+        templatesButton = PageButton("communicationTemplates", "Templates…", 135);
+        configureButton = PageButton("communicationConfigureSending", "Configure Sending…", 200);
+        newMessageButton.Click += (_, _) =>
         {
-            if (IsBusy || step <= 1) return;
-            bool returningFromSettings = step == 3;
-            if (returningFromSettings) InvalidatePreview();
-            SetStep(preview is null ? 0 : 1);
-            if (returningFromSettings && initialize && !methodChanged)
-                Defer(SelectReadyMethodAsync);
-        }, "TabActive");
-        historyButton = AddAction("History", async (_, _) =>
-        {
-            if (step == 2) return;
-            await RunBusyAsync("Reading communication history.", () => CurrentUser.HasPermission("Communication.View")
-                ? LoadHistoryAsync() : LoadUnfinishedAsync(), this);
-        }, "TabInactive");
-        settingsButton = AddAction("Settings", async (_, _) =>
-        {
-            if (step != 3) await RunBusyAsync("Reading communication settings.", LoadSettingsAsync, this);
-        }, "TabInactive");
-        newMessageButton.Name = "communicationNewMessage";
-        historyButton.Name = "communicationHistory";
-        settingsButton.Name = "communicationSettings";
-        GateAction(settingsButton, "Communication.Configure");
-        SetContent(steps);
-
+            if (!IsBusy) SetStep(preview is null ? 0 : 1);
+        };
+        unfinishedButton.Click += async (_, _) => await NavigateSessionsAsync(unfinished: true);
+        historyButton.Click += async (_, _) => await NavigateSessionsAsync(unfinished: false);
+        templatesButton.Click += (_, _) => OpenTemplates();
+        configureButton.Click += (_, _) => OpenSendingOptions();
+        UseToolbar();
+        SetContent(BuildWorkspace());
         deliveryMethod.SelectionChangeCommitted += (_, _) => methodChanged = true;
         deliveryMethod.SelectedIndexChanged += (_, _) =>
         {
@@ -233,6 +211,10 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             message.Text = initialBody ?? "";
         }
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
+        bool view = CurrentUser.HasPermission("Communication.View");
+        int landing = initialTarget is not null ? 0
+            : compose ? UnfinishedStep : view ? HistoryStep : AdministrationStep;
+        SetStep(landing);
         if (initialize)
         {
             if (compose)
@@ -241,19 +223,50 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
                 Defer(LoadComposeTemplatesAsync);
                 if (initialTarget is null) Defer(SelectReadyMethodAsync);
             }
-            else if (CurrentUser.HasPermission("Communication.Configure")) Defer(LoadSettingsAsync);
-            else if (CurrentUser.HasPermission("Communication.View")) Defer(LoadHistoryAsync);
+            if (landing is HistoryStep or UnfinishedStep)
+                Defer(() => step == landing ? NavigateSessionsAsync(landing == UnfinishedStep) : Task.CompletedTask);
         }
-        if (!compose) SetStep(CurrentUser.HasPermission("Communication.Configure") ? 3 : 2);
         Disposed += (_, _) =>
         {
             previewTable?.Dispose();
             (historyGrid.DataSource as DataTable)?.Dispose();
-            (settingsGrid.DataSource as DataTable)?.Dispose();
-            (templateGrid.DataSource as DataTable)?.Dispose();
+            (unfinishedGrid.DataSource as DataTable)?.Dispose();
         };
     }
 
+    private Control BuildWorkspace()
+    {
+        var navigation = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Margin = Padding.Empty
+        };
+        navigation.Controls.AddRange(new Control[] { newMessageButton, unfinishedButton, historyButton });
+        var management = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, WrapContents = false,
+            FlowDirection = FlowDirection.RightToLeft, Margin = Padding.Empty
+        };
+        management.Controls.AddRange(new Control[] { configureButton, templatesButton });
+        var bar = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, RowCount = 1,
+            BackColor = AppTheme.Surface, Padding = new Padding(AppScale.Scale(6))
+        };
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bar.Controls.Add(navigation, 0, 0);
+        bar.Controls.Add(management, 1, 0);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.Controls.Add(bar, 0, 0);
+        layout.Controls.Add(steps, 0, 1);
+        return layout;
+    }
     private HumanCard TargetCard()
     {
         var card = HumanUi.Card("New Message");
@@ -370,323 +383,23 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
     }
 
 
-    private HumanCard HistoryCard()
+    private void OpenTemplates()
     {
-        var card = HumanUi.Card("History", "WhatsApp sent counts are reported by the operator.");
-        historyGrid.AutoGenerateColumns = false;
-        foreach (var (field, caption, width) in new[]
-        {
-            ("CreatedUtc", "Created (UTC)", 155),
-            ("MethodText", "Method", 155),
-            ("Audience", "Audience", 100),
-            ("OperatorName", "Started by", 100),
-            ("StateText", "Outcome", 235),
-            ("InProgress", "Pending / unresolved", 115)
-
-        })
-            historyGrid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = field, DataPropertyName = field, HeaderText = caption,
-                MinimumWidth = width, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                SortMode = DataGridViewColumnSortMode.NotSortable
-            });
-        var resume = PageButton("communicationOpenSession", "Open Selected Session", 225);
-        resume.Enabled = false;
-        historyGrid.CurrentCellChanged += (_, _) =>
-            resume.Enabled = CurrentUser.HasPermission("Communication.Send")
-                && historyGrid.CurrentRow?.DataBoundItem is DataRowView;
-        resume.Click += async (_, _) => await RunBusyAsync("Opening the saved communication session…", ResumeManualFromHistoryAsync, this);
-        var footer = ActionFooter(resume);
-        onlyUnfinished.Visible = CurrentUser.HasPermission("Communication.Send")
-            && CurrentUser.HasPermission("Communication.View");
-        onlyUnfinished.CheckedChanged += async (_, _) =>
-        {
-            if (IsDisposed || updatingHistoryFilter || IsBusy || step != 2) return;
-            await RunBusyAsync("Reading communication history…", async () =>
-            {
-                if (onlyUnfinished.Checked) await LoadUnfinishedAsync();
-                else await LoadHistoryAsync();
-            }, this);
-        };
-        historySearch.Name = "communicationHistorySearch";
-        var searchField = HumanUi.Field("Search history", historySearch);
-        searchField.Height = AppMetrics.FieldRowHeight;
-        searchField.Dock = DockStyle.Top;
-        historySearch.TextChanged+=(_,_)=>FilterHistory();
-        card.Content.Controls.Add(historyGrid);
-        card.Content.Controls.Add(onlyUnfinished);
-        card.Content.Controls.Add(searchField);
-        card.Content.Controls.Add(footer);
-        return card;
+        if (IsBusy || !CurrentUser.HasPermission("Communication.Configure")) return;
+        using var dialog = new CommunicationTemplatesDialog();
+        dialog.ShowDialog(FindForm());
+        if (dialog.Changed && CurrentUser.HasPermission("Communication.Send")) Defer(LoadComposeTemplatesAsync);
     }
 
-    private HumanCard SettingsCard()
+    private void OpenSendingOptions()
     {
-        var card = HumanUi.Card("Settings");
-        settingsGrid.AutoGenerateColumns = false;
-        foreach (var (field, caption, width) in new[]
-        {
-            ("Channel", "Channel", 85), ("SendingMethod", "Sending method", 205),
-            ("StatusText", "Status", 190), ("UpdatedUtc", "Updated (UTC)", 160)
-        })
-            settingsGrid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = field, DataPropertyName = field, HeaderText = caption,
-                MinimumWidth = width, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                SortMode = DataGridViewColumnSortMode.NotSortable
-            });
-        templateGrid.AutoGenerateColumns = false;
-        foreach (var (field, caption, width) in new[]
-        {
-            ("Name", "Template", 150), ("Channel", "Channel", 85),
-            ("Purpose", "Purpose", 110), ("Body", "Message", 260),
-            ("Active", "Active", 70)
-        })
-            templateGrid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = field, DataPropertyName = field, HeaderText = caption,
-                MinimumWidth = width, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                SortMode = DataGridViewColumnSortMode.NotSortable
-            });
-        var tables = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top, ColumnCount = 1, RowCount = 6,
-            Padding = new Padding(AppScale.Scale(8)), Margin = Padding.Empty
-        };
-        tables.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, HumanUi.GroupHeadingHeight));
-        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.GridHeaderHeight + 2 * AppMetrics.GridRowHeight + 4));
-        tables.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, HumanUi.GroupHeadingHeight + AppScale.Scale(8)));
-        tables.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(224)));
-        tables.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        tables.Controls.Add(HumanUi.GroupHeading("Sending methods"), 0, 0);
-        tables.Controls.Add(settingsGrid, 0, 1);
-
-        ModernButton SettingsAction(string name, string text, int width, Func<Task> action)
-        {
-            var button = PageButton(name, text, width);
-            button.Click += async (_, _) => await RunBusyAsync("Updating communication settings.", action, this);
-            return button;
-        }
-        enableFreeWhatsAppButton = SettingsAction("communicationManualWhatsApp", "Use Free WhatsApp", 205,
-            () => SelectedChannel?["ProviderCode"] as string == "WhatsAppBusinessManual"
-                && SelectedChannel.Row.Field<bool>("Enabled") ? PauseChannelAsync("WhatsApp") : EnableFreeWhatsAppAsync());
-        configureProviderButton = SettingsAction("communicationConfigureProvider", "Configure API", 215, ConfigureProviderAsync);
-        verifyProviderButton = SettingsAction("communicationVerifyProvider", "Verify & Enable API", 245, VerifyAndEnableApiAsync);
-        pauseApiButton = SettingsAction("communicationPauseProvider", "Pause API", 190, () =>
-            SelectedChannel is { } row ? PauseChannelAsync(row.Row.Field<string>("Channel")!) : Task.CompletedTask);
-        blockNumberButton = SettingsAction("communicationBlockNumber", "Block a Number", 205, RecordOptOutAsync);
-        var modeActions = SettingsActions(enableFreeWhatsAppButton, configureProviderButton, verifyProviderButton,
-            pauseApiButton, blockNumberButton);
-        tables.Controls.Add(modeActions, 0, 2);
-
-        tables.Controls.Add(HumanUi.GroupHeading("Prepared messages"), 0, 3);
-        tables.Controls.Add(templateGrid, 0, 4);
-        var addTemplate = SettingsAction("communicationAddTemplate", "New Template", 150, () => EditTemplateAsync(false));
-        addTemplate.Enabled = CurrentUser.HasPermission("Communication.Configure");
-        editTemplateButton = SettingsAction("communicationEditTemplate", "Edit Template", 200, () => EditTemplateAsync(true));
-        tables.Controls.Add(SettingsActions(addTemplate, editTemplateButton), 0, 5);
-
-        settingsGrid.CurrentCellChanged += (_, _) => UpdateChannelActions();
-        templateGrid.CurrentCellChanged += (_, _) => UpdateTemplateAction();
-        settingsGrid.CellFormatting += (_, e) =>
-        {
-            if (settingsGrid.Columns[e.ColumnIndex].Name != "Channel" || e.Value is not string channel) return;
-            e.Value = ChannelLabel(channel);
-            e.FormattingApplied = true;
-        };
-        templateGrid.CellFormatting += (_, e) =>
-        {
-            if (templateGrid.Columns[e.ColumnIndex].Name == "Active" && e.Value is bool active)
-            {
-                e.Value = active ? "Yes" : "No";
-                e.FormattingApplied = true;
-            }
-            else if (templateGrid.Columns[e.ColumnIndex].Name == "Purpose" && e.Value is string purpose)
-            {
-                e.Value = CommunicationTemplateDialog.PurposeLabel(purpose);
-                e.FormattingApplied = true;
-            }
-            else if (templateGrid.Columns[e.ColumnIndex].Name == "Channel" && e.Value is string channel)
-            {
-                e.Value = ChannelLabel(channel);
-                e.FormattingApplied = true;
-            }
-        };
-        UpdateChannelActions();
-        UpdateTemplateAction();
-        tables.AutoSize = true;
-        tables.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-        scroller.Controls.Add(tables);
-        card.Content.Controls.Add(scroller);
-        return card;
+        if (IsBusy || !CurrentUser.HasPermission("Communication.Configure")) return;
+        using var dialog = new CommunicationSendingOptionsDialog();
+        dialog.ShowDialog(FindForm());
+        if (!dialog.Changed) return;
+        InvalidatePreview();
+        Defer(SelectReadyMethodAsync);
     }
-
-    private static FlowLayoutPanel SettingsActions(params ModernButton[] buttons)
-    {
-        var actions = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = true, Margin = Padding.Empty
-        };
-        actions.Controls.AddRange(buttons);
-        return actions;
-    }
-
-    private DataRowView? SelectedChannel => settingsGrid.CurrentRow?.DataBoundItem as DataRowView;
-    private readonly HashSet<string> configuredApiChannels = new();
-
-    private static string ChannelLabel(string channel) => channel == "Sms" ? "SMS" : channel;
-
-    private void UpdateChannelActions()
-    {
-        string? channel = SelectedChannel?.Row.Field<string>("Channel");
-        string? provider = SelectedChannel?.Row.Field<string>("ProviderCode");
-        bool canConfigure = CurrentUser.HasPermission("Communication.Configure");
-        bool whatsapp = channel == "WhatsApp";
-        bool sms = channel == "Sms";
-        bool enabled = SelectedChannel?.Row.Field<bool>("Enabled") == true;
-        bool manualProvider = provider == "WhatsAppBusinessManual";
-        bool apiEnabled = enabled && !manualProvider;
-        string api = whatsapp ? "Meta" : "Twilio";
-        enableFreeWhatsAppButton.Visible = whatsapp;
-        enableFreeWhatsAppButton.Enabled = canConfigure && whatsapp;
-        enableFreeWhatsAppButton.Text = !manualProvider ? "Use Free WhatsApp"
-            : enabled ? "Pause WhatsApp" : "Resume WhatsApp";
-        configureProviderButton.Text = $"Configure {api}";
-        verifyProviderButton.Text = $"Verify & Enable {api}";
-        pauseApiButton.Text = $"Pause {api}";
-        blockNumberButton.Text = channel is null ? "Block a Number" : $"Block {ChannelLabel(channel)} Number";
-        configureProviderButton.Enabled = blockNumberButton.Enabled = canConfigure && (whatsapp || sms);
-        verifyProviderButton.Enabled = canConfigure && !enabled && channel is not null
-            && provider == (whatsapp ? "MetaCloud" : "Twilio") && configuredApiChannels.Contains(channel);
-        pauseApiButton.Visible = apiEnabled;
-        pauseApiButton.Enabled = canConfigure && apiEnabled;
-    }
-
-    private void UpdateTemplateAction()
-    {
-        var selected = templateGrid.CurrentRow?.DataBoundItem as DataRowView;
-        editTemplateButton.Enabled = CurrentUser.HasPermission("Communication.Configure") && selected is not null;
-        editTemplateButton.Text = selected?.Row.Field<int>("TemplateId") < 0 ? "Customize Template" : "Edit Template";
-        SetToolTip(editTemplateButton, selected?.Row.Field<string>("Name") ?? "");
-    }
-
-    private async Task RecordOptOutAsync()
-    {
-        RequirePermission("Communication.Configure");
-        if (SelectedChannel?.Row.Field<string>("Channel") is not { } channel) return;
-        string channelLabel = ChannelLabel(channel);
-        using var dialog = new ApplicationWindowForm
-        {
-            Text = "Record " + channelLabel + " Opt-Out", StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(AppScale.Scale(510), AppScale.Scale(175)),
-            FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false
-        };
-        var phone = HumanUi.TextBox(false, 100);
-        var save = new ModernButton { Text = "Block " + channelLabel + " Messages", DialogResult = DialogResult.OK, ThemeRole = "Primary" };
-        var cancel = new ModernButton { Text = "Cancel", DialogResult = DialogResult.Cancel };
-        var actions = HumanUi.DialogButtons(save, cancel);
-        actions.Dock = DockStyle.Bottom;
-        var field = HumanUi.Field("Mobile number shared by all records to block", phone, true);
-        field.Dock = DockStyle.Top;
-        field.Height = AppMetrics.FieldRowHeight;
-        dialog.Padding = new Padding(AppScale.Scale(16));
-        dialog.Controls.Add(actions);
-        dialog.Controls.Add(field);
-        dialog.CancelButton = cancel;
-        if (dialog.ShowDialog(FindForm()) != DialogResult.OK) return;
-        if (CommunicationRecipientResolver.NormalizeMobile(phone.Text) is not { } number)
-        {
-            Warn("Enter a valid Pakistan mobile number to record the opt-out.");
-            return;
-        }
-        await CommunicationManagementStore.RecordChannelOptOutAsync(channel,number);
-        if (!IsDisposed) SetStatus(channelLabel + " opt-out recorded for the phone number.");
-    }
-
-    private async Task EnableFreeWhatsAppAsync()
-    {
-        if (!CurrentUser.HasPermission("Communication.Configure"))
-        {
-            Warn("Communication administrator permission is required.");
-            return;
-        }
-        if (!Confirm("Activate the free, MANUAL WhatsApp Business method? FMSC will only open chats. "
-            + "The operator must send each message; this is not automatic delivery.",
-            "Enable Free WhatsApp", false))
-            return;
-        try
-        {
-            await CommunicationManagementStore.EnableManualWhatsAppAsync();
-            if (!IsDisposed) await LoadSettingsAsync();
-        }
-        catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }
-        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
-    }
-
-    private async Task ConfigureProviderAsync()
-    {
-        if (!CurrentUser.HasPermission("Communication.Configure"))
-        {
-            Warn("Administrator configuration permission is required.");
-            return;
-        }
-        string? chosenChannel = SelectedChannel?.Row.Field<string>("Channel");
-        if (chosenChannel is not ("Sms" or "WhatsApp")) return;
-        using var dialog = new CommunicationProviderDialog(chosenChannel);
-        if (dialog.ShowDialog(FindForm()) != DialogResult.OK)
-            return;
-        try
-        {
-            await CommunicationManagementStore.ConfigureProviderAsync(dialog.Profile);
-            if (!IsDisposed) await LoadSettingsAsync();
-        }
-        catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }
-        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
-    }
-
-    private async Task EditTemplateAsync(bool existing)
-    {
-        if (!CurrentUser.HasPermission("Communication.Configure"))
-        {
-            Warn("Administrator configuration permission is required.");
-            return;
-        }
-        DataRowView? selected = existing
-            ? templateGrid.CurrentRow?.DataBoundItem as DataRowView : null;
-        if (existing && selected is null)
-        {
-            Warn("Select an existing template to edit.");
-            return;
-        }
-        int id = selected is null ? 0 : Convert.ToInt32(selected["TemplateId"]);
-        bool customizeBuiltIn = id < 0;
-        if (customizeBuiltIn) id = 0; // never alter the shipped examples
-        using var dialog = new CommunicationTemplateDialog(
-            selected is null ? "" : customizeBuiltIn
-                ? "Custom " + (Convert.ToString(selected["Name"]) ?? "").Replace(" (built-in)", "")
-                : Convert.ToString(selected["Name"]) ?? "",
-            selected is null ? "WhatsApp" : Convert.ToString(selected["Channel"]) ?? "WhatsApp",
-            selected is null ? "Announcement" : Convert.ToString(selected["Purpose"]) ?? "Announcement",
-            selected is null ? "" : Convert.ToString(selected["Body"]) ?? "",
-            selected is null || Convert.ToBoolean(selected["Active"]));
-        if (dialog.ShowDialog(FindForm()) != DialogResult.OK)
-            return;
-        try
-        {
-            await CommunicationManagementStore.SaveTemplateAsync(
-                id, dialog.TemplateName, dialog.Channel, dialog.Purpose,
-                dialog.Body, dialog.Active);
-            if (!IsDisposed && CurrentUser.HasPermission("Communication.Send")) await LoadComposeTemplatesAsync();
-            if (!IsDisposed) await LoadSettingsAsync();
-        }
-        catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }
-        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
-    }
-
     private async Task LoadComposeTemplatesAsync()
     {
         composeTemplates.Clear();
@@ -727,197 +440,6 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             if ((item.Channel == ComposeChannel || item.Id < 0) && item.Purpose == purpose)
                 templateChoice.Items.Add(item);
         templateChoice.SelectedIndex = 0;
-    }
-
-    private async Task LoadHistoryAsync()
-    {
-        try
-        {
-            int actor = CurrentUser.UserId;
-            int version = ++managementReadVersion;
-            DataTable table = await CommunicationManagementStore.ReadHistoryAsync();
-            if (IsDisposed || actor != CurrentUser.UserId || version != managementReadVersion)
-            {
-                table.Dispose(); return;
-            }
-            if (!table.Columns.Contains("StateText"))
-                table.Columns.Add("StateText", typeof(string));
-            foreach (DataRow row in table.Rows)
-            {
-                bool manual = Convert.ToString(row["Method"]) == "WhatsApp Business (manual)";
-                row["StateText"] = manual
-                    ? $"{row["ManualReported"]} reported sent · {row["ManualOpened"]} opened · {row["ManualSkipped"]} skipped / excluded (unverified)"
-                    : $"{row["Accepted"]} accepted · {row["Delivered"]} delivered · {row["Failed"]} failed · {row["Unknown"]} unknown";
-            }
-            ShowHistory(table, unfinished: false);
-            SetStatus("");
-        }
-        catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }
-        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
-    }
-
-    private async Task LoadUnfinishedAsync()
-    {
-        int actor = CurrentUser.UserId;
-        int version = ++managementReadVersion;
-        DataTable table = await CommunicationManagementStore.ReadMyUnfinishedBatchesAsync();
-        if (IsDisposed || actor != CurrentUser.UserId || version != managementReadVersion)
-        {
-            table.Dispose();
-            return;
-        }
-        ShowHistory(table, unfinished: true);
-        SetStatus("");
-    }
-
-    private void FilterHistory()
-    {
-        if(historyGrid.DataSource is not DataTable table)return;
-        // Filtering typed values avoids DataView expression escaping and wildcard surprises.
-        string query=historySearch.Text.Trim();
-        table.DefaultView.RowFilter="";
-        historyGrid.Tag = table.Rows.Count > 0 && query.Length > 0 ? "No sessions match your search."
-            : showingUnfinished ? "You have no unfinished message sessions." : "No message sessions yet.";
-        historyGrid.Invalidate();
-        if(query.Length==0)return;
-        if(!table.Columns.Contains("SearchMatch"))table.Columns.Add("SearchMatch",typeof(bool));
-        foreach(DataRow row in table.Rows)row["SearchMatch"]=new[]{"Audience","Method","MethodText","OperatorName","StateText","Channel"}
-            .Where(table.Columns.Contains).Any(name=>Convert.ToString(row[name])?.Contains(query,StringComparison.CurrentCultureIgnoreCase)==true);
-        table.DefaultView.RowFilter="SearchMatch = true";
-    }
-
-    private void ShowHistory(DataTable table, bool unfinished)
-    {
-        showingUnfinished = unfinished;
-        updatingHistoryFilter = true;
-        try { onlyUnfinished.Checked = unfinished; }
-        finally { updatingHistoryFilter = false; }
-        var old = historyGrid.DataSource as DataTable;
-        if(!table.Columns.Contains("MethodText"))table.Columns.Add("MethodText",typeof(string));
-        foreach(DataRow row in table.Rows)row["MethodText"]=Convert.ToString(row["Method"]) switch {
-            "WhatsApp Business (manual)"=>"WhatsApp · manual", "MetaCloud"=>"WhatsApp · Meta API",
-            "Twilio"=>Convert.ToString(row["Channel"])+" · Twilio", _=>Convert.ToString(row["Method"])
-        };
-        foreach (string column in new[] { "OperatorName", "StateText" })
-            historyGrid.Columns[column].Visible = !unfinished;
-        historyGrid.DataSource = table;
-        old?.Dispose();
-        cards[2].SetHeaderText("History",
-            unfinished ? "Only your unfinished communication sessions are shown."
-                       : "WhatsApp sent counts are reported by the operator.");
-        FilterHistory();
-        SetStep(2);
-    }
-
-    private async Task LoadSettingsAsync()
-    {
-        try
-        {
-            int actor = CurrentUser.UserId;
-            int version = ++managementReadVersion;
-            string? selectedChannel = SelectedChannel?.Row.Field<string>("Channel");
-            var channelTask = CommunicationManagementStore.ReadSettingsAsync();
-            var templateTask = CommunicationManagementStore.ReadTemplatesAsync();
-            await Task.WhenAll(channelTask, templateTask);
-            DataTable channels = channelTask.Result, templates = templateTask.Result;
-            if (IsDisposed || actor != CurrentUser.UserId || version != managementReadVersion)
-            {
-                channels.Dispose(); templates.Dispose(); return;
-            }
-            PrepareSettingsForDisplay(channels);
-            // Email has no active adapter; retain stored profiles without offering it as ready.
-            foreach (DataRow unused in channels.Select("Channel = 'Email'"))
-                unused.Delete();
-            channels.AcceptChanges();
-            configuredApiChannels.Clear();
-            foreach (string channel in channels.AsEnumerable().Select(row => row.Field<string>("Channel")!))
-            {
-                try
-                {
-                    var local = CommunicationProviderCredentialStore.ReadMetadata(channel);
-                    if (local.ProviderCode == (channel == "WhatsApp" ? "MetaCloud" : "Twilio"))
-                        configuredApiChannels.Add(channel);
-                }
-                catch (Exception ex) when (ex is InvalidOperationException or IOException or ArgumentException
-                    or System.Security.Cryptography.CryptographicException or System.Text.Json.JsonException)
-                { /* Configure remains available when the protected profile must be replaced. */ }
-            }
-            // Built-in formats are always available; choosing Edit Selected
-            // creates a custom copy instead of changing shipped examples.
-            foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
-            {
-                DataRow row = templates.NewRow();
-                row["TemplateId"] = -builtIn.index - 1;
-                row["Name"] = builtIn.item.Name + " (built-in)";
-                row["Channel"] = "WhatsApp";
-                row["Purpose"] = builtIn.item.Purpose;
-                row["Body"] = builtIn.item.Body;
-                row["Active"] = true;
-                templates.Rows.InsertAt(row, builtIn.index);
-            }
-            var oldChannels = settingsGrid.DataSource as DataTable;
-            var oldTemplates = templateGrid.DataSource as DataTable;
-            settingsGrid.DataSource = null;
-            templateGrid.DataSource = null;
-            settingsGrid.DataSource = channels;
-            templateGrid.DataSource = templates;
-            settingsGrid.CurrentCell = settingsGrid.Rows.Cast<DataGridViewRow>().FirstOrDefault(row =>
-                (row.DataBoundItem as DataRowView)?.Row.Field<string>("Channel") == (selectedChannel ?? "WhatsApp"))
-                ?.Cells[0] ?? settingsGrid.CurrentCell;
-            UpdateChannelActions();
-            UpdateTemplateAction();
-            oldChannels?.Dispose(); oldTemplates?.Dispose();
-            SetStep(3);
-            SetStatus("");
-        }
-        catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }
-        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
-    }
-
-    // UI-only presentation: SQL remains the authority for actual mode and permissions.
-    // Keep raw settings untouched while displaying plain-language statuses.
-    private static void PrepareSettingsForDisplay(DataTable channels)
-    {
-        if (!channels.Columns.Contains("SendingMethod"))
-            channels.Columns.Add("SendingMethod", typeof(string));
-        if (!channels.Columns.Contains("StatusText"))
-            channels.Columns.Add("StatusText", typeof(string));
-
-        foreach (DataRow row in channels.Rows)
-        {
-            string name = Convert.ToString(row["Channel"]) ?? "";
-            string provider = Convert.ToString(row["ProviderCode"]) ?? "";
-            bool enabled = Convert.ToBoolean(row["Enabled"]);
-            row["SendingMethod"] = (name, provider) switch
-            {
-                ("WhatsApp", "WhatsAppBusinessManual") => "WhatsApp Business — manual",
-                ("WhatsApp", "MetaCloud") => "WhatsApp · Meta API",
-                ("WhatsApp", "Twilio") => "Twilio WhatsApp — future",
-                ("Sms", "Twilio") => "SMS · Twilio",
-                ("Email", "Smtp") => "School email — future",
-                ("Email", "EmailClientManual") => "Email app — future",
-                _ => "Not configured"
-            };
-            row["StatusText"] = name == "Email" ? "Not available yet"
-                : enabled && name == "WhatsApp" && provider == "WhatsAppBusinessManual"
-                    ? "Ready for manual chats"
-                    : enabled && ((name == "Sms" && provider == "Twilio") || (name == "WhatsApp" && provider == "MetaCloud"))
-                        ? "Enabled · local profile required" : enabled ? "Unsupported method" : "Paused / unavailable";
-        }
-    }
-
-    private async Task PauseChannelAsync(string name)
-    {
-        if (!Confirm("Pause " + ChannelLabel(name) + " school messaging? No queued message will be dispatched while paused.",
-                "Pause Channel", false))
-            return;
-        try
-        {
-            await CommunicationManagementStore.PauseAsync(name);
-            if (!IsDisposed) await LoadSettingsAsync();
-        }
-        catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }
-        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
 
     private void ChangeAudienceFields()
@@ -970,7 +492,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             operations.ReadManualMode(),
             CommunicationApiBatchStore.IsReadyAsync("WhatsApp", "MetaCloud"),
             CommunicationApiBatchStore.IsReadyAsync("Sms", "Twilio"));
-        if (IsDisposed || actor != CurrentUser.UserId || methodChanged || step != 0) return;
+        if (IsDisposed || actor != CurrentUser.UserId || methodChanged || step == 1) return;
         // Choosing Meta replaces the text with an approved template. Preserve a draft already being written.
         int ready = Array.IndexOf(readiness, true);
         if (readiness.Count(value => value) == 1 && (ready != 1 || message.Text.Length == 0))
@@ -1055,8 +577,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         cards[1].Visible = step == 1;
         composerLayout.ResumeLayout(true);
         composerLayout.Visible = composing;
-        cards[2].Visible = step == 2;
-        cards[3].Visible = step == 3;
+        for (int index = HistoryStep; index < cards.Count; index++) cards[index].Visible = step == index;
         (composing ? (Control)composerLayout : cards[step]).BringToFront();
 
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
@@ -1065,14 +586,14 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         confirm.Text = IsManual ? (preview?.Included == 1 ? "Open in WhatsApp" : "Start WhatsApp Chats") : "Confirm & Send";
         confirm.Enabled = step == 1 && manualModeAvailable && preview is { Included: > 0 }
             && CurrentUser.HasPermission("Communication.Send");
-        historyButton.Visible = CurrentUser.HasPermission("Communication.View") || compose;
-        settingsButton.Visible = CurrentUser.HasPermission("Communication.Configure");
+        historyButton.Visible = CurrentUser.HasPermission("Communication.View");
+        unfinishedButton.Visible = compose;
+        templatesButton.Visible = configureButton.Visible = CurrentUser.HasPermission("Communication.Configure");
         newMessageButton.Visible = compose;
         SetNavigationTab(newMessageButton, composing);
-        SetNavigationTab(historyButton, step == 2);
-        SetNavigationTab(settingsButton, step == 3);
+        SetNavigationTab(unfinishedButton, step == UnfinishedStep);
+        SetNavigationTab(historyButton, step == HistoryStep);
     }
-
     private static void SetNavigationTab(ModernButton tab, bool active)
     {
         string role = active ? "TabActive" : "TabInactive";
@@ -1095,23 +616,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             templateChoice.SelectedIndex=0;
         }
         catch(CommunicationValidationException ex){if(!IsDisposed)Warn(ex.Message);}
-        catch(Exception){if(!IsDisposed)Warn("Meta templates could not be read. Check the protected profile and account permissions in Settings.");}
-    }
-
-    private async Task VerifyAndEnableApiAsync()
-    {
-        RequirePermission("Communication.Configure");
-        if(settingsGrid.CurrentRow?.DataBoundItem is not DataRowView selected)return;
-        string channel=Convert.ToString(selected["Channel"])!;
-        if (!Confirm("Verify the saved API account and enable " + ChannelLabel(channel)
-            + "? Provider charges may apply when you later confirm a send.", "Enable API", false)) return;
-        try
-        {
-            await CommunicationManagementStore.VerifyAndEnableAsync(channel);
-            if(!IsDisposed)await LoadSettingsAsync();
-        }
-        catch(CommunicationValidationException ex){if(!IsDisposed)Warn(ex.Message);}
-        catch(Exception){if(!IsDisposed)Warn("The provider could not be verified. Check the saved profile, internet connection and provider permissions; sending was not enabled by this action.");}
+        catch(Exception){if(!IsDisposed)Warn("Meta templates could not be read. Check the protected profile and account permissions in Configure Sending.");}
     }
 
     private async Task StartReviewedMessageAsync()
@@ -1128,13 +633,12 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             var saved=await CommunicationApiBatchStore.ConfirmAsync(target,reviewed,body,request,ApiProvider,metaSelection);
             if(IsDisposed || actor!=CurrentUser.UserId)return;
             if(request!=manualRequestId || target!=CurrentTarget() || body!=message.Text)
-                throw new CommunicationValidationException("The batch was saved, but the current review changed. Open it in History; nothing was sent.");
+                throw new CommunicationValidationException("The batch was saved, but the current review changed. Open it in Unfinished; nothing was sent.");
             using(var dialog=new CommunicationApiDispatchDialog(saved.BatchId,startConfirmed:!saved.AlreadyConfirmed))dialog.ShowDialog(FindForm());
             if (!IsDisposed)
             {
                 ClearReviewedDraft();
-                if (CurrentUser.HasPermission("Communication.View")) await LoadHistoryAsync();
-                else await LoadUnfinishedAsync();
+                await ShowSessionsAsync(unfinished: true);
             }
         }
         catch(CommunicationValidationException ex){if(!IsDisposed)Warn(ex.Message);}
@@ -1164,10 +668,10 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             CommunicationConfirmation saved = await operations.ConfirmBatch(target, reviewed, body, request);
             if (IsDisposed) return;
             if (actor != CurrentUser.UserId)
-                throw new InvalidOperationException("Signed-in user changed. Reopen History.");
+                throw new InvalidOperationException("Signed-in user changed. Open Unfinished.");
             if (request != manualRequestId || target != CurrentTarget() || body != message.Text)
             {
-                Warn("The reviewed batch was saved, but the current message changed. Review that batch in History; no chat was opened.");
+                Warn("The reviewed batch was saved, but the current message changed. Review that batch in Unfinished; no chat was opened.");
                 return;
             }
             // The operator has reviewed and confirmed this batch. Open the first
@@ -1178,37 +682,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             if (!IsDisposed)
             {
                 ClearReviewedDraft();
-                if (CurrentUser.HasPermission("Communication.View")) await LoadHistoryAsync();
-                else await LoadUnfinishedAsync();
-            }
-        }
-        catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }
-        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
-    }
-
-    private async Task ResumeManualFromHistoryAsync()
-    {
-        if (!CurrentUser.HasPermission("Communication.Send"))
-        {
-            Warn("Communication.Send permission is required to resume a handoff.");
-            return;
-        }
-        if (historyGrid.CurrentRow?.DataBoundItem is not DataRowView row)
-        {
-            Warn("Choose a communication batch to open.");
-            return;
-        }
-        try
-        {
-            var batchId = (Guid)row["BatchId"];
-            if(Convert.ToString(row["Method"]) == "WhatsApp Business (manual)")
-            {using var handoff = new CommunicationManualHandoffDialog(batchId);handoff.ShowDialog(FindForm());}
-            else
-            {using var api = new CommunicationApiDispatchDialog(batchId);api.ShowDialog(FindForm());}
-            if (!IsDisposed)
-            {
-                if (showingUnfinished) await LoadUnfinishedAsync();
-                else await LoadHistoryAsync();
+                await ShowSessionsAsync(unfinished: true);
             }
         }
         catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }
@@ -1297,7 +771,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
         showExcluded.Text = $"Show excluded records ({excluded:N0})";
         reviewNote.ForeColor = eligible.Length > 0 && manualModeAvailable ? AppTheme.MutedText : AppTheme.Danger;
         reviewNote.Text = eligible.Length == 0 ? "No eligible recipients for this message."
-            : !manualModeAvailable ? "This sending method is paused or needs setup in Settings."
+            : !manualModeAvailable ? "This sending method is paused or needs setup under Configure Sending."
             : IsManual ? "Press Send in WhatsApp for each chat." : "";
         BindPreviewRows();
         SetStep(1);

@@ -32,7 +32,7 @@ internal sealed class CommunicationProviderDialog : ApplicationWindowForm
             Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText, UseMnemonic = false,
             Text = (meta ? "Use a token with WhatsApp management and messaging permissions. Sending uses approved Meta templates. "
                 : "Provider charges may apply when sending. ")
-                + "Credentials are encrypted for this Windows user. Saving pauses sending until you verify and enable the method in Settings."
+                + "Credentials are encrypted for this Windows user. Saving pauses sending until you verify and enable the method."
         };
         var save=new ModernButton {Text="Save Profile",ThemeRole="Success",Width=AppScale.Scale(165),Height=AppMetrics.ButtonHeight};
         var cancel=new ModernButton {Text="Cancel",ThemeRole="Secondary",DialogResult=DialogResult.Cancel,Height=AppMetrics.ButtonHeight};

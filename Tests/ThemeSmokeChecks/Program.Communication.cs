@@ -168,86 +168,21 @@ internal static partial class Program
         // indices, a particular number of cards, or template-action row numbers.
         var targetCard = Descendants(page).OfType<HumanCard>()
             .Single(card => Descendants(card).Contains(audience));
-        var manualActivation = (ModernButton)type.GetField("enableFreeWhatsAppButton", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        var settingsCard = Descendants(page).OfType<HumanCard>()
-            .Single(card => Descendants(card).Contains(manualActivation));
-        var settingsActions = Descendants(settingsCard).OfType<ModernButton>().ToArray();
-        Check(Descendants(settingsCard).OfType<DataGridView>().Count() >= 2
-            && settingsActions.Contains(manualActivation)
-            && settingsActions.Count(button => button != manualActivation) >= 2,
-            "Settings provides manual WhatsApp and independent template management without fixing layout rows");
-        var decorate = type.GetMethod("PrepareSettingsForDisplay", BindingFlags.Static | BindingFlags.NonPublic)!;
-        var settingsGrid = (DataGridView)type.GetField("settingsGrid", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        using var modeRows = new DataTable();
-        modeRows.Columns.Add("Channel", typeof(string));
-        modeRows.Columns.Add("ProviderCode", typeof(string));
-        modeRows.Columns.Add("Enabled", typeof(bool));
-        modeRows.Rows.Add("Sms", "Twilio", true);
-        modeRows.Rows.Add("WhatsApp", "WhatsAppBusinessManual", false);
-        decorate.Invoke(null, new object[] { modeRows });
-        settingsGrid.DataSource = modeRows;
         Check(!send.Enabled, "An unreviewed page cannot send or open a chat before preview and confirmation");
 
-        // Render at dashboard scale. Merely having seven audience options in
-        // memory did not catch the blank Select Recipients card seen in the app.
         using var host = new Form { ClientSize = new Size(1200, 780), ShowInTaskbar = false };
         host.Controls.Add(page);
         host.Show();
         Application.DoEvents();
-        // Render the Settings workspace to verify user-visible, unclipped
-        // actions without freezing its internal panel or row structure.
-        var setStep = type.GetMethod("SetStep", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        var navNames = new[] { "communicationNewMessage", "communicationHistory", "communicationSettings" };
-        var navigation = navNames.Select(name => Descendants(page).Single(control => control.Name == name)).ToArray();
-        var navigationPositions = navigation.Select(button => button.Left).ToArray();
-        setStep.Invoke(page, new object[] { 3 });
-        Application.DoEvents();
-        Check(navigation.All(button => button.Visible) && navigation.Select(button => button.Left).SequenceEqual(navigationPositions),
-            "Navigation stays in the same place when opening Settings");
-        var settingsScroller = settingsCard.Content.Controls.OfType<ScrollableControl>()
-            .SingleOrDefault(control => control.AutoScroll);
-        Check(settingsCard.Visible && settingsScroller is not null,
-            "Communication Settings has a scrollable workspace for smaller windows");
-        // Test the action a user can reach, not that every action shares one
-        // row or simultaneously fits into a short viewport.
-        var pauseApi = settingsActions.Single(button => button.Name == "communicationPauseProvider");
-        settingsGrid.CurrentCell = settingsGrid.Rows[0].Cells[0];
-        Check(!manualActivation.Visible && pauseApi.Visible && pauseApi.Enabled,
-            "Selecting active SMS exposes its pause action and hides the WhatsApp action");
-        settingsGrid.CurrentCell = settingsGrid.Rows[1].Cells[0];
-        Check(manualActivation.Visible && manualActivation.Enabled && !pauseApi.Visible,
-            "Selecting paused WhatsApp exposes manual activation for the selected channel");
-        foreach (var button in settingsActions.Where(button => button.Visible))
-        {
-            settingsScroller!.ScrollControlIntoView(button);
-            Application.DoEvents();
-            Rectangle bounds = button.RectangleToScreen(button.ClientRectangle);
-            Rectangle visibleContent = Rectangle.Intersect(
-                settingsCard.Content.RectangleToScreen(settingsCard.Content.ClientRectangle),
-                settingsScroller.RectangleToScreen(settingsScroller.ClientRectangle));
-            Rectangle exposed = Rectangle.Intersect(bounds, visibleContent);
-            Check(button.Visible && button.Width > 0 && button.Height > 0
-                && exposed.Width >= button.Width - 2 && exposed.Height >= button.Height - 2,
-                "Communication Settings action is reachable without clipping: "
-                + button.Text + "; bounds=" + bounds + "; exposed=" + exposed
-                + "; viewport=" + visibleContent);
-        }
-        var showHistory = type.GetMethod("ShowHistory", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        var historyRows = new DataTable();
-        historyRows.Columns.Add("BatchId", typeof(Guid));
-        historyRows.Columns.Add("Method", typeof(string));
-        showHistory.Invoke(page, new object[] { historyRows, false });
-        Application.DoEvents();
-        var openSession = Descendants(page).Single(control => control.Name == "communicationOpenSession");
-        Check(openSession.Visible && !openSession.Enabled, "Empty history cannot open a session");
-        historyRows.Rows.Add(Guid.NewGuid(), "WhatsApp Business (manual)");
-        Application.DoEvents();
-        Check(openSession.Enabled, "History with a selected session can open it");
-        var historySearch = Descendants(page).Single(control => control.Name == "communicationHistorySearch");
-        historySearch.Text = "No matching fixture";
-        Application.DoEvents();
-        Check(!openSession.Enabled, "Filtering away the selected session disables Open");
-        setStep.Invoke(page, new object[] { 0 });
+        var navigation = new[] { "communicationNewMessage", "communicationUnfinished", "communicationHistory",
+            "communicationTemplates", "communicationConfigureSending" }
+            .Select(name => Descendants(page).Single(control => control.Name == name)).ToArray();
+        Check(navigation.All(button => button.Visible)
+            && navigation[2].PointToScreen(Point.Empty).X < navigation[3].PointToScreen(Point.Empty).X,
+            "Daily tabs and separate administration actions are visible in the navigation");
+        Check(Descendants(page).Single(control => control.Name == "communicationUnfinishedGrid").Visible,
+            "The center opens on the dedicated unfinished queue");
+        ((ModernButton)navigation[0]).PerformClick();
         Application.DoEvents();
         var workspace = (TableLayoutPanel)type.GetField("composerLayout",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
@@ -259,6 +194,7 @@ internal static partial class Program
         Check(reviewAction.Visible && reviewAction.RectangleToScreen(reviewAction.ClientRectangle).Bottom
             <= targetCard.Content.RectangleToScreen(targetCard.Content.ClientRectangle).Bottom,
             "The review action is reachable inside the composer");
+        var setStep = type.GetMethod("SetStep", BindingFlags.Instance | BindingFlags.NonPublic)!;
         setStep.Invoke(page, new object[] { 1 });
         Application.DoEvents();
         var review = Descendants(page).OfType<HumanCard>()

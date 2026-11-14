@@ -35,18 +35,23 @@ internal static partial class Program
                 Check(template.Channel == "Email", "Editing a saved email template preserves its channel rather than silently converting it to SMS");
             CheckProviderBodyDeadline();
             CheckCommunicationAsyncAndCancellation();
+            CheckCommunicationSessionsAndOptions();
             CheckManualLaunchAndReporting();
             CheckCommunicationApiWorkflow();
             CheckOptionalCommunicationEntries();
             CurrentUser.SignIn(7202, "Read-only fixture", "Messaging viewer", false, new[] { "Communication.View" });
             using var reader = new CommunicationCenterPage(false);
             Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission) && !CommunicationAccess.CanCompose(CurrentUser.HasPermission)
-                && Field<int>(reader, "step") == 2 && !Field<ModernButton>(reader, "next").Visible,
+                && Field<ModernButton>(reader, "historyButton").ThemeRole == "TabActive"
+                && !Field<ModernButton>(reader, "unfinishedButton").Visible,
                 "History-only access does not expose a composing/sending action");
             CurrentUser.SignIn(7203, "Settings fixture", "Messaging configuration", false, new[] { "Communication.Configure" });
             using var settings = new CommunicationCenterPage(false);
-            Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission) && Field<int>(settings, "step") == 3,
-                "A configuration-only operator opens Settings without student or history access");
+            Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission)
+                && Field<ModernButton>(settings, "configureButton").Visible
+                && Field<ModernButton>(settings, "templatesButton").Visible
+                && !Field<ModernButton>(settings, "historyButton").Visible,
+                "A configuration-only operator can open both administration dialogs without history access");
         }
         finally { CurrentUser.SignIn(previous.UserId, previous.Username, previous.RoleName, previous.MustChangePassword, previous.Item5); }
     }
@@ -75,6 +80,7 @@ internal static partial class Program
         using var host = new Form { ClientSize = new Size(1100, 780), ShowInTaskbar = false };
         page.Dock = DockStyle.Fill; host.Controls.Add(page); ModalPageCloseGuard.Attach(host, page);
         host.Show(); Application.DoEvents();
+        Field<ModernButton>(page, "newMessageButton").PerformClick();
         // Explicit school target keeps this synthetic async read independent
         // of the safer class-by-default choice in the actual user experience.
         Field<ModernComboBox>(page, "audience").SelectedIndex = (int)CommunicationAudience.School;
@@ -138,6 +144,7 @@ internal static partial class Program
         });
         singleHost.Controls.Add(singlePage);
         singleHost.Show(); Application.DoEvents();
+        Field<ModernButton>(singlePage, "newMessageButton").PerformClick();
         Field<ModernComboBox>(singlePage, "audience").SelectedIndex = (int)CommunicationAudience.Student;
         Field<StudentPicker>(singlePage, "student").SetStudent(42, "Synthetic child");
         Field<ModernTextBox>(singlePage, "message").Text = "Hello [StudentName]";
@@ -166,6 +173,7 @@ internal static partial class Program
         });
         bulkHost.Controls.Add(bulkPage);
         bulkHost.Show(); Application.DoEvents();
+        Field<ModernButton>(bulkPage, "newMessageButton").PerformClick();
         Field<ModernComboBox>(bulkPage, "audience").SelectedIndex = (int)CommunicationAudience.School;
         Field<ModernTextBox>(bulkPage, "message").Text = "School notice";
         Field<ModernButton>(bulkPage, "next").PerformClick();
@@ -183,6 +191,7 @@ internal static partial class Program
         excludedHost.Controls.Add(excludedPage);
         excludedHost.Show();
         Application.DoEvents();
+        Field<ModernButton>(excludedPage, "newMessageButton").PerformClick();
         Field<ModernComboBox>(excludedPage, "audience").SelectedIndex = (int)CommunicationAudience.School;
         Field<ModernTextBox>(excludedPage, "message").Text = "School notice";
         Field<ModernButton>(excludedPage, "next").PerformClick();
@@ -196,6 +205,144 @@ internal static partial class Program
         excludedToggle.Checked = true;
         Check(excludedGrid.Visible && excludedGrid.Rows.Count == 1,
             "The zero-eligible review can expand its excluded records");
+    }
+
+    private static void CheckCommunicationSessionsAndOptions()
+    {
+        Guid pending = Guid.NewGuid(), completed = Guid.NewGuid();
+        Guid? resumed = null, viewed = null;
+        int confirmations = 0;
+        const string savedBody = "Original message [StudentName]";
+        CommunicationHistoryDraft? newDraft = null;
+        DataTable Sessions(bool unfinished)
+        {
+            var rows = new DataTable();
+            rows.Columns.Add("BatchId", typeof(Guid));
+            rows.Columns.Add("Method");
+            rows.Columns.Add("Audience");
+            rows.Columns.Add("OperatorName");
+            rows.Columns.Add("InProgress", typeof(int));
+            foreach (var column in new[] { "ManualReported", "ManualOpened", "ManualSkipped" })
+                rows.Columns.Add(column, typeof(int));
+            rows.Rows.Add(unfinished ? pending : completed, "WhatsApp Business (manual)", "School",
+                "Synthetic operator", unfinished ? 1 : 0, unfinished ? 0 : 1, 0, 0);
+            return rows;
+        }
+        var operations = new CommunicationCenterPage.Operations(
+            _ => throw new Exception("Viewing a session does not run a new review."),
+            () => Task.FromResult(true),
+            (_, _, _, _) => { confirmations++; throw new Exception("Opening a session does not confirm a send."); },
+            (batch, openFirstChat) => { if (!openFirstChat) resumed = batch; },
+            () => false, unfinished => Task.FromResult(Sessions(unfinished)), row =>
+            {
+                viewed = row.BatchId;
+                return newDraft;
+            });
+        CurrentUser.SignIn(7204, "Session fixture", "Administrator", false, Array.Empty<string>());
+        using var host = new Form { ClientSize = new Size(1100, 700), ShowInTaskbar = false };
+        using var page = new CommunicationCenterPage(false, operations);
+        host.Controls.Add(page);
+        host.Show();
+        Application.DoEvents();
+        var queue = Field<DataGridView>(page, "unfinishedGrid");
+        var archive = Field<DataGridView>(page, "historyGrid");
+        void DoubleClick(DataGridView grid)
+        {
+            typeof(DataGridView).GetMethod("OnCellDoubleClick", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(grid, new object[] { new DataGridViewCellEventArgs(0, 0) });
+            Application.DoEvents();
+        }
+        Field<ModernButton>(page, "unfinishedButton").PerformClick();
+        PumpUntil(() => queue.Rows.Count == 1 && !page.IsBusy, "Unfinished loads its own session list");
+        DoubleClick(queue);
+        Check(resumed == pending && viewed is null && confirmations == 0 && !archive.Visible,
+            "Double-clicking an unfinished session resumes that batch without opening a chat or confirming another send");
+        Field<ModernButton>(page, "historyButton").PerformClick();
+        PumpUntil(() => archive.Rows.Count == 1 && !page.IsBusy, "History loads its separate list");
+        var openHistory = (ModernButton)page.Controls.Find("communicationViewHistory", true).Single();
+        Check(openHistory.Enabled && !queue.Visible, "A selected history row can be viewed independently of the unfinished queue");
+        DoubleClick(archive);
+        Check(viewed == completed && resumed == pending && confirmations == 0,
+            "Double-clicking History opens the selected message record without resuming or sending");
+        page.Controls.Find("communicationHistorySearch", true).Single().Text = "Unmatched fixture";
+        Application.DoEvents();
+        Check(archive.Rows.Count == 0 && !openHistory.Enabled, "Filtering history removes the open action when no session matches");
+        page.Controls.Find("communicationHistorySearch", true).Single().Text = "";
+        newDraft = new CommunicationHistoryDraft(new(CommunicationAudience.School, 0, 0, 0, 0, "WhatsApp"),
+            "WhatsAppBusinessManual", savedBody, "", "", null);
+        DoubleClick(archive);
+        Check(Field<ModernTextBox>(page, "message").Text == savedBody
+            && Field<ModernButton>(page, "next").Visible
+            && Field<CommunicationPreview?>(page, "preview") is null
+            && confirmations == 0 && !archive.Visible,
+            "Send Again brings the saved format into a new draft and requires a fresh review");
+        host.Close();
+
+        using var history = new CommunicationHistoryDialog(new(completed, "Twilio", "Delivered", "School"), _ =>
+        {
+            var rows = new DataTable();
+            foreach (var column in new[] { "Body", "RenderedBody", "Audience", "Channel", "SelectedStudentName",
+                "SelectedStaffName", "ProviderCode", "TemplateJson", "Outcome", "RecipientName", "LastFour" })
+                rows.Columns.Add(column);
+            foreach (var column in new[] { "CampusId", "ClassId", "StudentId", "StaffId" })
+                rows.Columns.Add(column, typeof(int));
+            rows.Rows.Add(savedBody, "Original message First", "School", "Sms", "", "", "Twilio", DBNull.Value,
+                "Delivered", "First", "0123", 0, 0, 0, 0);
+            rows.Rows.Add(savedBody, "Original message Second", "School", "Sms", "", "", "Twilio", DBNull.Value,
+                "Failed", "Second", "4567", 0, 0, 0, 0);
+            return Task.FromResult(rows);
+        });
+        history.Show();
+        Application.DoEvents();
+        var historyPreview = Field<ModernTextBox>(history, "preview");
+        Check(historyPreview.ReadOnly && historyPreview.Text == "Original message First" && history.Draft?.Body == savedBody,
+            "History shows the exact reviewed API message and keeps the saved format for a new draft");
+        var recipients = Field<DataGridView>(history, "recipients");
+        recipients.CurrentCell = recipients.Rows[1].Cells[0];
+        Check(historyPreview.Text == "Original message Second", "History preview follows the selected recipient");
+        var unsettled = (DataTable)recipients.DataSource!;
+        unsettled.Rows[1]["Outcome"] = "Unknown";
+        Check(CommunicationHistoryStore.CreateDraft(unsettled) is null,
+            "An uncertain attempt keeps Send Again unavailable until the batch can be reviewed safely");
+        history.Close();
+
+        using var settings = new CommunicationSendingOptionsDialog(() =>
+        {
+            var rows = new DataTable();
+            rows.Columns.Add("Channel");
+            rows.Columns.Add("ProviderCode");
+            rows.Columns.Add("Enabled", typeof(bool));
+            rows.Rows.Add("Sms", "Twilio", true);
+            rows.Rows.Add("WhatsApp", "WhatsAppBusinessManual", false);
+            return Task.FromResult(rows);
+        });
+        settings.Show();
+        Application.DoEvents();
+        Control Manual(string name) => settings.Controls.Find(name, true).Single();
+        Check(Manual("WhatsAppBusinessManualToggle").Enabled && Manual("TwilioToggle").Enabled
+            && !Manual("MetaCloudToggle").Enabled && Manual("MetaCloudSetup").Enabled
+            && !Descendants(settings).OfType<DataGridView>().Any(),
+            "Configure Sending presents independent actions for active, paused and unconfigured methods");
+        settings.Close();
+
+        using var templates = new CommunicationTemplatesDialog(() =>
+        {
+            var rows = new DataTable();
+            rows.Columns.Add("TemplateId", typeof(int));
+            foreach (var column in new[] { "Name", "Channel", "Purpose", "Body" }) rows.Columns.Add(column);
+            rows.Columns.Add("Active", typeof(bool));
+            return Task.FromResult(rows);
+        });
+        templates.Show();
+        Application.DoEvents();
+        var templateGrid = Field<DataGridView>(templates, "templates");
+        templateGrid.CurrentCell = templateGrid.Rows[1].Cells[0];
+        Check(Field<ModernTextBox>(templates, "preview").Text == CommunicationPreparedMessages.BuiltIns[1].Body
+            && Field<ModernButton>(templates, "edit").Enabled,
+            "Selecting a template shows its full editable format in the dedicated dialog");
+        templates.Close();
+        CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
+            new[] { "Communication.Send", "Students.View", "Fees.View" });
     }
 
     private static void CheckManualLaunchAndReporting()

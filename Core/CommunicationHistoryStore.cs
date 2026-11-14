@@ -1,0 +1,81 @@
+using System.Data;
+using System.Text.Json;
+
+namespace FMSC_SMS.Core;
+
+internal sealed record CommunicationSessionRow(Guid BatchId, string Method, string Outcome, string Audience);
+
+internal sealed record CommunicationHistoryDraft(CommunicationTarget Target, string Provider, string Body,
+    string StudentName, string StaffName, CommunicationMetaTransport.Selection? MetaTemplate);
+
+internal static class CommunicationHistoryStore
+{
+    internal static async Task<DataTable> ReadAsync(Guid batchId)
+    {
+        if (!CurrentUser.HasPermission("Communication.View"))
+            throw new UnauthorizedAccessException("Communication history permission is required.");
+        // History only returns masked contact details. API review text is
+        // historical; manual batches retain their original message format.
+        const string sql = """
+            SET NOCOUNT ON;
+            EXEC dbo.RequirePermission @UserId,N'Communication.View';
+            DECLARE @Audience varchar(20)=(SELECT Audience FROM msg.Batch WHERE BatchId=@BatchId);
+            IF @Audience IS NULL THROW 51132,'The saved message is no longer available.',1;
+            IF @Audience='Staff' EXEC dbo.RequirePermission @UserId,N'Staff.View';
+            ELSE EXEC dbo.RequirePermission @UserId,N'Students.View';
+            IF @Audience='OutstandingFees' EXEC dbo.RequirePermission @UserId,N'Fees.View';
+            SELECT B.Channel,B.Body,B.Audience,B.CampusId,B.ClassId,
+                CASE WHEN B.Audience='OutstandingFees' AND B.SingleStudentScope=0 THEN 0 ELSE B.StudentId END StudentId,
+                B.StaffId,SelectedStudent.StudentName AS SelectedStudentName,SelectedStaff.StaffName AS SelectedStaffName,
+                CASE WHEN M.BatchId IS NOT NULL THEN 'WhatsAppBusinessManual' ELSE A.ProviderCode END ProviderCode,
+                A.TemplateJson,COALESCE(H.State,R.State) Outcome,
+                COALESCE(S.StudentName,T.StaffName,N'School record') RecipientName,
+                RIGHT(R.PhoneE164,4) LastFour,J.RenderedBody
+            FROM msg.Batch B
+            LEFT JOIN msg.ManualBatch M ON M.BatchId=B.BatchId
+            LEFT JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
+            LEFT JOIN msg.Recipient R ON R.BatchId=B.BatchId
+            LEFT JOIN msg.ManualHandoff H ON H.RecipientId=R.RecipientId
+            LEFT JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
+            LEFT JOIN dbo.Staff T ON T.StaffId=R.StaffId
+            LEFT JOIN dbo.Students SelectedStudent ON SelectedStudent.AdmissionId=B.StudentId
+            LEFT JOIN dbo.Staff SelectedStaff ON SelectedStaff.StaffId=B.StaffId
+            OUTER APPLY (
+                SELECT TOP (1) X.RenderedBody FROM OPENJSON(A.ReviewJson)
+                WITH (Kind varchar(8),RecordId int,Phone varchar(16),RenderedBody nvarchar(1600) '$.Text') X
+                WHERE X.Kind=R.RecipientKind AND X.RecordId=COALESCE(R.AdmissionId,R.StaffId) AND X.Phone=R.PhoneE164
+            ) J
+            WHERE B.BatchId=@BatchId
+            ORDER BY R.RecipientId;
+            """;
+        int actor = CurrentUser.UserId;
+        DataTable table = await DatabaseHelper.QuerySqlAsync(sql,
+            DatabaseHelper.Int("@UserId", actor), DatabaseHelper.P("@BatchId", batchId));
+        if (actor == CurrentUser.UserId && table.Rows.Count > 0) return table;
+        table.Dispose();
+        throw new CommunicationValidationException("The saved message is no longer available.");
+    }
+
+    internal static CommunicationHistoryDraft? CreateDraft(DataTable history)
+    {
+        if (history.Rows.Count == 0 || history.AsEnumerable().Any(row =>
+                row.Field<string>("Outcome") is "Pending" or "Opened" or "Submitted" or "Accepted" or "Unknown"))
+            return null;
+        DataRow row = history.Rows[0];
+        string provider = Convert.ToString(row["ProviderCode"]) ?? "";
+        var scope = Enum.Parse<CommunicationAudience>((string)row["Audience"]);
+        string permission = scope == CommunicationAudience.Staff ? "Staff.View" : "Students.View";
+        if (!CurrentUser.HasPermission("Communication.Send") || !CurrentUser.HasPermission(permission)
+            || (scope == CommunicationAudience.OutstandingFees && !CurrentUser.HasPermission("Fees.View"))
+            || provider is not ("WhatsAppBusinessManual" or "MetaCloud" or "Twilio")) return null;
+        var target = new CommunicationTarget(scope, (int)row["CampusId"], (int)row["ClassId"],
+            (int)row["StudentId"], (int)row["StaffId"], (string)row["Channel"]);
+        string studentName = Convert.ToString(row["SelectedStudentName"]) ?? "";
+        string staffName = Convert.ToString(row["SelectedStaffName"]) ?? "";
+        if ((target.StudentId > 0 && studentName.Length == 0)
+            || (target.StaffId > 0 && staffName.Length == 0)) return null;
+        var metaTemplate = row["TemplateJson"] is string json
+            ? JsonSerializer.Deserialize<CommunicationMetaTransport.Selection>(json) : null;
+        return new(target, provider, (string)row["Body"], studentName, staffName, metaTemplate);
+    }
+}
