@@ -68,7 +68,7 @@ try {
     $queuedKey = Join-Path $cloud 'queue\abc.fmscbackup.dpapi'
     $journal = Join-Path $cloud 'journal\abc.json'
     $recoveryKey = Join-Path $cloud 'recovery-key.v1.dpapi'
-    $oauth = Join-Path $cloud 'oauth-googledrive.v1.dpapi'
+    $oauth = Join-Path $cloud 'oauth-dropbox.v1.dpapi'
     $schedule = Join-Path $cloud 'schedule.json'
     foreach ($file in @($package,$queuedKey,$journal,$recoveryKey,$oauth,$schedule)) {
         New-Item -ItemType Directory -Path (Split-Path $file -Parent) -Force | Out-Null
