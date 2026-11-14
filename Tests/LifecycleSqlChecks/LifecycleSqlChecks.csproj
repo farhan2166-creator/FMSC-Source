@@ -6,6 +6,7 @@
   <ItemGroup>
     <Compile Include="../../Core/PakistanPhoneNumber.cs" Link="PakistanPhoneNumber.cs" />
     <Compile Include="../../Core/CommunicationRecipientResolver.cs" Link="CommunicationRecipientResolver.cs" />
+    <Compile Include="../../Core/CommunicationReviewedContent.cs" Link="CommunicationReviewedContent.cs" />
     <Compile Include="../../Core/CommunicationPreparedMessages.cs" Link="CommunicationPreparedMessages.cs" />
     <Compile Include="../../Core/CommunicationValidationException.cs" Link="CommunicationValidationException.cs" />
     <Compile Include="../Level3Checks/ReliabilityChecks.cs" Link="ReliabilityChecks.cs" />
@@ -26,6 +27,7 @@
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema12Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema12Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema18Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema18Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema19Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema19Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema20Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema20Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema17Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema17Requirements.json" />
     <EmbeddedResource Include="../../Core/PermissionCatalog.json" LogicalName="FMSC_SMS.Core.PermissionCatalog.json" />
     <Using Include="System.Data" /><Using Include="FMSC_SMS" /><Using Include="FMSC_SMS.Core" />

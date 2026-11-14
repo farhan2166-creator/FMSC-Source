@@ -29,9 +29,9 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
         MinimumSize=ClientSize;
         BackColor=AppTheme.PageBackground;
         channel.Items.AddRange(new object[] {
-            new ChannelChoice("Sms", "SMS (sending unavailable)"),
+            new ChannelChoice("Sms", "SMS"),
             new ChannelChoice("WhatsApp", "WhatsApp Business (manual)"),
-            new ChannelChoice("Email", "Email (sending unavailable)") });
+            new ChannelChoice("Email", "Email (unavailable)") });
         purpose.Items.AddRange(new object[]{"Announcement","FeeReminder","Individual","Staff"});
         name.Text=nameValue;body.Text=bodyValue;active.Checked=isActive;
         channel.SelectedItem=channel.Items.Cast<ChannelChoice>().FirstOrDefault(choice => choice.Code==channelValue);

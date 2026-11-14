@@ -101,14 +101,14 @@ internal static partial class Program
         bool NoLiveAdapter(string channel, string provider)
         {
             try { adapterSelector.Invoke(null, new object[] { channel, provider }); return false; }
-            catch (TargetInvocationException ex) when (ex.InnerException is NotSupportedException or InvalidOperationException)
+            catch (TargetInvocationException ex) when (ex.InnerException is NotSupportedException or InvalidOperationException or UnauthorizedAccessException)
             { return true; }
         }
         Check(NoLiveAdapter("WhatsApp", "MetaCloud") && NoLiveAdapter("Email", "Smtp")
             && NoLiveAdapter("WhatsApp", "WhatsAppBusinessManual")
             && NoLiveAdapter("Email", "EmailClientManual")
             && NoLiveAdapter("Sms", "Smtp"),
-            "Manual handoff and unimplemented transports reject API dispatch before any claim or network request.");
+            "Manual handoff, unavailable transports and unconfigured Meta reject dispatch before any claim or network request.");
 
         var manualStore = assembly.GetType("FMSC_SMS.Core.CommunicationManualHandoffStore")!;
         var click = manualStore.GetMethod("BuildClickToChatLink",

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Core/CommunicationMetaTransport.cs" Link="CommunicationMetaTransport.cs" />
+    <Compile Include="../../Core/CommunicationProviderProfile.cs" Link="CommunicationProviderProfile.cs" />
+    <Compile Include="../../Core/CommunicationTwilioTransport.cs" Link="CommunicationTwilioTransport.cs" />
+    <Compile Include="../../Core/CommunicationRecipientResolver.cs" Link="CommunicationRecipientResolver.cs" />
+    <Compile Include="../../Core/CommunicationPreparedMessages.cs" Link="CommunicationPreparedMessages.cs" />
+    <Compile Include="../../Core/CommunicationReviewedContent.cs" Link="CommunicationReviewedContent.cs" />
+    <Compile Include="../../Core/CommunicationValidationException.cs" Link="CommunicationValidationException.cs" />
+    <Compile Include="../../Core/PakistanPhoneNumber.cs" Link="PakistanPhoneNumber.cs" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
+  </ItemGroup>
+</Project>

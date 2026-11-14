@@ -23,6 +23,12 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         Dock=DockStyle.Fill,AutoEllipsis=true,
         TextAlign=ContentAlignment.MiddleLeft,Font=AppTheme.NormalFont
     };
+    private readonly ProgressBar processedProgress = new()
+    {
+        Dock = DockStyle.Fill, Style = ProgressBarStyle.Continuous,
+        AccessibleName = "Processed recipients",
+        AccessibleDescription = "Reported sent or skipped; not verified delivery."
+    };
     private readonly Label explanation=new()
     {
         Dock=DockStyle.Fill,AutoEllipsis=true,
@@ -104,7 +110,16 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(48)));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(60)));
-        layout.Controls.Add(progress,0,0);
+        var progressHeader = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty
+        };
+        progressHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        progressHeader.RowStyles.Add(new RowStyle(SizeType.Percent, 72));
+        progressHeader.RowStyles.Add(new RowStyle(SizeType.Percent, 28));
+        progressHeader.Controls.Add(progress, 0, 0);
+        progressHeader.Controls.Add(processedProgress, 0, 1);
+        layout.Controls.Add(progressHeader,0,0);
         layout.Controls.Add(destination,0,1);
         layout.Controls.Add(explanation,0,2);
         preparedMessage.ReadOnly = true;
@@ -166,6 +181,10 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             int reportedCount=entries.Count(e=>e.State=="ReportedSent");
             int skippedCount=entries.Count(e=>e.State is "Skipped" or "Excluded");
             int remaining=entries.Count(e=>e.State is "Pending" or "Opened");
+            // Opening WhatsApp is still pending operator action. Only explicit
+            // reporting or exclusion/skip advances processing, never delivery.
+            processedProgress.Maximum = Math.Max(1, entries.Count);
+            processedProgress.Value = Math.Min(entries.Count, reportedCount + skippedCount);
             remainingAfterCurrent=Math.Max(0,remaining-(nextRecipient is null ? 0 : 1));
             progress.Text=nextRecipient is null
                 ? $"All done · {reportedCount} reported sent · {skippedCount} skipped"

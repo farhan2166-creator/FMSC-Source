@@ -12,19 +12,14 @@ namespace FMSC_SMS.Core;
 /// enable a provider or send a message. Adapters must validate live SQL channel
 /// state and the selected provider immediately before using a loaded secret.
 /// </summary>
-internal static class CommunicationProviderCredentialStore
+internal static partial class CommunicationProviderCredentialStore
 {
-    private const int FormatVersion = 1;
     private static readonly byte[] Entropy = SHA256.HashData(
         Encoding.UTF8.GetBytes("FMSC/Communication/provider-credential/v1"));
 
     internal static string DirectoryPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "FMSC", "Communication");
-
-    internal sealed record Credential(
-        int Format, string Channel, string ProviderCode, string AccountId,
-        string SenderId, string ApiToken, string CallbackSigningSecret);
 
     internal sealed record Metadata(string Channel, string ProviderCode, string SenderId);
 
@@ -81,29 +76,17 @@ internal static class CommunicationProviderCredentialStore
         return credential;
     }
 
+    internal static Credential LoadForConfiguration(string channel)
+    {
+        Require("Communication.Configure");
+        return Read(channel);
+    }
+
     internal static void Remove(string channel)
     {
         Require("Communication.Configure");
         string destination = Path.Combine(DirectoryPath, FileName(channel));
         if (File.Exists(destination)) File.Delete(destination);
-    }
-
-    internal static void Validate(Credential value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        FileName(value.Channel);
-        if (value.Format != FormatVersion
-            || string.IsNullOrWhiteSpace(value.ProviderCode)
-            || value.ProviderCode.Length > 40
-            || !value.ProviderCode.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')
-            || string.IsNullOrWhiteSpace(value.AccountId) || value.AccountId.Length > 128
-            || string.IsNullOrWhiteSpace(value.SenderId) || value.SenderId.Length > 128
-            || string.IsNullOrWhiteSpace(value.ApiToken) || value.ApiToken.Length is < 16 or > 4096
-            || string.IsNullOrWhiteSpace(value.CallbackSigningSecret)
-            || value.CallbackSigningSecret.Length is < 16 or > 4096
-            || value.AccountId.ContainsAnyNewline() || value.SenderId.ContainsAnyNewline()
-            || value.ApiToken.ContainsAnyNewline() || value.CallbackSigningSecret.ContainsAnyNewline())
-            throw new ArgumentException("Provider credential metadata or format is invalid.");
     }
 
     private static Credential Read(string channel)
@@ -162,6 +145,4 @@ internal static class CommunicationProviderCredentialStore
         new DirectoryInfo(directory).SetAccessControl(permissions);
     }
 
-    private static bool ContainsAnyNewline(this string value) =>
-        value.Contains('\r') || value.Contains('\n');
 }
