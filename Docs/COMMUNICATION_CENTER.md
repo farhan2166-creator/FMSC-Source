@@ -1,20 +1,3 @@
-## Simplified operator workspace (November 2026)
-
-The sending interface now uses one **New Message** workspace: the audience and
-message remain editable when **Review Message** opens an adjacent preview.
-Changing recipients, the selected template, or the message invalidates the
-review immediately; the operator must review the new snapshot before opening
-WhatsApp. The existing confirmation, SQL consent/phone/scope revalidation,
-idempotent batch and manual handoff behavior are unchanged.
-
-**History** includes **Only my unfinished** for permitted senders; no second
-global unfinished-batches navigation button is required. **Settings** shows the
-usable WhatsApp channel and prepared-message management, not disabled future
-transport profiles. Its one WhatsApp control offers Use, Resume or Pause
-according to the current mode, and a separate number opt-out action remains
-available. No API/SMS/email sending is activated by these UI changes. History
-continues to distinguish operator-reported sends from actual delivery.
-
 # Communication Center — manual WhatsApp Business
 
 The original `comm` module and `dbo.StudentGuardianCommunication` are retired by
@@ -44,6 +27,23 @@ PR #128 is no longer a pending merge gate. A **new application publication**
 still requires its own exact-commit Windows, disposable SQL and private Sandbox
 acceptance. An already-applied migration is not proof that the new UI binary
 was installed.
+
+## Simplified operator workspace (November 2026)
+
+The sending interface now uses one **New Message** workspace: the audience and
+message remain editable when **Review Message** opens an adjacent preview.
+Changing recipients, the selected template, or the message invalidates the
+review immediately; the operator must review the new snapshot before opening
+WhatsApp. The existing confirmation, SQL consent/phone/scope revalidation,
+idempotent batch and manual handoff behavior are unchanged.
+
+**History** includes **Only my unfinished** for permitted senders; no second
+global unfinished-batches navigation button is required. **Settings** shows the
+usable WhatsApp channel and prepared-message management, not disabled future
+transport profiles. Its one WhatsApp control offers Use, Resume or Pause
+according to the current mode, and a separate number opt-out action remains
+available. No API/SMS/email sending is activated by these UI changes. History
+continues to distinguish operator-reported sends from actual delivery.
 
 ## Provider-neutral extension — schema 10 (committed source; publication separately gated)
 
