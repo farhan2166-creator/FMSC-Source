@@ -38,3 +38,29 @@ from code and SQL after restoring a clean schema-48 database. Migration 52 remov
 them; refuse other snapshots containing cancelled copies rather than reviving them. The normal flow uses Create, Save Changes before collection,
 Print, Mark Collected and Issue Again. See
 `Docs/Decisions/CERTIFICATE_CANCELLATION_REMOVED.md` for the rationale.
+
+
+# Regression tests must validate behavior, not incidental UI wording
+
+In active WinForms smoke/acceptance tests, assert the operation and its observable
+result (correct selected record, enabled/disabled permissions, saved state,
+readiness, counts, cancellation, navigation, no duplicate writes, and layout
+visibility). Do **not** gate an otherwise working release on an exact button
+caption, label phrase, status sentence, order of cosmetic cards, or historical
+screen wording. Use stable control identities, dialog accept/cancel roles,
+domain values and business state instead of selecting controls by display text
+when possible.
+
+When product copy changes, preserve the behavior test and update or remove only
+obsolete presentation-coupled checks. If a caption is part of an actual
+contract (e.g. mandatory legal/consent notice, safety warning, accessibility
+requirement, or an explicit owner-approved wording requirement), test that
+contract deliberately and document why it requires exact text. Do not silently
+relax those cases.
+
+Continue to fail releases for real defects in SQL migrations and compatibility,
+permission enforcement, finances, data integrity, admissions, cloud-backup
+recoverability, installer/updater recovery, publication exact-commit gates,
+consent, idempotency, and message delivery status. The audit script for legacy
+copy-coupled tests is advisory and must never substitute for these validations.
+See `Docs/BEHAVIORAL_UI_TEST_CONTRACTS.md`.
