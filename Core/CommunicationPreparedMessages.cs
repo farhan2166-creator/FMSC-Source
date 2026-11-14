@@ -13,7 +13,11 @@ internal static class CommunicationPreparedMessages
 {
     internal sealed record BuiltIn(string Name, string Purpose, string Body);
     internal sealed record Values(int RecordId, string RecordName,
-        string? AdmissionNumber, DateTime? AdmissionDate, decimal? Outstanding);
+        string? AdmissionNumber, DateTime? AdmissionDate, decimal? Outstanding)
+    {
+        internal string? FatherName { get; init; }
+        internal string? ClassName { get; init; }
+    }
     // Only in-scope, consented and still-active students can contribute to a
     // shared-number fee reminder. Family association is verified before
     // joining identities into one guardian-facing message.
@@ -33,7 +37,23 @@ internal static class CommunicationPreparedMessages
         new BuiltIn("Individual student notice", "Individual",
             "Dear parent/guardian of [StudentName], please contact the school office regarding an important notice."),
         new BuiltIn("School announcement", "Announcement",
-            "Dear parent/guardian, this is an announcement from the school. Please contact the school office for more information.")
+            "Dear parent/guardian, this is an announcement from the school. Please contact the school office for more information."),
+        new BuiltIn("Parent-teacher meeting request", "Individual",
+            "Dear parent/guardian of [StudentName], the school would like to arrange a parent-teacher meeting. Please contact the office to agree on a convenient date and time."),
+        new BuiltIn("Attendance follow-up", "Individual",
+            "Dear parent/guardian of [StudentName] (admission [AdmissionNumber]), please contact the school office to discuss the student's attendance."),
+        new BuiltIn("Admission documents follow-up", "Individual",
+            "Dear parent/guardian of [StudentName], please contact the school office about documents required for the admission record."),
+        new BuiltIn("Current class information", "Individual",
+            "Dear parent/guardian, [StudentName] (admission [AdmissionNumber]) is recorded in [ClassName]. Please contact the school office if the class information needs correction."),
+        new BuiltIn("Examination information", "Announcement",
+            "Dear parent/guardian, the school has an important examination or assessment notice. Please contact the school office for the confirmed schedule and instructions."),
+        new BuiltIn("Timetable update", "Announcement",
+            "Dear parent/guardian, there is an update regarding the school timetable. Please contact the school office for the current schedule."),
+        new BuiltIn("School schedule notice", "Announcement",
+            "Dear parent/guardian, the school has an important update regarding its operating schedule. Please contact the school office for details."),
+        new BuiltIn("Staff coordination notice", "Staff",
+            "Dear [RecipientName], please contact the school administration regarding a staff coordination update. Thank you.")
     };
 
     // These are deliberately limited, readable placeholders. No SQL, scripting,
@@ -44,18 +64,24 @@ internal static class CommunicationPreparedMessages
     internal static bool HasFields(string body) => Field.IsMatch(body);
 
     internal static Values FromPreview(CommunicationPreviewEntry entry)
-        => entry.PreparedValues ?? new(entry.RecordId, entry.RecordName, entry.AdmissionNumber,
-            entry.AdmissionDate, entry.Outstanding);
+        => entry.PreparedValues ?? new Values(entry.RecordId, entry.RecordName, entry.AdmissionNumber,
+            entry.AdmissionDate, entry.Outstanding)
+        {
+            FatherName = entry.FatherName,
+            ClassName = entry.ClassName
+        };
 
     internal static void ValidateFormat(string body, string? purpose = null)
     {
         if (string.IsNullOrWhiteSpace(body) || body.Length > 1600)
             throw new CommunicationValidationException("Write a message of up to 1600 characters.");
         string remaining = Field.Replace(body, match => match.Groups["key"].Value switch {
-            "StudentName" or "AdmissionNumber" or "AdmissionDate" => "",
+            "RecipientName" or "StudentName" or "AdmissionNumber" or "AdmissionDate" => "",
+            "FatherName" or "ClassName" when purpose != "Staff" => "",
+            "FatherName" or "ClassName" => throw new CommunicationValidationException("Student and class fields cannot be used for a staff message."),
             "OutstandingAmount" when purpose is null or "FeeReminder" => "",
             "OutstandingAmount" => throw new CommunicationValidationException("Use [OutstandingAmount] with an outstanding-fee reminder."),
-            _ => throw new CommunicationValidationException("Unsupported prepared field " + match.Value + ". Use [StudentName], [AdmissionNumber], [AdmissionDate] or [OutstandingAmount].")
+            _ => throw new CommunicationValidationException("Unsupported prepared field " + match.Value + ". Use [RecipientName], [StudentName], [FatherName], [ClassName], [AdmissionNumber], [AdmissionDate] or [OutstandingAmount].")
         });
         if (remaining.Contains('[') || remaining.Contains(']') || remaining.Contains("{{", StringComparison.Ordinal)
             || remaining.Contains("}}", StringComparison.Ordinal))
@@ -67,8 +93,14 @@ internal static class CommunicationPreparedMessages
         ValidateFormat(body);
         string rendered = Field.Replace(body, m => m.Groups["key"].Value switch
         {
-            "StudentName" => !string.IsNullOrWhiteSpace(values.RecordName)
+            "RecipientName" or "StudentName" => !string.IsNullOrWhiteSpace(values.RecordName)
                 ? values.RecordName.Trim() : "school record #" + values.RecordId.ToString(CultureInfo.InvariantCulture),
+            "FatherName" => !string.IsNullOrWhiteSpace(values.FatherName)
+                ? values.FatherName.Trim()
+                : throw new CommunicationValidationException("Father's name is missing for this student. Check the school record or remove [FatherName]."),
+            "ClassName" => !string.IsNullOrWhiteSpace(values.ClassName)
+                ? values.ClassName.Trim()
+                : throw new CommunicationValidationException("No current class is available for this student. Check the placement or remove [ClassName]."),
             "AdmissionNumber" => !string.IsNullOrWhiteSpace(values.AdmissionNumber)
                 ? values.AdmissionNumber.Trim() : values.RecordId.ToString(CultureInfo.InvariantCulture),
             "AdmissionDate" => values.AdmissionDate.HasValue
@@ -119,7 +151,14 @@ internal static class CommunicationPreparedMessages
         decimal total = students.Sum(s => s.Outstanding);
         DateTime? date = students[0].AdmissionDate;
         if (students.Any(student => student.AdmissionDate != date)) date = null;
-        return selected with { RecordName = names, AdmissionNumber = admissions, Outstanding = total, AdmissionDate = date };
+        // A single guardian number may represent siblings in different classes.
+        // Never attribute one child's class or father name to the whole family.
+        return selected with
+        {
+            RecordName = names, AdmissionNumber = admissions,
+            Outstanding = total, AdmissionDate = date,
+            FatherName = null, ClassName = null
+        };
     }
 
     // The identical classroom/campus/active-enrollment rules used by both
@@ -233,7 +272,8 @@ internal static class CommunicationPreparedMessages
             SELECT COALESCE(R.AdmissionId,R.StaffId) RecordId,
                 COALESCE(NULLIF(LTRIM(RTRIM(S.StudentName)),N''),
                          NULLIF(LTRIM(RTRIM(T.StaffName)),N''),N'') RecordName,
-                S.AdmissionNumber,S.AdmissionDate,
+                S.AdmissionNumber,S.AdmissionDate,S.FatherName,
+                CASE WHEN E.Status=N'Active' THEN ClassRecord.ClassName END AS ClassName,
                 F.Outstanding,@Audience AS Audience,@Body AS Body
             FROM msg.ManualHandoff H
             JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
@@ -243,6 +283,7 @@ internal static class CommunicationPreparedMessages
                 WHERE E.AdmissionId=S.AdmissionId
                 ORDER BY CASE WHEN E.Status=N'Active' THEN 0 ELSE 1 END,E.EnrollmentId DESC) E
             LEFT JOIN dbo.CampusClassSections CCS ON CCS.ClassSectionId=E.ClassSectionId
+            LEFT JOIN dbo.Classes ClassRecord ON ClassRecord.ClassId=CCS.ClassId
             OUTER APPLY (
                 SELECT SUM(dbo.GetFeeChargeBalance(C.BillingChargeId)) Outstanding
                 FROM dbo.BillingCharges C
@@ -285,7 +326,11 @@ internal static class CommunicationPreparedMessages
                 Convert.ToInt32(row["RecordId"]), Convert.ToString(row["RecordName"])),
             row.IsNull("AdmissionNumber") ? null : Convert.ToString(row["AdmissionNumber"]),
             row.IsNull("AdmissionDate") ? null : Convert.ToDateTime(row["AdmissionDate"]),
-            row.IsNull("Outstanding") ? null : Convert.ToDecimal(row["Outstanding"]));
+            row.IsNull("Outstanding") ? null : Convert.ToDecimal(row["Outstanding"]))
+        {
+            FatherName = row.IsNull("FatherName") ? null : Convert.ToString(row["FatherName"]),
+            ClassName = row.IsNull("ClassName") ? null : Convert.ToString(row["ClassName"])
+        };
         if (string.Equals(Convert.ToString(row["Audience"]), "OutstandingFees", StringComparison.Ordinal))
             selected = await ReadSharedFeeValuesAsync(recipientId, actor, selected, previewBatchId);
         return (selected, (string)row["Body"]);
