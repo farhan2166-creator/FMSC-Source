@@ -286,13 +286,25 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             }
             finally { fitting = false; }
         }
-        navigation.SizeChanged += (_, _) => FitNavigation();
-        navigation.Layout += (_, _) => FitNavigation();
-        // Paint runs after the flow engine has settled each wrap position.
-        navigation.Paint += (_, _) => FitNavigation();
-        SizeChanged += (_, _) => FitNavigation();
-        navigation.VisibleChanged += (_, _) => FitNavigation();
-        layout.SizeChanged += (_, _) => FitNavigation();
+        bool fitPending = false;
+        void RefitAfterLayout()
+        {
+            // WinForms raises resize/layout notifications before the flow
+            // children have finished wrapping. Re-evaluate once the current
+            // layout pass completes, using the final client width.
+            if (fitPending || layout.IsDisposed || !layout.IsHandleCreated) return;
+            fitPending = true;
+            layout.BeginInvoke(new Action(() =>
+            {
+                fitPending = false;
+                if (!layout.IsDisposed) FitNavigation();
+            }));
+        }
+        navigation.SizeChanged += (_, _) => RefitAfterLayout();
+        navigation.Layout += (_, _) => RefitAfterLayout();
+        SizeChanged += (_, _) => RefitAfterLayout();
+        navigation.VisibleChanged += (_, _) => RefitAfterLayout();
+        layout.SizeChanged += (_, _) => RefitAfterLayout();
         layout.HandleCreated += (_, _) => FitNavigation();
         foreach (Control button in navigation.Controls)
         {
