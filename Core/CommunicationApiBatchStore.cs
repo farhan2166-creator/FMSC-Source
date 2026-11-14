@@ -86,8 +86,7 @@ internal static class CommunicationApiBatchStore
             && e.RecordId==Convert.ToInt32(row["RecordId"]) && e.PhoneE164==Convert.ToString(row["PhoneE164"]));
         var reviewed=JsonSerializer.Deserialize<CommunicationReviewedContent.Reviewed[]>(Convert.ToString(row["ReviewJson"])!) ?? Array.Empty<CommunicationReviewedContent.Reviewed>();
         string body=Convert.ToString(row["Body"])!;
-        if(entry is null || !reviewed.Any(r=>r.Kind==entry.Kind && r.RecordId==entry.RecordId && r.Phone==entry.PhoneE164
-            && r.Hash==CommunicationReviewedContent.Signature(target,current,entry,body)))
+        if(entry is null || !reviewed.Any(r=>CommunicationReviewedContent.Matches(r,target,current,entry,body)))
             throw new CommunicationValidationException("Consent, contact, scope or message values changed. Prepare a new review; nothing was sent.");
         string payload=CommunicationPreparedMessages.Render(body,CommunicationPreparedMessages.FromPreview(entry));
         if(provider=="MetaCloud")

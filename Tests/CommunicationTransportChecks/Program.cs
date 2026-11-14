@@ -35,6 +35,10 @@ Check(reviewed!=CommunicationReviewedContent.ReviewJson(target,new Communication
 Check(reviewed!=CommunicationReviewedContent.ReviewJson(target,new CommunicationPreview(new[]{entry with {PreparedValues=values with {Outstanding=2200}},sibling}),"Due [OutstandingAmount]"),"Changed current balance invalidates review");
 Check(reviewed!=CommunicationReviewedContent.ReviewJson(target,new CommunicationPreview(new[]{entry with {PhoneE164="+923001234568"},sibling}),"Due [OutstandingAmount]"),"Changed destination invalidates review");
 Check(JsonSerializer.Deserialize<CommunicationReviewedContent.Reviewed[]>(reviewed)![0].Text=="Due 2,300.00","Saved review retains exact rendered content for history and resuming");
+var savedReview=JsonSerializer.Deserialize<CommunicationReviewedContent.Reviewed[]>(reviewed)![0];
+Check(CommunicationReviewedContent.Matches(savedReview,target,preview,entry,"Due [OutstandingAmount]")
+    && !CommunicationReviewedContent.Matches(savedReview with {Text="A different reviewed message"},target,preview,entry,"Due [OutstandingAmount]"),
+    "Dispatch refuses a saved preview whose text differs from the actual rendered message, even if its hash was retained");
 string approved="""{"data":[{"name":"fee_reminder","language":"en_US","status":"APPROVED","components":[{"type":"HEADER","format":"TEXT","text":"School"},{"type":"BODY","text":"Dear {{1}}, balance PKR {{2}}."},{"type":"FOOTER","text":"Thank you"}]},{"name":"draft","language":"en","status":"PENDING","components":[{"type":"BODY","text":"Draft"}]},{"name":"media","language":"en","status":"APPROVED","components":[{"type":"HEADER","format":"IMAGE"},{"type":"BODY","text":"Body"}]},{"name":"buttons","language":"en","status":"APPROVED","components":[{"type":"BODY","text":"Body"},{"type":"BUTTONS","buttons":[]}]}]}""";
 var handler=new Fake(async request=>{
     Check(request.RequestUri!.Host=="graph.facebook.com" && request.RequestUri.Scheme=="https","Only official fixed HTTPS host used");

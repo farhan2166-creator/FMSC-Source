@@ -21,6 +21,10 @@ internal static class CommunicationReviewedContent
                     .Where(m=>m.EligiblePhone==e.PhoneE164).OrderBy(m=>m.RecordId)
                     .Select(m=>new FeeMember(m.RecordId,m.Outstanding ?? 0)).ToArray())).ToArray());
     }
+    internal static bool Matches(Reviewed reviewed,CommunicationTarget target,CommunicationPreview preview,
+        CommunicationPreviewEntry entry,string body) => reviewed.Kind==entry.Kind && reviewed.RecordId==entry.RecordId
+        && reviewed.Phone==entry.PhoneE164 && reviewed.Hash==Signature(target,preview,entry,body)
+        && reviewed.Text==CommunicationPreparedMessages.Render(body,CommunicationPreparedMessages.FromPreview(entry));
     internal static string Signature(CommunicationTarget target,CommunicationPreview preview,
         CommunicationPreviewEntry entry,string body)
     {
