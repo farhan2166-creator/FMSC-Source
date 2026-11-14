@@ -27,14 +27,13 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     {
         Dock=DockStyle.Fill,AutoEllipsis=true,
         TextAlign=ContentAlignment.TopLeft,Font=AppTheme.NormalFont,
-        Text="Free WhatsApp Business mode: FMSC opens ONE prepared chat. "
-           +"You must check the school account and press Send in WhatsApp yourself. "
-           +"Marking 'I sent it' is your own report, not proof of delivery."
+        Text="Check the school WhatsApp account and press Send there. "
+           +"FMSC only records your report; it cannot verify delivery."
     };
     private readonly ModernTextBox preparedMessage = HumanUi.TextBox(true, 1600);
     private readonly ModernButton open=new()
     {
-        Text="Open WhatsApp Chat",ThemeRole="Primary",
+        Text="Open WhatsApp",ThemeRole="Primary",
         Width=AppScale.Scale(180),Height=AppMetrics.ButtonHeight
     };
     private readonly ModernButton reported=new()
@@ -49,10 +48,11 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     };
     private readonly ModernButton close=new()
     {
-        Text="Close / Resume Later",ThemeRole="Secondary",
+        Text="Finish Later",ThemeRole="Secondary",
         Width=AppScale.Scale(180),Height=AppMetrics.ButtonHeight
     };
     private CommunicationManualRecipient? current;
+    private int remainingAfterCurrent;
     private bool busy;
     private FileStream? batchLease;
     private readonly HashSet<long> failedOpen = new();
@@ -89,7 +89,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         FormBorderStyle=FormBorderStyle.FixedDialog;
         MaximizeBox=MinimizeBox=false;
         ShowInTaskbar=false;
-        ClientSize=new Size(AppScale.Scale(730),AppScale.Scale(440));
+        ClientSize=new Size(AppScale.Scale(730),AppScale.Scale(410));
         MinimumSize=ClientSize;
         BackColor=AppTheme.PageBackground;
 
@@ -101,7 +101,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(45)));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(55)));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(72)));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(48)));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(60)));
         layout.Controls.Add(progress,0,0);
@@ -142,8 +142,9 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         bool canReport = current?.State=="Opened" && !failedOpen.Contains(current.RecipientId);
         reported.Enabled=allowed && canReport;
         reported.Text=canReport && !current!.ShellHandoffRecorded && operations.ConfirmRecoveredSend is not null
-            ? "Check & Report" : "I Sent It";
+            ? "Check & Report" : remainingAfterCurrent > 0 ? "I Sent It · Next" : "I Sent It";
         skip.Enabled=allowed && (current?.State is "Pending" or "Opened");
+        skip.Text=remainingAfterCurrent > 0 ? "Skip · Next" : "Skip";
         close.Enabled=!busy;
     }
 
@@ -164,7 +165,11 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             current=nextRecipient;
             int reportedCount=entries.Count(e=>e.State=="ReportedSent");
             int skippedCount=entries.Count(e=>e.State is "Skipped" or "Excluded");
-            progress.Text=$"Manual WhatsApp · {reportedCount} operator-reported · {skippedCount} skipped/excluded · {entries.Count} total";
+            int remaining=entries.Count(e=>e.State is "Pending" or "Opened");
+            remainingAfterCurrent=Math.Max(0,remaining-(nextRecipient is null ? 0 : 1));
+            progress.Text=nextRecipient is null
+                ? $"All done · {reportedCount} reported sent · {skippedCount} skipped"
+                : $"Chat {entries.Count-remaining+1} of {entries.Count} · {reportedCount} reported sent · {skippedCount} skipped";
             destination.Text=current is null
                 ? "No unprocessed recipients remain. You can close this window."
                 : $"{current.RecordName}   •••• {current.LastFour}   ({DisplayState(current)})";
@@ -233,6 +238,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         if (state=="ReportedSent" && (current.State!="Opened" || failedOpen.Contains(current.RecipientId)
             || (recoveredReport && !operations.ConfirmRecoveredSend!()))) return;
         long id=current.RecipientId;
+        bool recorded=false;
         busy=true;
         ApplyAvailability();
         try
@@ -243,6 +249,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
                 await operations.MarkRecovered(id);
             else
                 await operations.Mark(id,state);
+            recorded=true;
         }
         catch(Exception ex){if(!IsDisposed)Warn(ex.Message);}
         finally
@@ -251,7 +258,14 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             if(!IsDisposed)
             {
                 await RefreshAsync();
-                if (openFirstChat && current is null) Close();
+                // "I Sent It · Next" and "Skip · Next" explicitly authorize
+                // opening the next reviewed contact. This never marks the next
+                // message sent or bypasses SQL consent / destination rechecks.
+                // Do not reopen a previously Opened or uncertain chat.
+                if (recorded && current?.State=="Pending"
+                    && state is ("ReportedSent" or "Skipped"))
+                    await OpenAsync();
+                if (!IsDisposed && openFirstChat && current is null) Close();
             }
         }
     }
