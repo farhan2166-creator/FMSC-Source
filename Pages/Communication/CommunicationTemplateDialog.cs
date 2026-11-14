@@ -37,7 +37,7 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
         FormBorderStyle=FormBorderStyle.FixedDialog;
         MaximizeBox=MinimizeBox=false;
         ShowInTaskbar=false;
-        ClientSize=new Size(AppScale.Scale(570),AppScale.Scale(525));
+        ClientSize=new Size(AppScale.Scale(730),AppScale.Scale(600));
         BackColor=AppTheme.PageBackground;
         channel.Items.AddRange(new object[] {
             new ChannelChoice("Sms", "SMS"),
@@ -94,9 +94,12 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
                 body.Focus();
                 body.SelectionStart = start + token.Length;
             });
+            AddField(Purpose == "Staff" ? "Staff member name" : "Recipient name", "[RecipientName]");
             if (Purpose != "Staff")
             {
                 AddField("Student name", "[StudentName]");
+                AddField("Father name", "[FatherName]");
+                AddField("Current class", "[ClassName]");
                 AddField("Admission number", "[AdmissionNumber]");
                 AddField("Admission date", "[AdmissionDate]");
             }

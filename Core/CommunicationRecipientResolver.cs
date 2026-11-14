@@ -30,6 +30,8 @@ internal sealed record CommunicationPreviewEntry(
     string? AdmissionNumber = null, DateTime? AdmissionDate = null)
 {
     internal bool Included => Reason == "Included";
+    internal string? FatherName { get; init; }
+    internal string? ClassName { get; init; }
     internal int? FamilyId { get; init; }
     // Retain a destination only for eligible duplicate-family aggregation.
     // Declined, unrecorded, invalid and suppressed rows never expose one.
@@ -64,7 +66,8 @@ internal static class CommunicationRecipientResolver
         IF @Audience=N'OutstandingFees'
             EXEC dbo.RequirePermission @UserId, N'Fees.View';
         SELECT S.AdmissionId RecordId, S.StudentName RecordName,
-               S.AdmissionNumber, S.AdmissionDate,
+               S.AdmissionNumber, S.AdmissionDate, S.FatherName,
+               CASE WHEN E.Status=N'Active' THEN ClassRecord.ClassName END ClassName,
                S.ContactNumber, S.SchoolMessageConsent,
                CONVERT(varchar(8),'Student') Kind, B.Outstanding, FM.FamilyId
         FROM dbo.Students S
@@ -76,6 +79,7 @@ internal static class CommunicationRecipientResolver
                      E.EnrollmentId DESC
         ) E
         LEFT JOIN dbo.CampusClassSections CCS ON CCS.ClassSectionId=E.ClassSectionId
+        LEFT JOIN dbo.Classes ClassRecord ON ClassRecord.ClassId=CCS.ClassId
         OUTER APPLY (
             SELECT SUM(dbo.GetFeeChargeBalance(BC.BillingChargeId)) Outstanding
             FROM dbo.BillingCharges BC
@@ -111,6 +115,8 @@ internal static class CommunicationRecipientResolver
         SELECT StaffId RecordId, StaffName RecordName, ContactNumber,
                CONVERT(nvarchar(60),NULL) AdmissionNumber,
                CONVERT(datetime2,NULL) AdmissionDate,
+               CONVERT(nvarchar(500),NULL) FatherName,
+               CONVERT(nvarchar(500),NULL) ClassName,
                CONVERT(bit,1) SchoolMessageConsent,
                CONVERT(varchar(8),'Staff') Kind, CONVERT(decimal(19,2),NULL) Outstanding
         FROM dbo.Staff WHERE StaffId=@StaffId AND Status=N'Active'
@@ -191,6 +197,10 @@ internal static class CommunicationRecipientResolver
             DateTime? admissionDate = candidates.Columns.Contains("AdmissionDate")
                 && !row.IsNull("AdmissionDate")
                     ? Convert.ToDateTime(row["AdmissionDate"]) : null;
+            string? fatherName = candidates.Columns.Contains("FatherName") && !row.IsNull("FatherName")
+                ? Convert.ToString(row["FatherName"]) : null;
+            string? className = candidates.Columns.Contains("ClassName") && !row.IsNull("ClassName")
+                ? Convert.ToString(row["ClassName"]) : null;
             string kind = Convert.ToString(row["Kind"]) ?? "Student";
             bool? consent = row.IsNull("SchoolMessageConsent")
                 ? null : Convert.ToBoolean(row["SchoolMessageConsent"]);
@@ -208,6 +218,8 @@ internal static class CommunicationRecipientResolver
                 reason == "Included" ? number : null, reason, balance,
                 admissionNumber, admissionDate) {
                 EligiblePhone = reason is "Included" or "Duplicate destination" ? number : null,
+                FatherName = reason == "Included" ? fatherName : null,
+                ClassName = reason == "Included" ? className : null,
                 FamilyId = candidates.Columns.Contains("FamilyId") && !row.IsNull("FamilyId")
                     ? Convert.ToInt32(row["FamilyId"]) : null
             });

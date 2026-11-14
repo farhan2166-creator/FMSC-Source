@@ -29,6 +29,33 @@ internal static partial class Program
             Check(missingTargetRefused, "An incomplete audience gives actionable selection guidance rather than an unexpected-error message");
             string unicode = "اطلاع & 'notice'\n[StudentName]";
             string rendered = CommunicationPreparedMessages.Render(unicode, new(42, "Synthetic child", "42", DateTime.Today, 250));
+            // Prepared fields are resolved from the same scoped preview as the live
+            // handoff, not from an unrestricted student details query.
+            var enriched = new CommunicationPreviewEntry(42, "Synthetic child", "Student",
+                "+923001234567", "Included", null, "42", DateTime.Today)
+            {
+                FatherName = "Synthetic father",
+                ClassName = "Grade 5"
+            };
+            string enrichedBody = CommunicationPreparedMessages.Render(
+                "Dear [RecipientName], father [FatherName], class [ClassName]",
+                CommunicationPreparedMessages.FromPreview(enriched));
+            Check(enrichedBody.Contains("Synthetic child")
+                && enrichedBody.Contains("Synthetic father") && enrichedBody.Contains("Grade 5"),
+                "Authorized student and current-class fields resolve into the reviewed message");
+            bool missingClassRejected = false;
+            try
+            {
+                CommunicationPreparedMessages.Render("Class [ClassName]",
+                    new CommunicationPreparedMessages.Values(42, "Synthetic child", "42", null, null));
+            }
+            catch (CommunicationValidationException) { missingClassRejected = true; }
+            Check(missingClassRejected,
+                "Missing class data prevents an inaccurate prepared message");
+            bool staffFieldRejected = false;
+            try { CommunicationPreparedMessages.ValidateFormat("[FatherName]", "Staff"); }
+            catch (CommunicationValidationException) { staffFieldRejected = true; }
+            Check(staffFieldRejected, "Staff messages cannot use student-family fields");
             var link = CommunicationManualHandoffStore.BuildClickToChatLink("+923001234567", rendered);
             Check(Uri.UnescapeDataString(link.Query).Contains(rendered) && link.Host == "wa.me", "Unicode, quotes, ampersands and newlines survive official WhatsApp handoff encoding");
             using (var template = new CommunicationTemplateDialog("Saved email template", "Email", "Announcement", "School notice"))
