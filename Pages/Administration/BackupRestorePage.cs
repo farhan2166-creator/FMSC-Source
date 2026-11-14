@@ -26,7 +26,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     private TimeSpan transferUpdatedAt;
     ModernButton backupNowButton = null!;
     private readonly LinkLabel toggleTechnicalDetails = new() {
-        Dock = DockStyle.Top, Height = AppScale.Scale(24),
+        AutoSize = true, Visible = false,
         Text = "Show technical details", LinkColor = AppTheme.Primary,
         TextAlign = ContentAlignment.MiddleLeft
     };
@@ -37,9 +37,10 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     readonly ModernButton retryPendingButton;
     private readonly ModernButton refreshListsButton;
     private readonly Label historyCount = new() {
-        Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight,
-        ForeColor = AppTheme.MutedText, AutoEllipsis = true
+        Anchor = AnchorStyles.Right, AutoSize = true, ForeColor = AppTheme.MutedText
     };
+    private readonly RowStyle sqlHistoryRow = new(SizeType.Absolute, 0);
+    private readonly Control sqlHistorySection;
     private readonly TabControl tabs = new() { Dock = DockStyle.Fill };
     private readonly TabPage backupTab = new("Backup / Restore") { BackColor = AppTheme.Surface };
     ModernButton? cloudSettingsButton;
@@ -242,25 +243,25 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         activityLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.PageActionBarHeight));
         activityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         activityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
+        activityLayout.RowStyles.Add(sqlHistoryRow);
         activityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         ConfigureActivityGrids();
+        sqlHistorySection = ActivitySection("SQL backup and restore records", Grid);
+        sqlHistorySection.Visible = false;
         var activityLinks = new FlowLayoutPanel {
             Dock = DockStyle.Fill, AutoSize = true, Margin = Padding.Empty,
             Padding = new Padding(0, AppMetrics.SpacingXs, 0, AppMetrics.SpacingXs)
         };
         activityLinks.Controls.Add(viewCloudStatus);
-        toggleTechnicalDetails.Dock = DockStyle.None;
-        toggleTechnicalDetails.AutoSize = true;
         activityLinks.Controls.Add(toggleTechnicalDetails);
         var viewSqlRecord = new LinkLabel {
             Text = "Selected SQL record details", AutoSize = true,
-            LinkColor = AppTheme.Primary, Enabled = false
+            LinkColor = AppTheme.Primary, Visible = false
         };
         viewSqlRecord.LinkClicked += (_, _) => ShowSelectedSqlRecord();
         Grid.SelectionChanged += (_, _) => {
-            viewSqlRecord.Enabled = SelectedSqlRecord is not null;
+            viewSqlRecord.Visible = SelectedSqlRecord is not null;
             ApplyHistoryDependentEnablement();
         };
         activityLinks.Controls.Add(viewSqlRecord);
@@ -269,18 +270,27 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         };
         historyToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         historyToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        historyCount.AutoSize = true;
+        historyToolbar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         historyToolbar.Controls.Add(CreateCompactActionRow(refreshHistoryButton, locateFileButton), 0, 0);
         historyToolbar.Controls.Add(historyCount, 1, 0);
         activityLayout.Controls.Add(historyToolbar, 0, 0);
         activityLayout.Controls.Add(activityLinks, 0, 1);
         activityLayout.Controls.Add(technicalDetails, 0, 2);
         activityLayout.Controls.Add(ActivitySection("Recent activity", recordedCloudActivity), 0, 3);
-        activityLayout.Controls.Add(ActivitySection("SQL backup and restore records", Grid), 0, 4);
+        activityLayout.Controls.Add(sqlHistorySection, 0, 4);
         toggleTechnicalDetails.LinkClicked += (_, _) => {
             technicalDetails.Visible = !technicalDetails.Visible;
             toggleTechnicalDetails.Text = technicalDetails.Visible
                 ? "Hide technical details" : "Show technical details";
+        };
+        technicalDetails.TextChanged += (_, _) => {
+            bool hasDetails = technicalDetails.TextLength > 0;
+            toggleTechnicalDetails.Visible = hasDetails;
+            if (!hasDetails)
+            {
+                technicalDetails.Hide();
+                toggleTechnicalDetails.Text = "Show technical details";
+            }
         };
         activityTab.Controls.Add(activityLayout);
         if (!canRestore)
@@ -1500,7 +1510,13 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 Grid.DataSource = history;
                 ReportGridStyler.Apply(Grid, Accent);
                 ClearGridSelection(Grid);
-                historyCount.Text = $"{history.Rows.Count:N0} SQL record(s)";
+                bool hasSqlHistory = history.Rows.Count > 0;
+                historyCount.Text = hasSqlHistory
+                    ? $"{history.Rows.Count:N0} SQL record(s)"
+                    : "No SQL backup or restore records";
+                sqlHistoryRow.SizeType = hasSqlHistory ? SizeType.Percent : SizeType.Absolute;
+                sqlHistoryRow.Height = hasSqlHistory ? 35 : 0;
+                sqlHistorySection.Visible = hasSqlHistory;
                 historyLoadedLatest = true;
                 RefreshRecordedActivity();
                 if (pruned.removed > 0)
