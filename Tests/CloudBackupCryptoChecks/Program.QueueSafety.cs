@@ -18,15 +18,16 @@ internal static class CloudQueueSafetyChecks
             "Completed provider was marked superseded.");
         Require(CloudBackupQueuePolicy.MaySupersede(oldest, newest, true, true, true, false),
             "Verified newer provider was unable to safely retire outdated pending upload.");
-        Require(!CloudBackupQueuePolicy.CanRelease(false, false, false, false,
-            false, false, false, false),
-            "Queue discarded its sole encrypted copy after both clouds were disabled.");
-        Require(!CloudBackupQueuePolicy.CanRelease(true, false, false, true,
-            true, false, false, false),
-            "Package still required by the other provider was discarded.");
-        Require(CloudBackupQueuePolicy.CanRelease(true, false, false, true,
-            true, true, false, false),
-            "Completed or safely superseded deliveries were never released.");
+        Require(!CloudBackupQueuePolicy.CanRelease(false, false, false, false),
+            "A disabled Dropbox destination must not erase the only encrypted ciphertext.");
+        Require(!CloudBackupQueuePolicy.CanRelease(true, false, false, false),
+            "Unverified Dropbox ciphertext was discarded without recovery proof.");
+        Require(!CloudBackupQueuePolicy.CanRelease(true, false, true, false),
+            "A pruned marker alone must not delete unverified pending ciphertext.");
+        Require(CloudBackupQueuePolicy.CanRelease(true, false, false, true),
+            "A safely superseded Dropbox queue entry was not released.");
+        Require(CloudBackupQueuePolicy.CanRelease(true, true, false, false),
+            "A recovery-tested Dropbox package was not released.");
         Require(CloudBackupQueuePolicy.ShouldPauseCreation(10_000, 10_000, 50_000_000_000, 100),
             "Full encrypted queue did not block additional backup creation.");
         Require(CloudBackupQueuePolicy.ShouldPauseCreation(0, 100_000_000_000,
