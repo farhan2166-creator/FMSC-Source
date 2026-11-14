@@ -135,10 +135,10 @@ internal static partial class Program
             BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { false }, null)!;
         var audience = (ModernComboBox)type.GetField("audience", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var audienceOptions = audience.Items.Cast<object>().Select(item => item.ToString()).ToArray();
-        Check(audience.SelectedItem?.ToString() == "Entire school"
-            && audienceOptions.Contains("Campus") && audienceOptions.Contains("Class")
+        Check(audience.SelectedIndex == (int)CommunicationAudience.Class
+            && audienceOptions.Length == Enum.GetValues<CommunicationAudience>().Length
             && audienceOptions.Distinct().Count() == audienceOptions.Length,
-            "Communication defaults to whole-school audience and offers distinct bulk campus/class targets");
+            "New communication starts with a scoped class, while all supported audience choices remain available");
         var send = (ModernButton)type.GetField("confirm", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var templates = (ModernComboBox)type.GetField("templateChoice",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
@@ -308,28 +308,31 @@ internal static partial class Program
         var classPanel = (Control)type.GetField("classField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var studentPanel = (Control)type.GetField("studentField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var staffPanel = (Control)type.GetField("staffField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        audience.SelectedIndex = (int)CommunicationAudience.School;
+        Application.DoEvents();
         Check(!campusPanel.Visible && !classPanel.Visible && !studentPanel.Visible && !staffPanel.Visible,
             "Entire-school audience needs no extra pickers");
-        void ChooseAudience(string caption)
+        void ChooseAudience(CommunicationAudience choice)
         {
-            int index = Array.IndexOf(audienceOptions, caption);
-            Check(index >= 0, "Communication includes the " + caption + " audience");
-            audience.SelectedIndex = index;
+            audience.SelectedIndex = (int)choice;
             Application.DoEvents();
+            var selected = (CommunicationTarget)type.GetMethod("CurrentTarget",
+                BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, null)!;
+            Check(selected.Audience == choice, "Audience choice maps to its intended target: " + choice);
         }
-        ChooseAudience("Campus");
+        ChooseAudience(CommunicationAudience.Campus);
         Check(campusPanel.Visible && !classPanel.Visible && campusPanel.Top > audienceField.Top,
             "Campus audience visibly adds the campus selector below Send to");
-        ChooseAudience("Class");
+        ChooseAudience(CommunicationAudience.Class);
         Check(campusPanel.Visible && classPanel.Visible && classPanel.Top > campusPanel.Top,
             "Class audience visibly adds campus and class selectors in order");
-        ChooseAudience("One student");
+        ChooseAudience(CommunicationAudience.Student);
         Check(studentPanel.Visible && !campusPanel.Visible && !classPanel.Visible,
             "Individual audience displays the existing student picker");
-        ChooseAudience("One staff member");
+        ChooseAudience(CommunicationAudience.Staff);
         Check(staffPanel.Visible && !studentPanel.Visible,
             "Staff audience displays the existing staff picker");
-        ChooseAudience("Entire school");
+        ChooseAudience(CommunicationAudience.School);
         Check(audience.Visible && !campusPanel.Visible && !classPanel.Visible
             && !studentPanel.Visible && !staffPanel.Visible,
             "Switching back to entire school keeps the selector visible and collapses optional fields");
