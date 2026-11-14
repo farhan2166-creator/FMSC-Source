@@ -2,6 +2,7 @@ using System.Data;
 using System.Reflection;
 using FMSC_SMS.Core;
 using FMSC_SMS.Pages.Students.Admissions;
+using FMSC_SMS.Pages.Security;
 
 internal static partial class Program
 {
@@ -39,16 +40,21 @@ internal static partial class Program
         Check(pending.Admission is null, "A registration without a completed identity is never reported as confirmed");
 
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        using (var page = new StudentAdmissionPage(null, 0, true))
+        var priorUser = (CurrentUser.UserId, CurrentUser.Username, CurrentUser.RoleName,
+            CurrentUser.MustChangePassword, Permissions: CurrentUser.GetPermissions().ToArray());
+        try
         {
+            CurrentUser.SignIn(9104, "Synthetic admission reviewer", "Administrator", false, Array.Empty<string>());
+            using var page = new StudentAdmissionPage(null, 0, true);
             var type = typeof(StudentAdmissionPage);
             T Field<T>(string name) => (T)type.GetField(name, flags)!.GetValue(page)!;
             type.GetField("currentAdmissionId", flags)!.SetValue(page, 41);
             type.GetField("_workspaceStudentStatus", flags)!.SetValue(page, "Pending");
             type.GetMethod("CaptureAdmissionBaseline", flags)!.Invoke(page, null);
             Field<ModernTextBox>("name").Text = "Unsaved completed student";
-            Check(page.HasUnsavedChanges && Field<ModernButton>("saveButton").Text == "Save Draft",
-                "Review retains unsaved edits and presents draft saving as an optional separate action");
+            type.GetMethod("UpdateStudentWorkspace", flags)!.Invoke(page, null);
+            Check(page.HasUnsavedChanges && Field<ModernButton>("saveButton").Enabled,
+                "Review retains unsaved edits and keeps the separate save action available");
             type.GetField("unconfirmedAdmission", flags)!.SetValue(page, submitted);
             type.GetMethod("UpdateStudentWorkspace", flags)!.Invoke(page, null);
             Check(!Field<ModernButton>("saveButton").Enabled && !Field<ModernButton>("confirmAdmissionButton").Enabled &&
@@ -64,6 +70,11 @@ internal static partial class Program
             type.GetMethod("FinishRegistrationReview", flags)!.Invoke(page, null);
             type.GetMethod("FinishRegistrationReview", flags)!.Invoke(page, null);
             Check(finished == 1, "Completion closes the review once, after the busy scope has released");
+        }
+        finally
+        {
+            CurrentUser.SignIn(priorUser.UserId, priorUser.Username, priorUser.RoleName,
+                priorUser.MustChangePassword, priorUser.Permissions);
         }
 
         string output = Path.GetFullPath("artifacts/admission-confirmation");

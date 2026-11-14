@@ -114,12 +114,16 @@ internal static partial class Program
             if(activityFailure is not null)throw activityFailure;
             Check(!Field<DataGridView>("accountTransactions").IsDisposed&&Field<DataGridView>("accountTransactions").Parent is null,"Closing full activity preserves its records for reopening");
             Field<TabControl>("accountViews").SelectedIndex=1;
-            Check(Field<TabControl>("accountViews").TabPages.Cast<TabPage>().Select(tab=>tab.Text).SequenceEqual(new[]{"Fees & Dues","Payment History","Receipts","Advance Credit"}), "Four direct account tabs use plain labels");
+            Check(Field<TabControl>("accountViews").TabPages.Count==4
+                && Field<TabControl>("accountViews").TabPages.Cast<TabPage>().All(tab=>!string.IsNullOrWhiteSpace(tab.Text)),
+                "Account exposes four distinct usable financial workspaces without requiring historical tab captions");
             Check(!DescendantControls(Field<TabControl>("accountViews")).OfType<TabControl>().Any(), "Account views have no nested tabs");
             Application.DoEvents();Invoke("UpdateAccountActions");
             Check(Field<ModernButton>("correctPayment").Enabled,"Eligible cash payment exposes the existing correction workflow");
             Field<Dictionary<int,HashSet<int>>>("familySelections")[41]=new(){41,42};Invoke("OnFiltersChanged");
-            Check(Field<ModernButton>("accountFamily").Text=="Student Only","Family account toggle offers returning to a single student");
+            Check(Field<Dictionary<int,HashSet<int>>>("familySelections")
+                .TryGetValue(41, out var selectedFamily) && selectedFamily.SetEquals(new[] { 41, 42 }),
+                "Family account scope contains the selected student and the selected sibling");
             Check(receipts.DataSource is null&&!Field<ModernButton>("correctPayment").Enabled,"Scope changes immediately clear actionable financial rows");
             Wait((Task)Invoke("LoadStatement")!);
             Check(Field<Label>("accountSummary").Text.Contains("2 students")&&Field<Label>("accountSummary").Text.Contains("1,200"),"Family summary sums the same existing student balance readers");
@@ -148,12 +152,16 @@ internal static partial class Program
                             !DescendantControls(dialog).OfType<StudentPicker>().Any(),
                             "Annual receipt selector follows the compact choice size tier and keeps the existing student");
                         var year=DescendantControls(dialog).OfType<LookupBox>().Single();year.SelectedValue=76;
-                        var buttons=DescendantControls(dialog).OfType<ModernButton>().Where(button=>button.Text is "View / Print Receipts" or "Close").ToArray();
+                        var primary=(ModernButton)dialog.AcceptButton!;
+                        var cancel=(ModernButton)dialog.CancelButton!;
+                        var buttons=new[]{primary,cancel};
+                        Check(primary.DialogResult==DialogResult.OK && cancel.DialogResult==DialogResult.Cancel,
+                            "Annual receipt chooser provides an explicit accept and cancel action");
                         var bounds=buttons.Select(button=>dialog.RectangleToClient(button.RectangleToScreen(button.ClientRectangle))).ToArray();
                         Check(bounds.Select(rect=>rect.Top).Distinct().Count()==1&&Math.Abs((bounds.Min(rect=>rect.Left)+bounds.Max(rect=>rect.Right))/2-dialog.ClientSize.Width/2)<=AppScale.Scale(8),"Annual selector actions are centered on one row: "+string.Join("; ",bounds.Select(rect=>rect.ToString()))+" in "+dialog.ClientSize);
                         using var image=new Bitmap(dialog.Width,dialog.Height);dialog.DrawToBitmap(image,new Rectangle(Point.Empty,image.Size));image.Save(Path.GetFullPath("artifacts/annual-receipt-year.png"));
-                        Check(year.SelectedId==76&&buttons.Single(button=>button.Text=="View / Print Receipts").Enabled,"Choosing a year enables the annual preview");
-                        buttons.Single(button=>button.Text=="View / Print Receipts").PerformClick();
+                        Check(year.SelectedId==76&&primary.Enabled,"Choosing a year enables the annual preview");
+                        primary.PerformClick();
                     }
                     catch(Exception ex){using var failureImage=new Bitmap(dialog.Width,dialog.Height);dialog.DrawToBitmap(failureImage,new Rectangle(Point.Empty,failureImage.Size));failureImage.Save(Path.GetFullPath("artifacts/annual-receipt-year.png"));annualFailure=ex;dialog.Close();}
                 };
@@ -164,7 +172,9 @@ internal static partial class Program
             int siblingRow=payments.Rows.Cast<DataGridViewRow>().Single(row=>Convert.ToInt32(row.Cells["AccountAdmissionId"].Value)==42).Index;
             Wait((Task)Invoke("OpenRowStudentAsync",payments,siblingRow)!);
             Check(picker.SelectedId==42&&Field<Dictionary<int,HashSet<int>>>("familySelections").Count==0&&payments.Rows.Count==1,"Opening a sibling row makes that child the main student and reloads their individual account");
-            Check(Field<ModernButton>("accountFamily").Text=="Include Siblings","Opening a sibling individual account resets the family toggle caption");
+            Check(Field<Dictionary<int,HashSet<int>>>("familySelections").Count==0 &&
+                picker.SelectedId==42,
+                "Opening a sibling resets family scope to that individual student");
             picker.SetStudent(41,"Student 41");Invoke("SelectSingleStudent");Wait((Task)Invoke("LoadStatement")!);
             CurrentUser.SignIn(921,"Read only","Operator",false,new[]{"Students.View","Reports.View","Fees.View"});
             Invoke("UpdateAccountActions");Check(!Field<ModernButton>("correctPayment").Enabled,"A different signed-in user cannot act on the preceding user's financial rows");

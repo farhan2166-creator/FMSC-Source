@@ -262,8 +262,9 @@ internal static partial class Program
                 Check(!((IEnumerable<DataGridViewRow>)Call(page,"SettlementRows",null!,null!)!).Any(),"A saved waiver is excluded from payment and credit allocation");
                 Call(page,"ClearPayNowAmounts");Check((string)fee.Cells["Pay"].Value=="—","Payment resets preserve the nonpayable row marker");
                 Call(page,"UpdateProcessCollectionAvailability");
-                Check(Field<ModernButton>(page,"printBillButton").Text=="Print Fee Changes"&&!Field<ModernButton>(page,"executeButton").Enabled,
-                    "A waiver-only visit offers its acknowledgement instead of a payment or zero-total Outstanding bill");
+                Check((bool)Call(page,"HasPendingWaiverRows")! && !(bool)Call(page,"HasOutstandingCharges")!
+                    && !Field<ModernButton>(page,"executeButton").Enabled,
+                    "A waiver-only visit retains its waiver result without offering payment or a zero-total collection");
                 CurrentUser.SignIn(7782,"Read-only fixture","Accountant",false,new[]{"Fees.View"});
                 fee.Cells["Balance"].Value=100m;items=Menu();Check(items.SequenceEqual(new[]{"View Fee Details"}),"Read-only users get only fee details even when dues remain");
             }

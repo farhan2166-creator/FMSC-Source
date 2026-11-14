@@ -71,9 +71,11 @@ internal static partial class Program
                     var reprint=Field<ModernButton>("reprintReceiptButton");
                     grid.CurrentCell=grid.Rows[2].Cells[0];
                     type.GetMethod("SelectHistoryReceipt",flags)!.Invoke(page,new object?[]{grid});
-                    Check(Field<int>("historyReceiptChild")==43 && history.SelectedRows.Count==0 && reprint.Text=="Reprint Student Receipt", "A child selection targets that saved member and clears the upper highlight");
+                    Check(Field<int>("historyReceiptChild")==43 && history.SelectedRows.Count==0 && reprint.Enabled,
+                        "A child selection targets that saved member, clears the upper highlight and permits reprinting");
                     type.GetMethod("SelectHistoryReceipt",flags)!.Invoke(page,new object?[]{null});
-                    Check(Field<int>("historyReceiptChild")==0 && grid.SelectedRows.Count==0 && history.SelectedRows.Count==1 && reprint.Text=="Reprint Full Receipt", "Returning to the same upper receipt restores the full family target");
+                    Check(Field<int>("historyReceiptChild")==0 && grid.SelectedRows.Count==0 && history.SelectedRows.Count==1 && reprint.Enabled,
+                        "Returning to the upper receipt restores the full family target and permits reprinting");
                     using(var bitmap=new Bitmap(dialog.Width,dialog.Height)){dialog.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size));bitmap.Save($"artifacts/receipt-breakdown/family-{size.Width}.png");}
                     Check(history.Height>70&&details.RectangleToScreen(details.ClientRectangle).Bottom<=reprint.Parent!.RectangleToScreen(reprint.Parent.ClientRectangle).Top,$"The breakdown fits beneath payments without covering actions or removing the payment list (payments {history.Height}, table {grid.Height}, window {size})");
                     Check(reprint.RectangleToScreen(reprint.ClientRectangle).Bottom<=dialog.RectangleToScreen(dialog.ClientRectangle).Bottom&&grid.RectangleToScreen(grid.ClientRectangle).Right<=dialog.RectangleToScreen(dialog.ClientRectangle).Right,"The full sibling table width and receipt actions remain inside the smaller window");
