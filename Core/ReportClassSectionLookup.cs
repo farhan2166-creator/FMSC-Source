@@ -27,8 +27,7 @@ internal static class ReportClassSectionLookup
             ORDER BY CMP.CampusName, C.ClassName, S.SectionName, S.SectionId;
             """;
         return LookupDataCache.GetAsync("ReportClassSectionLookup", parameters,
-            () => Task.Run(() => DatabaseHelper.QuerySql(sql,
-                parameters.Select(parameter => (SqlParameter)((ICloneable)parameter).Clone()).ToArray())),
+            commandParameters => Task.Run(() => DatabaseHelper.QuerySql(sql, commandParameters)),
             CancellationToken.None);
     }
 }

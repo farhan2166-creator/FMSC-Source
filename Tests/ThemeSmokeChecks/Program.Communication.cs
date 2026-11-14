@@ -144,10 +144,9 @@ internal static partial class Program
         Check(templates.Items.Count >= 2
             && templates.Items.Cast<object>().Any(item => item.ToString() == "School announcement"),
             "Composition offers a built-in prepared notice without entering Settings");
-        var channelChoice = (ModernComboBox)type.GetField("channel", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        Check(channelChoice.SelectedItem?.ToString()?.Contains("manual", StringComparison.OrdinalIgnoreCase) == true
-            && channelChoice.Items.Cast<object>().Any(item => item.ToString()?.Contains("unavailable", StringComparison.OrdinalIgnoreCase) == true),
-            "Communication starts with approved manual WhatsApp rather than unavailable SMS");
+        var defaultTarget = (CommunicationTarget)type.GetMethod("CurrentTarget",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, null)!;
+        Check(defaultTarget.Channel == "WhatsApp", "Composition uses the available manual WhatsApp channel");
         // Discover the controls the user interacts with, not private card-list
         // indices, a particular number of cards, or template-action row numbers.
         var targetCard = Descendants(page).OfType<HumanCard>()

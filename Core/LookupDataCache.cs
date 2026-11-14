@@ -24,7 +24,7 @@ internal static class LookupDataCache
     {
         "CheckClassFeeConfiguration", "CheckStudentConsistency", "DailyClosingSnapshot",
         "PreviewLifecycleDateRepair", "PreviewMigrationBillingCleanup", "PreviewMonthlyFees",
-        "PreviewPostingReversal", "ReportClassSectionLookup"
+        "PreviewPostingReversal", "ReportClassSectionLookup", "msg.ReadComposeTemplates"
     };
 
     internal static void Invalidate()
@@ -52,15 +52,16 @@ internal static class LookupDataCache
     }
     internal static bool CanCache(string procedure, SqlParameter[] parameters) => Key(procedure, parameters) is not null;
 
-    internal static DataTable Get(string procedure, SqlParameter[] parameters, Func<DataTable> load) =>
-        GetAsync(procedure, parameters, () => Task.FromResult(load()), CancellationToken.None).GetAwaiter().GetResult();
+    internal static DataTable Get(string procedure, SqlParameter[] parameters, Func<SqlParameter[], DataTable> load) =>
+        GetAsync(procedure, parameters, commandParameters => Task.FromResult(load(commandParameters)),
+            CancellationToken.None).GetAwaiter().GetResult();
 
     internal static async Task<DataTable> GetAsync(string procedure, SqlParameter[] parameters,
-        Func<Task<DataTable>> load, CancellationToken token)
+        Func<SqlParameter[], Task<DataTable>> load, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         string? key = Key(procedure, parameters);
-        if (key is null) return await load().ConfigureAwait(false);
+        if (key is null) return await load(parameters).ConfigureAwait(false);
         while (true)
         {
             Entry entry;
@@ -72,8 +73,13 @@ internal static class LookupDataCache
                 {
                     if (Entries.Count >= Capacity)
                         Entries.Remove(Entries.OrderBy(pair => pair.Value.Created).First().Key);
+                    // Invalidation can retry this lookup. Each command needs its own
+                    // parameters, while the originals remain available for the cache key.
+                    SqlParameter[] commandParameters = parameters
+                        .Select(parameter => (SqlParameter)((ICloneable)parameter).Clone()).ToArray();
                     entry = new Entry(Task.Run(async () =>
-                        await LookupDisplayOrder.EnrichAsync(procedure, parameters, await load().ConfigureAwait(false)).ConfigureAwait(false)), DateTime.UtcNow);
+                        await LookupDisplayOrder.EnrichAsync(procedure, parameters,
+                            await load(commandParameters).ConfigureAwait(false)).ConfigureAwait(false)), DateTime.UtcNow);
                     Entries[key] = entry;
                 }
             }
@@ -96,7 +102,11 @@ internal static class LookupDataCache
             token.ThrowIfCancellationRequested();
             lock (Sync)
             {
-                if (observed != generation) continue;
+                if (observed != generation)
+                {
+                    copy.Dispose();
+                    continue;
+                }
             }
             return copy;
         }

@@ -14,13 +14,13 @@ DataTable Sample(int count = 3)
 }
 SqlParameter[] Parameters(int user = 1) => new[] { DatabaseHelper.Int("@UserId", user) };
 int loads = 0;
-Task<DataTable> Load() { loads++; return Task.FromResult(Sample()); }
+Task<DataTable> Load(SqlParameter[] _) { loads++; return Task.FromResult(Sample()); }
 LookupDataCache.Invalidate();
 var first = await LookupDataCache.GetAsync("GetCampuses", Parameters(), Load, default);
 first.Rows[0]["Name"] = "Edited";
 var second = await LookupDataCache.GetAsync("GetCampuses", Parameters(), Load, default);
 Check(loads == 1 && (string)second.Rows[0]["Name"] == "Name 0", "Cached results must be independently editable");
-foreach (string read in new[] { "CheckClassFeeConfiguration", "CheckStudentConsistency", "DailyClosingSnapshot", "PreviewLifecycleDateRepair", "PreviewMigrationBillingCleanup", "PreviewMonthlyFees", "PreviewPostingReversal", "ReportClassSectionLookup" })
+foreach (string read in new[] { "CheckClassFeeConfiguration", "CheckStudentConsistency", "DailyClosingSnapshot", "PreviewLifecycleDateRepair", "PreviewMigrationBillingCleanup", "PreviewMonthlyFees", "PreviewPostingReversal", "ReportClassSectionLookup", "msg.ReadComposeTemplates" })
 {
     LookupDataCache.OperationCompleted(read);
     await LookupDataCache.GetAsync("GetCampuses", Parameters(), Load, default);
@@ -42,7 +42,7 @@ Check(loads == 6, "Financial balances must never be cached");
 LookupDataCache.Invalidate();
 var gate = new TaskCompletionSource<DataTable>(TaskCreationOptions.RunContinuationsAsynchronously);
 int concurrentLoads = 0;
-Task<DataTable> SharedLoad() { Interlocked.Increment(ref concurrentLoads); return gate.Task; }
+Task<DataTable> SharedLoad(SqlParameter[] _) { Interlocked.Increment(ref concurrentLoads); return gate.Task; }
 using var cancellation = new CancellationTokenSource();
 var cancelled = LookupDataCache.GetAsync("GetCampuses", Parameters(), SharedLoad, cancellation.Token);
 var retained = LookupDataCache.GetAsync("GetCampuses", Parameters(), SharedLoad, default);
@@ -55,16 +55,26 @@ LookupDataCache.Invalidate();
 var staleGate = new TaskCompletionSource<DataTable>(TaskCreationOptions.RunContinuationsAsynchronously);
 var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 int generations = 0;
-Task<DataTable> ChangingLoad()
+using var originalCommand = new SqlCommand();
+using var retryCommand = new SqlCommand();
+Task<DataTable> ChangingLoad(SqlParameter[] parameters)
 {
-    if (Interlocked.Increment(ref generations) == 1) { started.SetResult(); return staleGate.Task; }
+    if (Interlocked.Increment(ref generations) == 1)
+    {
+        originalCommand.Parameters.AddRange(parameters);
+        started.SetResult();
+        return staleGate.Task;
+    }
+    retryCommand.Parameters.AddRange(parameters);
     var fresh = Sample(); fresh.Rows[0]["Name"] = "Fresh"; return Task.FromResult(fresh);
 }
 var racing = LookupDataCache.GetAsync("GetCampuses", Parameters(), ChangingLoad, default);
 await started.Task; LookupDataCache.Invalidate(); staleGate.SetResult(Sample());
 Check((string)(await racing).Rows[0]["Name"] == "Fresh" && generations == 2, "Invalidation during loading must discard stale results");
+Check((int)retryCommand.Parameters["@UserId"].Value == 1,
+    "An invalidated lookup retries with fresh command parameters and preserves the captured user");
 LookupDataCache.Invalidate();
-try { await LookupDataCache.GetAsync("GetCampuses", Parameters(), () => Task.FromException<DataTable>(new InvalidOperationException("Failure")), default); }
+try { await LookupDataCache.GetAsync("GetCampuses", Parameters(), _ => Task.FromException<DataTable>(new InvalidOperationException("Failure")), default); }
 catch (InvalidOperationException) { checks++; }
 Check((await LookupDataCache.GetAsync("GetCampuses", Parameters(), Load, default)).Rows.Count == 3, "Failed lookups must remain retryable");
 

@@ -245,14 +245,14 @@ FOR ATTACH;";
         string procedure,
         int commandTimeoutSeconds,
         params SqlParameter[] parameters) =>
-        Core.LookupDataCache.Get(procedure, parameters, () => WithWaitCursor(() => {
+        Core.LookupDataCache.Get(procedure, parameters, commandParameters => WithWaitCursor(() => {
             using var cn = GetConnection();
             using var cmd = new SqlCommand(procedure, cn) {
                 CommandType = CommandType.StoredProcedure,
                 CommandTimeout = commandTimeoutSeconds
             };
-            if (parameters.Length > 0)
-                cmd.Parameters.AddRange(parameters);
+            if (commandParameters.Length > 0)
+                cmd.Parameters.AddRange(commandParameters);
             using var adapter = new SqlDataAdapter(cmd);
             var dt = new DataTable();
             OpenConnection(cn);
@@ -546,8 +546,8 @@ FOR ATTACH;";
 
     private static async Task<DataTable> QueryUserCoreAsync(string procedure, int timeout, CancellationToken token, SqlParameter[] parameters)
         => await Core.LookupDataCache.GetAsync(procedure, parameters,
-            () => QueryUserTableCoreAsync(procedure, timeout,
-                Core.LookupDataCache.CanCache(procedure, parameters) ? CancellationToken.None : token, parameters), token).ConfigureAwait(false);
+            commandParameters => QueryUserTableCoreAsync(procedure, timeout,
+                Core.LookupDataCache.CanCache(procedure, parameters) ? CancellationToken.None : token, commandParameters), token).ConfigureAwait(false);
 
     private static async Task<DataTable> QueryUserTableCoreAsync(string procedure, int timeout, CancellationToken token, SqlParameter[] parameters)
     {
