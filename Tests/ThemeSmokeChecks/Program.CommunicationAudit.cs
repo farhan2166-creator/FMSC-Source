@@ -60,7 +60,8 @@ internal static partial class Program
     {
         var entries = new CommunicationPreview(new[] {
             new CommunicationPreviewEntry(42,"A Synthetic child","Student","+923001234567","Included",null,"42",DateTime.Today),
-            new CommunicationPreviewEntry(43,"Z Synthetic child","Student","+923011234567","Included",null,"43",DateTime.Today)
+            new CommunicationPreviewEntry(43,"Z Synthetic child","Student","+923011234567","Included",null,"43",DateTime.Today),
+            new CommunicationPreviewEntry(44,"Excluded fixture","Student",null,"Consent not recorded",null)
         });
         var read = new TaskCompletionSource<CommunicationPreview>();
         var confirm = new TaskCompletionSource<CommunicationConfirmation>();
@@ -79,6 +80,9 @@ internal static partial class Program
         Field<ModernComboBox>(page, "audience").SelectedIndex = (int)CommunicationAudience.School;
         var body = Field<ModernTextBox>(page, "message");
         var next = Field<ModernButton>(page, "next");
+        next.PerformClick();
+        Check(reads == 0 && Field<Label>(page, "messageIssue").Text.Length > 0,
+            "Reviewing an empty message gives feedback beside the editor before any recipient read");
         body.Text = "Notice [StudentName] " + new string('x', 600);
         next.PerformClick();
         Check(page.IsBusy && !page.Enabled && reads == 1, "Preview holds navigation and conflicting input while its actual read is pending");
@@ -95,8 +99,15 @@ internal static partial class Program
         body.Text = "Notice [StudentName] " + new string('x', 600);
         next.PerformClick(); PumpUntil(() => !page.IsBusy, "Fresh communication preview finishes");
         var grid = Field<DataGridView>(page, "previewGrid");
-        grid.CurrentCell = grid.Rows[1].Cells[0]; Application.DoEvents();
+        var excluded = Field<CheckBox>(page, "showExcluded");
+        Check(!excluded.Checked && grid.Rows.Count == 2 && Field<Label>(page, "summary").Text.Contains("1 consent not recorded"),
+            "Review shows eligible rows and counts their exclusions before opening details");
+        excluded.Checked = true;
+        grid.CurrentCell = grid.Rows[2].Cells[0]; Application.DoEvents();
         var sample = Field<ModernTextBox>(page, "sampleMessage");
+        Check(grid.Rows.Count == 3 && sample.Text.Contains("A Synthetic child") && !sample.Text.Contains("Excluded fixture"),
+            "Expanding excluded records keeps the preview tied to an eligible recipient");
+        grid.CurrentCell = grid.Rows[1].Cells[0]; Application.DoEvents();
         Check(sample.ReadOnly && sample.ScrollBars == ScrollBars.Vertical, "The complete recipient preview is read-only and scrollable");
         Check(sample.Text.Contains("Z Synthetic child"), "Preview follows the current recipient after the cell changes: " + sample.Text[..Math.Min(140, sample.Text.Length)]);
         Check(sample.Text.Contains(new string('x', 600)), "The complete rendered message remains available without ellipsis");
@@ -163,6 +174,28 @@ internal static partial class Program
         Application.DoEvents();
         Check(bulkApprovals == 1 && openedFirstBulkChat,
             "One bulk confirmation opens the first reviewed chat without an extra Open action");
+
+        using var excludedHost = new Form { ClientSize = new Size(1100, 780), ShowInTaskbar = false };
+        using var excludedPage = new CommunicationCenterPage(false, operations with
+        {
+            ReadRecipients = _ => Task.FromResult(new CommunicationPreview(new[] { entries.Entries[2] }))
+        });
+        excludedHost.Controls.Add(excludedPage);
+        excludedHost.Show();
+        Application.DoEvents();
+        Field<ModernComboBox>(excludedPage, "audience").SelectedIndex = (int)CommunicationAudience.School;
+        Field<ModernTextBox>(excludedPage, "message").Text = "School notice";
+        Field<ModernButton>(excludedPage, "next").PerformClick();
+        PumpUntil(() => !excludedPage.IsBusy, "Review with only excluded records finishes");
+        var excludedToggle = Field<CheckBox>(excludedPage, "showExcluded");
+        var excludedGrid = Field<DataGridView>(excludedPage, "previewGrid");
+        Check(excludedToggle.Visible && !excludedToggle.Checked && !excludedGrid.Visible
+            && !Field<ModernButton>(excludedPage, "confirm").Enabled
+            && Field<ModernTextBox>(excludedPage, "sampleMessage").Text == "School notice",
+            "A review with zero eligible recipients shows the draft and keeps sending disabled");
+        excludedToggle.Checked = true;
+        Check(excludedGrid.Visible && excludedGrid.Rows.Count == 1,
+            "The zero-eligible review can expand its excluded records");
     }
 
     private static void CheckManualLaunchAndReporting()

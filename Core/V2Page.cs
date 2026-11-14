@@ -618,6 +618,10 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
     {
         switch (role)
         {
+            case "TabActive":
+            case "TabInactive":
+                button.ThemeRole = role;
+                break;
             case UiDesignSystem.Actions.Secondary:
                 button.ThemeRole = "Secondary";
                 break;

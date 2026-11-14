@@ -211,10 +211,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         backupTab.Padding = activityTab.Padding = new Padding(UiDesignSystem.Spacing.Md);
         tabs.Selecting += (_, e) => { if (isBusy) e.Cancel = true; };
         tabs.SelectedIndexChanged += (_, _) => ApplyHistoryDependentEnablement();
-        // A single click opens an inline summary beneath the row; restoring
-        // remains an explicit double-click/Enter action.
-        availableBackupsGrid.CellClick += async (_, e) => {
-            if (e.RowIndex < 0 ||
+        availableBackupsGrid.CellContentClick += async (_, e) => {
+            if (e.RowIndex < 0 || e.ColumnIndex != availableBackupsGrid.DetailsColumnIndex ||
                 availableBackupsGrid.Rows[e.RowIndex].Tag is not UnifiedRecoveryPoint point)
                 return;
             var row = availableBackupsGrid.Rows[e.RowIndex];
@@ -231,7 +229,8 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                     FormatExpandedRecoveryDetails(point, latest, summary));
         };
         availableBackupsGrid.CellDoubleClick += async (_, e) => {
-            if (canRestore && e.RowIndex >= 0) await UseSelectedRecoveryPointAsync();
+            if (canRestore && e.RowIndex >= 0 && e.ColumnIndex != availableBackupsGrid.DetailsColumnIndex)
+                await UseSelectedRecoveryPointAsync();
         };
         if (canRestore)
             availableBackupsGrid.LoadSelected += async (_, _) => await UseSelectedRecoveryPointAsync();
@@ -595,6 +594,11 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
 
     private sealed class RecoveryPointsGrid : DataGridView
     {
+        private const int WmLeftButtonDown = 0x0201;
+        private const int WmLeftButtonUp = 0x0202;
+        private const int WmLeftButtonDoubleClick = 0x0203;
+        internal const string DetailsColumnName = "RecoveryPointDetails";
+        internal int DetailsColumnIndex => Columns[DetailsColumnName].Index;
         internal event EventHandler? LoadSelected;
         private DataGridViewRow? expandedRow;
         private RecoveryDetails? expandedDetails;
@@ -602,6 +606,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         private int detailsHeight;
         private Padding previousPadding;
         private DataGridViewContentAlignment previousAlignment;
+        private bool selectingRowWithMouse;
 
         internal bool ToggleDetails(int rowIndex, RecoveryDetails details)
         {
@@ -648,6 +653,55 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             row.DefaultCellStyle.Alignment = previousAlignment;
             row.Height = originalHeight;
             InvalidateRow(row.Index);
+        }
+
+        protected override void OnCurrentCellChanged(EventArgs e)
+        {
+            base.OnCurrentCellChanged(e);
+            if (!selectingRowWithMouse)
+                CollapseDetailsOutsideCurrentRow();
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            // Selection changes during mouse-down, before the link is hit-tested on mouse-up.
+            if (m.Msg is WmLeftButtonDown or WmLeftButtonDoubleClick)
+                selectingRowWithMouse = true;
+            base.WndProc(ref m);
+            if (m.Msg == WmLeftButtonUp)
+                CompleteMouseSelection();
+        }
+
+        protected override void OnLeave(EventArgs e)
+        {
+            base.OnLeave(e);
+            selectingRowWithMouse = false;
+            CollapseDetails();
+        }
+
+        private void CompleteMouseSelection()
+        {
+            if (!selectingRowWithMouse) return;
+            selectingRowWithMouse = false;
+            CollapseDetailsOutsideCurrentRow();
+        }
+
+        private void CollapseDetailsOutsideCurrentRow()
+        {
+            if (expandedRow is not null && !ReferenceEquals(expandedRow, CurrentRow))
+                CollapseDetails();
+        }
+
+        protected override void OnCellFormatting(DataGridViewCellFormattingEventArgs e)
+        {
+            base.OnCellFormatting(e);
+            if (e.RowIndex >= 0 && e.ColumnIndex == DetailsColumnIndex)
+            {
+                var link = (DataGridViewLinkCell)Rows[e.RowIndex].Cells[e.ColumnIndex];
+                Color color = link.Selected ? AppTheme.SelectionText : AppTheme.PrimaryHover;
+                if (link.LinkColor != color) link.LinkColor = color;
+                if (link.ActiveLinkColor != color) link.ActiveLinkColor = color;
+            }
         }
 
         protected override void OnRowPostPaint(DataGridViewRowPostPaintEventArgs e)
@@ -698,15 +752,21 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         }
 
         protected override bool ProcessDialogKey(Keys keyData) =>
-            TryLoadSelected(keyData) || base.ProcessDialogKey(keyData);
+            TryActivateSelected(keyData) || base.ProcessDialogKey(keyData);
 
         protected override bool ProcessDataGridViewKey(KeyEventArgs e) =>
-            TryLoadSelected(e.KeyData) || base.ProcessDataGridViewKey(e);
+            TryActivateSelected(e.KeyData) || base.ProcessDataGridViewKey(e);
 
-        private bool TryLoadSelected(Keys keyData)
+        private bool TryActivateSelected(Keys keyData)
         {
-            if (keyData != Keys.Enter || SelectedRows.Count != 1 || LoadSelected is null)
+            if (keyData != Keys.Enter || SelectedRows.Count != 1)
                 return false;
+            if (CurrentCell is DataGridViewLinkCell link && link.ColumnIndex == DetailsColumnIndex)
+            {
+                OnCellContentClick(new DataGridViewCellEventArgs(link.ColumnIndex, link.RowIndex));
+                return true;
+            }
+            if (LoadSelected is null) return false;
             LoadSelected(this, EventArgs.Empty);
             return true;
         }
@@ -747,6 +807,16 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         grid.Columns.Add(new DataGridViewTextBoxColumn {
             HeaderText = "Recovery status", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             MinimumWidth = AppScale.Scale(160), FillWeight = 60,
+            SortMode = DataGridViewColumnSortMode.NotSortable
+        });
+        grid.Columns.Add(new DataGridViewLinkColumn {
+            Name = RecoveryPointsGrid.DetailsColumnName,
+            HeaderText = string.Empty,
+            Text = "Details", UseColumnTextForLinkValue = true, TrackVisitedState = false,
+            LinkBehavior = LinkBehavior.AlwaysUnderline,
+            Width = AppScale.Scale(76), AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+            Resizable = DataGridViewTriState.False,
+            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter },
             SortMode = DataGridViewColumnSortMode.NotSortable
         });
         return grid;
@@ -1000,14 +1070,15 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 var row = availableBackupsGrid.Rows[rowIndex];
                 row.Tag = point;
                 string copyDetails = FormatRecoveryCopyDetails(point);
-                for (int column = 2; column < row.Cells.Count; column++)
+                for (int column = 2; column < availableBackupsGrid.DetailsColumnIndex; column++)
                     row.Cells[column].ToolTipText = copyDetails;
+                row.Cells[availableBackupsGrid.DetailsColumnIndex].ToolTipText = "Show or hide backup details.";
             }
             availableBackupsGrid.ClearSelection();
             string countText = inventory.Points.Count == 0
                 ? "No backups found. Browse for a backup file or connect a cloud account in Backup Settings."
-                : canRestore ? "Click a row for backup details; double-click or press Enter to load it for restore."
-                    : "Click a row for details. " + inventory.Points.Count + " available backups.";
+                : canRestore ? "Click Details to expand a backup. Double-click the row to load it for restore."
+                    : inventory.Points.Count + " available backups. Click Details to expand a backup.";
             availableBackupsStatus.Text = inventory.Warnings.Count == 0
                 ? countText : countText + "  " + string.Join(" ", inventory.Warnings);
         }

@@ -8,6 +8,22 @@ internal static partial class Program
     // campus/class targets never require selecting each child individually.
     private static void CheckCommunicationWorkflow()
     {
+        var previous = (CurrentUser.UserId, CurrentUser.Username, CurrentUser.RoleName,
+            CurrentUser.MustChangePassword, CurrentUser.GetPermissions().ToArray());
+        try
+        {
+            CurrentUser.SignIn(7204, "Communication UI fixture", "Administrator", false, Array.Empty<string>());
+            CheckCommunicationLayoutAndDomainRules();
+        }
+        finally
+        {
+            CurrentUser.SignIn(previous.UserId, previous.Username, previous.RoleName,
+                previous.MustChangePassword, previous.Item5);
+        }
+    }
+
+    private static void CheckCommunicationLayoutAndDomainRules()
+    {
         var assembly = typeof(StudentPicker).Assembly;
         var resolver = assembly.GetType("FMSC_SMS.Core.CommunicationRecipientResolver")!;
         var normalize = resolver.GetMethod("NormalizeMobile", BindingFlags.NonPublic | BindingFlags.Static)!;
@@ -160,23 +176,16 @@ internal static partial class Program
             && settingsActions.Contains(manualActivation)
             && settingsActions.Count(button => button != manualActivation) >= 2,
             "Settings provides manual WhatsApp and independent template management without fixing layout rows");
-        var decorate = type.GetMethod("PrepareSettingsForDisplay", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var decorate = type.GetMethod("PrepareSettingsForDisplay", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var settingsGrid = (DataGridView)type.GetField("settingsGrid", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         using var modeRows = new DataTable();
         modeRows.Columns.Add("Channel", typeof(string));
         modeRows.Columns.Add("ProviderCode", typeof(string));
         modeRows.Columns.Add("Enabled", typeof(bool));
+        modeRows.Rows.Add("Sms", "Twilio", true);
         modeRows.Rows.Add("WhatsApp", "WhatsAppBusinessManual", false);
-        decorate.Invoke(page, new object[] { modeRows });
-        Check(manualActivation.Text == "Resume WhatsApp"
-            && manualActivation.Enabled == CurrentUser.HasPermission("Communication.Configure")
-            && (string)modeRows.Rows[0]["StatusText"] == "Paused / unavailable",
-            "Paused manual WhatsApp offers resumption with one contextual control");
-        modeRows.Rows[0]["Enabled"] = true;
-        decorate.Invoke(page, new object[] { modeRows });
-        Check(manualActivation.Text == "Pause WhatsApp"
-            && manualActivation.Enabled == CurrentUser.HasPermission("Communication.Configure")
-            && (string)modeRows.Rows[0]["StatusText"] == "Ready for manual chats",
-            "Active WhatsApp offers Pause instead of duplicate enable and pause actions");
+        decorate.Invoke(null, new object[] { modeRows });
+        settingsGrid.DataSource = modeRows;
         Check(!send.Enabled, "An unreviewed page cannot send or open a chat before preview and confirmation");
 
         // Render at dashboard scale. Merely having seven audience options in
@@ -188,15 +197,27 @@ internal static partial class Program
         // Render the Settings workspace to verify user-visible, unclipped
         // actions without freezing its internal panel or row structure.
         var setStep = type.GetMethod("SetStep", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var navNames = new[] { "communicationNewMessage", "communicationHistory", "communicationSettings" };
+        var navigation = navNames.Select(name => Descendants(page).Single(control => control.Name == name)).ToArray();
+        var navigationPositions = navigation.Select(button => button.Left).ToArray();
         setStep.Invoke(page, new object[] { 3 });
         Application.DoEvents();
+        Check(navigation.All(button => button.Visible) && navigation.Select(button => button.Left).SequenceEqual(navigationPositions),
+            "Navigation stays in the same place when opening Settings");
         var settingsScroller = settingsCard.Content.Controls.OfType<ScrollableControl>()
             .SingleOrDefault(control => control.AutoScroll);
         Check(settingsCard.Visible && settingsScroller is not null,
             "Communication Settings has a scrollable workspace for smaller windows");
         // Test the action a user can reach, not that every action shares one
         // row or simultaneously fits into a short viewport.
-        foreach (var button in settingsActions)
+        var pauseApi = settingsActions.Single(button => button.Name == "communicationPauseProvider");
+        settingsGrid.CurrentCell = settingsGrid.Rows[0].Cells[0];
+        Check(!manualActivation.Visible && pauseApi.Visible && pauseApi.Enabled,
+            "Selecting active SMS exposes its pause action and hides the WhatsApp action");
+        settingsGrid.CurrentCell = settingsGrid.Rows[1].Cells[0];
+        Check(manualActivation.Visible && manualActivation.Enabled && !pauseApi.Visible,
+            "Selecting paused WhatsApp exposes manual activation for the selected channel");
+        foreach (var button in settingsActions.Where(button => button.Visible))
         {
             settingsScroller!.ScrollControlIntoView(button);
             Application.DoEvents();
@@ -211,6 +232,21 @@ internal static partial class Program
                 + button.Text + "; bounds=" + bounds + "; exposed=" + exposed
                 + "; viewport=" + visibleContent);
         }
+        var showHistory = type.GetMethod("ShowHistory", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var historyRows = new DataTable();
+        historyRows.Columns.Add("BatchId", typeof(Guid));
+        historyRows.Columns.Add("Method", typeof(string));
+        showHistory.Invoke(page, new object[] { historyRows, false });
+        Application.DoEvents();
+        var openSession = Descendants(page).Single(control => control.Name == "communicationOpenSession");
+        Check(openSession.Visible && !openSession.Enabled, "Empty history cannot open a session");
+        historyRows.Rows.Add(Guid.NewGuid(), "WhatsApp Business (manual)");
+        Application.DoEvents();
+        Check(openSession.Enabled, "History with a selected session can open it");
+        var historySearch = Descendants(page).Single(control => control.Name == "communicationHistorySearch");
+        historySearch.Text = "No matching fixture";
+        Application.DoEvents();
+        Check(!openSession.Enabled, "Filtering away the selected session disables Open");
         setStep.Invoke(page, new object[] { 0 });
         Application.DoEvents();
         var workspace = (TableLayoutPanel)type.GetField("composerLayout",
@@ -219,6 +255,10 @@ internal static partial class Program
             && workspace.Controls.Contains(targetCard)
             && workspace.ColumnStyles[0].Width == 100,
             "New Message uses the whole workspace rather than a short form beside an empty preview");
+        var reviewAction = Descendants(targetCard).Single(control => control.Name == "communicationReviewMessage");
+        Check(reviewAction.Visible && reviewAction.RectangleToScreen(reviewAction.ClientRectangle).Bottom
+            <= targetCard.Content.RectangleToScreen(targetCard.Content.ClientRectangle).Bottom,
+            "The review action is reachable inside the composer");
         setStep.Invoke(page, new object[] { 1 });
         Application.DoEvents();
         var review = Descendants(page).OfType<HumanCard>()
@@ -324,8 +364,10 @@ internal static partial class Program
         Check(campusPanel.Visible && !classPanel.Visible && campusPanel.Top > audienceField.Top,
             "Campus audience visibly adds the campus selector below Send to");
         ChooseAudience(CommunicationAudience.Class);
-        Check(campusPanel.Visible && classPanel.Visible && classPanel.Top > campusPanel.Top,
-            "Class audience visibly adds campus and class selectors in order");
+        Check(campusPanel.Visible && classPanel.Visible
+            && classPanel.RectangleToScreen(classPanel.ClientRectangle).Left
+                >= campusPanel.RectangleToScreen(campusPanel.ClientRectangle).Right - 2,
+            "Class audience displays the campus and class selectors side by side");
         ChooseAudience(CommunicationAudience.Student);
         Check(studentPanel.Visible && !campusPanel.Visible && !classPanel.Visible,
             "Individual audience displays the existing student picker");

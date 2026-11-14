@@ -261,11 +261,10 @@ namespace FMSC_SMS.Core
             if (sender is not DataGridView grid)
                 return;
             var hit = grid.HitTest(e.X, e.Y);
-            grid.Cursor = hit.Type == DataGridViewHitTestType.Cell &&
-                          grid.Rows.Count > 0 &&
-                          hit.RowIndex >= 0
-                ? Cursors.Default
-                : Cursors.Default;
+            if (hit.Type == DataGridViewHitTestType.Cell &&
+                grid.Columns[hit.ColumnIndex] is DataGridViewLinkColumn)
+                return;
+            grid.Cursor = Cursors.Default;
         }
         private static void GridCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
         {
@@ -850,6 +849,7 @@ namespace FMSC_SMS.Core
             }
             return column is DataGridViewCheckBoxColumn ||
                    column is DataGridViewButtonColumn ||
+                   column is DataGridViewLinkColumn ||
                    column is DataGridViewImageColumn;
         }
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DataGridView, object> EqualWidthGrids = new();

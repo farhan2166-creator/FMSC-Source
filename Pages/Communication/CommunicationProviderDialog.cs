@@ -6,7 +6,6 @@ namespace FMSC_SMS.Pages.Communication;
 /// activation remain a separate administrator decision; secrets are never read back into controls.</summary>
 internal sealed class CommunicationProviderDialog : ApplicationWindowForm
 {
-    private readonly ModernComboBox channel=HumanUi.Combo();
     private readonly ModernTextBox account=HumanUi.TextBox(false,128);
     private readonly ModernTextBox sender=HumanUi.TextBox(false,128);
     private readonly ModernTextBox token=HumanUi.TextBox(false,4096);
@@ -14,56 +13,65 @@ internal sealed class CommunicationProviderDialog : ApplicationWindowForm
     private CommunicationProviderCredentialStore.Credential? selectedProfile;
     internal CommunicationProviderCredentialStore.Credential Profile => selectedProfile
         ?? throw new InvalidOperationException("No provider profile was confirmed.");
-    internal CommunicationProviderDialog(string selectedChannel="Sms")
+    internal CommunicationProviderDialog(string selectedChannel)
     {
-        Text="Messaging provider";StartPosition=FormStartPosition.CenterParent;
+        bool meta = selectedChannel == "WhatsApp";
+        Text = meta ? "Configure WhatsApp · Meta API" : "Configure SMS · Twilio";
+        StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=MinimizeBox=false;ShowInTaskbar=false;
-        ClientSize=new Size(AppScale.Scale(680),AppScale.Scale(535));MinimumSize=ClientSize;
         BackColor=AppTheme.PageBackground;
-        channel.Items.AddRange(new object[]{"SMS · Twilio","WhatsApp · Meta API"});
-        channel.SelectedIndex=selectedChannel=="WhatsApp" ? 1 : 0;
         token.UseSystemPasswordChar=true;version.Text="v23.0";
-        var accountField=HumanUi.Field("Account ID",account,true);
-        var senderField=HumanUi.Field("Sender ID",sender,true);
+        account.PlaceholderText = meta ? "Digits from the Meta account" : "AC followed by 32 hexadecimal characters";
+        sender.PlaceholderText = meta ? "Numeric ID from Meta" : "+ followed by the SMS-capable number";
+        var accountField=HumanUi.Field(meta ? "WhatsApp Business Account ID" : "Account SID",account,true);
+        var senderField=HumanUi.Field(meta ? "Phone Number ID" : "Twilio phone number",sender,true);
+        var tokenField = HumanUi.Field(meta ? "Access Token" : "Auth Token", token, true);
         var versionField=HumanUi.Field("Graph API version",version,true);
-        var hint=new Label {Dock=DockStyle.Fill,ForeColor=AppTheme.MutedText,
-            Text="Credentials are encrypted for this Windows user. Save leaves sending paused. Use Verify & Enable in Settings when ready. API messaging may incur provider charges."};
-        void UpdateFields()
+        var hint = new Label
         {
-            bool meta=channel.SelectedIndex==1;
-            account.PlaceholderText=meta ? "WhatsApp Business Account ID (digits)" : "Twilio Account SID: AC + 32 hexadecimal characters";
-            sender.PlaceholderText=meta ? "Meta Phone Number ID (digits, not the phone number)" : "SMS-capable Twilio number: +...";
-            token.PlaceholderText=meta ? "Meta access token with WhatsApp permissions" : "Twilio account Auth Token";
-            versionField.Visible=meta;
-            hint.Text=meta
-                ? "Use a Meta token with whatsapp_business_management and whatsapp_business_messaging permissions. Approved text templates are required. Credentials stay encrypted for this Windows user; saving leaves sending paused."
-                : "Use an SMS-capable Twilio number and account Auth Token. Credentials stay encrypted for this Windows user. Saving leaves sending paused; Verify & Enable when ready. Provider charges may apply.";
-        }
-        channel.SelectedIndexChanged+=(_,_)=>UpdateFields();UpdateFields();
-        var save=new ModernButton {Text="Save Protected Profile",ThemeRole="Success",Width=AppScale.Scale(210),Height=AppMetrics.ButtonHeight};
+            Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText, UseMnemonic = false,
+            Text = (meta ? "Use a token with WhatsApp management and messaging permissions. Sending uses approved Meta templates. "
+                : "Provider charges may apply when sending. ")
+                + "Credentials are encrypted for this Windows user. Saving pauses sending until you verify and enable the method in Settings."
+        };
+        var save=new ModernButton {Text="Save Profile",ThemeRole="Success",Width=AppScale.Scale(165),Height=AppMetrics.ButtonHeight};
         var cancel=new ModernButton {Text="Cancel",ThemeRole="Secondary",DialogResult=DialogResult.Cancel,Height=AppMetrics.ButtonHeight};
         save.Click+=(_,_)=>{
             try
             {
-                bool meta=channel.SelectedIndex==1;
                 var c=new CommunicationProviderCredentialStore.Credential(1,meta ? "WhatsApp" : "Sms",
                     meta ? "MetaCloud" : "Twilio",account.Text.Trim(),sender.Text.Trim(),token.Text,meta ? "" : token.Text)
-                    {GraphVersion=version.Text.Trim()};
+                    {GraphVersion=meta ? version.Text.Trim() : "v23.0"};
                 if(meta) CommunicationMetaTransport.ValidateCredentials(c); else CommunicationTwilioTransport.ValidateCredentials(c);
                 selectedProfile=c;token.Clear();DialogResult=DialogResult.OK;Close();
             }
             catch(Exception ex) when(ex is ArgumentException or InvalidOperationException)
-            { ModernMessageDialog.Show(this,"Check the account ID, sender ID and token. Meta also requires a valid Graph API version (for example v23.0).",
+            { ModernMessageDialog.Show(this, meta
+                ? "Check the WhatsApp Business Account ID, Phone Number ID, Access Token and Graph API version."
+                : "Check the Account SID, Twilio phone number and Auth Token.",
                 "Provider Configuration",MessageBoxButtons.OK,MessageBoxIcon.Warning); }
         };
-        var layout=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=7,Padding=new Padding(16)};
+        int fieldCount = meta ? 4 : 3;
+        int hintHeight = AppScale.Scale(meta ? 112 : 90);
+        int footerHeight = AppMetrics.ButtonHeight + AppScale.Scale(12);
+        int padding = AppScale.Scale(16);
+        ClientSize = new Size(AppScale.Scale(565), fieldCount * AppMetrics.FieldRowHeight + hintHeight + footerHeight + 2 * padding);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = fieldCount + 2, Padding = new Padding(padding)
+        };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-        for(int i=0;i<5;i++)layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppMetrics.FieldRowHeight));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(57)));
-        layout.Controls.Add(HumanUi.Field("Send using",channel,true),0,0);
-        layout.Controls.Add(accountField,0,1);layout.Controls.Add(senderField,0,2);
-        layout.Controls.Add(HumanUi.Field("Access token",token,true),0,3);layout.Controls.Add(versionField,0,4);
-        layout.Controls.Add(hint,0,5);layout.Controls.Add(HumanUi.DialogButtons(save,cancel),0,6);
+        for (int i = 0; i < fieldCount; i++)
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, hintHeight));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, footerHeight));
+        layout.Controls.Add(accountField, 0, 0);
+        layout.Controls.Add(senderField, 0, 1);
+        layout.Controls.Add(tokenField, 0, 2);
+        if (meta) layout.Controls.Add(versionField, 0, 3);
+        else versionField.Dispose();
+        layout.Controls.Add(hint, 0, fieldCount);
+        layout.Controls.Add(HumanUi.DialogButtons(save, cancel), 0, fieldCount + 1);
         Controls.Add(layout);AcceptButton=save;CancelButton=cancel;FormClosed+=(_,_)=>token.Clear();
     }
 }
