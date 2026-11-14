@@ -44,8 +44,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     private readonly TabControl tabs = new() { Dock = DockStyle.Fill };
     private readonly TabPage backupTab = new("Backup / Restore") { BackColor = AppTheme.Surface };
     ModernButton? cloudSettingsButton;
-    ModernButton? selectCloudCopyButton;
-    FlowLayoutPanel? cloudCopyActions;
     readonly RecoveryPointsGrid availableBackupsGrid = CreateAvailableBackupsGrid();
     readonly Label availableBackupsStatus = new() {
         Dock = DockStyle.Top, Height = AppScale.Scale(42), AutoEllipsis = true,
@@ -132,8 +130,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 catch (Exception ex) { Fail(ex); }
             });
             SetToolTip(browseRestoreFile, fileBrowseLabel);
-            selectCloudCopyButton =
-                AddAction("Choose Cloud Copy…", (_, _) => UseSelectedCloudCopy(), "Secondary");
             /* Prevent duplicate restore submissions. */
             restoreButton =
                 AddBusyAction("Restore Now", RestoreNowAsync, "Danger");
@@ -158,8 +154,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         RelocateFromActions(refreshListsButton, refreshHistoryButton, retryPendingButton, locateFileButton, backupNowButton);
         if (cloudSettingsButton is not null)
             RelocateFromActions(cloudSettingsButton);
-        if (selectCloudCopyButton is not null)
-            RelocateFromActions(selectCloudCopyButton);
         if (restoreButton is not null)
             RelocateFromActions(restoreButton);
         var backupCard = HumanUi.Card("Backup", "Save a verified copy to your backup destinations.");
@@ -216,11 +210,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         var activityTab = new TabPage("Activity History") { BackColor = AppTheme.Surface };
         backupTab.Padding = activityTab.Padding = new Padding(UiDesignSystem.Spacing.Md);
         tabs.Selecting += (_, e) => { if (isBusy) e.Cancel = true; };
-        tabs.SelectedIndexChanged += (_, _) => {
-            UpdateSelectedBackupAction();
-            ApplyHistoryDependentEnablement();
-        };
-        availableBackupsGrid.SelectionChanged += (_, _) => UpdateSelectedBackupAction();
+        tabs.SelectedIndexChanged += (_, _) => ApplyHistoryDependentEnablement();
         availableBackupsGrid.CellDoubleClick += async (_, e) => {
             if (canRestore && e.RowIndex >= 0) await UseSelectedRecoveryPointAsync();
         };
@@ -228,14 +218,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             availableBackupsGrid.LoadSelected += async (_, _) => await UseSelectedRecoveryPointAsync();
         recoveryList.Controls.Add(availableBackupsGrid);
         recoveryList.Controls.Add(availableBackupsStatus);
-        if (canRestore)
-        {
-            cloudCopyActions = CreateCompactActionRow(selectCloudCopyButton!);
-            cloudCopyActions.Dock = DockStyle.Top;
-            cloudCopyActions.Height = AppMetrics.ButtonRowHeight;
-            cloudCopyActions.Visible = false;
-            recoveryList.Controls.Add(cloudCopyActions);
-        }
         var activityLayout = new TableLayoutPanel {
             Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1,
             Margin = Padding.Empty, Padding = Padding.Empty
@@ -320,7 +302,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         Defer(LoadHistoryAsync);
         Defer(LoadRecoveryCatalogueAsync);
         RefreshRecordedActivity();
-        UpdateSelectedBackupAction();
     }
 
     private void RepaintTabs(object? sender, EventArgs e) => TabStrip.Repaint(tabs);
@@ -457,18 +438,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             (settings.GoogleDriveEnabled ? "Google Drive · " : "") +
             (settings.DropboxEnabled ? "Dropbox · " : "") +
             (settings.AutomaticEnabled ? "Scheduled" : "Manual");
-    }
-
-    private void UpdateSelectedBackupAction()
-    {
-        var point = SelectedRecoveryPoint;
-        bool canSelect = !isBusy && !selectingBackup;
-        if (cloudCopyActions is not null && selectCloudCopyButton is not null)
-        {
-            bool canChooseCloudCopy = point is { HasLocal: true, CloudCopies.Count: > 0 };
-            cloudCopyActions.Visible = canChooseCloudCopy;
-            selectCloudCopyButton.Enabled = canSelect && canChooseCloudCopy;
-        }
     }
 
     private UnifiedRecoveryPoint? SelectedRecoveryPoint =>
@@ -956,7 +925,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
             return;
         }
         selectingBackup = true;
-        UpdateSelectedBackupAction();
         try
         {
             RequirePermission("Backup.Restore");
@@ -1007,20 +975,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         finally
         {
             selectingBackup = false;
-            if (!IsDisposed) UpdateSelectedBackupAction();
         }
-    }
-
-    private void UseSelectedCloudCopy()
-    {
-        if (isBusy || selectingBackup ||
-            SelectedRecoveryPoint is not { HasLocal: true, CloudCopies.Count: > 0 } point) return;
-        try
-        {
-            RequirePermission("Backup.Restore");
-            SelectCloudCopy(point);
-        }
-        catch (Exception ex) { Fail(ex); }
     }
 
     private void SelectCloudCopy(UnifiedRecoveryPoint point)
@@ -1601,7 +1556,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         retryPendingButton.Enabled = !busy;
         if (cloudSettingsButton != null) cloudSettingsButton.Enabled = !busy;
         refreshListsButton.Enabled = !busy;
-        UpdateSelectedBackupAction();
         /* Keep Refresh History available for retrying a failed read. */
         refreshHistoryButton.Enabled = !busy;
         if (busy)
