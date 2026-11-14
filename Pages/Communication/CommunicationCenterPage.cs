@@ -114,7 +114,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             "Entire school", "Campus", "Class", "Outstanding fees",
             "One student", "Family / siblings", "One staff member"
         });
-        audience.SelectedIndex = 0;
+        audience.SelectedIndex = (int)CommunicationAudience.Class;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
         foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
@@ -155,7 +155,7 @@ public sealed class CommunicationCenterPage : V2Page, IBusyPage
             InvalidatePreview();
             message.Text = "";
             templateChoice.SelectedIndex = 0;
-            audience.SelectedIndex = 0;
+            audience.SelectedIndex = (int)CommunicationAudience.Class;
             SetStep(0);
         }, "Secondary");
         GateAction(historyButton, "Communication.View");
