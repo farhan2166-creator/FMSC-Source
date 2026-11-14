@@ -130,6 +130,34 @@ internal static partial class Program
         PumpUntil(() => !singlePage.IsBusy, "Single recipient preview finishes");
         Field<ModernButton>(singlePage, "confirm").PerformClick();
         Check(requestedDirectChat && bulkPrompts == 0, "One reviewed student opens WhatsApp directly with no bulk prompt");
+
+        // Bulk delivery still needs explicit operator confirmation, but that
+        // confirmation also opens the first chat. There is no second Open click.
+        int bulkApprovals = 0;
+        bool openedFirstBulkChat = false;
+        CommunicationCenterPage? bulkPage = null;
+        using var bulkHost = new Form { ClientSize = new Size(1100, 780), ShowInTaskbar = false };
+        bulkPage = new CommunicationCenterPage(false, operations with
+        {
+            ReadRecipients = _ => Task.FromResult(entries),
+            ConfirmBatch = (_, _, _, _) => Task.FromResult(
+                new CommunicationConfirmation(Guid.NewGuid(), 2, false)),
+            ConfirmStart = () => { bulkApprovals++; return true; },
+            OpenHandoff = (_, openFirstChat) =>
+            {
+                openedFirstBulkChat = openFirstChat;
+                bulkPage!.Dispose();
+            }
+        });
+        bulkHost.Controls.Add(bulkPage);
+        bulkHost.Show(); Application.DoEvents();
+        Field<ModernTextBox>(bulkPage, "message").Text = "School notice";
+        Field<ModernButton>(bulkPage, "next").PerformClick();
+        PumpUntil(() => !bulkPage.IsBusy, "Bulk communication preview finishes");
+        Field<ModernButton>(bulkPage, "confirm").PerformClick();
+        Application.DoEvents();
+        Check(bulkApprovals == 1 && openedFirstBulkChat,
+            "One bulk confirmation opens the first reviewed chat without an extra Open action");
     }
 
     private static void CheckManualLaunchAndReporting()
@@ -188,6 +216,47 @@ internal static partial class Program
             "A new single-recipient handoff opens the chat without a second Open click");
         Field<ModernButton>(direct, "reported").PerformClick(); Application.DoEvents();
         Check(marks == 2 && !direct.Visible, "Reporting the single message closes its completed handoff");
+
+        // Marking a contact never marks the next contact Sent. The explicit
+        // "I Sent It · Next" action only opens the next reviewed WhatsApp chat.
+        string first = "Pending", second = "Pending";
+        int advancedLaunches = 0, advancedMarks = 0;
+        var consecutive = operations with
+        {
+            Read = _ => Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(
+                new[] {
+                    new CommunicationManualRecipient(1, "First child", "4567", first),
+                    new CommunicationManualRecipient(2, "Second child", "5678", second)
+                }),
+            Open = id =>
+            {
+                if (id == 1) first = "Opened";
+                else if (id == 2) second = "Opened";
+                return Task.FromResult(new CommunicationManualOpen(true,
+                    new Uri("https://wa.me/923001234567?text=fixture"), null, message));
+            },
+            Mark = (id, outcome) =>
+            {
+                if (id == 1) first = outcome;
+                else if (id == 2) second = outcome;
+                advancedMarks++;
+                return Task.CompletedTask;
+            },
+            Launch = _ => advancedLaunches++,
+            ConfirmRecoveredSend = null,
+            MarkRecovered = null
+        };
+        using var consecutiveDialog = new CommunicationManualHandoffDialog(
+            Guid.NewGuid(), consecutive, openFirstChat: true);
+        consecutiveDialog.Show(); Application.DoEvents();
+        Check(first == "Opened" && second == "Pending" && advancedLaunches == 1,
+            "The first chat opens after the reviewed batch is confirmed; the second stays pending");
+        Field<ModernButton>(consecutiveDialog, "reported").PerformClick();
+        Application.DoEvents();
+        Check(first == "ReportedSent" && second == "Opened"
+            && advancedLaunches == 2 && advancedMarks == 1,
+            "Reporting the first chat opens the next without reporting it sent");
+        consecutiveDialog.Close();
     }
 
     private static void CheckProviderBodyDeadline()
