@@ -50,6 +50,13 @@ internal static partial class Program
             if(selected.Length == 1)
             {
                 Check(summary.Controls.Contains(action), "Ordinary collection retains its primary payment action");
+                var siblingHint = Field<Label>("siblingHint");
+                var selectAll = Field<ModernButton>("selectAllSiblings");
+                var siblingPanel = selectAll.Parent!;
+                Check(siblingHint.Visible && selectAll.Visible && siblingHint.TextAlign == ContentAlignment.MiddleCenter
+                    && Math.Abs(siblingHint.Left + siblingHint.Right - siblingPanel.ClientSize.Width) <= 2
+                    && Math.Abs(selectAll.Left + selectAll.Right - siblingPanel.ClientSize.Width) <= 2,
+                    "The included-student count and Select All are centered in the Paying For panel");
                 // Programmatic enrollment binding used to launch an independent
                 // asynchronous reload, invalidating the just-selected student.
                 var enrollment=Field<LookupBox>("enrollment");

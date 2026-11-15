@@ -148,6 +148,13 @@ internal static partial class Program
         type.GetMethod("UpdateCollectionTotals", flags)!.Invoke(page,null);
         Check(layout.RowStyles[0].Height==0 && ((Label)Field("remainingCredit")).Text=="50",
             "After full settlement, remaining credit replaces the empty outstanding summary");
+        credit.Clear(); RefreshTotals();
+        var usableAdvance = (Label)Field("availableCredit");
+        var advanceLeft = (Label)Field("remainingCredit");
+        Check(use.Visible && usableAdvance.Visible && advanceLeft.Visible
+            && usableAdvance.Text == 0m.ToString("N0") && advanceLeft.Text == 0m.ToString("N0")
+            && layout.RowStyles[2].Height > 0 && layout.RowStyles[7].Height > 0 && Plan().Count == 0,
+            "Both advance figures stay visible and read zero after switching from positive to zero credit");
         Check(((Label)Field("collectionResult")).Parent is null, "Transaction text is absent below Next Student");
         page.ConfigureCounter(new[]{6594,6589});
         grid.Rows.Clear();credit.Clear();Bill(6,6594,300);Bill(7,6589,400);credit[6594]=400;credit[6589]=100;

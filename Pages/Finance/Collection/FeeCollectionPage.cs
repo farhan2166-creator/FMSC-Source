@@ -51,11 +51,10 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
     /// <summary>Retain the shared family receipt number for reprinting.</summary>
     private string? lastGroupReceiptNumber;
     private readonly Label siblingHint = new() {
-        Dock = DockStyle.Bottom,
+        Dock = DockStyle.Fill,
         AutoSize = false,
-        Height = AppScale.Scale(30, AppScale.ControlSizeScale),
         ForeColor = AppTheme.MutedText,
-        TextAlign = ContentAlignment.MiddleLeft
+        TextAlign = ContentAlignment.MiddleCenter
     };
     /// <summary>Map selected siblings to their enrollment and display name for allocation.</summary>
     private readonly Dictionary<int, (int EnrollmentId, string Name)> payingFor = new();
@@ -127,7 +126,6 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
     private Control? outstandingSummary;
     private Control? remainingBalanceSummary;
     private Control? creditSummary;
-    private Control? remainingCreditSummary;
     /// <summary>Payment History receipt-reprint action.</summary>
     private ModernButton? reprintReceiptButton;
     /// <summary>Off-screen parent for the payment list.</summary>
@@ -687,7 +685,7 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         selectAllSiblings =
             new ModernButton {
                 Text = UiText.Actions.SelectAll,
-                Dock = DockStyle.Left,
+                Anchor = AnchorStyles.None,
                 Width = AppScale.Scale(108),
                 Height = AppTheme.CompactButtonHeight,
                 ThemeRole = "Outline",
@@ -790,12 +788,13 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         };
         summary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         int valueHeight = AppScale.Scale(40, AppScale.ControlSizeScale);
-        foreach (int height in new[] { valueHeight, AppMetrics.FieldRowHeight + 2, 0, valueHeight,
-            AppMetrics.FieldRowHeight + 2, 0, valueHeight, 0, AppMetrics.FieldRowHeight + 2,
+        foreach (int height in new[] { valueHeight, AppMetrics.FieldRowHeight + 2, valueHeight, valueHeight,
+            AppMetrics.FieldRowHeight + 2, 0, valueHeight, valueHeight, AppMetrics.FieldRowHeight + 2,
             AppMetrics.FieldRowHeight + 2, AppMetrics.ButtonHeight + 6, AppMetrics.ButtonHeight + 6 })
             summary.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
         summary.SizeChanged += (_, _) => collectionResult.MaximumSize = new Size(Math.Max(1, summary.ClientSize.Width - 8), 0);
         totalDue.Text = balance.Text = "0.00";
+        availableCredit.Text = remainingCredit.Text = "0";
         suppressPaymentEvents = true;
         try { paymentAmount.Text = "0"; }
         finally { suppressPaymentEvents = false; }
@@ -841,7 +840,7 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         summary.Controls.Add(executeButton!, 0, 10);
         summary.Controls.Add(receiptActions, 0, 11);
         creditSummary = SummaryField("Available credit (Rs.)", availableCredit, Color.ForestGreen);
-        remainingCreditSummary = SummaryField("Advance left (Rs.)", remainingCredit, Color.ForestGreen);
+        var remainingCreditSummary = (TableLayoutPanel)SummaryField("Advance left (Rs.)", remainingCredit, Color.ForestGreen);
         FinanceHelp.Attach(this,paymentAmount,FinanceHelp.Topic.ReceiveMoney);
         FinanceHelp.Attach(this,discountAmount,FinanceHelp.Topic.Discount);
         FinanceHelp.Attach(this,useAvailableCredit,FinanceHelp.Topic.UseAdvance);
@@ -852,8 +851,8 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         FinanceHelp.Attach(this,printReceiptButton!,FinanceHelp.Topic.Receipt);
         FinanceHelp.Attach(this,fullAmountButton!,"Fill Amount Received with the amount still needed after the entered discount and selected advance money. Nothing is saved until you confirm collection.","Rs. 1,000 due minus Rs. 300 advance fills Rs. 700 as new money to receive.");
         FinanceHelp.Attach(this,executeButton!,"Save the reviewed payment using new money and any selected student advance. Check the split and remaining dues before confirming.","Rs. 1,000 due can be settled with Rs. 700 new money and Rs. 300 already held as advance.");
-        ((TableLayoutPanel)remainingCreditSummary).ColumnStyles[0].Width = 70;
-        ((TableLayoutPanel)remainingCreditSummary).ColumnStyles[1].Width = 30;
+        remainingCreditSummary.ColumnStyles[0].Width = 70;
+        remainingCreditSummary.ColumnStyles[1].Width = 30;
         // Keep credit with the balance figures, above the amount received.
         summary.Controls.Add(creditSummary, 0, 2);
         summary.Controls.Add(remainingCreditSummary, 0, 7);
@@ -2186,7 +2185,7 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         int extra=advanceScopeHint.Text.Length==0?0:TextRenderer.MeasureText(advanceScopeHint.Text,advanceScopeHint.Font,
             new Size(width,int.MaxValue),TextFormatFlags.WordBreak|TextFormatFlags.TextBoxControl).Height+advanceScopeHint.Margin.Vertical;
         field.RowStyles[1].Height=extra;
-        float height=SelectedAvailableCredit()>0m?AppScale.Scale(40,AppScale.ControlSizeScale)+extra:0;
+        float height=AppScale.Scale(40,AppScale.ControlSizeScale)+extra;
         if(Math.Abs(summary.RowStyles[2].Height-height)>.5f)summary.RowStyles[2].Height=height;
     }
     // BUSINESS DECISION: Fee Collection receives only the payable fee balance,
@@ -3139,13 +3138,8 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
                 GetInt(row.Cells["AdmissionId"].Value)!=admissionId&&GetRowNetDue(row,discountMap)>0m)
                 ?"Main student only; transfer advance for siblings.":"";
         advanceScopeHint.Visible=advanceScopeHint.Text.Length>0;
-        if (creditSummary is not null && remainingCreditSummary is not null)
+        if (creditSummary?.Parent is TableLayoutPanel layout)
         {
-            var layout = (TableLayoutPanel)creditSummary.Parent!;
-            creditSummary.Visible = credit > 0;
-            layout.RowStyles[2].Height = credit > 0 ? AppScale.Scale(40, AppScale.ControlSizeScale) : 0;
-            remainingCreditSummary.Visible = credit > 0;
-            layout.RowStyles[7].Height = credit > 0 ? AppScale.Scale(40, AppScale.ControlSizeScale) : 0;
             outstandingSummary!.Visible = due > 0 || credit <= 0;
             layout.RowStyles[0].Height = due > 0 || credit <= 0 ? AppScale.Scale(40, AppScale.ControlSizeScale) : 0;
             remainingBalanceSummary!.Visible = remaining > 0 || credit <= 0;
