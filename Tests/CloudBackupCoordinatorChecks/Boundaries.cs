@@ -65,12 +65,6 @@ internal static class CloudRestoreStaging {
  }
 }
 internal static class BackupActivityJournal {internal static void TryRecord(string o,string d,string s,string detail=""){}}
-// The disposable cloud-only fixture is intentionally SQL-free. Production
-// exercises the actual restored-backup snapshot reader separately.
-internal static class BackupContentsSummary
-{
- internal static object CaptureVerifiedBackup(string path, DateTime when) => new();
-}
 }
 
 namespace FMSC_SMS.Services.Backup {

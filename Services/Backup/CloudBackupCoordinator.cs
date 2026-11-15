@@ -175,23 +175,8 @@ internal static class CloudBackupCoordinator
                 throw new InvalidDataException("Verified SQL backup metadata is not readable.");
             DateTime sqlCreated = DateTime.SpecifyKind(info.BackupStartDate, DateTimeKind.Local).ToUniversalTime();
             progress?.Report(new BackupProgressUpdate("SQL backup verified", "SQL header and RESTORE VERIFYONLY completed.", "Local"));
-            // Read facts from an isolated restore of THIS verified .bak, never
-            // from the live school DB after the backup. Optional preview data
-            // must not cause a verified backup or queued upload to fail.
-            try
-            {
-                progress?.Report(new BackupProgressUpdate("Reading backup contents",
-                    "Capturing student and finance record counts from the saved SQL recovery point."));
-                await Task.Run(() => BackupContentsSummary.CaptureVerifiedBackup(bak, sqlCreated), token)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                AppExceptionHandler.LogNonFatal(ex,
-                    "Optional backup contents summary unavailable; the verified backup is retained");
-                progress?.Report(new BackupProgressUpdate("Backup summary unavailable",
-                    "The backup remains verified and restorable; its record counts could not be recorded."));
-            }
+            // Record-count summaries are disabled. Keep the actual backup
+            // verification and cloud recovery test independent of UI details.
             if (settings.LocalEnabled)
             {
                 await Task.Run(() => PruneLocalManagedBackups(folder, settings.MaximumLocalBackups, bak))
