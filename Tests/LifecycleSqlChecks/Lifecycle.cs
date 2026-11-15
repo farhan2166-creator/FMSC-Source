@@ -25,6 +25,8 @@ internal sealed class Lifecycle(Fixture f, Report r)
             () => CommunicationAuditSqlChecks.Run(f,r), a);
         await r.Stage("Communication API: enrollment, immutable review, cancellation and honest status",
             () => CommunicationApiSqlChecks.Run(f,r), a);
+        await r.Stage("Admission: confirmed single-field sibling sync and stale-review protection",
+            () => SiblingFieldSyncChecks.Run(f, r), a);
     }
 
     private Task Admission()

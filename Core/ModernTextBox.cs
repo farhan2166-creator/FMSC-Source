@@ -188,9 +188,13 @@ namespace FMSC_SMS.Core
             set => _inner.PlaceholderText = value;
         }
         internal Button AddFolderBrowseButton(string accessibleName, EventHandler click)
+            => AddInlineActionButton("\uE838", accessibleName, click);
+
+        internal Button AddInlineActionButton(string glyph, string accessibleName, EventHandler click)
         {
+            if (_browseButton is not null) throw new InvalidOperationException("This field already has an inline action.");
             var button = new Button {
-                Text = "\uE838",
+                Text = glyph,
                 Font = AppTheme.IconFont(12f * AppScale.BodyFontScale),
                 AccessibleName = accessibleName,
                 FlatStyle = FlatStyle.Flat,
@@ -202,6 +206,7 @@ namespace FMSC_SMS.Core
             };
             button.FlatAppearance.BorderSize = 0;
             button.Click += click;
+            button.VisibleChanged += (_, _) => Reposition();
             _browseButton = button;
             Controls.Add(button);
             Reposition();
@@ -358,7 +363,7 @@ namespace FMSC_SMS.Core
             int left = LogicalToDeviceUnits(TextInsetLeft);
             int right = LogicalToDeviceUnits(TextInsetRight);
             int vertical = LogicalToDeviceUnits(MultilineVerticalInset);
-            if (_browseButton is { } browse)
+            if (_browseButton is { Visible: true } browse)
             {
                 int inset = LogicalToDeviceUnits(3);
                 int size = Math.Max(0, Math.Min(Height - 2 * inset, Width - 2 * inset));

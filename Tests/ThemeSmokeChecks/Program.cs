@@ -105,6 +105,7 @@ internal static partial class Program
         if (args.Contains("--registration-workflow"))
         {
             CheckRegistrationWorkflow();
+            CheckAdmissionSiblingSync();
             Console.WriteLine($"PASS: {checks} native admission registration and status-row checks (no database connection).");
             return;
         }

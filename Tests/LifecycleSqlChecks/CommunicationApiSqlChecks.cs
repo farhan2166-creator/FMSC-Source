@@ -96,8 +96,22 @@ internal static class CommunicationApiSqlChecks
         var withdrawn=Confirm(Guid.NewGuid(),new string('D',64));Guid withdrawnBatch=(Guid)withdrawn.Rows[0]["BatchId"];
         long withdrawnId=Convert.ToInt64(Sql.Scalar("SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Batch",Sql.P("@Batch",withdrawnBatch)));
         Sql.Proc("msg.RecordAdmissionConsent",Sql.P("@UserId",f.Admin),Sql.P("@AdmissionId",student),Sql.P("@Consent",false),Sql.P("@Authority","Students.Admit"));
-        var excluded=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",withdrawnId),Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));
-        r.Check(!Convert.ToBoolean(excluded.Rows[0]["Claimed"]),"Admission consent withdrawal remains authoritative after API confirmation.");
+        // Admission consent is shared across the family. One child withdrawing
+        // cannot revoke the separate affirmative consent of a linked sibling.
+        var studentTarget=new CommunicationTarget(CommunicationAudience.Student,0,0,student,0,"Sms");
+        r.Check((await CommunicationRecipientResolver.ReadAsync(studentTarget)).Included==1,
+            "A consenting sibling still authorizes the family's shared guardian destination.");
+
+        // Conversely, a previously confirmed API batch must not be claimed if
+        // the family's final affirmative consent is withdrawn before dispatch.
+        Sql.Proc("msg.RecordAdmissionConsent",Sql.P("@UserId",f.Admin),Sql.P("@AdmissionId",sibling),Sql.P("@Consent",false),Sql.P("@Authority","Students.Admit"));
+        Guid withdrawnAttempt=Guid.NewGuid();
+        var excluded=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",withdrawnId),Sql.P("@AttemptKey",withdrawnAttempt),Sql.P("@ExpectedProviderCode","Twilio"));
+        r.Check(!Convert.ToBoolean(excluded.Rows[0]["Claimed"])
+            && Convert.ToString(excluded.Rows[0]["ExclusionCode"])=="NoLongerEligible"
+            && Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Id",Sql.P("@Id",withdrawnId))==0,
+            "With all family consent withdrawn, the confirmed API batch is excluded without a provider attempt.");
+        Sql.Proc("msg.RecordAdmissionConsent",Sql.P("@UserId",f.Admin),Sql.P("@AdmissionId",sibling),Sql.P("@Consent",true),Sql.P("@Authority","Students.Admit"));
         Sql.Proc("msg.PauseChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"));
         var smsTarget=new CommunicationTarget(CommunicationAudience.Student,0,0,sibling,0,"Sms");
         r.Check((await CommunicationRecipientResolver.ReadAsync(smsTarget)).Included==1,"Consenting sibling is independently eligible before an SMS opt-out.");

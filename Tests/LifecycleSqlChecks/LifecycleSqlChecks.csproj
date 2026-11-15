@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Core/SiblingFieldSyncSql.cs" Link="SiblingFieldSyncSql.cs" />
     <Compile Include="../../Core/PakistanPhoneNumber.cs" Link="PakistanPhoneNumber.cs" />
     <Compile Include="../../Core/CommunicationRecipientResolver.cs" Link="CommunicationRecipientResolver.cs" />
     <Compile Include="../../Core/CommunicationReviewedContent.cs" Link="CommunicationReviewedContent.cs" />
