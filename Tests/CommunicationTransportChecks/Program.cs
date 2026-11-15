@@ -145,6 +145,47 @@ using(var history=new DataTable())
     Check(CommunicationHistoryStore.CreateDraft(history) is null,"Fee-reminder drafts retain financial-view authorization");
     CurrentUser.Permissions.Clear();
 }
+var feeChild = new CommunicationFeeDetails.Student(42, "علی & Ahmed", "0042", "Eight - F", 825.50m);
+var feeSibling = new CommunicationFeeDetails.Student(43, "علی & Ahmed", "0043", "Nine - A", 424.50m);
+var statementDate = new DateTime(2026, 11, 15);
+string studentFees = CommunicationFeeDetails.Format(statementDate, new[] { feeChild }, 825.50m, false);
+Check(studentFees.Contains("علی & Ahmed") && studentFees.Contains("0042") && studentFees.Contains("Eight - F")
+    && studentFees.Contains("825.50") && studentFees.Contains("15-Nov-2026"),
+    "Student fee details identify the child, class, actual balance and statement date");
+string familyFees = CommunicationFeeDetails.Format(statementDate, new[] { feeChild, feeSibling }, 1250m, true);
+Check(familyFees.Contains("0042") && familyFees.Contains("0043") && familyFees.Contains("Eight - F") && familyFees.Contains("Nine - A")
+    && familyFees.Contains("825.50") && familyFees.Contains("424.50") && familyFees.Contains("1,250.00"),
+    "Same-name siblings retain separate identities and balances alongside their exact family total");
+string feeBody = CommunicationFeeDetails.Expand(CommunicationFeeDetails.Template, familyFees);
+CommunicationPreparedMessages.ValidateFormat(feeBody, "FeeReminder");
+Check(CommunicationPreparedMessages.Render(feeBody, values) == feeBody && !feeBody.Contains(CommunicationFeeDetails.Field),
+    "The preview and saved batch use identical resolved fee details without new global template fields");
+string edited = "A personal note\n" + CommunicationFeeDetails.Field + "\nPlease contact us tomorrow.";
+Check(CommunicationFeeDetails.Expand(edited, studentFees) == edited.Replace(CommunicationFeeDetails.Field, studentFees),
+    "Editing the wording around the fee details is preserved during review");
+string literalLabels = CommunicationFeeDetails.Format(statementDate,
+    new[] { feeChild with { Name = "Ali [OutstandingAmount] {{1}}\nExtra" } }, 825.50m, false);
+CommunicationPreparedMessages.ValidateFormat(literalLabels, "FeeReminder");
+Check(CommunicationPreparedMessages.Render(literalLabels, values) == literalLabels && !literalLabels.Contains("2,300.00"),
+    "Brackets and line breaks in school records cannot inject prepared fields or substitute another child's values");
+Refuse(() => CommunicationFeeDetails.Format(statementDate, new[] { feeChild, feeSibling }, 999m, true),
+    "A mismatched family total is refused");
+Refuse(() => CommunicationFeeDetails.Format(statementDate, new[] { feeChild, feeChild }, 1651m, true),
+    "The same student cannot appear twice in a fee breakdown");
+Refuse(() => CommunicationFeeDetails.Format(statementDate, new[] { feeChild, feeSibling }, 1250m, false),
+    "A student-only message cannot expose another child's balance");
+Refuse(() => CommunicationFeeDetails.Format(statementDate, Array.Empty<CommunicationFeeDetails.Student>(), 0m, true),
+    "Empty fee details are refused");
+Refuse(() => CommunicationFeeDetails.Format(statementDate, new[] { feeChild with { Outstanding = 0 } }, 0m, false),
+    "Zero balances cannot be mislabeled as outstanding");
+Refuse(() => CommunicationFeeDetails.Expand(CommunicationFeeDetails.Template, ""), "Missing details cannot produce a false empty reminder");
+var largeFamily = Enumerable.Range(1, 30).Select(id => new CommunicationFeeDetails.Student(id, "Synthetic child " + id,
+    id.ToString(), "Eight - F", 100m)).ToArray();
+string largeDetails = CommunicationFeeDetails.Format(statementDate, largeFamily, 3000m, true);
+Refuse(() => CommunicationFeeDetails.Expand(CommunicationFeeDetails.Template, largeDetails),
+    "An oversized family message fails clearly rather than dropping children or cutting off totals");
+Check(CommunicationFeeDetails.Expand("Total PKR 3,000.00", largeDetails) == "Total PKR 3,000.00",
+    "Large families can still choose a short balance-only message and share the complete bill image");
 Console.WriteLine($"PASS: {count} communication transport, history and reviewed-content behavior checks; no external network, credentials or SQL used.");
 static HttpResponseMessage Json(HttpStatusCode status,string text)=>new(status){Content=new StringContent(text,Encoding.UTF8,"application/json")};
 sealed class Fake(Func<HttpRequestMessage,Task<HttpResponseMessage>> respond):HttpMessageHandler

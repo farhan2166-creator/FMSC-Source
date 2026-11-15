@@ -689,8 +689,15 @@ internal static partial class Program
                 data.Columns.Add("ReceiptNumber");
                 data.Columns.Add("PaymentDateText");
                 data.Rows.Add(receipt ? "R-42" : "", documentRevision.ToString());
+                var children = new List<CommunicationFeeDetails.Student>
+                {
+                    new(id, "Synthetic student", "42", "Eight - F", 825m)
+                };
+                if (family) children.Add(new(43, "Synthetic sibling", "43", "Nine - A", 425m));
+                string details = receipt ? "" : CommunicationFeeDetails.Format(DateTime.Today, children,
+                    family ? 1250m : 825m, family);
                 return Task.FromResult(new FeeMessageDocument(data, id, new[] { id, 43 }, new[] { id }, family,
-                    receipt, receipt ? 500m : family ? 1250m : 825m, receipt ? "R-42" : ""));
+                    receipt, receipt ? 500m : family ? 1250m : 825m, receipt ? "R-42" : "", details));
             },
             _ => { renders++; return Task.FromResult(new Bitmap(10, 10)); },
             _ => copies++,
@@ -751,14 +758,16 @@ internal static partial class Program
             "Fee Collection offers relevant fee templates and only the current student or linked family scopes");
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
         Check(captured is { Audience: CommunicationAudience.FeeStudent, StudentId: studentId }
-            && Field<ModernTextBox>(fees, "preview").Text.Contains("825.00") && confirms == 1 && dispatches == 1,
-            "The fee preview renders the selected student's live balance without confirming a message");
+            && new[] { "825.00", "Synthetic student", "Eight - F", "42" }
+                .All(value => Field<ModernTextBox>(fees, "preview").Text.Contains(value)) && confirms == 1 && dispatches == 1,
+            "The fee preview identifies the selected student, class and live balance without confirming a message");
         Field<ModernButton>(fees, "back").PerformClick();
         feeScope.SelectedIndex = 1;
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
         Check(captured is { Audience: CommunicationAudience.FeeFamily, StudentId: studentId }
-            && Field<ModernTextBox>(fees, "preview").Text.Contains("1,250.00"),
-            "Family outstanding uses the reviewed family total and the same guardian scope");
+            && new[] { "1,250.00", "825.00", "425.00", "Synthetic student", "Synthetic sibling", "Eight - F", "Nine - A" }
+                .All(value => Field<ModernTextBox>(fees, "preview").Text.Contains(value)),
+            "Family outstanding lists both children's own balances and classes before the total, using the same guardian scope");
         Field<ModernButton>(fees, "back").PerformClick();
         feeContent.SelectedIndex = 1;
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
@@ -884,6 +893,22 @@ internal static partial class Program
             Field<ModernButton>(sms, "action").PerformClick(); Application.DoEvents();
             Check(confirms == 5 && dispatches == 2 && launches == 2 && renders == previousRenders && copies == 1,
                 "API messaging keeps its existing confirmation path without image rendering or clipboard access");
+        }
+        using (var staleText = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations))
+        {
+            changeAtHandoff = true;
+            int priorLaunches = launches, priorCopies = copies, priorWarnings = warnings;
+            staleText.Show(); Application.DoEvents();
+            Field<ModernComboBox>(staleText, "feeContent").SelectedIndex = 1;
+            Field<CheckBox>(staleText, "attachImage").Checked = false;
+            Field<ModernButton>(staleText, "action").PerformClick(); Application.DoEvents();
+            Field<ModernButton>(staleText, "action").PerformClick(); Application.DoEvents();
+            var textHandoff = Descendants(staleText).OfType<CommunicationManualHandoff>().Single();
+            Check(launches == priorLaunches && copies == priorCopies && warnings > priorWarnings
+                && !Field<ModernButton>(textHandoff, "reported").Enabled,
+                "Text-only fee messages also reject changed financial data before launching or allowing a sent report");
+            staleText.Close();
+            changeAtHandoff = false;
         }
     }
 }
