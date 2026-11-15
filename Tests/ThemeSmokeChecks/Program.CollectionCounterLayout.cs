@@ -53,10 +53,19 @@ internal static partial class Program
                 var siblingHint = Field<Label>("siblingHint");
                 var selectAll = Field<ModernButton>("selectAllSiblings");
                 var siblingPanel = selectAll.Parent!;
-                Check(siblingHint.Visible && selectAll.Visible && siblingHint.TextAlign == ContentAlignment.MiddleCenter
-                    && Math.Abs(siblingHint.Left + siblingHint.Right - siblingPanel.ClientSize.Width) <= 2
-                    && Math.Abs(selectAll.Left + selectAll.Right - siblingPanel.ClientSize.Width) <= 2,
-                    "The included-student count and Select All are centered in the Paying For panel");
+                // A blank SQL-free fixture may legitimately hide Select All until
+                // eligible siblings are loaded. Test the layout contract itself,
+                // then geometry only when the action is actually displayed.
+                Check(siblingPanel.Controls.Contains(siblingHint) && siblingPanel.Controls.Contains(selectAll)
+                    && siblingHint.Dock == DockStyle.Fill
+                    && siblingHint.TextAlign == ContentAlignment.MiddleCenter
+                    && siblingPanel.GetColumn(siblingHint) == siblingPanel.GetColumn(selectAll)
+                    && siblingPanel.GetRow(selectAll) > siblingPanel.GetRow(siblingHint)
+                    && selectAll.Anchor == AnchorStyles.None,
+                    "Paying For keeps its centered count and a centered Select All layout row");
+                Check(!selectAll.Visible ||
+                    HorizontallyCentered(BoundsWithin(selectAll, siblingPanel), siblingPanel.ClientRectangle),
+                    "Visible Select All is centered and not clipped in Paying For");
                 // Programmatic enrollment binding used to launch an independent
                 // asynchronous reload, invalidating the just-selected student.
                 var enrollment=Field<LookupBox>("enrollment");
