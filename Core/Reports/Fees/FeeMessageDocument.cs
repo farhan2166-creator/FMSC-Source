@@ -73,7 +73,7 @@ internal sealed class FeeMessageDocument : IDisposable
                 string.Join(" / ", group.Select(FeeBillDataBuilder.PlacementText).Where(value => value.Length > 0)
                     .Distinct(StringComparer.OrdinalIgnoreCase)), group.Sum(row => Convert.ToDecimal(row["Due"])))).ToArray();
         return new(data, admissionId, ids, billed, family, false, total,
-            outstandingDetails: CommunicationFeeDetails.Format(institution.Name, DateTime.Today, students, total, family));
+            outstandingDetails: CommunicationFeeDetails.Format(DateTime.Today, students, total, family));
     }
 
     private static async Task<FeeMessageDocument> ReadReceiptAsync(InstitutionProfile.PrintIdentity institution,

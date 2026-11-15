@@ -10,9 +10,9 @@ internal static class CommunicationFeeDetails
     internal sealed record Student(int AdmissionId, string Name, string AdmissionNumber, string ClassSection, decimal Outstanding);
 
     internal const string Field = "[FeeDetails]";
-    internal const string Template = "[FeeDetails]\n\nFor payment queries, please contact the school accounts office.\nThank you.";
+    internal const string Template = "[FeeDetails]\n\nFor payment queries, please contact the school accounts office.\n\nRegards : FMSC";
 
-    internal static string Format(string school, DateTime asAt, IReadOnlyList<Student> students, decimal total, bool family)
+    internal static string Format(DateTime asAt, IReadOnlyList<Student> students, decimal total, bool family)
     {
         if (students.Count == 0 || (!family && students.Count != 1)
             || students.Any(student => student.AdmissionId <= 0 || student.Outstanding <= 0)
@@ -22,7 +22,7 @@ internal static class CommunicationFeeDetails
 
         var lines = new List<string>
         {
-            Label(school), "Fee balance as at " + asAt.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture),
+            "Fee balance as at " + asAt.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture),
             "", "Dear Parent/Guardian,", ""
         };
         foreach (var student in students)

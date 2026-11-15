@@ -230,7 +230,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
                 {
                     new ComposeTemplate("Family outstanding details", "FeeReminder", CommunicationFeeDetails.Template),
                     new ComposeTemplate("Family outstanding balance", "FeeReminder",
-                        "Dear Parent/Guardian,\n\nFamily outstanding balance: PKR [OutstandingAmount]\n\nFor payment queries, please contact the school accounts office.\nThank you.")
+                        "Dear Parent/Guardian,\n\nFamily outstanding balance: PKR [OutstandingAmount]\n\nFor payment queries, please contact the school accounts office.\n\nRegards : FMSC")
                 };
             else
             {

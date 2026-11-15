@@ -694,7 +694,7 @@ internal static partial class Program
                     new(id, "Synthetic student", "42", "Eight - F", 825m)
                 };
                 if (family) children.Add(new(43, "Synthetic sibling", "43", "Nine - A", 425m));
-                string details = receipt ? "" : CommunicationFeeDetails.Format("Synthetic School", DateTime.Today, children,
+                string details = receipt ? "" : CommunicationFeeDetails.Format(DateTime.Today, children,
                     family ? 1250m : 825m, family);
                 return Task.FromResult(new FeeMessageDocument(data, id, new[] { id, 43 }, new[] { id }, family,
                     receipt, receipt ? 500m : family ? 1250m : 825m, receipt ? "R-42" : "", details));
@@ -758,9 +758,9 @@ internal static partial class Program
             "Fee Collection offers relevant fee templates and only the current student or linked family scopes");
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
         Check(captured is { Audience: CommunicationAudience.FeeStudent, StudentId: studentId }
-            && new[] { "825.00", "Synthetic student", "Eight - F", "42", "Synthetic School" }
+            && new[] { "825.00", "Synthetic student", "Eight - F", "42" }
                 .All(value => Field<ModernTextBox>(fees, "preview").Text.Contains(value)) && confirms == 1 && dispatches == 1,
-            "The fee preview identifies the selected student, class, school and live balance without confirming a message");
+            "The fee preview identifies the selected student, class and live balance without confirming a message");
         Field<ModernButton>(fees, "back").PerformClick();
         feeScope.SelectedIndex = 1;
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
