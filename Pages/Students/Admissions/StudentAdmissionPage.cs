@@ -623,6 +623,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         RecordTextPolicy.WireInput(prevSchool, "@PreviousSchool");
         RecordTextPolicy.WireInput(placeOfBirthInput, "@PlaceOfBirth");
         RecordTextPolicy.WireInput(casteTribe, "@CasteTribe");
+        ConfigureSiblingSync();
         NationalIdentityInput.Attach(bform);
         UiHelper.DisposePictureImageOnDispose(photoPreview);
         StudentPhotoViewForm.EnableZoom(photoPreview, () => currentAdmissionId > 0
@@ -2081,6 +2082,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
     /// <summary>Display New Admission or the loaded student's stored status.</summary>
     private void UpdateStudentWorkspace()
     {
+        UpdateSiblingSyncActions();
         UpdateRegistrationActions();
         UpdatePhotoActions();
         bool savedStudentReady = currentAdmissionId > 0 && !IsBusy;
