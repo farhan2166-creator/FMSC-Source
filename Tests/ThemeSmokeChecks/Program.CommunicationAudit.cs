@@ -517,17 +517,49 @@ internal static partial class Program
             ConfirmRecoveredSend = null,
             MarkRecovered = null
         };
+        int imageCopies = 0;
+        bool clipboardBusy = false;
         using var consecutiveDialog = new CommunicationManualHandoffDialog(
-            Guid.NewGuid(), consecutive, openFirstChat: true);
+            Guid.NewGuid(), consecutive with
+            {
+                Launch = _ =>
+                {
+                    Check(imageCopies == advancedLaunches + 1, "Each chat receives its image before the browser is launched");
+                    advancedLaunches++;
+                }
+            }, openFirstChat: true, prepareImage: () =>
+            {
+                if (clipboardBusy) throw new System.Runtime.InteropServices.ExternalException("Synthetic busy clipboard");
+                imageCopies++;
+                return Task.CompletedTask;
+            });
         consecutiveDialog.Show(); Application.DoEvents();
         Check(first == "Opened" && second == "Pending" && advancedLaunches == 1,
             "The first chat opens after the reviewed batch is confirmed; the second stays pending");
+        clipboardBusy = true;
         Field<ModernButton>(consecutiveDialog, "reported").PerformClick();
         Application.DoEvents();
+        Check(first == "ReportedSent" && second == "Opened" && advancedLaunches == 1 && advancedMarks == 1
+            && imageCopies == 1 && !Field<ModernButton>(consecutiveDialog, "reported").Enabled,
+            "Clipboard failure stops the next chat launch and cannot be reported as sent");
+        clipboardBusy = false;
+        Field<ModernButton>(consecutiveDialog, "open").PerformClick(); Application.DoEvents();
         Check(first == "ReportedSent" && second == "Opened"
-            && advancedLaunches == 2 && advancedMarks == 1,
+            && advancedLaunches == 2 && advancedMarks == 1 && imageCopies == 2,
             "Reporting the first chat opens the next without reporting it sent");
         consecutiveDialog.Close();
+
+        int deniedCopies = 0;
+        using var deniedImage = new CommunicationManualHandoffDialog(Guid.NewGuid(), consecutive with
+        {
+            Read = _ => Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(
+                new[] { new CommunicationManualRecipient(1, "Ineligible child", "4567", "Pending") }),
+            Open = _ => Task.FromResult(new CommunicationManualOpen(false, null, "ConsentRequired", null))
+        }, openFirstChat: true, prepareImage: () => { deniedCopies++; return Task.CompletedTask; });
+        deniedImage.Show(); Application.DoEvents();
+        Check(deniedCopies == 0 && advancedLaunches == 2 && advancedMarks == 1,
+            "A recipient rejected by the authoritative eligibility check never receives a clipboard image or chat launch");
+        deniedImage.Close();
     }
 
     private static void CheckProviderBodyDeadline()
@@ -597,7 +629,7 @@ internal static partial class Program
         CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
             new[] { "Communication.Send", "Students.View", "Fees.View" });
         CommunicationTarget? captured = null;
-        int confirms = 0, dispatches = 0;
+        int confirms = 0, dispatches = 0, renders = 0, copies = 0, documentRevision = 0;
         const int studentId = 42;
         var operations = new CommunicationRecordMessageDialog.Operations(
             option => Task.FromResult(option.Provider is null),
@@ -616,16 +648,22 @@ internal static partial class Program
                 confirms++;
                 return Task.FromResult(new CommunicationConfirmation(request, result.Included, false));
             },
-            (_, _) => dispatches++,
+            (_, _, prepareImage) =>
+            {
+                dispatches++;
+                prepareImage?.Invoke().GetAwaiter().GetResult();
+            },
             (id, family, receipt) =>
             {
                 var data = new DataTable("FeeDocument");
                 data.Columns.Add("ReceiptNumber");
                 data.Columns.Add("PaymentDateText");
-                data.Rows.Add(receipt ? "R-42" : "", "");
+                data.Rows.Add(receipt ? "R-42" : "", documentRevision.ToString());
                 return Task.FromResult(new FeeMessageDocument(data, id, new[] { id, 43 }, new[] { id }, family,
                     receipt, receipt ? 500m : family ? 1250m : 825m, receipt ? "R-42" : ""));
-            });
+            },
+            _ => { renders++; return Task.FromResult(new Bitmap(10, 10)); },
+            _ => copies++);
 
         using (var admission = new CommunicationRecordMessageDialog(studentId, "Synthetic student", false, operations))
         {
@@ -680,11 +718,98 @@ internal static partial class Program
             && confirms == 1 && dispatches == 1, "Payment preview uses the saved receipt number and amount without sending");
         Field<ModernButton>(fees, "back").PerformClick();
         feeScope.SelectedIndex = 0;
-        Check(Field<CheckBox>(fees, "attachPdf").Visible && Field<CheckBox>(fees, "attachPdf").Enabled,
-            "Manual WhatsApp offers a PDF attachment for a saved payment");
+        Check(Field<CheckBox>(fees, "attachImage").Visible && Field<CheckBox>(fees, "attachImage").Enabled
+            && Field<CheckBox>(fees, "attachImage").Checked,
+            "Manual WhatsApp defaults to a pasteable receipt image without a file picker");
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
         Check(captured is { Audience: CommunicationAudience.FeeStudent, StudentId: studentId }
             && Field<ModernTextBox>(fees, "preview").Text.Contains("R-42"), "A student receipt uses the individual fee scope");
-        fees.Close();
+        Check(renders == 0 && copies == 0, "Reviewing a fee message never renders or copies an attachment");
+        Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
+        Check(confirms == 2 && dispatches == 2 && renders == 1 && copies == 1 && !fees.Visible,
+            "Confirmation prepares an image and supplies a checked clipboard callback to the manual handoff");
+
+        using (var changed = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations))
+        {
+            changed.Show(); Application.DoEvents();
+            Field<ModernComboBox>(changed, "feeContent").SelectedIndex = 1;
+            Field<ModernButton>(changed, "action").PerformClick(); Application.DoEvents();
+            documentRevision++;
+            Field<ModernButton>(changed, "action").PerformClick(); Application.DoEvents();
+            Check(confirms == 2 && dispatches == 2 && renders == 1 && copies == 1 && changed.Visible,
+                "A changed saved receipt blocks confirmation and clipboard access until it is reviewed again");
+            changed.Close();
+        }
+        using (var failed = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations with
+        {
+            RenderImage = _ => throw new InvalidOperationException("Synthetic renderer failure")
+        }))
+        {
+            failed.Show(); Application.DoEvents();
+            Field<ModernButton>(failed, "action").PerformClick(); Application.DoEvents();
+            Field<ModernButton>(failed, "action").PerformClick(); Application.DoEvents();
+            Check(confirms == 2 && dispatches == 2 && copies == 1 && failed.Visible
+                && Field<ModernButton>(failed, "action").Enabled,
+                "Rendering failure is recoverable and never confirms or opens a messaging batch");
+            failed.Close();
+        }
+        using (var textOnly = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations))
+        {
+            textOnly.Show(); Application.DoEvents();
+            Field<CheckBox>(textOnly, "attachImage").Checked = false;
+            Field<ModernButton>(textOnly, "action").PerformClick(); Application.DoEvents();
+            Field<ModernButton>(textOnly, "action").PerformClick(); Application.DoEvents();
+            Check(confirms == 3 && dispatches == 3 && renders == 1 && copies == 1,
+                "Text-only fee messaging remains optional and does not touch the clipboard");
+        }
+        using (var cancelled = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations))
+        {
+            cancelled.Show(); Application.DoEvents();
+            Field<ModernButton>(cancelled, "action").PerformClick(); Application.DoEvents();
+            Field<ModernButton>(cancelled, "cancel").PerformClick(); Application.DoEvents();
+            Check(confirms == 3 && dispatches == 3 && renders == 1 && copies == 1,
+                "Cancelling after fee review never confirms, renders, copies or dispatches");
+        }
+        using (var changedDuringRender = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations with
+        {
+            RenderImage = _ => { documentRevision++; return Task.FromResult(new Bitmap(10, 10)); }
+        }))
+        {
+            changedDuringRender.Show(); Application.DoEvents();
+            Field<ModernComboBox>(changedDuringRender, "feeContent").SelectedIndex = 1;
+            Field<ModernButton>(changedDuringRender, "action").PerformClick(); Application.DoEvents();
+            Field<ModernButton>(changedDuringRender, "action").PerformClick(); Application.DoEvents();
+            Check(confirms == 3 && dispatches == 3 && copies == 1 && changedDuringRender.Visible,
+                "A receipt changed during rendering is rejected before the batch is confirmed");
+            changedDuringRender.Close();
+        }
+        using (var changedDuringHandoff = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations with
+        {
+            Dispatch = (_, _, prepareImage) => { documentRevision++; prepareImage!().GetAwaiter().GetResult(); }
+        }))
+        {
+            changedDuringHandoff.Show(); Application.DoEvents();
+            Field<ModernComboBox>(changedDuringHandoff, "feeContent").SelectedIndex = 1;
+            Field<ModernButton>(changedDuringHandoff, "action").PerformClick(); Application.DoEvents();
+            Field<ModernButton>(changedDuringHandoff, "action").PerformClick(); Application.DoEvents();
+            Check(confirms == 4 && copies == 1 && changedDuringHandoff.Visible,
+                "A fee change while the handoff is open blocks copying the previously rendered receipt");
+            changedDuringHandoff.Close();
+        }
+        using (var sms = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations with
+        {
+            IsReady = _ => Task.FromResult(true)
+        }))
+        {
+            sms.Show(); Application.DoEvents();
+            var methods = Field<ModernComboBox>(sms, "method");
+            methods.SelectedItem = methods.Items.OfType<CommunicationRecordMessageDialog.Method>().Single(item => item.Channel == "Sms");
+            Check(!Field<CheckBox>(sms, "attachImage").Visible, "SMS never offers a manual WhatsApp image attachment");
+            int previousRenders = renders;
+            Field<ModernButton>(sms, "action").PerformClick(); Application.DoEvents();
+            Field<ModernButton>(sms, "action").PerformClick(); Application.DoEvents();
+            Check(confirms == 5 && renders == previousRenders && copies == 1,
+                "API messaging keeps its existing confirmation path without image rendering or clipboard access");
+        }
     }
 }

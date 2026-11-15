@@ -13,8 +13,12 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private readonly Guid batchId;
     private readonly int actorId;
     private readonly bool openFirstChat;
+    private readonly Func<Task>? prepareImage;
     private const string HandoffInstructions = "Check the school WhatsApp account and press Send there. "
         + "FMSC only records your report; it cannot verify delivery.";
+    private string Instructions => prepareImage is null ? HandoffInstructions
+        : "Press Ctrl+V in WhatsApp to paste the bill or receipt image. Review it and the school account, then press Send. "
+            + "FMSC cannot verify delivery.";
     private readonly Label progress=new()
     {
         Dock=DockStyle.Fill,AutoEllipsis=true,
@@ -76,10 +80,12 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private readonly Operations operations;
 
 
-    internal CommunicationManualHandoffDialog(Guid batchId, bool openFirstChat = false)
-        : this(batchId, null, openFirstChat) { }
-    internal CommunicationManualHandoffDialog(Guid batchId, Operations? operations, bool openFirstChat = false)
+    internal CommunicationManualHandoffDialog(Guid batchId, bool openFirstChat = false, Func<Task>? prepareImage = null)
+        : this(batchId, null, openFirstChat, prepareImage) { }
+    internal CommunicationManualHandoffDialog(Guid batchId, Operations? operations, bool openFirstChat = false, Func<Task>? prepareImage = null)
     {
+        this.prepareImage = prepareImage;
+        explanation.Text = Instructions;
         this.operations = operations ?? new Operations(CommunicationManualHandoffStore.ReadAsync,
             CommunicationPreparedMessages.ReadManualPreviewAsync,
             CommunicationManualHandoffStore.OpenAsync, (id, outcome) => CommunicationManualHandoffStore.MarkAsync(id, outcome, false),
@@ -198,7 +204,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             if (recipientChanged)
             {
                 preparedMessage.Clear();
-                explanation.Text = HandoffInstructions;
+                explanation.Text = Instructions;
                 if (nextRecipient is not null)
                 {
                     try
@@ -243,7 +249,11 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             if(!IsDisposed && handoff.Allowed && handoff.Link is not null)
             {
                 preparedMessage.Text = handoff.Message ?? "";
-                explanation.Text = HandoffInstructions;
+                if (prepareImage is not null) await prepareImage();
+                if (IsDisposed) return;
+                if (actorId != CurrentUser.UserId)
+                    throw new InvalidOperationException("Signed-in account changed. No chat was launched.");
+                explanation.Text = Instructions;
                 // Browser or linked app opens only after SQL has persisted
                 // Opened. No automatic Send or delivery acknowledgement.
                 try { operations.Launch(handoff.Link); }

@@ -7,6 +7,7 @@ internal static partial class Program
 {
     private static void CheckFeeDocuments(List<FeeDocumentReviewSample>? review=null)
     {
+        CheckFeeMessageImages();
         foreach(string retired in new[]{"AdmissionBill.rdlc","FeePaymentReceipt.rdlc","FeeAgingReport.rdlc"})
             Check(!File.Exists(Path.Combine(AppContext.BaseDirectory,"Reports",retired)),"Retired templates are absent from the built application");
         foreach(var (template,dataSet) in new[]{(StudentBillReport.TemplateFile,StudentBillReport.DataSetName),
@@ -117,6 +118,13 @@ internal static partial class Program
             report.DataSources.Add(new ReportDataSource(xml.Descendants(ns+"DataSet").Single().Attribute("Name")!.Value,printData??data));
             using var roll=review is not null && bill && !annual
                 ? FeeBillRollDocument.Render(path,xml.Descendants(ns+"DataSet").Single().Attribute("Name")!.Value,data) : null;
+            if (name == "family-bill-months")
+            {
+                using var imageRoll = FeeBillRollDocument.Render(path, FamilyBillReport.DataSetName, data);
+                using var image = FeeMessageImage.Combine(imageRoll.Pages.Select(page => page.Image));
+                Check(image.Width >= 500 && image.Height >= imageRoll.Pages.Count * 100,
+                    "The exact fitted family bill pages also form a complete image for manual sharing");
+            }
             byte[] pdf=roll?.ExportPdf()??report.Render("PDF");File.WriteAllBytes(Path.Combine(folder,name+".pdf"),pdf);
             using var parsed=PdfSharp.Pdf.IO.PdfReader.Open(new MemoryStream(pdf),PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import);
             if(annual && file==StudentReceiptReport.TemplateFile)
