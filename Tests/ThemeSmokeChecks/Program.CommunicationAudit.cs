@@ -379,6 +379,7 @@ internal static partial class Program
             rows.Columns.Add("TemplateId", typeof(int));
             foreach (var column in new[] { "Name", "Channel", "Purpose", "Body" }) rows.Columns.Add(column);
             rows.Columns.Add("Active", typeof(bool));
+            rows.Rows.Add(47, "Office collection", "Sms", "Announcement", "Bring the coordinator's blue folder.", true);
             return Task.FromResult(rows);
         });
         templates.Show();
@@ -388,6 +389,25 @@ internal static partial class Program
         Check(Field<ModernTextBox>(templates, "preview").Text == CommunicationPreparedMessages.BuiltIns[1].Body
             && Field<ModernButton>(templates, "edit").Enabled,
             "Selecting a template shows its full editable format in the dedicated dialog");
+        var templateSearch = templates.Controls.Find("communicationTemplateSearch", true).Single();
+        var templateEdit = Field<ModernButton>(templates, "edit");
+        var templatePreview = Field<ModernTextBox>(templates, "preview");
+        Rectangle editBounds = templateEdit.Bounds;
+        templateSearch.Text = "SMS COORDINATOR'S";
+        Application.DoEvents();
+        Check(templateGrid.Rows.Count == 1
+            && (templateGrid.CurrentRow?.DataBoundItem as DataRowView)?.Row.Field<int>("TemplateId") == 47
+            && templatePreview.Text == "Bring the coordinator's blue folder."
+            && templateEdit.Enabled && templateEdit.Bounds == editBounds,
+            "Template search matches channel and body case-insensitively, selects the match and keeps actions aligned");
+        templateSearch.Text = "[no matching draft]";
+        Application.DoEvents();
+        Check(templateGrid.Rows.Count == 0 && templatePreview.Text.Length == 0 && !templateEdit.Enabled,
+            "No matching templates clears the preview and disables editing");
+        templateSearch.Text = "";
+        Application.DoEvents();
+        Check(templateGrid.Rows.Count == CommunicationPreparedMessages.BuiltIns.Count + 1,
+            "Clearing search restores built-in and school templates");
         templates.Close();
         CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
             new[] { "Communication.Send", "Students.View", "Fees.View" });

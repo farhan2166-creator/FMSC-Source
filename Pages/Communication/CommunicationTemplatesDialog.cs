@@ -1,13 +1,17 @@
 using System.Data;
+using System.Globalization;
 using FMSC_SMS.Core;
 
 namespace FMSC_SMS.Pages.Communication;
 
 internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
 {
+    private const string EditTemplateText = "Edit Template…";
+    private const string CustomizeTemplateText = "Customize Template…";
     private readonly DataGridView templates = HumanUi.Grid(false);
+    private readonly ModernTextBox search = HumanUi.TextBox(false, 100);
     private readonly ModernTextBox preview = HumanUi.TextBox(true, 1600);
-    private readonly ModernButton edit = new() { Text = "Edit Template…", Enabled = false };
+    private readonly ModernButton edit = new() { Text = CustomizeTemplateText, Enabled = false };
     private readonly ModernButton add = new() { Text = "New Template…", ThemeRole = "Primary", Enabled = false };
     private readonly Label feedback = new() { Dock = DockStyle.Fill, AutoEllipsis = true };
     private readonly Func<Task<DataTable>> read;
@@ -27,6 +31,10 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         ClientSize = new Size(AppScale.Scale(1000), AppScale.Scale(680));
         MinimumSize = new Size(AppScale.Scale(760), AppScale.Scale(540));
         BackColor = AppTheme.PageBackground;
+        search.Name = "communicationTemplateSearch";
+        var searchField = HumanUi.Field("Search templates", search);
+        searchField.Margin = new Padding(templates.Margin.Left, 0, templates.Margin.Right, 0);
+        searchField.Padding = new Padding(0, 0, 0, AppScale.Scale(6));
         templates.AutoGenerateColumns = false;
         foreach (var (field, title, weight) in new[]
         {
@@ -43,7 +51,8 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             string column = templates.Columns[e.ColumnIndex].Name;
             if (column == "Active" && e.Value is bool active) e.Value = active ? "Yes" : "No";
             else if (column == "Purpose" && e.Value is string purpose) e.Value = CommunicationTemplateDialog.PurposeLabel(purpose);
-            else if (e.Value is "Sms" && column == "Channel") e.Value = "SMS";
+            else if (column == "Channel" && templates.Rows[e.RowIndex].DataBoundItem is DataRowView row)
+                e.Value = ChannelLabel(row.Row);
             else return;
             e.FormattingApplied = true;
         };
@@ -55,18 +64,26 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         buttons.Dock = DockStyle.Fill;
         layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(AppScale.Scale(14))
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(AppScale.Scale(14))
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonHeight + AppScale.Scale(10)));
-        layout.Controls.Add(templates, 0, 0);
-        layout.Controls.Add(HumanUi.Field("Template preview", preview), 0, 1);
-        layout.Controls.Add(feedback, 0, 2);
-        layout.Controls.Add(buttons, 0, 3);
+        layout.Controls.Add(searchField, 0, 0);
+        layout.Controls.Add(templates, 0, 1);
+        layout.Controls.Add(HumanUi.Field("Template preview", preview), 0, 2);
+        layout.Controls.Add(feedback, 0, 3);
+        layout.Controls.Add(buttons, 0, 4);
         Controls.Add(layout);
+        search.TextChanged += (_, _) =>
+        {
+            if (templates.DataSource is not DataTable rows) return;
+            ApplySearch(rows);
+            ShowSelected();
+        };
         templates.CurrentCellChanged += (_, _) => ShowSelected();
         templates.CellDoubleClick += async (_, e) =>
         {
@@ -88,8 +105,33 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         var row = (templates.CurrentRow?.DataBoundItem as DataRowView)?.Row;
         preview.Text = row?.Field<string>("Body") ?? "";
         edit.Enabled = !busy && row is not null;
-        edit.Text = row?.Field<int>("TemplateId") < 0 ? "Customize Template…" : "Edit Template…";
-        AppMetrics.FitButtonWidth(edit, minWidth: AppScale.Scale(145));
+        edit.Text = row?.Field<int>("TemplateId") > 0 ? EditTemplateText : CustomizeTemplateText;
+    }
+
+    private static string ChannelLabel(DataRow row) => row.Field<int>("TemplateId") < 0
+        ? "WhatsApp / SMS"
+        : row.Field<string>("Channel") is "Sms" ? "SMS" : row.Field<string>("Channel") ?? "";
+
+    private void ApplySearch(DataTable rows)
+    {
+        string[] terms = search.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        UiHelper.SetGridEmptyMessage(templates, terms.Length == 0 ? "No templates available." : "No templates match your search.");
+        if (terms.Length == 0)
+        {
+            rows.DefaultView.RowFilter = "";
+        }
+        else
+        {
+            var matches = rows.AsEnumerable().Where(row =>
+            {
+                string searchableText = string.Join(" ", row.Field<string>("Name"), ChannelLabel(row),
+                    CommunicationTemplateDialog.PurposeLabel(row.Field<string>("Purpose") ?? ""), row.Field<string>("Body"));
+                return terms.All(term => searchableText.Contains(term, StringComparison.CurrentCultureIgnoreCase));
+            }).Select(row => row.Field<int>("TemplateId").ToString(CultureInfo.InvariantCulture)).ToArray();
+            // Only numeric IDs enter the expression, so punctuation in the search is matched literally.
+            rows.DefaultView.RowFilter = matches.Length == 0 ? "1 = 0" : $"TemplateId IN ({string.Join(",", matches)})";
+        }
+        templates.Invalidate();
     }
 
     private async Task RefreshAsync()
@@ -107,6 +149,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             rows.Rows.InsertAt(row, index);
         }
         var old = templates.DataSource as DataTable;
+        ApplySearch(rows);
         templates.DataSource = rows;
         old?.Dispose();
         add.Enabled = true;

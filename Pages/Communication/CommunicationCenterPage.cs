@@ -244,11 +244,14 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             Dock = DockStyle.Fill, WrapContents = true, Margin = Padding.Empty,
             BackColor = AppTheme.Surface, Padding = new Padding(AppScale.Scale(6))
         };
-        templatesButton.Margin = new Padding(AppScale.Scale(20), 0, AppScale.Scale(3), 0);
-        navigation.Controls.AddRange(new Control[]
+        var navigationButtons = new[]
         {
             newMessageButton, unfinishedButton, historyButton, templatesButton, configureButton
-        });
+        };
+        var buttonMargin = new Padding(0, 0, AppScale.Scale(6), AppScale.Scale(4));
+        foreach (var button in navigationButtons)
+            button.Margin = buttonMargin;
+        navigation.Controls.AddRange(navigationButtons);
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty

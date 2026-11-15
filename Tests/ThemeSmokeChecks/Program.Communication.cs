@@ -188,6 +188,9 @@ internal static partial class Program
                     .Contains(button.RectangleToScreen(button.ClientRectangle));
         });
         Check(ButtonsFit(), "All communication actions are fully visible, not clipped by the navigation container");
+        Check(navigation.Select(button => button.Top).Distinct().Count() == 1
+            && navigation.Select(button => button.Height).Distinct().Count() == 1,
+            "Communication actions share a top edge and height when they fit on one row");
         host.ClientSize = new Size(670, 780);
         Application.DoEvents();
         Check(ButtonsFit(), "Communication actions wrap without clipping on a narrower page. " +
