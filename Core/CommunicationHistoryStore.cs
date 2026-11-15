@@ -58,8 +58,17 @@ internal static class CommunicationHistoryStore
 
     internal static CommunicationHistoryDraft? CreateDraft(DataTable history)
     {
+        // Meta acceptance completes submission work; delivery remains unverified.
+        // Send Again creates a separate draft for fresh eligibility checks and
+        // confirmation. Pending and uncertain attempts can never use this path.
         if (history.Rows.Count == 0 || history.AsEnumerable().Any(row =>
-                row.Field<string>("Outcome") is "Pending" or "Opened" or "Submitted" or "Accepted" or "Unknown"))
+                row.Field<string>("Outcome") switch
+                {
+                    "Pending" or "Opened" or "Submitted" or "Unknown" => true,
+                    "Accepted" => row.Field<string>("ProviderCode") != "MetaCloud"
+                        || row.Field<string>("Channel") != "WhatsApp",
+                    _ => false
+                }))
             return null;
         DataRow row = history.Rows[0];
         string provider = Convert.ToString(row["ProviderCode"]) ?? "";

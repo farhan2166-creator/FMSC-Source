@@ -211,22 +211,15 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
         backupTab.Padding = activityTab.Padding = new Padding(UiDesignSystem.Spacing.Md);
         tabs.Selecting += (_, e) => { if (isBusy) e.Cancel = true; };
         tabs.SelectedIndexChanged += (_, _) => ApplyHistoryDependentEnablement();
-        availableBackupsGrid.CellContentClick += async (_, e) => {
+        availableBackupsGrid.CellContentClick += (_, e) => {
             if (e.RowIndex < 0 || e.ColumnIndex != availableBackupsGrid.DetailsColumnIndex ||
                 availableBackupsGrid.Rows[e.RowIndex].Tag is not UnifiedRecoveryPoint point)
                 return;
-            var row = availableBackupsGrid.Rows[e.RowIndex];
             bool latest = e.RowIndex == 0;
-            if (!availableBackupsGrid.ToggleDetails(e.RowIndex,
-                    FormatExpandedRecoveryDetails(point, latest, null, loading: true)))
-                return;
-            // Never inspect or restore a .bak on the WinForms message pump.
-            // An older local backup is verified in a disposable SQL catalog;
-            // cloud-only legacy backups without local metadata show unavailable.
-            var summary = await Task.Run(() => BackupContentsSummary.FindOrInspect(point));
-            if (!IsDisposed)
-                availableBackupsGrid.UpdateDetails(row,
-                    FormatExpandedRecoveryDetails(point, latest, summary));
+            // Details use existing recovery metadata; expanding a row never
+            // restores a database to count student or finance records.
+            availableBackupsGrid.ToggleDetails(e.RowIndex,
+                FormatExpandedRecoveryDetails(point, latest));
         };
         availableBackupsGrid.CellDoubleClick += async (_, e) => {
             if (canRestore && e.RowIndex >= 0 && e.ColumnIndex != availableBackupsGrid.DetailsColumnIndex)
@@ -1111,8 +1104,7 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
     }
 
     private static RecoveryDetails FormatExpandedRecoveryDetails(
-        UnifiedRecoveryPoint point, bool latest,
-        BackupContentsSummary.Snapshot? summary, bool loading = false)
+        UnifiedRecoveryPoint point, bool latest)
     {
         var rows = new List<(string Label, string Value)> {
             ("SQL backup date",
@@ -1129,20 +1121,6 @@ public sealed class BackupRestorePage : V2Page, IBusyPage
                 (copy.Remote.UploadedUtc == default ? "" :
                     "  ·  uploaded " + copy.Remote.UploadedUtc.ToLocalTime().ToString("dd-MMM h:mm tt")) +
                 (copy.RecoveryTested ? "  ·  recovery-tested" : "  ·  verification needed")));
-
-        // Every count belongs to the original SQL recovery point; never show
-        // values taken from the live database in a historical backup preview.
-        if (summary is not null)
-        {
-            rows.Add(("Student records",
-                $"{summary.Students:N0}  ·  Admissions numbered: {summary.NumberedAdmissions:N0}  ·  Active enrollments: {summary.ActiveStudents:N0}"));
-            rows.Add(("Finance",
-                $"Fee payment entries: {summary.FeePayments:N0}  ·  Billing charges: {summary.BillingCharges:N0}  ·  Schema: {summary.SchemaVersion}"));
-        }
-        else
-            rows.Add(("Database contents", loading
-                ? "Reading this backup's saved records…"
-                : "Summary unavailable for this recovery point."));
 
         return new RecoveryDetails(latest ? "LATEST BACKUP" : "BACKUP DETAILS", rows);
     }

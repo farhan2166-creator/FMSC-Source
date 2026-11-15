@@ -1,4 +1,5 @@
 using System.Net;
+using System.Data;
 using System.Text;
 using System.Text.Json;
 using FMSC_SMS.Core;
@@ -109,7 +110,42 @@ using(var client=new HttpClient(paged))
 var staticSelection=new CommunicationMetaTransport.Selection(template with {Body="School is closed tomorrow."},Array.Empty<string>());
 using(var payload=JsonDocument.Parse(staticSelection.Payload(values)))
     Check(payload.RootElement.GetProperty("components").GetArrayLength()==0,"Static approved templates do not invent empty parameters");
-Console.WriteLine($"PASS: {count} communication transport and reviewed-content behavior checks; no external network, credentials or SQL used.");
+using(var history=new DataTable())
+{
+    foreach(string field in new[]{"Outcome","Channel","ProviderCode","Audience","Body","SelectedStudentName","SelectedStaffName","TemplateJson"})
+        history.Columns.Add(field);
+    foreach(string field in new[]{"CampusId","ClassId","StudentId","StaffId"})history.Columns.Add(field,typeof(int));
+    var approvedNotice=new CommunicationMetaTransport.Selection(
+        new("school_notice","en","School meeting.","",""),Array.Empty<string>());
+    history.Rows.Add("Accepted","WhatsApp","MetaCloud","School","School meeting.","","",JsonSerializer.Serialize(approvedNotice),0,0,0,0);
+    CurrentUser.Permissions.UnionWith(new[]{"Communication.Send","Students.View"});
+    var draft=CommunicationHistoryStore.CreateDraft(history);
+    Check(draft is not null && draft.Target.Channel=="WhatsApp" && draft.Body=="School meeting."
+        && draft.MetaTemplate?.Template==approvedNotice.Template,"Accepted Meta submission can create a separate reviewed draft with its approved template");
+    Check((string)history.Rows[0]["Outcome"]=="Accepted","Preparing another draft never promotes the original submission to Delivered");
+    foreach(string state in new[]{"Pending","Opened","Submitted","Unknown"})
+    {
+        history.Rows[0]["Outcome"]=state;
+        Check(CommunicationHistoryStore.CreateDraft(history) is null,"Pending, opened, submitted and uncertain records cannot use Send Again");
+    }
+    history.Rows[0]["Outcome"]="Accepted";
+    history.ImportRow(history.Rows[0]);history.Rows[1]["Outcome"]="Unknown";
+    Check(CommunicationHistoryStore.CreateDraft(history) is null,"One uncertain recipient blocks Send Again for the whole mixed batch");
+    history.Rows.RemoveAt(1);
+    history.Rows[0]["Channel"]="Sms";history.Rows[0]["ProviderCode"]="Twilio";
+    Check(CommunicationHistoryStore.CreateDraft(history) is null,"Twilio acceptance still requires its existing delivery reconciliation");
+    history.Rows[0]["ProviderCode"]="MetaCloud";
+    Check(CommunicationHistoryStore.CreateDraft(history) is null,"Meta acceptance on an unsupported channel stays blocked");
+    history.Rows[0]["Channel"]="WhatsApp";
+    CurrentUser.Permissions.Remove("Communication.Send");
+    Check(CommunicationHistoryStore.CreateDraft(history) is null,"Accepted Meta history does not bypass sending permission");
+    CurrentUser.Permissions.Add("Communication.Send");CurrentUser.Permissions.Remove("Students.View");
+    Check(CommunicationHistoryStore.CreateDraft(history) is null,"Accepted Meta history does not bypass school-record access");
+    CurrentUser.Permissions.Add("Students.View");history.Rows[0]["Audience"]="OutstandingFees";
+    Check(CommunicationHistoryStore.CreateDraft(history) is null,"Fee-reminder drafts retain financial-view authorization");
+    CurrentUser.Permissions.Clear();
+}
+Console.WriteLine($"PASS: {count} communication transport, history and reviewed-content behavior checks; no external network, credentials or SQL used.");
 static HttpResponseMessage Json(HttpStatusCode status,string text)=>new(status){Content=new StringContent(text,Encoding.UTF8,"application/json")};
 sealed class Fake(Func<HttpRequestMessage,Task<HttpResponseMessage>> respond):HttpMessageHandler
 {

@@ -331,7 +331,28 @@ internal static partial class Program
         unsettled.Rows[1]["Outcome"] = "Unknown";
         Check(CommunicationHistoryStore.CreateDraft(unsettled) is null,
             "An uncertain attempt keeps Send Again unavailable until the batch can be reviewed safely");
+        using var acceptedMetaRows = unsettled.Copy();
         history.Close();
+
+        var metaTemplate = new CommunicationMetaTransport.Selection(
+            new("school_notice", "en", "Original message {{1}}", "", ""), new[] { "[StudentName]" });
+        foreach (DataRow row in acceptedMetaRows.Rows)
+        {
+            row["Channel"] = "WhatsApp"; row["ProviderCode"] = "MetaCloud"; row["Outcome"] = "Accepted";
+            row["TemplateJson"] = System.Text.Json.JsonSerializer.Serialize(metaTemplate);
+        }
+        using (var acceptedHistory = new CommunicationHistoryDialog(new(completed,"MetaCloud","Accepted","School"),
+            _ => Task.FromResult(acceptedMetaRows.Copy())))
+        {
+            acceptedHistory.Show(); Application.DoEvents();
+            var again = Field<ModernButton>(acceptedHistory,"sendAgain");
+            Check(again.Visible && again.Enabled && acceptedHistory.Draft?.MetaTemplate?.Template == metaTemplate.Template
+                && Field<ModernTextBox>(acceptedHistory,"preview").Text == "Original message First",
+                "Accepted Meta history offers a new draft while preserving the saved preview and approved template");
+            Check(acceptedMetaRows.AsEnumerable().All(row => row.Field<string>("Outcome") == "Accepted"),
+                "Opening accepted Meta history never fabricates delivery or sends another message");
+            acceptedHistory.Close();
+        }
 
         using var settings = new CommunicationSendingOptionsDialog(() =>
         {
