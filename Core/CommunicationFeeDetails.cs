@@ -10,7 +10,7 @@ internal static class CommunicationFeeDetails
     internal sealed record Student(int AdmissionId, string Name, string AdmissionNumber, string ClassSection, decimal Outstanding);
 
     internal const string Field = "[FeeDetails]";
-    internal const string Template = "[FeeDetails]\n\nPlease contact the school accounts office if you have already paid or need assistance.\nThank you.";
+    internal const string Template = "[FeeDetails]\n\nFor payment queries, please contact the school accounts office.\nThank you.";
 
     internal static string Format(string school, DateTime asAt, IReadOnlyList<Student> students, decimal total, bool family)
     {
@@ -22,20 +22,34 @@ internal static class CommunicationFeeDetails
 
         var lines = new List<string>
         {
-            Label(school), "Outstanding fees as at " + asAt.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture),
-            "", "Dear parent/guardian,", ""
+            Label(school), "Fee balance as at " + asAt.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture),
+            "", "Dear Parent/Guardian,", ""
         };
         foreach (var student in students)
         {
             string admission = Label(student.AdmissionNumber);
             string name = Label(student.Name);
-            lines.Add((name.Length == 0 ? "Student" : name) + (admission.Length == 0 ? "" : " (Adm. " + admission + ")"));
             string placement = Label(student.ClassSection);
-            if (placement.Length > 0) lines.Add("Class: " + placement);
-            lines.Add("Outstanding: PKR " + student.Outstanding.ToString("N2", CultureInfo.InvariantCulture));
-            lines.Add("");
+            string identity = name.Length == 0 ? "Student" : name;
+            string amount = "PKR " + student.Outstanding.ToString("N2", CultureInfo.InvariantCulture);
+            if (family)
+            {
+                string reference = string.Join(", ", new[] { admission.Length == 0 ? "" : "Adm. " + admission, placement }
+                    .Where(value => value.Length > 0));
+                lines.Add(identity + (reference.Length == 0 ? "" : " (" + reference + ")") + ": " + amount);
+            }
+            else
+            {
+                lines.Add("Student: " + identity + (admission.Length == 0 ? "" : " (Adm. " + admission + ")"));
+                if (placement.Length > 0) lines.Add("Class: " + placement);
+                lines.Add("Outstanding: " + amount);
+            }
         }
-        if (family) lines.Add("Total outstanding: PKR " + total.ToString("N2", CultureInfo.InvariantCulture));
+        if (family)
+        {
+            lines.Add("");
+            lines.Add("Total outstanding: PKR " + total.ToString("N2", CultureInfo.InvariantCulture));
+        }
         return string.Join("\n", lines).Trim();
     }
 
