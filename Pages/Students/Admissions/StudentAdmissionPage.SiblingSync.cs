@@ -48,6 +48,7 @@ public sealed partial class StudentAdmissionPage
             using var submitted = HoldSubmittedInputs();
             var preview = await AdmissionSiblingSyncData.ReadAsync(anchor, field, input.Text);
             if (IsDisposed || currentAdmissionId != anchor || admissionLoadVersion != version) return;
+            if (preview is null) return;
             using var dialog = new AdmissionSiblingSyncDialog(preview);
             if (dialog.ShowDialog(FindForm()) != DialogResult.OK) return;
             if (IsDisposed || currentAdmissionId != anchor || admissionLoadVersion != version) return;

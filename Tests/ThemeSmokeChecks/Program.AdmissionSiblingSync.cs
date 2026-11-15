@@ -15,6 +15,18 @@ internal static partial class Program
             var sibling = new AdmissionSiblingSyncData.Row(42, "0042", "Synthetic sibling", "Old Sibling Address");
             var preview = new AdmissionSiblingSyncData.Preview(CurrentUser.UserId, 41, 7, AdmissionSiblingSyncData.Address,
                 "Reviewed Address", new[] { source, sibling });
+            Check(AdmissionSiblingSyncData.Review(CurrentUser.UserId, 41, 0, AdmissionSiblingSyncData.Address,
+                "", new[] { source }) is null,
+                "No linked sibling returns silently, even when the unused source value is blank");
+            Check(AdmissionSiblingSyncData.Review(CurrentUser.UserId, 41, 7, AdmissionSiblingSyncData.Address,
+                source.OldValue, new[] { source, sibling with { OldValue = source.OldValue } }) is null,
+                "Matching sibling values do not open a preview or request an update");
+            Check(AdmissionSiblingSyncData.Review(CurrentUser.UserId, 41, 7, AdmissionSiblingSyncData.Address,
+                preview.NewValue, new[] { source, sibling with { OldValue = preview.NewValue } }) is null,
+                "An unsaved source change alone is left to normal Save when the siblings already match");
+            Check(AdmissionSiblingSyncData.Review(CurrentUser.UserId, 41, 7, AdmissionSiblingSyncData.Address,
+                preview.NewValue, preview.Rows) is { NeedsSync: true },
+                "A differing linked sibling still produces the reviewed sync scope");
             int writes = 0;
             Task<int> Apply(AdmissionSiblingSyncData.Preview reviewed)
             {

@@ -15,6 +15,7 @@ internal static class AdmissionSiblingSyncData
     internal sealed record Preview(int Actor, int Anchor, int FamilyId, Field Field, string NewValue, IReadOnlyList<Row> Rows)
     {
         internal int Changes => Rows.Count(row => row.OldValue != NewValue);
+        internal bool NeedsSync => Rows.Any(row => row.AdmissionId != Anchor && row.OldValue != NewValue);
     }
 
     internal static bool CanUse => CurrentUser.HasPermission("Students.View") && CurrentUser.HasPermission("Students.Administer");
@@ -36,20 +37,28 @@ internal static class AdmissionSiblingSyncData
         return Convert.ToString(RecordTextPolicy.NormalizeParameter("@" + field.Column, value)) ?? "";
     }
 
-    internal static async Task<Preview> ReadAsync(int anchor, Field field, string value)
+    internal static async Task<Preview?> ReadAsync(int anchor, Field field, string value)
     {
         if (!CanUse) throw new UnauthorizedAccessException("Student administration permission is required.");
         int actor = CurrentUser.UserId;
-        value = Normalize(field, value);
         using var table = await DatabaseHelper.QuerySqlAsync(SiblingFieldSyncSql.Read(field.Column),
             DatabaseHelper.Int("@UserId", actor), DatabaseHelper.Int("@Anchor", anchor));
         if (actor != CurrentUser.UserId || !CanUse) throw new UnauthorizedAccessException("Signed-in access changed.");
         var rows = table.AsEnumerable().Select(row => new Row(row.Field<int>("AdmissionId"),
             Convert.ToString(row["AdmissionNumber"]) ?? "", Convert.ToString(row["StudentName"]) ?? "",
             Convert.ToString(row["OldValue"]) ?? "")).ToArray();
-        if (rows.Length < 2 || rows.All(row => row.AdmissionId != anchor))
-            throw new InvalidOperationException("No linked siblings are available. Link the siblings first.");
-        return new(actor, anchor, Convert.ToInt32(table.Rows[0]["FamilyId"]), field, value, rows);
+        if (rows.Length == 0) return null;
+        return Review(actor, anchor, Convert.ToInt32(table.Rows[0]["FamilyId"]), field, value, rows);
+    }
+
+    internal static Preview? Review(int actor, int anchor, int familyId, Field field, string value, IReadOnlyList<Row> rows)
+    {
+        var preview = new Preview(actor, anchor, familyId, field, value.Trim(), rows);
+        // Sync is only useful when another linked student's value will change.
+        // Do not prompt, validate an unused value, or save the source alone.
+        if (familyId <= 0 || rows.All(row => row.AdmissionId != anchor) || !preview.NeedsSync) return null;
+        preview = preview with { NewValue = Normalize(field, value) };
+        return preview.NeedsSync ? preview : null;
     }
 
     internal static async Task<int> ApplyAsync(Preview preview)
