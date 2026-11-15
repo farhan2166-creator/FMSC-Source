@@ -109,7 +109,7 @@ internal sealed class FeeMessageDocument : IDisposable
             Convert.ToDecimal(source.Tables[0].Rows[0]["CashReceived"]), number);
     }
 
-    internal async Task ExportAsync(string file)
+    private async Task<DataTable> PrepareAsync()
     {
         if (!receipt && issuedBill is null)
             issuedBill = await FeeBillDocuments.IssueAsync(data,
@@ -118,9 +118,15 @@ internal sealed class FeeMessageDocument : IDisposable
         DataTable source = saved ?? data;
         if (receipt) await FeeDocumentParents.ApplyAsync(source);
         bool grouped = source.Columns.Contains("FamilyRowKind");
-        using var display = receipt ? grouped ? FamilyFeeDocumentPresentation.Receipt(source) : FeeReceiptPresentation.Prepare(source)
+        var display = receipt ? grouped ? FamilyFeeDocumentPresentation.Receipt(source) : FeeReceiptPresentation.Prepare(source)
             : grouped ? FamilyFeeDocumentPresentation.Bill(source) : FeeBillPresentation.Prepare(source);
         if (receipt && !grouped) FeeDocumentData.GroupPeriods(display);
+        return display;
+    }
+
+    private (string Path, string DataSet) Template(DataTable display)
+    {
+        bool grouped = display.Columns.Contains("FamilyRowKind");
         var (template, dataSet) = (receipt, grouped) switch
         {
             (true, true) => (FamilyReceiptReport.TemplateFile, FamilyReceiptReport.DataSetName),
@@ -128,7 +134,45 @@ internal sealed class FeeMessageDocument : IDisposable
             (false, true) => (FamilyBillReport.TemplateFile, FamilyBillReport.DataSetName),
             _ => (StudentBillReport.TemplateFile, StudentBillReport.DataSetName)
         };
-        string templatePath = Path.Combine(AppContext.BaseDirectory, "Reports", template);
+        return (Path.Combine(AppContext.BaseDirectory, "Reports", template), dataSet);
+    }
+
+    internal async Task<Bitmap> RenderImageAsync()
+    {
+        using var display = await PrepareAsync();
+        var (path, dataSet) = Template(display);
+        // Rendering stays off the UI thread; clipboard access belongs to the caller's STA thread.
+        return await Task.Run(() =>
+        {
+            if (!receipt)
+            {
+                using var bills = FeeBillRollDocument.Render(path, dataSet, display);
+                return FeeMessageImage.Combine(bills.Pages.Select(page => page.Image));
+            }
+            using var printable = RecordTextPolicy.PrintCopy(display);
+            using var report = new LocalReport();
+            report.LoadReportDefinition(new StringReader(FeeDocumentLayout.SizeToContent(path, display)));
+            report.DataSources.Add(new ReportDataSource(dataSet, printable));
+            var pages = new List<MemoryStream>();
+            try
+            {
+                report.Render("IMAGE", "<DeviceInfo><OutputFormat>EMF</OutputFormat><StartPage>0</StartPage><EndPage>0</EndPage></DeviceInfo>",
+                    (name, extension, encoding, mime, seek) =>
+                    {
+                        var stream = new MemoryStream();
+                        pages.Add(stream);
+                        return stream;
+                    }, out _);
+                return FeeMessageImage.Combine(pages);
+            }
+            finally { foreach (var page in pages) page.Dispose(); }
+        });
+    }
+
+    internal async Task ExportAsync(string file)
+    {
+        using var display = await PrepareAsync();
+        var (templatePath, dataSet) = Template(display);
         byte[] pdf;
         if (receipt)
         {

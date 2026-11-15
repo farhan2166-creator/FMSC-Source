@@ -72,6 +72,11 @@ internal static partial class Program
                 share.ExportAsync(path).GetAwaiter().GetResult();
                 using var pdf = PdfSharp.Pdf.IO.PdfReader.Open(path, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import);
                 Check(pdf.PageCount == 1, "The WhatsApp attachment exports a complete saved family receipt PDF");
+                var rendering = share.RenderImageAsync();
+                PumpUntil(() => rendering.IsCompleted, "Render the saved family receipt image", TimeSpan.FromSeconds(60));
+                using var image = rendering.GetAwaiter().GetResult();
+                Check(image.Width >= 500 && image.Height > image.Width && image.HorizontalResolution == FeeMessageImage.Dpi,
+                    "The same saved family receipt renders a readable continuous image without a saved attachment");
             }
             finally { if (File.Exists(path)) File.Delete(path); }
         }

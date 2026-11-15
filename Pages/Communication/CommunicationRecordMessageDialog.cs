@@ -16,8 +16,10 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         Func<Task<IReadOnlyList<ComposeTemplate>>> ReadTemplates,
         Func<CommunicationTarget, Task<CommunicationPreview>> ReadRecipients,
         Func<Method, CommunicationTarget, CommunicationPreview, string, Guid, CommunicationMetaTransport.Selection?, Task<CommunicationConfirmation>> Confirm,
-        Action<Method, CommunicationConfirmation> Dispatch,
-        Func<int, bool, bool, Task<FeeMessageDocument>>? ReadFeeDocument = null);
+        Action<Method, CommunicationConfirmation, Func<Task>?> Dispatch,
+        Func<int, bool, bool, Task<FeeMessageDocument>>? ReadFeeDocument = null,
+        Func<FeeMessageDocument, Task<Bitmap>>? RenderImage = null,
+        Action<Image>? CopyImage = null);
 
     private sealed record ReviewedMessage(CommunicationTarget Target, CommunicationPreview Preview, string Body, Guid RequestId,
         FeeMessageDocument? Document);
@@ -38,7 +40,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     private readonly Operations operations;
     private readonly ModernComboBox scope = HumanUi.Combo();
     private readonly ModernComboBox feeContent = HumanUi.Combo();
-    private readonly CheckBox attachPdf = new() { Text = "Save PDF to attach in WhatsApp", Dock = DockStyle.Fill };
+    private readonly CheckBox attachImage = new() { Text = "Share as image in WhatsApp", Checked = true, Dock = DockStyle.Fill };
     private readonly ModernComboBox method = HumanUi.Combo(), templates = HumanUi.Combo(), recipients = HumanUi.Combo();
     private readonly ModernTextBox message = HumanUi.TextBox(true, 1600), preview = HumanUi.TextBox(true, 1600);
     private readonly Label destination = new() { Dock = DockStyle.Fill, AutoEllipsis = true, Font = AppTheme.ButtonFont, UseMnemonic = false };
@@ -57,6 +59,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     private bool IsFamily => scope.SelectedIndex == 1;
     private bool IsReceipt => feeContent.SelectedIndex == 1;
     private Method? SelectedMethod => method.SelectedItem as Method;
+    private bool ShareImage => fees && attachImage.Checked && SelectedMethod is { Provider: null };
     private CommunicationTarget Target => studentTarget with
     {
         Audience = IsFamily ? fees ? CommunicationAudience.FeeFamily : CommunicationAudience.Family : studentTarget.Audience,
@@ -75,10 +78,10 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
             (option, target, review, body, request, meta) => option.Provider is { } provider
                 ? CommunicationApiBatchStore.ConfirmAsync(target, review, body, request, provider, meta)
                 : CommunicationBatchStore.ConfirmPreviewAsync(target, review, body, request, manualWhatsApp: true),
-            (option, batch) =>
+            (option, batch, prepareImage) =>
             {
                 using Form dispatch = option.Provider is null
-                    ? new CommunicationManualHandoffDialog(batch.BatchId, openFirstChat: !batch.AlreadyConfirmed)
+                    ? new CommunicationManualHandoffDialog(batch.BatchId, openFirstChat: !batch.AlreadyConfirmed, prepareImage: prepareImage)
                     : new CommunicationApiDispatchDialog(batch.BatchId, startConfirmed: !batch.AlreadyConfirmed);
                 dispatch.ShowDialog(this);
             });
@@ -97,7 +100,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         options = Pair(HumanUi.Field("Send to", scope), HumanUi.Field("Send using", method));
         feeContent.Items.AddRange(new object[] { "Outstanding balance / bill", "Latest payment / receipt" });
         feeContent.SelectedIndex = 0;
-        feeOptions.Controls.Add(Pair(HumanUi.Field("Fee message", feeContent), attachPdf));
+        feeOptions.Controls.Add(Pair(HumanUi.Field("Fee message", feeContent), attachImage));
         templateField = HumanUi.Field("Template (optional)", templates);
         messageField = HumanUi.Field("Message", message);
         recipientField = HumanUi.Field("Recipient preview", recipients);
@@ -123,7 +126,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         layout.Controls.Add(SwitchableRow(templateField, chooseMeta, recipientField), 0, 3);
         layout.Controls.Add(SwitchableRow(messageField, previewField), 0, 4);
         layout.Controls.Add(status, 0, 5);
-        action.Width = AppMetrics.TextWidth("Save PDF & Open Chat", action.Font, AppScale.Scale(32));
+        action.Width = AppMetrics.TextWidth("Copy Image & Open Chat", action.Font, AppScale.Scale(32));
         layout.Controls.Add(HumanUi.DialogButtons(back, action, cancel), 0, 6);
         Controls.Add(layout);
 
@@ -137,7 +140,6 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         method.SelectedIndexChanged += (_, _) =>
         {
             if (metaSelection is not null || SelectedMethod?.IsMeta == true) ClearDraft();
-            if (SelectedMethod?.Provider is not null) attachPdf.Checked = false;
             message.ReadOnly = SelectedMethod?.IsMeta == true;
             RefreshTemplates(selectDefault: fees && message.Text.Length == 0);
             UpdateView();
@@ -290,7 +292,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         status.ForeColor = result.Included == 0 ? AppTheme.Danger : AppTheme.MutedText;
         status.Text = result.Included == 0
             ? "No eligible guardian contact for this message."
-            : attachPdf.Checked ? "Save the PDF, then attach it in the reviewed WhatsApp chat."
+            : ShareImage ? "The image is copied when each chat opens. Press Ctrl+V in WhatsApp, review it, then Send."
             : option.Provider is null ? "Press Send in WhatsApp." : "Confirm to send to the reviewed contact. Provider charges may apply.";
         review = new(target, result, body, Guid.NewGuid(), document);
     }
@@ -298,41 +300,41 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     private async Task ConfirmAsync()
     {
         if (review is not { Preview.Included: > 0 } reviewed || SelectedMethod is not { } option) return;
-        string? attachment = null;
+        using var image = ShareImage && reviewed.Document is { } imageDocument
+            ? await PrepareImageAsync(imageDocument) : null;
         if (reviewed.Document is { } document)
-        {
-            if (attachPdf.Checked)
-            {
-                using var save = new SaveFileDialog
-                {
-                    Title = "Save PDF to attach in WhatsApp", Filter = "PDF document (*.pdf)|*.pdf", DefaultExt = "pdf",
-                    AddExtension = true, FileName = document.SuggestedFileName
-                };
-                if (save.ShowDialog(this) != DialogResult.OK) return;
-                attachment = save.FileName;
-            }
-            using var current = await ReadFeeDocumentAsync();
-            EnsureAccess();
-            if (current.ReviewKey != document.ReviewKey)
-                throw new CommunicationValidationException("The fee document or family membership changed. Go back and review it again.");
-            if (attachment is not null)
-            {
-                await document.ExportAsync(attachment);
-                EnsureAccess();
-                ModernMessageDialog.ShowInfo(this,
-                    "In WhatsApp, choose Attach → Document and select this PDF before pressing Send:\n\n" + attachment, "Attach Fee PDF");
-                EnsureAccess();
-                using var verified = await ReadFeeDocumentAsync();
-                if (verified.ReviewKey != document.ReviewKey)
-                    throw new CommunicationValidationException("The fee document changed after export. Go back and prepare the current PDF.");
-            }
-        }
+            await VerifyDocumentAsync(document);
         var batch = await operations.Confirm(option, reviewed.Target, reviewed.Preview, reviewed.Body, reviewed.RequestId, metaSelection);
         EnsureAccess();
-        operations.Dispatch(option, batch);
+        // The modal handoff owns the image's lifetime. Revalidate before every chat,
+        // including a later sibling contact or a retry; never paste stale financial data.
+        operations.Dispatch(option, batch, image is null ? null : async () =>
+        {
+            await VerifyDocumentAsync(reviewed.Document!);
+            EnsureAccess();
+            try { (operations.CopyImage ?? Clipboard.SetImage)(image); }
+            catch (System.Runtime.InteropServices.ExternalException)
+            {
+                throw new CommunicationValidationException("Windows clipboard is busy. Choose Open WhatsApp again to retry copying the image.");
+            }
+        });
         busy = false;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private async Task<Bitmap> PrepareImageAsync(FeeMessageDocument document)
+    {
+        await VerifyDocumentAsync(document);
+        return await (operations.RenderImage ?? (item => item.RenderImageAsync()))(document);
+    }
+
+    private async Task VerifyDocumentAsync(FeeMessageDocument document)
+    {
+        using var current = await ReadFeeDocumentAsync();
+        EnsureAccess();
+        if (current.ReviewKey != document.ReviewKey)
+            throw new CommunicationValidationException("The fee document or family membership changed. Close the handoff and review it again.");
     }
 
     private void UpdateView()
@@ -342,13 +344,14 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         options.Visible = messageField.Visible = !reviewing;
         feeOptions.Visible = fees && !reviewing;
         feeOptions.Enabled = !busy;
-        attachPdf.Enabled = fees && SelectedMethod is { Provider: null };
+        attachImage.Visible = fees && SelectedMethod is { Provider: null };
+        attachImage.Enabled = !busy && fees && SelectedMethod is { Provider: null };
         chooseMeta.Visible = !reviewing && useMeta;
         templateField.Visible = !reviewing && !useMeta;
         summary.Visible = previewField.Visible = reviewing;
         recipientField.Visible = reviewing && recipients.Items.Count > 0;
         back.Visible = reviewing;
-        action.Text = !reviewing ? "Review Message" : attachPdf.Checked ? "Save PDF & Open Chat" : SelectedMethod?.Provider is not null ? "Confirm & Send"
+        action.Text = !reviewing ? "Review Message" : ShareImage ? "Copy Image & Open Chat" : SelectedMethod?.Provider is not null ? "Confirm & Send"
             : review!.Preview.Included == 1 ? "Open in WhatsApp" : "Start WhatsApp Chats";
         action.Enabled = !busy && (reviewing ? review!.Preview.Included > 0 : SelectedMethod is not null);
         options.Enabled = templateField.Enabled = chooseMeta.Enabled = messageField.Enabled = !busy;
