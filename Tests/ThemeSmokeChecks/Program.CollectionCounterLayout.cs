@@ -52,7 +52,7 @@ internal static partial class Program
                 Check(summary.Controls.Contains(action), "Ordinary collection retains its primary payment action");
                 var siblingHint = Field<Label>("siblingHint");
                 var selectAll = Field<ModernButton>("selectAllSiblings");
-                var siblingPanel = selectAll.Parent!;
+                var siblingPanel = (TableLayoutPanel)selectAll.Parent!;
                 // A blank SQL-free fixture may legitimately hide Select All until
                 // eligible siblings are loaded. Test the layout contract itself,
                 // then geometry only when the action is actually displayed.
