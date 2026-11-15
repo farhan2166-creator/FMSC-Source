@@ -659,6 +659,9 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
                 Margin = new Padding(0)
             };
         counterSiblingCard=siblingsCard;counterSiblingPanel=siblingPanel;
+        // Use the full available column: the default auto-sized column can grow
+        // wider than a narrow Paying For card and clip an otherwise centered button.
+        siblingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         // The current student's compact summary appears above the sibling choices.
         siblingPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
         primaryPayer.Visible = false;

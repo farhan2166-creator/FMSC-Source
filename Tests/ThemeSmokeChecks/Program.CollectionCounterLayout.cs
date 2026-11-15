@@ -52,11 +52,21 @@ internal static partial class Program
                 Check(summary.Controls.Contains(action), "Ordinary collection retains its primary payment action");
                 var siblingHint = Field<Label>("siblingHint");
                 var selectAll = Field<ModernButton>("selectAllSiblings");
-                var siblingPanel = selectAll.Parent!;
-                Check(siblingHint.Visible && selectAll.Visible && siblingHint.TextAlign == ContentAlignment.MiddleCenter
-                    && Math.Abs(siblingHint.Left + siblingHint.Right - siblingPanel.ClientSize.Width) <= 2
-                    && Math.Abs(selectAll.Left + selectAll.Right - siblingPanel.ClientSize.Width) <= 2,
-                    "The included-student count and Select All are centered in the Paying For panel");
+                var siblingPanel = (TableLayoutPanel)selectAll.Parent!;
+                // A blank SQL-free fixture may legitimately hide Select All until
+                // eligible siblings are loaded. Test the layout contract itself,
+                // then geometry only when the action is actually displayed.
+                Check(siblingPanel.Controls.Contains(siblingHint) && siblingPanel.Controls.Contains(selectAll)
+                    && siblingHint.Dock == DockStyle.Fill
+                    && siblingHint.TextAlign == ContentAlignment.MiddleCenter
+                    && siblingPanel.GetColumn(siblingHint) == siblingPanel.GetColumn(selectAll)
+                    && siblingPanel.GetRow(selectAll) > siblingPanel.GetRow(siblingHint)
+                    && selectAll.Anchor == AnchorStyles.None,
+                    "Paying For keeps its centered count and a centered Select All layout row");
+                var selectAllBounds = BoundsWithin(selectAll, siblingPanel);
+                Check(!selectAll.Visible ||
+                    HorizontallyCentered(selectAllBounds, siblingPanel.ClientRectangle),
+                    $"Visible Select All is centered and not clipped in Paying For (button={selectAllBounds}, panel={siblingPanel.ClientRectangle}, anchor={selectAll.Anchor}, row={siblingPanel.GetRow(selectAll)}, visible={selectAll.Visible})");
                 // Programmatic enrollment binding used to launch an independent
                 // asynchronous reload, invalidating the just-selected student.
                 var enrollment=Field<LookupBox>("enrollment");
