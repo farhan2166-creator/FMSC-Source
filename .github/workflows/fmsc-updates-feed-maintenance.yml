@@ -19,14 +19,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify-and-prune:
+  inspect-feed:
     if: github.repository_id == '1412760928' && github.repository_owner_id == '316891609' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - name: Audit private update feed (read-only)
         uses: actions/github-script@v9
-         with:
+        with:
           github-token: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
           retries: 3
           script: |
@@ -53,7 +53,7 @@ jobs:
                 !names.includes(channel.latestVersion) ||
                 (channel.previousVersion && !names.includes(channel.previousVersion)) ||
                 names.length < 1 || names.length > 2) {
-              throw new Error('Refusing cleanup: private feed versions or stable pointer are inconsistent.');
+              throw new Error('Invalid private feed versions or stable pointer are inconsistent.');
             }
             const [{ data: tip }, { data: listing }] = await Promise.all([
               github.rest.git.getCommit({ owner, repo, commit_sha: main.commit.sha }),
