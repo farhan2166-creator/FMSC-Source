@@ -300,7 +300,6 @@ internal static partial class Program
             audience.RectangleToScreen(audience.ClientRectangle),
             targetCard.Content.RectangleToScreen(targetCard.Content.ClientRectangle));
         Check(targetCard.Visible && audience.Visible && audienceField.Visible
-            && audienceField.Dock == DockStyle.Fill
             && audience.Width > 100 && audience.Height > 15
             && visibleInput.Width > 100 && visibleInput.Height > 15,
             "Recipients page visibly renders the Send to selector below its header at dashboard size");
@@ -356,6 +355,13 @@ internal static partial class Program
                 var content = targetCard.Content.RectangleToScreen(targetCard.Content.ClientRectangle);
                 return bounds.Width > 0 && bounds.Left >= content.Left && bounds.Right <= content.Right;
             }), "A narrow composer wraps the fields in order and keeps the inputs and Review action within its width");
+        var composeScroll = targetCard.Content.Controls.OfType<Panel>().Single();
+        composeScroll.ScrollControlIntoView(reviewAction);
+        Application.DoEvents();
+        Check(composeScroll.RectangleToScreen(composeScroll.ClientRectangle)
+            .Contains(reviewAction.RectangleToScreen(reviewAction.ClientRectangle)),
+            "The Review action can be scrolled fully into view on a narrow composer");
+        composeScroll.AutoScrollPosition = Point.Empty;
         host.ClientSize = new Size(1200, 780);
         Application.DoEvents();
         ChooseAudience(CommunicationAudience.Student);

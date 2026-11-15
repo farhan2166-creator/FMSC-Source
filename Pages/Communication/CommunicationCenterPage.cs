@@ -264,7 +264,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             if (fitting || navigation.IsDisposed) return;
             int width = navigation.ClientSize.Width - navigation.Padding.Horizontal;
             if (width <= 0) return;
-            int measuredHeight = ButtonRowsHeight(navigation, width)
+            int measuredHeight = WrappedRowsHeight(navigation, width)
                 + navigation.Padding.Vertical;
             // During a Windows resize the FlowLayoutPanel can position its
             // wrapped children *after* SizeChanged. Never let its actual
@@ -312,7 +312,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         return layout;
     }
 
-    private static int ButtonRowsHeight(FlowLayoutPanel panel, int availableWidth)
+    private static int WrappedRowsHeight(FlowLayoutPanel panel, int availableWidth)
     {
         int height = 0, rowHeight = 0, rowWidth = 0;
         foreach (Control button in panel.Controls)
@@ -357,21 +357,45 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         editor.Height = AppScale.Scale(200);
         fields.Controls.Add(editor, 0, 3);
         fields.Controls.Add(messageIssue, 0, 4);
+        foreach (var issue in new[] { targetIssue, messageIssue })
+        {
+            issue.Visible = false;
+            issue.TextChanged += (_, _) => issue.Visible = issue.Text.Length > 0;
+        }
         var footer = ActionFooter(next);
         footer.Dock = DockStyle.Fill;
         fields.Controls.Add(footer, 0, 5);
+        fields.RowStyles[0] = new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight);
+        fields.RowStyles[2] = new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight + sending.Margin.Vertical);
         fields.RowStyles[3] = new RowStyle(SizeType.Absolute, editor.Height);
         fields.RowStyles[5] = new RowStyle(SizeType.Absolute, footer.Height);
-        fields.SizeChanged += (_, _) =>
+        bool fitting = false;
+        void FitFields()
         {
-            int width = Math.Max(1, fields.ClientSize.Width - fields.Padding.Horizontal);
-            int columns = Math.Clamp(width / AppScale.Scale(235), 1, 3);
-            int columnWidth = width / columns;
-            audienceField.Width = campusField.Width = classField.Width = columnWidth;
-            studentField.Width = staffField.Width = Math.Min(width, columnWidth * 2);
-            methodField.Width = templateField.Width = width >= AppScale.Scale(470) ? Math.Min(width / 2, AppScale.Scale(360)) : width;
-            targetIssue.MaximumSize = messageIssue.MaximumSize = new Size(width, 0);
-        };
+            int width = fields.ClientSize.Width - fields.Padding.Horizontal;
+            if (fitting || !fields.Visible || fields.IsDisposed || width <= 0) return;
+            fitting = true;
+            fields.SuspendLayout();
+            try
+            {
+                int columns = Math.Clamp(width / AppScale.Scale(235), 1, 3);
+                int columnWidth = width / columns;
+                audienceField.Width = campusField.Width = classField.Width = columnWidth;
+                studentField.Width = staffField.Width = Math.Min(width, columnWidth * 2);
+                methodField.Width = templateField.Width = columnWidth;
+                fields.RowStyles[0].Height = WrappedRowsHeight(recipients, width);
+                fields.RowStyles[2].Height = WrappedRowsHeight(sending, width) + sending.Margin.Vertical;
+                targetIssue.MaximumSize = messageIssue.MaximumSize = new Size(width, 0);
+            }
+            finally
+            {
+                fields.ResumeLayout(true);
+                fitting = false;
+            }
+        }
+        fields.SizeChanged += (_, _) => FitFields();
+        fields.VisibleChanged += (_, _) => FitFields();
+        recipients.Layout += (_, _) => FitFields();
         scroll.Controls.Add(fields);
         card.Content.Controls.Add(scroll);
         return card;
@@ -381,11 +405,11 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     {
         var row = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = true, Margin = Padding.Empty, Padding = Padding.Empty
+            Dock = DockStyle.Fill, WrapContents = true, Margin = Padding.Empty, Padding = Padding.Empty
         };
         foreach (var field in fields)
         {
+            field.Dock = DockStyle.None;
             field.Height = AppMetrics.FieldRowHeight;
             row.Controls.Add(field);
         }
