@@ -38,6 +38,7 @@ jobs:
             const retain = 3;
             const dryRun = process.env.DRY_RUN === 'true';
             const { owner, repo } = context.repo;
+            const { data: repository } = await github.rest.repos.get({ owner, repo });
             // Fetch every page before deleting: deleting while paginating skips runs.
             const allRuns = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
               owner, repo, status: 'completed', per_page: 100
@@ -57,6 +58,8 @@ jobs:
 
             let kept = 0;
             let candidates = 0;
+            let deleted = 0;
+            let alreadyAbsent = 0;
             for (const [workflowId, runs] of byWorkflow) {
               runs.sort((a, b) =>
                 Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id);
@@ -68,8 +71,17 @@ jobs:
                 if (dryRun) {
                   core.info(`[preview] Delete ${run.html_url}`);
                 } else {
-                  await github.rest.actions.deleteWorkflowRun({ owner, repo, run_id: run.id });
-                  core.info(`Deleted completed run ${run.id}`);
+                  try {
+                    await github.rest.actions.deleteWorkflowRun({ owner, repo, run_id: run.id });
+                    deleted++;
+                    core.info(`Deleted completed run ${run.id}`);
+                  } catch (error) {
+                    // Another cleanup or GitHub retention can remove a run after
+                    // inventory. Already absent is not an unsafe state.
+                    if (error.status !== 404) throw error;
+                    alreadyAbsent++;
+                    core.warning(`Run ${run.id} was already removed; continuing`);
+                  }
                 }
                 candidates++;
               }
@@ -80,8 +92,10 @@ jobs:
               .addTable([
                 [{data:'Metric',header:true},{data:'Count',header:true}],
                 ['Workflows', String(byWorkflow.size)],
+                ['Git repository size (reported MiB)', (repository.size / 1024).toFixed(1)],
                 ['Completed runs retained', String(kept)],
-                [dryRun ? 'Runs eligible for deletion' : 'Runs deleted', String(candidates)]
+                [dryRun ? 'Runs eligible for deletion' : 'Runs deleted', String(dryRun ? candidates : deleted)],
+                ['Runs already absent during deletion', String(alreadyAbsent)]
               ])
               .addRaw('Only completed runs are eligible. Deleting a run may remove its logs and associated artifacts.\n')
               .write();
