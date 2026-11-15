@@ -42,6 +42,7 @@ internal sealed class CommunicationManualHandoff : UserControl
     private readonly bool openFirstChat;
     private readonly bool closeOnCompletion;
     private readonly Func<Task>? prepareImage;
+    private readonly Func<Task>? validateContent;
     private const string HandoffInstructions = "Check the school WhatsApp account and press Send there. "
         + "FMSC only records your report; it cannot verify delivery.";
     private string Instructions => prepareImage is null ? HandoffInstructions
@@ -112,9 +113,10 @@ internal sealed class CommunicationManualHandoff : UserControl
 
 
     internal CommunicationManualHandoff(Guid batchId, bool openFirstChat, Func<Task>? prepareImage,
-        Operations? operations = null, bool compact = false)
+        Operations? operations = null, bool compact = false, Func<Task>? validateContent = null)
     {
         this.prepareImage = prepareImage;
+        this.validateContent = validateContent;
         explanation.Text = Instructions;
         this.operations = operations ?? new Operations(CommunicationManualHandoffStore.ReadAsync,
             CommunicationPreparedMessages.ReadManualPreviewAsync,
@@ -284,6 +286,7 @@ internal sealed class CommunicationManualHandoff : UserControl
             if(!IsDisposed && handoff.Allowed && handoff.Link is not null)
             {
                 preparedMessage.Text = handoff.Message ?? "";
+                if (validateContent is not null) await validateContent();
                 if (prepareImage is not null) await prepareImage();
                 if (IsDisposed) return;
                 if (actorId != CurrentUser.UserId)

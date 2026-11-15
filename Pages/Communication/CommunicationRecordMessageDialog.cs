@@ -226,12 +226,17 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
                 options = new[] { new ComposeTemplate("Payment recorded", "Individual",
                     "Dear parent/guardian, the school recorded a payment of PKR [PaymentAmount]. Receipt: [ReceiptNumber]. Thank you.") };
             else if (fees && IsFamily)
-                options = new[] { new ComposeTemplate("Family outstanding balance", "FeeReminder",
-                    "Dear parent/guardian, your family's current outstanding school fees total PKR [OutstandingAmount]. Please contact the school accounts office with any questions.") };
+                options = new[]
+                {
+                    new ComposeTemplate("Family outstanding details", "FeeReminder", CommunicationFeeDetails.Template),
+                    new ComposeTemplate("Family outstanding balance", "FeeReminder",
+                        "Dear parent/guardian, your family's current outstanding school fees total PKR [OutstandingAmount]. Please contact the school accounts office with any questions.")
+                };
             else
             {
                 var target = fees ? Target with { Audience = CommunicationAudience.OutstandingFees } : Target;
                 options = choices.Where(item => item.Matches(target) && (!IsFamily || !HasFields(item.Body)));
+                if (fees) options = new[] { new ComposeTemplate("Student outstanding details", "FeeReminder", CommunicationFeeDetails.Template) }.Concat(options);
             }
             templates.Items.AddRange(options.Cast<object>().ToArray());
         }
@@ -267,10 +272,12 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
                 EnsureAccess();
                 if (!option.IsMeta)
                 {
+                    // Resolve composer-only fields before saving the exact reviewed batch text.
                     string amount = document.Amount.ToString("N2", System.Globalization.CultureInfo.InvariantCulture);
                     body = IsReceipt ? body.Replace("[PaymentAmount]", amount, StringComparison.Ordinal)
                             .Replace("[ReceiptNumber]", document.ReceiptNumber, StringComparison.Ordinal)
-                        : body.Replace("[OutstandingAmount]", amount, StringComparison.Ordinal);
+                        : CommunicationFeeDetails.Expand(body, document.OutstandingDetails)
+                            .Replace("[OutstandingAmount]", amount, StringComparison.Ordinal);
                 }
             }
             DisplayReview(option, target, result, body, document);
@@ -338,19 +345,20 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
 
     private async Task StartFeeHandoffAsync(CommunicationConfirmation batch, ReviewedMessage reviewed, Bitmap? image)
     {
-        Func<Task>? copyImage = image is null ? null : async () =>
+        Func<Task>? copyImage = image is null ? null : () =>
         {
-            // Revalidate against current fee data on each attempt before copying the reviewed document.
-            await VerifyDocumentAsync(reviewed.Document!);
             EnsureAccess();
             try { (operations.CopyImage ?? Clipboard.SetImage)(image); }
             catch (System.Runtime.InteropServices.ExternalException)
             {
                 throw new CommunicationValidationException("Windows clipboard is busy. Try opening the chat again to copy the image.");
             }
+            return Task.CompletedTask;
         };
         var session = new CommunicationManualHandoff(batch.BatchId, !batch.AlreadyConfirmed, copyImage,
-            operations.FeeHandoff, compact: true);
+            operations.FeeHandoff, compact: true,
+            // Text-only fee details must stay current too, including retries and subsequent chats.
+            validateContent: reviewed.Document is { } document ? () => VerifyDocumentAsync(document) : null);
         handoff = session;
         session.Finished += (_, _) => Finish();
         composer.Visible = false;

@@ -18,9 +18,10 @@ internal sealed class FeeMessageDocument : IDisposable
     internal string SuggestedFileName => ReportDocumentNaming.ExportFileName(
         receipt ? $"{(family ? "Family" : "Student")} Receipt {ReceiptNumber}" : family ? "Family Fee Bill" : "Student Fee Bill");
     internal string ReviewKey { get; }
+    internal string OutstandingDetails { get; }
 
     internal FeeMessageDocument(DataTable data, int admissionId, int[] members, int[] billedStudents,
-        bool family, bool receipt, decimal amount, string receiptNumber = "")
+        bool family, bool receipt, decimal amount, string receiptNumber = "", string outstandingDetails = "")
     {
         this.data = data;
         this.admissionId = admissionId;
@@ -29,6 +30,7 @@ internal sealed class FeeMessageDocument : IDisposable
         this.receipt = receipt;
         Amount = amount;
         ReceiptNumber = receiptNumber;
+        OutstandingDetails = outstandingDetails;
         string content;
         if (receipt)
         {
@@ -37,7 +39,7 @@ internal sealed class FeeMessageDocument : IDisposable
             content = writer.ToString();
         }
         else content = FeeBillDocuments.Snapshot(data);
-        ReviewKey = string.Join(",", members) + "\n" + content;
+        ReviewKey = string.Join(",", members) + "\n" + content + "\n" + outstandingDetails;
     }
 
     internal static async Task<FeeMessageDocument> ReadAsync(int admissionId, bool family, bool receipt)
@@ -64,7 +66,14 @@ internal sealed class FeeMessageDocument : IDisposable
         var data = family
             ? FamilyBillReport.BuildData(institution.Name, institution.ContactNumber, institution.Address, parent, charges)
             : StudentBillReport.BuildData(institution.Name, institution.ContactNumber, institution.Address, parent, charges);
-        return new(data, admissionId, ids, billed, family, false, balances.Sum(row => Convert.ToDecimal(row["Due"])));
+        decimal total = balances.Sum(row => Convert.ToDecimal(row["Due"]));
+        var students = FeeStudentOrder.Rows(charges, "Reference").Where(row => Convert.ToDecimal(row["Due"]) > 0)
+            .GroupBy(row => row.Field<int>("AdmissionId")).Select(group => new CommunicationFeeDetails.Student(group.Key,
+                Convert.ToString(group.First()["StudentName"]) ?? "", Convert.ToString(group.First()["Reference"]) ?? "",
+                string.Join(" / ", group.Select(FeeBillDataBuilder.PlacementText).Where(value => value.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)), group.Sum(row => Convert.ToDecimal(row["Due"])))).ToArray();
+        return new(data, admissionId, ids, billed, family, false, total,
+            outstandingDetails: CommunicationFeeDetails.Format(institution.Name, DateTime.Today, students, total, family));
     }
 
     private static async Task<FeeMessageDocument> ReadReceiptAsync(InstitutionProfile.PrintIdentity institution,
