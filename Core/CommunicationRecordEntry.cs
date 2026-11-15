@@ -5,6 +5,15 @@ namespace FMSC_SMS.Core;
 /// <summary>Optional entry to the existing workflow; never saves or sends on behalf of its parent.</summary>
 internal static class CommunicationRecordEntry
 {
+    internal static string DisplayFor(DataRow? row)
+    {
+        string name = row is not null && row.Table.Columns.Contains("StudentName")
+            ? Convert.ToString(row["StudentName"])?.Trim() ?? "" : "";
+        string number = row is not null ? AdmissionNumbers.Read(row) : "";
+        if (name.Length == 0) return number.Length == 0 ? "Selected student" : $"Admission {number}";
+        return number.Length == 0 ? name : $"{name} ({number})";
+    }
+
     internal static CommunicationTarget Target(int admissionId, bool fees)
     {
         if (admissionId <= 0) throw new CommunicationValidationException("Select a saved student first.");
@@ -16,18 +25,7 @@ internal static class CommunicationRecordEntry
     {
         if (!CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission, fees))
             throw new UnauthorizedAccessException("School-message and source-record access are required.");
-        var target = Target(admissionId, fees);
-        string body = CommunicationPreparedMessages.BuiltIns.First(item =>
-            item.Name == (fees ? "Outstanding fee reminder" : "Individual student notice")).Body;
-        using var page = new CommunicationCenterPage(target, body, display);
-        using var dialog = new ApplicationWindowForm {
-            Text = "School Message", StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(AppScale.Scale(1100), AppScale.Scale(760)),
-            MinimumSize = new Size(AppScale.Scale(800), AppScale.Scale(600)), ShowInTaskbar = false
-        };
-        page.Dock = DockStyle.Fill;
-        dialog.Controls.Add(page);
-        ModalPageCloseGuard.Attach(dialog, page);
+        using var dialog = new CommunicationRecordMessageDialog(admissionId, display, fees);
         dialog.ShowDialog(owner.FindForm());
         // No admission/payment reload, write or draft reset on return.
     }

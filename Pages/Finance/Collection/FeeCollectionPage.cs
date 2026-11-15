@@ -217,8 +217,7 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         { Warn("School-message, student-view and fee-view permissions are required."); return; }
         // Message scope is explicit: the main selected student, independent of
         // sibling payment ticks. Closing messaging never reloads or resets a split.
-        string display = student.SelectedRow is DataRow row && row.Table.Columns.Contains("StudentName")
-            ? Convert.ToString(row["StudentName"]) ?? "Selected student" : "Selected student";
+        string display = CommunicationRecordEntry.DisplayFor(student.SelectedRow);
         try { using var focus = new DialogReturnFocus(this); (open ?? CommunicationRecordEntry.Open)(this, admissionId, display, true); }
         catch (Exception ex) { Fail(ex); }
     }

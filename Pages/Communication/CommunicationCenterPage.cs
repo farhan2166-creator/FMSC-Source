@@ -20,12 +20,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private string ComposeChannel => deliveryMethod.SelectedIndex == 2 ? "Sms" : "WhatsApp";
     private string ApiProvider => IsMeta ? "MetaCloud" : "Twilio";
     private readonly ModernComboBox templateChoice = HumanUi.Combo();
-    private readonly List<TemplateChoice> composeTemplates = new();
-
-    private sealed record TemplateChoice(int Id,string Name,string Channel,string Purpose,string Body)
-    {
-        public override string ToString() => Name;
-    }
+    private IReadOnlyList<CommunicationPreparedMessages.ComposeTemplate> composeTemplates = CommunicationPreparedMessages.BuiltInChoices;
     private readonly ModernTextBox message = HumanUi.TextBox(true, 1600);
     private readonly CheckBox showExcluded = new()
     {
@@ -86,12 +81,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     public CommunicationCenterPage() : this(true) { }
 
     // SQL-free construction supports synthetic Windows UI tests.
-    internal CommunicationCenterPage(bool initialize) : this(initialize, null, null, null, null) { }
-    internal CommunicationCenterPage(bool initialize, Operations operations) : this(initialize, null, null, null, operations) { }
-    internal CommunicationCenterPage(CommunicationTarget target, string body, string display)
-        : this(true, target, body, display, null) { }
-    private CommunicationCenterPage(bool initialize, CommunicationTarget? initialTarget, string? initialBody,
-        string? initialDisplay, Operations? operations)
+    internal CommunicationCenterPage(bool initialize) : this(initialize, null) { }
+    internal CommunicationCenterPage(bool initialize, Operations? operations)
         : base("Communication Center", "")
     {
         this.operations = operations ?? new Operations(CommunicationRecipientResolver.ReadAsync,
@@ -120,9 +111,6 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         audience.SelectedIndex = (int)CommunicationAudience.Class;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
-        foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
-            composeTemplates.Add(new TemplateChoice(-builtIn.index - 1, builtIn.item.Name,
-                "WhatsApp", builtIn.item.Purpose, builtIn.item.Body));
 
         campusField = HumanUi.Field("Campus", campus);
         classField = HumanUi.Field("Class", cls);
@@ -194,7 +182,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 await RunBusyAsync("Reading approved Meta templates…",ChooseMetaTemplateAsync,this);
                 return;
             }
-            if (templateChoice.SelectedItem is TemplateChoice selected)
+            if (templateChoice.SelectedItem is CommunicationPreparedMessages.ComposeTemplate selected)
                 message.Text = selected.Body;
         };
         message.TextChanged += (_, _) => InvalidatePreview();
@@ -204,16 +192,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         RefreshTemplateChoices();
         if (!CurrentUser.HasPermission("Students.View") && CurrentUser.HasPermission("Staff.View"))
             audience.SelectedIndex = (int)CommunicationAudience.Staff;
-        if (initialTarget is not null)
-        {
-            audience.SelectedIndex = (int)initialTarget.Audience;
-            student.SetStudent(initialTarget.StudentId, initialDisplay ?? "Selected student");
-            message.Text = initialBody ?? "";
-        }
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
         bool view = CurrentUser.HasPermission("Communication.View");
-        int landing = initialTarget is not null ? 0
-            : compose ? UnfinishedStep : view ? HistoryStep : AdministrationStep;
+        int landing = compose ? UnfinishedStep : view ? HistoryStep : AdministrationStep;
         SetStep(landing);
         if (initialize)
         {
@@ -221,7 +202,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             {
                 if (CurrentUser.HasPermission("Students.View")) Defer(BindLookupsAsync);
                 Defer(LoadComposeTemplatesAsync);
-                if (initialTarget is null) Defer(SelectReadyMethodAsync);
+                Defer(SelectReadyMethodAsync);
             }
             if (landing is HistoryStep or UnfinishedStep)
                 Defer(() => step == landing ? NavigateSessionsAsync(landing == UnfinishedStep) : Task.CompletedTask);
@@ -470,30 +451,18 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     }
     private async Task LoadComposeTemplatesAsync()
     {
-        composeTemplates.Clear();
-        foreach (var builtIn in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
-            composeTemplates.Add(new TemplateChoice(-builtIn.index - 1, builtIn.item.Name,
-                "WhatsApp", builtIn.item.Purpose, builtIn.item.Body));
-        if (CurrentUser.HasPermission("Communication.Send"))
-        {
-            int actor = CurrentUser.UserId;
-            using DataTable table = await CommunicationManagementStore.ReadComposeTemplatesAsync();
-            if (IsDisposed || actor != CurrentUser.UserId) return;
-            foreach (DataRow row in table.Rows)
-                composeTemplates.Add(new TemplateChoice(
-                    Convert.ToInt32(row["TemplateId"]),
-                    Convert.ToString(row["Name"]) ?? "",
-                    Convert.ToString(row["Channel"]) ?? "",
-                    Convert.ToString(row["Purpose"]) ?? "",
-                    Convert.ToString(row["Body"]) ?? ""));
-        }
+        if (!CurrentUser.HasPermission("Communication.Send")) return;
+        int actor = CurrentUser.UserId;
+        var choices = await CommunicationPreparedMessages.ReadComposeTemplatesAsync();
+        if (IsDisposed || actor != CurrentUser.UserId) return;
+        composeTemplates = choices;
         RefreshTemplateChoices();
     }
 
     private void RefreshTemplateChoices()
     {
         if (templateChoice is null) return;
-        string purpose = CurrentTarget().Purpose;
+        var target = CurrentTarget();
         templateChoice.Items.Clear();
         templateChoice.Items.Add("Write your own message");
         if(IsMeta)
@@ -504,8 +473,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             templateChoice.SelectedIndex=0;
             return;
         }
-        foreach (TemplateChoice item in composeTemplates)
-            if ((item.Channel == ComposeChannel || item.Id < 0) && item.Purpose == purpose)
+        foreach (var item in composeTemplates)
+            if (item.Matches(target))
                 templateChoice.Items.Add(item);
         templateChoice.SelectedIndex = 0;
     }

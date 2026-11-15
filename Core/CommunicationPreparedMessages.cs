@@ -11,7 +11,14 @@ namespace FMSC_SMS.Core;
 /// </summary>
 internal static class CommunicationPreparedMessages
 {
-    internal sealed record BuiltIn(string Name, string Purpose, string Body);
+    internal sealed record BuiltIn(string Name, string Purpose, string Body, bool FamilyOnly = false);
+    internal sealed record ComposeTemplate(string Name, string Purpose, string Body, string? Channel = null, bool FamilyOnly = false)
+    {
+        internal bool Matches(CommunicationTarget target) => Purpose == target.Purpose
+            && (Channel is null || Channel == target.Channel)
+            && (!FamilyOnly || target.Audience == CommunicationAudience.Family);
+        public override string ToString() => Name;
+    }
     internal sealed record Values(int RecordId, string RecordName,
         string? AdmissionNumber, DateTime? AdmissionDate, decimal? Outstanding)
     {
@@ -77,8 +84,23 @@ internal static class CommunicationPreparedMessages
         new BuiltIn("Staff meeting preparation", "Staff",
             "Dear [RecipientName], please bring any agenda items and relevant updates to the next staff meeting. Send any items you would like included to the school administration in advance."),
         new BuiltIn("Staff record update", "Staff",
-            "Dear [RecipientName], please inform the school administration if your contact details have changed so your staff record can be updated.")
+            "Dear [RecipientName], please inform the school administration if your contact details have changed so your staff record can be updated."),
+        new BuiltIn("Family records update", "Individual",
+            "Dear parent/guardian, please let the school office know if the contact or emergency details for any of your children have changed.", FamilyOnly: true),
+        new BuiltIn("Family meeting request", "Individual",
+            "Dear parent/guardian, the school would like to arrange a meeting about your children's school records. Please contact the office to agree on a convenient time.", FamilyOnly: true)
     };
+
+    internal static IReadOnlyList<ComposeTemplate> BuiltInChoices { get; } = BuiltIns
+        .Select(item => new ComposeTemplate(item.Name, item.Purpose, item.Body, FamilyOnly: item.FamilyOnly)).ToArray();
+
+    internal static async Task<IReadOnlyList<ComposeTemplate>> ReadComposeTemplatesAsync()
+    {
+        using DataTable rows = await CommunicationManagementStore.ReadComposeTemplatesAsync();
+        return BuiltInChoices.Concat(rows.AsEnumerable().Select(row => new ComposeTemplate(
+            row.Field<string>("Name") ?? "", row.Field<string>("Purpose") ?? "",
+            row.Field<string>("Body") ?? "", row.Field<string>("Channel") ?? ""))).ToArray();
+    }
 
     // These are deliberately limited, readable placeholders. No SQL, scripting,
     // formula expressions, or arbitrary data paths can be supplied by a template.

@@ -66,6 +66,7 @@ internal static partial class Program
             CheckManualLaunchAndReporting();
             CheckCommunicationApiWorkflow();
             CheckOptionalCommunicationEntries();
+            CheckRecordMessageDialog();
             CurrentUser.SignIn(7202, "Read-only fixture", "Messaging viewer", false, new[] { "Communication.View" });
             using var reader = new CommunicationCenterPage(false);
             Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission) && !CommunicationAccess.CanCompose(CurrentUser.HasPermission)
@@ -585,5 +586,79 @@ internal static partial class Program
         admission.OpenStudentMessage(Cancel); fees.OpenStudentMessage(Cancel);
         Check(opens == 2 && !CommunicationAccess.CanOpen(CurrentUser.HasPermission),
             "Opening either integration is independently refused after sender permission is removed");
+    }
+
+    private static void CheckRecordMessageDialog()
+    {
+        CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
+            new[] { "Communication.Send", "Students.View", "Fees.View" });
+        CommunicationTarget? captured = null;
+        int confirms = 0, dispatches = 0;
+        const int studentId = 42;
+        var operations = new CommunicationRecordMessageDialog.Operations(
+            option => Task.FromResult(option.Provider is null),
+            () => Task.FromResult(CommunicationPreparedMessages.BuiltInChoices),
+            target =>
+            {
+                captured = target;
+                var student = new CommunicationPreviewEntry(studentId, "Synthetic student", "Student", "+923001234567",
+                    "Included", 825m, "42", DateTime.Today);
+                return Task.FromResult(new CommunicationPreview(target.Audience == CommunicationAudience.Family
+                    ? new[] { student, student with { RecordId = 43, RecordName = "Synthetic sibling", PhoneE164 = null, Reason = "Consent not recorded" } }
+                    : new[] { student }));
+            },
+            (_, target, result, body, request, _) =>
+            {
+                Check(target == captured && result.Included == 1 && request != Guid.Empty && body.Length > 0,
+                    "Record message confirmation receives the exact reviewed scope, eligible contacts and format");
+                confirms++;
+                return Task.FromResult(new CommunicationConfirmation(request, result.Included, false));
+            },
+            (_, _) => dispatches++);
+
+        using (var admission = new CommunicationRecordMessageDialog(studentId, "Synthetic student", false, operations))
+        {
+            admission.Show(); Application.DoEvents();
+            var action = Field<ModernButton>(admission, "action");
+            var templates = Field<ModernComboBox>(admission, "templates");
+            var scope = Field<ModernComboBox>(admission, "scope");
+            var formats = templates.Items.OfType<CommunicationPreparedMessages.ComposeTemplate>().ToArray();
+            Check(scope.Visible && scope.Items.Count == 2 && templates.Visible && action.Visible && action.Enabled
+                && !Descendants(admission).OfType<CommunicationCenterPage>().Any()
+                && confirms == 0 && dispatches == 0 && captured is null,
+                "Admission opens a compact scoped composer without reviewing, confirming or dispatching");
+            Check(formats.Length > 0 && formats.All(item => item.Purpose == "Individual" && !item.FamilyOnly),
+                "The student scope offers only student message templates");
+            templates.SelectedItem = formats.First(item => CommunicationPreparedMessages.HasFields(item.Body));
+            scope.SelectedIndex = 1;
+            formats = templates.Items.OfType<CommunicationPreparedMessages.ComposeTemplate>().ToArray();
+            Check(formats.Any(item => item.FamilyOnly) && formats.All(item => !CommunicationPreparedMessages.HasFields(item.Body))
+                && Field<ModernTextBox>(admission, "message").Text.Length == 0,
+                "Switching to a linked family offers shared wording and clears the previous student's draft");
+            templates.SelectedItem = formats[0];
+            action.PerformClick(); Application.DoEvents();
+            var recipients = Field<ModernComboBox>(admission, "recipients");
+            Check(captured is { Audience: CommunicationAudience.Family, StudentId: studentId }
+                && recipients.Visible && recipients.Items.Count == 2 && !scope.Visible && confirms == 0 && dispatches == 0,
+                "Review resolves only the selected student's family and shows included and excluded contacts without sending");
+            recipients.SelectedIndex = 1;
+            Check(Field<ModernTextBox>(admission, "preview").Text == "Consent not recorded",
+                "An excluded family contact shows its eligibility reason");
+            recipients.SelectedIndex = 0;
+            action.PerformClick(); Application.DoEvents();
+            Check(confirms == 1 && dispatches == 1 && !admission.Visible, "Explicit confirmation dispatches the reviewed family message once");
+        }
+
+        using var fees = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations);
+        fees.Show(); Application.DoEvents();
+        var feeFormats = Field<ModernComboBox>(fees, "templates").Items.OfType<CommunicationPreparedMessages.ComposeTemplate>().ToArray();
+        Check(feeFormats.Length > 0 && feeFormats.All(item => item.Purpose == "FeeReminder")
+            && fees.Controls.Find("communicationRecordScope", true).Length == 0,
+            "Fee Collection offers fee templates with no family or unrelated audience picker");
+        Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
+        Check(captured is { Audience: CommunicationAudience.OutstandingFees, StudentId: studentId }
+            && Field<ModernTextBox>(fees, "preview").Text.Contains("825.00") && confirms == 1 && dispatches == 1,
+            "The fee preview renders the selected student's live balance without confirming a message");
+        fees.Close();
     }
 }

@@ -285,6 +285,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         AutoEllipsis = true
     };
     private int currentAdmissionId;
+    private (int AdmissionId, string Display) messageStudentRecord;
     private ModernButton? saveButton;
     private ModernButton? saveAndNewButton;
     private ModernButton? checkAdmissionButton;
@@ -3211,6 +3212,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
     private void UpdateQuickStudentToLoadedRecord(DataRow row)
     {
         quickStudent.SetStudent(currentAdmissionId, StudentPickerRowProjector.DisplayFor(row));
+        messageStudentRecord = (currentAdmissionId, CommunicationRecordEntry.DisplayFor(row));
     }
     /* Version fee-structure reads so older context changes cannot overwrite newer results. */
     private int feeStructureLoadVersion;
@@ -3481,7 +3483,8 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         if (currentAdmissionId <= 0) { Warn("Save or select a student before preparing a message."); return; }
         if (!CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission))
         { Warn("School-message and student-view permissions are required."); return; }
-        try { (open ?? CommunicationRecordEntry.Open)(this, currentAdmissionId, name.Text, false); }
+        string display = messageStudentRecord.AdmissionId == currentAdmissionId ? messageStudentRecord.Display : "Selected student";
+        try { (open ?? CommunicationRecordEntry.Open)(this, currentAdmissionId, display, false); }
         catch (Exception ex) { Fail(ex); }
     }
 

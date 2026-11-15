@@ -11,7 +11,8 @@ internal sealed class CommunicationMetaTemplateDialog : ApplicationWindowForm
     private readonly TableLayoutPanel fields=new() {Dock=DockStyle.Top,AutoSize=true,ColumnCount=1};
     private readonly List<ModernComboBox> mappings=new();
     internal CommunicationMetaTransport.Selection? Selection {get;private set;}
-    internal CommunicationMetaTemplateDialog(IReadOnlyList<CommunicationMetaTransport.Template> templates,string purpose)
+    internal CommunicationMetaTemplateDialog(IReadOnlyList<CommunicationMetaTransport.Template> templates,string purpose,
+        bool allowStudentFields = true)
     {
         Text="Approved Meta template";StartPosition=FormStartPosition.CenterParent;ShowInTaskbar=false;
         ClientSize=new Size(AppScale.Scale(710),AppScale.Scale(650));MinimumSize=new Size(AppScale.Scale(590),AppScale.Scale(490));
@@ -29,7 +30,8 @@ internal sealed class CommunicationMetaTemplateDialog : ApplicationWindowForm
             for(int i=0;i<selected.ParameterCount;i++)
             {
                 var input=HumanUi.Combo();input.DropDownStyle=ComboBoxStyle.DropDown;
-                input.Items.AddRange(new object[]{"[StudentName]","[AdmissionNumber]","[AdmissionDate]"});
+                if (allowStudentFields)
+                    input.Items.AddRange(new object[]{"[StudentName]","[AdmissionNumber]","[AdmissionDate]"});
                 if(purpose=="FeeReminder")input.Items.Add("[OutstandingAmount]");
                 mappings.Add(input);fields.RowStyles.Add(new RowStyle(SizeType.Absolute,AppMetrics.FieldRowHeight));
                 fields.Controls.Add(HumanUi.Field("Field "+(i+1)+" · choose school data or type a value",input,true),0,i);
@@ -43,7 +45,10 @@ internal sealed class CommunicationMetaTemplateDialog : ApplicationWindowForm
             try
             {
                 var selection=new CommunicationMetaTransport.Selection(selected,mappings.Select(m=>m.Text.Trim()).ToArray());
-                CommunicationPreparedMessages.ValidateFormat(selection.Format(),purpose);
+                string format = selection.Format();
+                CommunicationPreparedMessages.ValidateFormat(format,purpose);
+                if (!allowStudentFields && CommunicationPreparedMessages.HasFields(format))
+                    throw new CommunicationValidationException("Use shared wording for a family message. Student fields require one student.");
                 Selection=selection;DialogResult=DialogResult.OK;Close();
             }
             catch(CommunicationValidationException ex) {ModernMessageDialog.Show(this,ex.Message,"Template",MessageBoxButtons.OK,MessageBoxIcon.Warning);}
