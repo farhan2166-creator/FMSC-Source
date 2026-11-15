@@ -68,7 +68,7 @@ internal static partial class FeeBillDataBuilder
         }
         return data;
     }
-    private static string PlacementText(DataRow charge)
+    internal static string PlacementText(DataRow charge)
     {
         string Read(string column)=>charge.Table.Columns.Contains(column)&&!charge.IsNull(column)
             ?Convert.ToString(charge[column])?.Trim()??"":"";

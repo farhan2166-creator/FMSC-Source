@@ -6,6 +6,7 @@
     <Compile Include="../../Core/CommunicationTwilioTransport.cs" Link="CommunicationTwilioTransport.cs" />
     <Compile Include="../../Core/CommunicationRecipientResolver.cs" Link="CommunicationRecipientResolver.cs" />
     <Compile Include="../../Core/CommunicationPreparedMessages.cs" Link="CommunicationPreparedMessages.cs" />
+    <Compile Include="../../Core/CommunicationFeeDetails.cs" Link="CommunicationFeeDetails.cs" />
     <Compile Include="../../Core/CommunicationReviewedContent.cs" Link="CommunicationReviewedContent.cs" />
     <Compile Include="../../Core/CommunicationHistoryStore.cs" Link="CommunicationHistoryStore.cs" />
     <Compile Include="../../Core/CommunicationValidationException.cs" Link="CommunicationValidationException.cs" />
