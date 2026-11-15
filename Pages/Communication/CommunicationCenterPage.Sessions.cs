@@ -105,9 +105,14 @@ public sealed partial class CommunicationCenterPage
                 "Twilio" => "SMS · Twilio",
                 _ => Convert.ToString(row["Method"])
             };
-            row["AudienceText"] = Enum.TryParse(Convert.ToString(row["Audience"]), out CommunicationAudience scope)
-                && Enum.IsDefined(scope)
-                ? Convert.ToString(audience.Items[(int)scope]) : Convert.ToString(row["Audience"]);
+            string? code = Convert.ToString(row["Audience"]);
+            row["AudienceText"] = code switch
+            {
+                nameof(CommunicationAudience.FeeStudent) => "Student fees",
+                nameof(CommunicationAudience.FeeFamily) => "Family fees",
+                _ => Enum.TryParse(code, out CommunicationAudience scope) && (int)scope >= 0 && (int)scope < audience.Items.Count
+                    ? Convert.ToString(audience.Items[(int)scope]) : code
+            };
             if (unfinished) continue;
             row["StateText"] = Convert.ToString(row["Method"]) == "WhatsApp Business (manual)"
                 ? $"{row["ManualReported"]} reported sent · {row["ManualOpened"]} opened · {row["ManualSkipped"]} skipped / excluded"

@@ -209,7 +209,7 @@ internal static class FeeReceiptDocuments
 
     // The collection snapshot stores each child's fee allocation. The linked
     // original payments identify who actually received any retained advance.
-    private static async Task ReadChildCashReceivedAsync(string receiptNumber,DataRow header,DataTable students)
+    internal static async Task ReadChildCashReceivedAsync(string receiptNumber,DataRow header,DataTable students)
     {
         using var payments=await DatabaseHelper.QuerySqlAsync("""
             EXEC dbo.RequirePermission @UserId,N'Fees.View';

@@ -1,0 +1,5 @@
+{
+  "objects": [
+    { "schema": "msg", "name": "RecordGuardian", "type": "IF" }
+  ]
+}

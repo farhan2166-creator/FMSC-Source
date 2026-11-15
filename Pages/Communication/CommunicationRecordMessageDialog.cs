@@ -16,9 +16,11 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         Func<Task<IReadOnlyList<ComposeTemplate>>> ReadTemplates,
         Func<CommunicationTarget, Task<CommunicationPreview>> ReadRecipients,
         Func<Method, CommunicationTarget, CommunicationPreview, string, Guid, CommunicationMetaTransport.Selection?, Task<CommunicationConfirmation>> Confirm,
-        Action<Method, CommunicationConfirmation> Dispatch);
+        Action<Method, CommunicationConfirmation> Dispatch,
+        Func<int, bool, bool, Task<FeeMessageDocument>>? ReadFeeDocument = null);
 
-    private sealed record ReviewedMessage(CommunicationTarget Target, CommunicationPreview Preview, string Body, Guid RequestId);
+    private sealed record ReviewedMessage(CommunicationTarget Target, CommunicationPreview Preview, string Body, Guid RequestId,
+        FeeMessageDocument? Document);
     private sealed record Recipient(string Label, string Text)
     {
         public override string ToString() => Label;
@@ -34,7 +36,9 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     private readonly CommunicationTarget studentTarget;
     private readonly bool fees;
     private readonly Operations operations;
-    private readonly ModernComboBox? scope;
+    private readonly ModernComboBox scope = HumanUi.Combo();
+    private readonly ModernComboBox feeContent = HumanUi.Combo();
+    private readonly CheckBox attachPdf = new() { Text = "Save PDF to attach in WhatsApp", Dock = DockStyle.Fill };
     private readonly ModernComboBox method = HumanUi.Combo(), templates = HumanUi.Combo(), recipients = HumanUi.Combo();
     private readonly ModernTextBox message = HumanUi.TextBox(true, 1600), preview = HumanUi.TextBox(true, 1600);
     private readonly Label destination = new() { Dock = DockStyle.Fill, AutoEllipsis = true, Font = AppTheme.ButtonFont, UseMnemonic = false };
@@ -45,14 +49,17 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     private readonly ModernButton back = new() { Text = "Back" };
     private readonly ModernButton cancel = new() { Text = "Cancel", DialogResult = DialogResult.Cancel };
     private readonly Control options, templateField, messageField, recipientField, previewField;
+    private readonly Panel feeOptions = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
     private IReadOnlyList<ComposeTemplate> choices = BuiltInChoices;
     private CommunicationMetaTransport.Selection? metaSelection;
     private ReviewedMessage? review;
     private bool busy;
+    private bool IsFamily => scope.SelectedIndex == 1;
+    private bool IsReceipt => feeContent.SelectedIndex == 1;
     private Method? SelectedMethod => method.SelectedItem as Method;
     private CommunicationTarget Target => studentTarget with
     {
-        Audience = scope?.SelectedIndex == 1 ? CommunicationAudience.Family : studentTarget.Audience,
+        Audience = IsFamily ? fees ? CommunicationAudience.FeeFamily : CommunicationAudience.Family : studentTarget.Audience,
         Channel = SelectedMethod?.Channel ?? studentTarget.Channel
     };
 
@@ -64,7 +71,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
             option => option.Provider is { } provider
                 ? CommunicationApiBatchStore.IsReadyAsync(option.Channel, provider)
                 : CommunicationManualHandoffStore.IsEnabledAsync(),
-            ReadComposeTemplatesAsync, CommunicationRecipientResolver.ReadAsync,
+            CommunicationManagementStore.ReadComposeTemplatesAsync, CommunicationRecipientResolver.ReadAsync,
             (option, target, review, body, request, meta) => option.Provider is { } provider
                 ? CommunicationApiBatchStore.ConfirmAsync(target, review, body, request, provider, meta)
                 : CommunicationBatchStore.ConfirmPreviewAsync(target, review, body, request, manualWhatsApp: true),
@@ -78,27 +85,19 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
 
         Text = fees ? "Fee Message" : "School Message";
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(AppScale.Scale(630), AppScale.Scale(420));
+        ClientSize = new Size(AppScale.Scale(630), AppScale.Scale(fees ? 480 : 420));
         MinimumSize = new Size(AppScale.Scale(600), AppScale.Scale(405));
         MaximizeBox = MinimizeBox = ShowInTaskbar = false;
         BackColor = AppTheme.PageBackground;
         CancelButton = cancel;
 
-        var delivery = HumanUi.Field("Send using", method);
-        if (fees) options = delivery;
-        else
-        {
-            scope = HumanUi.Combo();
-            scope.Name = "communicationRecordScope";
-            scope.Items.AddRange(new object[] { "This student", "Linked family / siblings" });
-            scope.SelectedIndex = 0;
-            var fields = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
-            fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            fields.Controls.Add(HumanUi.Field("Send to", scope), 0, 0);
-            fields.Controls.Add(delivery, 1, 0);
-            options = fields;
-        }
+        scope.Name = "communicationRecordScope";
+        scope.Items.AddRange(new object[] { "This student", "Linked family / siblings" });
+        scope.SelectedIndex = 0;
+        options = Pair(HumanUi.Field("Send to", scope), HumanUi.Field("Send using", method));
+        feeContent.Items.AddRange(new object[] { "Outstanding balance / bill", "Latest payment / receipt" });
+        feeContent.SelectedIndex = 0;
+        feeOptions.Controls.Add(Pair(HumanUi.Field("Fee message", feeContent), attachPdf));
         templateField = HumanUi.Field("Template (optional)", templates);
         messageField = HumanUi.Field("Message", message);
         recipientField = HumanUi.Field("Recipient preview", recipients);
@@ -106,11 +105,13 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         preview.ReadOnly = true;
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(AppScale.Scale(14))
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(AppScale.Scale(14))
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(31)));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
+        var feeRow = new RowStyle(SizeType.Absolute, fees ? AppMetrics.FieldRowHeight : 0);
+        layout.RowStyles.Add(feeRow);
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(47)));
@@ -118,23 +119,27 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         destination.Text = "To: " + display;
         layout.Controls.Add(destination, 0, 0);
         layout.Controls.Add(SwitchableRow(options, summary), 0, 1);
-        layout.Controls.Add(SwitchableRow(templateField, chooseMeta, recipientField), 0, 2);
-        layout.Controls.Add(SwitchableRow(messageField, previewField), 0, 3);
-        layout.Controls.Add(status, 0, 4);
-        layout.Controls.Add(HumanUi.DialogButtons(back, action, cancel), 0, 5);
+        layout.Controls.Add(feeOptions, 0, 2);
+        layout.Controls.Add(SwitchableRow(templateField, chooseMeta, recipientField), 0, 3);
+        layout.Controls.Add(SwitchableRow(messageField, previewField), 0, 4);
+        layout.Controls.Add(status, 0, 5);
+        action.Width = AppMetrics.TextWidth("Save PDF & Open Chat", action.Font, AppScale.Scale(32));
+        layout.Controls.Add(HumanUi.DialogButtons(back, action, cancel), 0, 6);
         Controls.Add(layout);
 
-        if (scope is not null) scope.SelectedIndexChanged += (_, _) =>
+        scope.SelectedIndexChanged += (_, _) =>
         {
-            destination.Text = (Target.Audience == CommunicationAudience.Family ? "Family of " : "To: ") + display;
+            destination.Text = (IsFamily ? "Family of " : "To: ") + display;
             ClearDraft();
-            RefreshTemplates();
+            RefreshTemplates(selectDefault: fees);
         };
+        feeContent.SelectedIndexChanged += (_, _) => { ClearDraft(); RefreshTemplates(selectDefault: true); };
         method.SelectedIndexChanged += (_, _) =>
         {
             if (metaSelection is not null || SelectedMethod?.IsMeta == true) ClearDraft();
+            if (SelectedMethod?.Provider is not null) attachPdf.Checked = false;
             message.ReadOnly = SelectedMethod?.IsMeta == true;
-            RefreshTemplates();
+            RefreshTemplates(selectDefault: fees && message.Text.Length == 0);
             UpdateView();
         };
         templates.SelectedIndexChanged += (_, _) =>
@@ -144,10 +149,22 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         recipients.SelectedIndexChanged += (_, _) => preview.Text = (recipients.SelectedItem as Recipient)?.Text ?? "";
         chooseMeta.Click += async (_, _) => await RunAsync(ChooseMetaAsync);
         action.Click += async (_, _) => await RunAsync(review is null ? ReviewAsync : ConfirmAsync);
-        back.Click += (_, _) => { review = null; status.Text = ""; UpdateView(); };
+        back.Click += (_, _) => { review?.Document?.Dispose(); review = null; status.Text = ""; UpdateView(); };
         Shown += async (_, _) => await RunAsync(LoadOptionsAsync);
         FormClosing += (_, e) => { if (busy) { e.Cancel = true; DialogResult = DialogResult.None; } };
+        Disposed += (_, _) => review?.Document?.Dispose();
+        feeOptions.VisibleChanged += (_, _) => feeRow.Height = fees && feeOptions.Visible ? AppMetrics.FieldRowHeight : 0;
         UpdateView();
+    }
+
+    private static Control Pair(Control left, Control right)
+    {
+        var fields = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        fields.Controls.Add(left, 0, 0);
+        fields.Controls.Add(right, 1, 0);
+        return fields;
     }
 
     private static Panel SwitchableRow(params Control[] controls)
@@ -174,11 +191,9 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
             return;
         }
         method.SelectedIndex = 0;
-        if (fees && templates.Items.Count > 1) templates.SelectedIndex = 1;
         choices = await operations.ReadTemplates();
         EnsureAccess();
-        RefreshTemplates();
-        if (fees && templates.Items.Count > 1) templates.SelectedIndex = 1;
+        RefreshTemplates(selectDefault: fees);
     }
 
     private void ClearDraft()
@@ -188,26 +203,34 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         status.Text = "";
     }
 
-    private void RefreshTemplates()
+    private void RefreshTemplates(bool selectDefault = false)
     {
         templates.Items.Clear();
         templates.Items.Add("Write your own message");
         if (SelectedMethod?.IsMeta != true)
         {
-            var target = Target;
-            // A shared guardian contact should receive a family notice that reads correctly for every sibling.
-            templates.Items.AddRange(choices.Where(item => item.Matches(target)
-                && (target.Audience != CommunicationAudience.Family || !HasFields(item.Body))).Cast<object>().ToArray());
+            IEnumerable<ComposeTemplate> options;
+            if (fees && IsReceipt)
+                options = new[] { new ComposeTemplate("Payment recorded", "Individual",
+                    "Dear parent/guardian, the school recorded a payment of PKR [PaymentAmount]. Receipt: [ReceiptNumber]. Thank you.") };
+            else if (fees && IsFamily)
+                options = new[] { new ComposeTemplate("Family outstanding balance", "FeeReminder",
+                    "Dear parent/guardian, your family's current outstanding school fees total PKR [OutstandingAmount]. Please contact the school accounts office with any questions.") };
+            else
+            {
+                var target = fees ? Target with { Audience = CommunicationAudience.OutstandingFees } : Target;
+                options = choices.Where(item => item.Matches(target) && (!IsFamily || !HasFields(item.Body)));
+            }
+            templates.Items.AddRange(options.Cast<object>().ToArray());
         }
-        templates.SelectedIndex = 0;
+        templates.SelectedIndex = selectDefault && templates.Items.Count > 1 ? 1 : 0;
     }
 
     private async Task ChooseMetaAsync()
     {
         var approved = await CommunicationApiBatchStore.ReadMetaTemplatesAsync();
         EnsureAccess();
-        using var dialog = new CommunicationMetaTemplateDialog(approved, Target.Purpose,
-            allowStudentFields: Target.Audience != CommunicationAudience.Family);
+        using var dialog = new CommunicationMetaTemplateDialog(approved, "Individual", allowStudentFields: !IsFamily);
         if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Selection is null) return;
         metaSelection = dialog.Selection;
         message.Text = metaSelection.Format();
@@ -220,13 +243,43 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         string body = option.IsMeta ? message.Text : message.Text.Trim();
         if (option.IsMeta && (metaSelection is null || metaSelection.Format() != body))
             throw new CommunicationValidationException("Choose an approved Meta template before reviewing.");
-        ValidateFormat(body, target.Purpose);
-        if (target.Audience == CommunicationAudience.Family && HasFields(body))
-            throw new CommunicationValidationException("Use shared wording for a family message. Student fields require one student.");
+        if (body.Length == 0) throw new CommunicationValidationException("Write or choose a message.");
         var result = await operations.ReadRecipients(target);
         EnsureAccess();
+        FeeMessageDocument? document = null;
+        try
+        {
+            if (fees && result.Included > 0)
+            {
+                document = await ReadFeeDocumentAsync();
+                EnsureAccess();
+                if (!option.IsMeta)
+                {
+                    string amount = document.Amount.ToString("N2", System.Globalization.CultureInfo.InvariantCulture);
+                    body = IsReceipt ? body.Replace("[PaymentAmount]", amount, StringComparison.Ordinal)
+                            .Replace("[ReceiptNumber]", document.ReceiptNumber, StringComparison.Ordinal)
+                        : body.Replace("[OutstandingAmount]", amount, StringComparison.Ordinal);
+                }
+            }
+            DisplayReview(option, target, result, body, document);
+            document = null;
+        }
+        finally { document?.Dispose(); }
+    }
+
+    private Task<FeeMessageDocument> ReadFeeDocumentAsync() => (operations.ReadFeeDocument ?? FeeMessageDocument.ReadAsync)
+        (studentTarget.StudentId, IsFamily, IsReceipt);
+
+    private void DisplayReview(Method option, CommunicationTarget target, CommunicationPreview result, string body, FeeMessageDocument? document)
+    {
+        if (!fees || document is not null)
+        {
+            ValidateFormat(body, target.Purpose);
+            if (IsFamily && HasFields(body))
+                throw new CommunicationValidationException("Use shared wording for a family message. Student fields require one student.");
+        }
         var rows = result.Entries.OrderByDescending(entry => entry.Included).Select(entry => new Recipient(
-            entry.Included && entry.PhoneE164 is { Length: >= 4 } phone ? $"{entry.RecordName} · {phone[^4..]}" : entry.RecordName,
+            entry.Included && entry.PhoneE164 is { Length: >= 4 } phone ? $"Guardian number ending in {phone[^4..]}" : entry.RecordName,
             entry.Included ? Render(body, FromPreview(entry)) : entry.Reason)).ToArray();
         recipients.Items.Clear();
         recipients.Items.AddRange(rows);
@@ -236,14 +289,44 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         summary.Text = $"{option.Label} · {eligible}{excluded}";
         status.ForeColor = result.Included == 0 ? AppTheme.Danger : AppTheme.MutedText;
         status.Text = result.Included == 0
-            ? fees && rows.Length == 0 ? "No current outstanding fees for this student." : "No eligible contacts for this message."
-            : option.Provider is null ? "Press Send in WhatsApp for each reviewed chat." : "Confirm to send to the reviewed contacts. Provider charges may apply.";
-        review = new(target, result, body, Guid.NewGuid());
+            ? "No eligible guardian contact for this message."
+            : attachPdf.Checked ? "Save the PDF, then attach it in the reviewed WhatsApp chat."
+            : option.Provider is null ? "Press Send in WhatsApp." : "Confirm to send to the reviewed contact. Provider charges may apply.";
+        review = new(target, result, body, Guid.NewGuid(), document);
     }
 
     private async Task ConfirmAsync()
     {
         if (review is not { Preview.Included: > 0 } reviewed || SelectedMethod is not { } option) return;
+        string? attachment = null;
+        if (reviewed.Document is { } document)
+        {
+            if (attachPdf.Checked)
+            {
+                using var save = new SaveFileDialog
+                {
+                    Title = "Save PDF to attach in WhatsApp", Filter = "PDF document (*.pdf)|*.pdf", DefaultExt = "pdf",
+                    AddExtension = true, FileName = document.SuggestedFileName
+                };
+                if (save.ShowDialog(this) != DialogResult.OK) return;
+                attachment = save.FileName;
+            }
+            using var current = await ReadFeeDocumentAsync();
+            EnsureAccess();
+            if (current.ReviewKey != document.ReviewKey)
+                throw new CommunicationValidationException("The fee document or family membership changed. Go back and review it again.");
+            if (attachment is not null)
+            {
+                await document.ExportAsync(attachment);
+                EnsureAccess();
+                ModernMessageDialog.ShowInfo(this,
+                    "In WhatsApp, choose Attach → Document and select this PDF before pressing Send:\n\n" + attachment, "Attach Fee PDF");
+                EnsureAccess();
+                using var verified = await ReadFeeDocumentAsync();
+                if (verified.ReviewKey != document.ReviewKey)
+                    throw new CommunicationValidationException("The fee document changed after export. Go back and prepare the current PDF.");
+            }
+        }
         var batch = await operations.Confirm(option, reviewed.Target, reviewed.Preview, reviewed.Body, reviewed.RequestId, metaSelection);
         EnsureAccess();
         operations.Dispatch(option, batch);
@@ -257,12 +340,15 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         bool reviewing = review is not null;
         bool useMeta = SelectedMethod?.IsMeta == true;
         options.Visible = messageField.Visible = !reviewing;
+        feeOptions.Visible = fees && !reviewing;
+        feeOptions.Enabled = !busy;
+        attachPdf.Enabled = fees && SelectedMethod is { Provider: null };
         chooseMeta.Visible = !reviewing && useMeta;
         templateField.Visible = !reviewing && !useMeta;
         summary.Visible = previewField.Visible = reviewing;
         recipientField.Visible = reviewing && recipients.Items.Count > 0;
         back.Visible = reviewing;
-        action.Text = !reviewing ? "Review Message" : SelectedMethod?.Provider is not null ? "Confirm & Send"
+        action.Text = !reviewing ? "Review Message" : attachPdf.Checked ? "Save PDF & Open Chat" : SelectedMethod?.Provider is not null ? "Confirm & Send"
             : review!.Preview.Included == 1 ? "Open in WhatsApp" : "Start WhatsApp Chats";
         action.Enabled = !busy && (reviewing ? review!.Preview.Included > 0 : SelectedMethod is not null);
         options.Enabled = templateField.Enabled = chooseMeta.Enabled = messageField.Enabled = !busy;

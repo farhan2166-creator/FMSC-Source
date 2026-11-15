@@ -113,6 +113,7 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
     private ModernButton? studentCreditButton;
     private ModernButton? printBillButton;
     private ModernButton? printStudentBillButton;
+    private ModernButton? messageStudentButton;
     private Func<Form?,int,int[]?,Func<bool>?,bool,Task> showOutstandingBill = FeeBillPreview.ShowAsync;
     private readonly Dictionary<int,string> receiptReviewTokens=new();
     private readonly Dictionary<int, decimal> availableCreditByStudent = new();
@@ -215,8 +216,8 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         if (IsBusy || siblingBusy || admissionId <= 0) return;
         if (!CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission, true))
         { Warn("School-message, student-view and fee-view permissions are required."); return; }
-        // Message scope is explicit: the main selected student, independent of
-        // sibling payment ticks. Closing messaging never reloads or resets a split.
+        // The message dialog selects its own student or linked-family scope.
+        // Closing it never reloads or resets a payment split.
         string display = CommunicationRecordEntry.DisplayFor(student.SelectedRow);
         try { using var focus = new DialogReturnFocus(this); (open ?? CommunicationRecordEntry.Open)(this, admissionId, display, true); }
         catch (Exception ex) { Fail(ex); }
@@ -399,8 +400,13 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         transportButton=new ModernButton{Text="Start Transport",ThemeRole="Secondary",Enabled=false,AutoSize=true};
         transportButton.Click+=async(_,_)=>await OpenTransportAsync(transportStarts);
         var recoveryItem=studentFeesMenu.Items.Add("Check Fee Change Save",null,async(_,_)=>await CheckFeeChangeSaveAsync());
-        var messageStudentItem = studentFeesMenu.Items.Add("Message Student…", null, (_, _) => OpenStudentMessage());
-        messageStudentItem.ToolTipText = "Prepare an optional fee notice for the main selected student. Your payment entries stay unchanged.";
+        messageStudentButton = new ModernButton
+        {
+            Name = "feeCollectionMessage", Text = "Message…", ThemeRole = "Secondary", Enabled = false,
+            Visible = CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission, true)
+        };
+        UiAccessibility.Describe(messageStudentButton, "Message student or family", "Prepare a fee notice, bill or payment receipt.");
+        messageStudentButton.Click += (_, _) => OpenStudentMessage();
         studentFeesMenu.Items.Add(new ToolStripSeparator());
         // Bills cover current unpaid charges. Paid transactions are reprinted as receipts.
         printBillButton = AddBusyAction("Print Family Bill", PrintSelectedFamilyBillAsync, "Secondary");
@@ -417,8 +423,6 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         familyReturnsItem.Click+=async(_,_)=>await OpenFamilyReturnsAsync();
         studentFeesMenu.Items.Add(familyReturnsItem);
         studentFeesMenu.Opening += (_, _) => {
-            messageStudentItem.Available = CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission, true);
-            messageStudentItem.Enabled = admissionId > 0 && !IsBusy && !siblingBusy;
             futureFeesItem.Enabled = futureFeesButton?.Enabled == true;
             accountItem.Enabled = historyButton?.Enabled == true;
             feeChangesItem.Enabled=admissionId>0&&CurrentUser.HasPermission("Fees.Collect")&&!siblingBusy;
@@ -898,7 +902,7 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
             Padding = Padding.Empty, Margin = Padding.Empty
         };
         paymentHistoryButton!.Text = "Recent Payments";
-        foreach (Control button in new Control[] { studentFeesMenuButton!, transportButton!, addChargeButton!, printBillButton!, printStudentBillButton!, studentCreditButton!, paymentHistoryButton })
+        foreach (Control button in new Control[] { studentFeesMenuButton!, messageStudentButton!, transportButton!, addChargeButton!, printBillButton!, printStudentBillButton!, studentCreditButton!, paymentHistoryButton })
         {
             button.AutoSize = false;
             button.Dock = DockStyle.None;
@@ -923,7 +927,7 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         work.Margin = new Padding(0, 0, 10, 0);
         workspace.Controls.Add(work, 0, 0);
         workspace.Controls.Add(paymentSummary, 1, 0);
-        context.SetHeaderText("Student", "Search by admission number, student or father name.");
+        context.SetHeaderText("Student", "Search by name or adm. no.");
         context.Header.Controls.Add(actions);
         context.Header.Controls.SetChildIndex(actions, context.Header.Controls.Count - 1);
         chargeCard.SetHeaderText("Outstanding Charges", "Review the charges included in this payment.");
@@ -3027,6 +3031,12 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
     /// <summary>Process Collection is the button that takes money, so it is enabled only while the charges grid holds a charge that still has a balance.</summary>
     private void UpdateProcessCollectionAvailability()
     {
+        if (messageStudentButton is not null)
+        {
+            bool canMessage = CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission, true);
+            messageStudentButton.Visible = canMessage;
+            messageStudentButton.Enabled = canMessage && admissionId > 0;
+        }
         UpdateTransportButton();
         if(printBillButton is not null)
         {

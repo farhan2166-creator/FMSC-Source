@@ -152,7 +152,7 @@ internal static partial class Program
         var audience = (ModernComboBox)type.GetField("audience", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var audienceOptions = audience.Items.Cast<object>().Select(item => item.ToString()).ToArray();
         Check(audience.SelectedIndex == (int)CommunicationAudience.Class
-            && audienceOptions.Length == Enum.GetValues<CommunicationAudience>().Length
+            && audienceOptions.Length == (int)CommunicationAudience.Staff + 1
             && audienceOptions.Distinct().Count() == audienceOptions.Length,
             "New communication starts with a scoped class, while all supported audience choices remain available");
         var send = (ModernButton)type.GetField("confirm", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;

@@ -9,7 +9,7 @@ namespace FMSC_SMS.Core;
 /// </summary>
 internal enum CommunicationAudience
 {
-    School, Campus, Class, OutstandingFees, Student, Family, Staff
+    School, Campus, Class, OutstandingFees, Student, Family, Staff, FeeStudent, FeeFamily
 }
 
 internal sealed record CommunicationTarget(
@@ -17,11 +17,12 @@ internal sealed record CommunicationTarget(
     int StudentId, int StaffId, string Channel)
 {
     internal string Purpose => Audience switch {
-        CommunicationAudience.OutstandingFees => "FeeReminder",
+        CommunicationAudience.OutstandingFees or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily => "FeeReminder",
         CommunicationAudience.Staff => "Staff",
         CommunicationAudience.Student or CommunicationAudience.Family => "Individual",
         _ => "Announcement"
     };
+    internal bool IsRecordFeeNotice => Audience is CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily;
 }
 
 internal sealed record CommunicationPreviewEntry(
@@ -63,15 +64,17 @@ internal static class CommunicationRecipientResolver
     // School and campus/class selection never require one picker action per student.
     private const string StudentCandidatesSql = """
         EXEC dbo.RequirePermission @UserId, N'Students.View';
-        IF @Audience=N'OutstandingFees'
+        IF @Audience IN (N'OutstandingFees',N'FeeStudent',N'FeeFamily')
             EXEC dbo.RequirePermission @UserId, N'Fees.View';
         SELECT S.AdmissionId RecordId, S.StudentName RecordName,
                S.AdmissionNumber, S.AdmissionDate, S.FatherName,
                CASE WHEN E.Status=N'Active' THEN ClassRecord.ClassName END ClassName,
-               S.ContactNumber, S.SchoolMessageConsent,
+               CASE WHEN @StudentId>0 AND @Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily') THEN Guardian.PhoneE164 ELSE S.ContactNumber END ContactNumber,
+               CASE WHEN @StudentId>0 AND @Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily') THEN Guardian.HasConsent ELSE S.SchoolMessageConsent END SchoolMessageConsent,
                CONVERT(varchar(8),'Student') Kind, B.Outstanding, FM.FamilyId
         FROM dbo.Students S
         LEFT JOIN dbo.FamilyMembers FM ON FM.AdmissionId=S.AdmissionId
+        OUTER APPLY msg.RecordGuardian(CASE WHEN @Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily') THEN @StudentId ELSE 0 END) Guardian
         OUTER APPLY (
             SELECT TOP (1) E.ClassSectionId, E.Status
             FROM dbo.Enrollments E WHERE E.AdmissionId=S.AdmissionId
@@ -96,14 +99,7 @@ internal static class CommunicationRecipientResolver
                 AND (@ClassId=0 OR CCS.ClassId=@ClassId)
                 AND (@StudentId=0 OR S.AdmissionId=@StudentId)
                 AND B.Outstanding>0)
-            OR (@Audience=N'Student' AND S.AdmissionId=@StudentId)
-            OR (@Audience=N'Family' AND (
-                S.AdmissionId=@StudentId
-                OR EXISTS (
-                    SELECT 1 FROM dbo.FamilyMembers FM
-                    WHERE FM.AdmissionId=S.AdmissionId AND FM.FamilyId IN (
-                        SELECT F2.FamilyId FROM dbo.FamilyMembers F2
-                        WHERE F2.AdmissionId=@StudentId))))
+            OR (@Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily') AND S.AdmissionId=@StudentId)
         )
         ORDER BY S.StudentName, S.AdmissionId;
         """;
@@ -170,7 +166,7 @@ internal static class CommunicationRecipientResolver
         if ((target.Audience == CommunicationAudience.Campus && target.CampusId <= 0)
             || (target.Audience == CommunicationAudience.Class
                 && (target.CampusId <= 0 || target.ClassId <= 0))
-            || ((target.Audience is CommunicationAudience.Student or CommunicationAudience.Family)
+            || ((target.Audience is CommunicationAudience.Student or CommunicationAudience.Family || target.IsRecordFeeNotice)
                 && target.StudentId <= 0)
             || (target.Audience == CommunicationAudience.Staff && target.StaffId <= 0))
             throw new CommunicationValidationException("Select the required campus, class or school record.");

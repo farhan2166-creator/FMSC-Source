@@ -453,7 +453,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     {
         if (!CurrentUser.HasPermission("Communication.Send")) return;
         int actor = CurrentUser.UserId;
-        var choices = await CommunicationPreparedMessages.ReadComposeTemplatesAsync();
+        var choices = await CommunicationManagementStore.ReadComposeTemplatesAsync();
         if (IsDisposed || actor != CurrentUser.UserId) return;
         composeTemplates = choices;
         RefreshTemplateChoices();

@@ -58,6 +58,23 @@ internal static partial class Program
                 "Each child retains their own campus beneath the common school heading");
         }
         Check(render("family-separate-child-receipts",receipt)==1,"Child receipts and the final summary render on one continuous page");
+        var attachmentData = receipt.Copy();
+        if (!attachmentData.Columns.Contains("ParentRelationLabel")) attachmentData.Columns.Add("ParentRelationLabel");
+        foreach (DataRow row in attachmentData.Rows) row["ParentRelationLabel"] = "S/O";
+        using (var share = new FeeMessageDocument(attachmentData, 1, new[] { 1, 2, 3, 4, 5 }, Array.Empty<int>(),
+            family: true, receipt: true, amount: 4700m, receiptNumber: "FR-2026-00005"))
+        {
+            // The test fixture carries printable labels so export never loads live student details.
+            // The report copy must preserve the saved family totals and every printable child.
+            string path = Path.Combine("artifacts", "fee-documents", $"fmsc-shared-receipt-{Guid.NewGuid():N}.pdf");
+            try
+            {
+                share.ExportAsync(path).GetAwaiter().GetResult();
+                using var pdf = PdfSharp.Pdf.IO.PdfReader.Open(path, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import);
+                Check(pdf.PageCount == 1, "The WhatsApp attachment exports a complete saved family receipt PDF");
+            }
+            finally { if (File.Exists(path)) File.Delete(path); }
+        }
         using(var largeStudents=students.Clone())
         using(var largeLines=lines.Clone())
         using(var largeHeader=header.Copy())

@@ -94,14 +94,6 @@ internal static class CommunicationPreparedMessages
     internal static IReadOnlyList<ComposeTemplate> BuiltInChoices { get; } = BuiltIns
         .Select(item => new ComposeTemplate(item.Name, item.Purpose, item.Body, FamilyOnly: item.FamilyOnly)).ToArray();
 
-    internal static async Task<IReadOnlyList<ComposeTemplate>> ReadComposeTemplatesAsync()
-    {
-        using DataTable rows = await CommunicationManagementStore.ReadComposeTemplatesAsync();
-        return BuiltInChoices.Concat(rows.AsEnumerable().Select(row => new ComposeTemplate(
-            row.Field<string>("Name") ?? "", row.Field<string>("Purpose") ?? "",
-            row.Field<string>("Body") ?? "", row.Field<string>("Channel") ?? ""))).ToArray();
-    }
-
     // These are deliberately limited, readable placeholders. No SQL, scripting,
     // formula expressions, or arbitrary data paths can be supplied by a template.
     private static readonly Regex Field = new(
@@ -314,7 +306,7 @@ internal static class CommunicationPreparedMessages
             ELSE EXEC dbo.RequirePermission @UserId,N'Students.View';
             IF @NeedFees=1 AND @Audience<>'OutstandingFees'
                 THROW 51120,'Fee amounts require the outstanding-fee audience.',1;
-            IF @Audience='OutstandingFees' EXEC dbo.RequirePermission @UserId,N'Fees.View';
+            IF @Audience IN ('OutstandingFees','FeeStudent','FeeFamily') EXEC dbo.RequirePermission @UserId,N'Fees.View';
             SELECT COALESCE(R.AdmissionId,R.StaffId) RecordId,
                 COALESCE(NULLIF(LTRIM(RTRIM(S.StudentName)),N''),
                          NULLIF(LTRIM(RTRIM(T.StaffName)),N''),N'') RecordName,
@@ -325,6 +317,7 @@ internal static class CommunicationPreparedMessages
             JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
             LEFT JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
             LEFT JOIN dbo.Staff T ON T.StaffId=R.StaffId
+            OUTER APPLY msg.RecordGuardian(CASE WHEN @Audience IN ('Student','Family','FeeStudent','FeeFamily') THEN @StudentId ELSE 0 END) Guardian
             OUTER APPLY (SELECT TOP(1) E.ClassSectionId,E.Status FROM dbo.Enrollments E
                 WHERE E.AdmissionId=S.AdmissionId
                 ORDER BY CASE WHEN E.Status=N'Active' THEN 0 ELSE 1 END,E.EnrollmentId DESC) E
@@ -343,18 +336,15 @@ internal static class CommunicationPreparedMessages
                   SELECT 1 FROM msg.Suppression O
                   WHERE O.Channel='WhatsApp' AND O.PhoneE164=R.PhoneE164)
               AND ((S.AdmissionId IS NOT NULL AND S.Status=N'Active'
-                    AND S.SchoolMessageConsent=1
-                    AND msg.NormalizeMobile(S.ContactNumber)=R.PhoneE164
+                    AND ((@Audience IN ('Student','Family','FeeStudent','FeeFamily') AND S.AdmissionId=@StudentId
+                        AND Guardian.HasConsent=1 AND Guardian.PhoneE164=R.PhoneE164)
+                    OR (S.SchoolMessageConsent=1 AND msg.NormalizeMobile(S.ContactNumber)=R.PhoneE164
                     AND (@Audience='School'
                       OR (@Audience='Campus' AND E.Status=N'Active' AND CCS.CampusId=@CampusId)
                       OR (@Audience='Class' AND E.Status=N'Active' AND CCS.CampusId=@CampusId AND CCS.ClassId=@ClassId)
                       OR (@Audience='OutstandingFees' AND E.Status=N'Active'
                           AND (@CampusId=0 OR CCS.CampusId=@CampusId) AND (@ClassId=0 OR CCS.ClassId=@ClassId)
-                          AND (@StudentId=0 OR S.AdmissionId=@StudentId) AND F.Outstanding>0)
-                      OR (@Audience='Student' AND S.AdmissionId=@StudentId)
-                      OR (@Audience='Family' AND (S.AdmissionId=@StudentId OR EXISTS(
-                          SELECT 1 FROM dbo.FamilyMembers M JOIN dbo.FamilyMembers X ON X.FamilyId=M.FamilyId
-                          WHERE M.AdmissionId=S.AdmissionId AND X.AdmissionId=@StudentId)))))
+                          AND (@StudentId=0 OR S.AdmissionId=@StudentId) AND F.Outstanding>0)))))
                 OR (@Audience='Staff' AND T.StaffId=@StaffId AND T.Status=N'Active'
                     AND msg.NormalizeMobile(T.ContactNumber)=R.PhoneE164));
             """;

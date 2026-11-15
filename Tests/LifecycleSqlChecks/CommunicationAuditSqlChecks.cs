@@ -206,6 +206,31 @@ internal static class CommunicationAuditSqlChecks
         r.Check((string)history["State"] == "Completed" && Convert.ToInt32(history["ManualSkipped"]) == 1
             && Convert.ToInt32(history["InProgress"]) == 0 && Convert.ToInt32(history["Delivered"]) == 0 && Convert.ToInt32(history["ManualReported"]) == 0,
             "Excluding the last recipient completes history, accounts for the target and never fabricates sending/delivery.");
+
+        var noPhone = Admit("Guardian fixture consent", null, true);
+        var olderPhone = Admit("Guardian fixture older number", "03008000021", false, noPhone.Id);
+        var linked = new CommunicationTarget(CommunicationAudience.Family, 0, 0, noPhone.Id, 0, "WhatsApp");
+        var shared = await CommunicationRecipientResolver.ReadAsync(linked);
+        r.Check(shared.Entries.Single() is { Included: true, PhoneE164: "+923008000021" },
+            "Consent on one linked child makes the valid number on another child available.");
+        var newerPhone = Admit("Guardian fixture latest number", "03008000022", null, noPhone.Id);
+        var familyFees = linked with { Audience = CommunicationAudience.FeeFamily, StudentId = olderPhone.Id };
+        var chosen = await CommunicationRecipientResolver.ReadAsync(familyFees);
+        var thisStudent = await CommunicationRecipientResolver.ReadAsync(familyFees with { Audience = CommunicationAudience.Student });
+        r.Check(chosen.Entries.Single() is { Included: true, PhoneE164: "+923008000022" }
+            && thisStudent.Entries.Single() is { Included: true, PhoneE164: "+923008000022" },
+            "Individual and family messages use one valid guardian number from the latest linked admission.");
+        var reviewedGuardian = Confirm(familyFees, chosen);
+        long guardianRecipient = Recipient((Guid)reviewedGuardian.Rows[0]["BatchId"]);
+        Sql.Query("UPDATE dbo.Students SET ContactNumber=N'03008000023' WHERE AdmissionId=@Id", Sql.P("@Id", newerPhone.Id));
+        var changedGuardian = Sql.Proc("msg.OpenManualHandoff", Sql.P("@UserId", f.Admin), Sql.P("@RecipientId", guardianRecipient));
+        r.Check(!Convert.ToBoolean(changedGuardian.Rows[0]["Opened"])
+            && Convert.ToString(changedGuardian.Rows[0]["ExclusionCode"]) == "DestinationChanged",
+            "A change to the selected family number blocks a previously reviewed fee handoff.");
+        Sql.Proc("msg.RecordWhatsAppOptOut", Sql.P("@UserId", f.Admin), Sql.P("@Phone", "03008000023"));
+        var optedGuardian = await CommunicationRecipientResolver.ReadAsync(familyFees);
+        r.Check(optedGuardian.Entries.Single().Reason == "Channel opt-out" && optedGuardian.Included == 0,
+            "An opt-out on the chosen family number blocks the send instead of falling back to an older number.");
         Sql.Proc("msg.PauseChannel", Sql.P("@UserId", f.Admin), Sql.P("@Channel", "WhatsApp"));
         await r.Refused("Paused manual messaging cannot open an otherwise eligible chat", () => {
             Sql.Proc("msg.OpenManualHandoff", Sql.P("@UserId", f.Admin), Sql.P("@RecipientId", Recipient((Guid)one.Rows[0]["BatchId"]))); return Task.CompletedTask;

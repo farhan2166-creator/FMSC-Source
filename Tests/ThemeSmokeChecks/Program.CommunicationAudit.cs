@@ -567,7 +567,8 @@ internal static partial class Program
     {
         int opens = 0;
         CommunicationTarget? captured = null;
-        void Cancel(Control owner, int id, string display, bool fees) { opens++; captured = CommunicationRecordEntry.Target(id, fees); }
+        bool fromFees = false;
+        void Cancel(Control owner, int id, string display, bool fees) { opens++; captured = CommunicationRecordEntry.Target(id, fees); fromFees = fees; }
         using var admission = new StudentAdmissionPage(false);
         SetField(admission, "currentAdmissionId", 42);
         var name = Field<ModernTextBox>(admission, "name"); name.Text = "Unsubmitted admission edit";
@@ -576,10 +577,13 @@ internal static partial class Program
             && name.Text == "Unsubmitted admission edit", "Optional Admission messaging uses the saved student and cancel leaves unsaved details intact");
         using var fees = new FeeCollectionPage(false);
         SetField(fees, "admissionId", 42);
+        var messageButton = fees.Controls.Find("feeCollectionMessage", true).Single();
+        Check(messageButton.Parent is FlowLayoutPanel && messageButton.Parent == Field<ModernButton>(fees, "printBillButton").Parent,
+            "The Fee Collection message action sits in the same header row as the bill actions");
         var reference = Field<ModernTextBox>(fees, "reference"); reference.Text = "Unsaved payment reference";
         var remarks = Field<ModernTextBox>(fees, "remarks"); remarks.Text = "Unsaved payment remarks";
         fees.OpenStudentMessage(Cancel);
-        Check(opens == 2 && captured?.StudentId == 42 && captured.Audience == CommunicationAudience.OutstandingFees
+        Check(opens == 2 && fromFees && captured?.StudentId == 42 && captured.Audience == CommunicationAudience.FeeStudent
             && reference.Text == "Unsaved payment reference" && remarks.Text == "Unsaved payment remarks",
             "Optional Collection messaging scopes current fees to the main student and never reloads or clears the payment draft");
         CurrentUser.SignIn(7204, "Viewer", "Read-only fixture", false, new[] { "Students.View", "Fees.View" });
@@ -603,9 +607,7 @@ internal static partial class Program
                 captured = target;
                 var student = new CommunicationPreviewEntry(studentId, "Synthetic student", "Student", "+923001234567",
                     "Included", 825m, "42", DateTime.Today);
-                return Task.FromResult(new CommunicationPreview(target.Audience == CommunicationAudience.Family
-                    ? new[] { student, student with { RecordId = 43, RecordName = "Synthetic sibling", PhoneE164 = null, Reason = "Consent not recorded" } }
-                    : new[] { student }));
+                return Task.FromResult(new CommunicationPreview(new[] { student }));
             },
             (_, target, result, body, request, _) =>
             {
@@ -614,7 +616,16 @@ internal static partial class Program
                 confirms++;
                 return Task.FromResult(new CommunicationConfirmation(request, result.Included, false));
             },
-            (_, _) => dispatches++);
+            (_, _) => dispatches++,
+            (id, family, receipt) =>
+            {
+                var data = new DataTable("FeeDocument");
+                data.Columns.Add("ReceiptNumber");
+                data.Columns.Add("PaymentDateText");
+                data.Rows.Add(receipt ? "R-42" : "", "");
+                return Task.FromResult(new FeeMessageDocument(data, id, new[] { id, 43 }, new[] { id }, family,
+                    receipt, receipt ? 500m : family ? 1250m : 825m, receipt ? "R-42" : ""));
+            });
 
         using (var admission = new CommunicationRecordMessageDialog(studentId, "Synthetic student", false, operations))
         {
@@ -639,12 +650,8 @@ internal static partial class Program
             action.PerformClick(); Application.DoEvents();
             var recipients = Field<ModernComboBox>(admission, "recipients");
             Check(captured is { Audience: CommunicationAudience.Family, StudentId: studentId }
-                && recipients.Visible && recipients.Items.Count == 2 && !scope.Visible && confirms == 0 && dispatches == 0,
-                "Review resolves only the selected student's family and shows included and excluded contacts without sending");
-            recipients.SelectedIndex = 1;
-            Check(Field<ModernTextBox>(admission, "preview").Text == "Consent not recorded",
-                "An excluded family contact shows its eligibility reason");
-            recipients.SelectedIndex = 0;
+                && recipients.Visible && recipients.Items.Count == 1 && !scope.Visible && confirms == 0 && dispatches == 0,
+                "Review resolves the selected family's single guardian number without sending");
             action.PerformClick(); Application.DoEvents();
             Check(confirms == 1 && dispatches == 1 && !admission.Visible, "Explicit confirmation dispatches the reviewed family message once");
         }
@@ -652,13 +659,32 @@ internal static partial class Program
         using var fees = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations);
         fees.Show(); Application.DoEvents();
         var feeFormats = Field<ModernComboBox>(fees, "templates").Items.OfType<CommunicationPreparedMessages.ComposeTemplate>().ToArray();
-        Check(feeFormats.Length > 0 && feeFormats.All(item => item.Purpose == "FeeReminder")
-            && fees.Controls.Find("communicationRecordScope", true).Length == 0,
-            "Fee Collection offers fee templates with no family or unrelated audience picker");
+        var feeScope = Field<ModernComboBox>(fees, "scope");
+        var feeContent = Field<ModernComboBox>(fees, "feeContent");
+        Check(feeFormats.Length > 0 && feeFormats.All(item => item.Purpose == "FeeReminder") && feeScope.Items.Count == 2,
+            "Fee Collection offers relevant fee templates and only the current student or linked family scopes");
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
-        Check(captured is { Audience: CommunicationAudience.OutstandingFees, StudentId: studentId }
+        Check(captured is { Audience: CommunicationAudience.FeeStudent, StudentId: studentId }
             && Field<ModernTextBox>(fees, "preview").Text.Contains("825.00") && confirms == 1 && dispatches == 1,
             "The fee preview renders the selected student's live balance without confirming a message");
+        Field<ModernButton>(fees, "back").PerformClick();
+        feeScope.SelectedIndex = 1;
+        Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
+        Check(captured is { Audience: CommunicationAudience.FeeFamily, StudentId: studentId }
+            && Field<ModernTextBox>(fees, "preview").Text.Contains("1,250.00"),
+            "Family outstanding uses the reviewed family total and the same guardian scope");
+        Field<ModernButton>(fees, "back").PerformClick();
+        feeContent.SelectedIndex = 1;
+        Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
+        Check(Field<ModernTextBox>(fees, "preview").Text.Contains("R-42") && Field<ModernTextBox>(fees, "preview").Text.Contains("500.00")
+            && confirms == 1 && dispatches == 1, "Payment preview uses the saved receipt number and amount without sending");
+        Field<ModernButton>(fees, "back").PerformClick();
+        feeScope.SelectedIndex = 0;
+        Check(Field<CheckBox>(fees, "attachPdf").Visible && Field<CheckBox>(fees, "attachPdf").Enabled,
+            "Manual WhatsApp offers a PDF attachment for a saved payment");
+        Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
+        Check(captured is { Audience: CommunicationAudience.FeeStudent, StudentId: studentId }
+            && Field<ModernTextBox>(fees, "preview").Text.Contains("R-42"), "A student receipt uses the individual fee scope");
         fees.Close();
     }
 }

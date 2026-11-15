@@ -23,7 +23,7 @@ internal static class CommunicationHistoryStore
             IF @Audience IS NULL THROW 51132,'The saved message is no longer available.',1;
             IF @Audience='Staff' EXEC dbo.RequirePermission @UserId,N'Staff.View';
             ELSE EXEC dbo.RequirePermission @UserId,N'Students.View';
-            IF @Audience='OutstandingFees' EXEC dbo.RequirePermission @UserId,N'Fees.View';
+            IF @Audience IN ('OutstandingFees','FeeStudent','FeeFamily') EXEC dbo.RequirePermission @UserId,N'Fees.View';
             SELECT B.Channel,B.Body,B.Audience,B.CampusId,B.ClassId,
                 CASE WHEN B.Audience='OutstandingFees' AND B.SingleStudentScope=0 THEN 0 ELSE B.StudentId END StudentId,
                 B.StaffId,SelectedStudent.StudentName AS SelectedStudentName,SelectedStaff.StaffName AS SelectedStaffName,
@@ -75,6 +75,7 @@ internal static class CommunicationHistoryStore
         var scope = Enum.Parse<CommunicationAudience>((string)row["Audience"]);
         string permission = scope == CommunicationAudience.Staff ? "Staff.View" : "Students.View";
         if (!CurrentUser.HasPermission("Communication.Send") || !CurrentUser.HasPermission(permission)
+            || scope is CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily
             || (scope == CommunicationAudience.OutstandingFees && !CurrentUser.HasPermission("Fees.View"))
             || provider is not ("WhatsAppBusinessManual" or "MetaCloud" or "Twilio")) return null;
         var target = new CommunicationTarget(scope, (int)row["CampusId"], (int)row["ClassId"],

@@ -30,11 +30,14 @@ internal static class CommunicationManagementStore
     internal static Task RecordChannelOptOutAsync(string channel,string phone) =>
         DatabaseHelper.ExecuteUserAsync("msg.RecordChannelOptOut",DatabaseHelper.P("@Channel",channel),DatabaseHelper.P("@Phone",phone));
 
-    internal static async Task<DataTable> ReadComposeTemplatesAsync()
+    internal static async Task<IReadOnlyList<CommunicationPreparedMessages.ComposeTemplate>> ReadComposeTemplatesAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Send"))
             throw new UnauthorizedAccessException("A sender permission is required to read message templates.");
-        return await DatabaseHelper.QueryUserAsync("msg.ReadComposeTemplates");
+        using var rows = await DatabaseHelper.QueryUserAsync("msg.ReadComposeTemplates");
+        return CommunicationPreparedMessages.BuiltInChoices.Concat(rows.AsEnumerable().Select(row =>
+            new CommunicationPreparedMessages.ComposeTemplate(row.Field<string>("Name") ?? "", row.Field<string>("Purpose") ?? "",
+                row.Field<string>("Body") ?? "", row.Field<string>("Channel") ?? ""))).ToArray();
     }
 
     internal static async Task<DataTable> ReadTemplatesAsync()

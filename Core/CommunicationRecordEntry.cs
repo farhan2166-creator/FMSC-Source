@@ -14,10 +14,10 @@ internal static class CommunicationRecordEntry
         return number.Length == 0 ? name : $"{name} ({number})";
     }
 
-    internal static CommunicationTarget Target(int admissionId, bool fees)
+    internal static CommunicationTarget Target(int admissionId, bool fees = false)
     {
         if (admissionId <= 0) throw new CommunicationValidationException("Select a saved student first.");
-        return new(fees ? CommunicationAudience.OutstandingFees : CommunicationAudience.Student,
+        return new(fees ? CommunicationAudience.FeeStudent : CommunicationAudience.Student,
             0, 0, admissionId, 0, "WhatsApp");
     }
 
