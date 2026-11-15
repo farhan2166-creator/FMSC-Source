@@ -16,10 +16,11 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         Func<Task<IReadOnlyList<ComposeTemplate>>> ReadTemplates,
         Func<CommunicationTarget, Task<CommunicationPreview>> ReadRecipients,
         Func<Method, CommunicationTarget, CommunicationPreview, string, Guid, CommunicationMetaTransport.Selection?, Task<CommunicationConfirmation>> Confirm,
-        Action<Method, CommunicationConfirmation, Func<Task>?> Dispatch,
+        Action<Method, CommunicationConfirmation> Dispatch,
         Func<int, bool, bool, Task<FeeMessageDocument>>? ReadFeeDocument = null,
         Func<FeeMessageDocument, Task<Bitmap>>? RenderImage = null,
-        Action<Image>? CopyImage = null);
+        Action<Image>? CopyImage = null,
+        CommunicationManualHandoff.Operations? FeeHandoff = null);
 
     private sealed record ReviewedMessage(CommunicationTarget Target, CommunicationPreview Preview, string Body, Guid RequestId,
         FeeMessageDocument? Document);
@@ -52,9 +53,13 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     private readonly ModernButton cancel = new() { Text = "Cancel", DialogResult = DialogResult.Cancel };
     private readonly Control options, templateField, messageField, recipientField, previewField;
     private readonly Panel feeOptions = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
+    private readonly Panel content = new() { Dock = DockStyle.Fill };
+    private readonly TableLayoutPanel composer;
     private IReadOnlyList<ComposeTemplate> choices = BuiltInChoices;
     private CommunicationMetaTransport.Selection? metaSelection;
     private ReviewedMessage? review;
+    private CommunicationManualHandoff? handoff;
+    private Bitmap? handoffImage;
     private bool busy;
     private bool IsFamily => scope.SelectedIndex == 1;
     private bool IsReceipt => feeContent.SelectedIndex == 1;
@@ -78,10 +83,10 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
             (option, target, review, body, request, meta) => option.Provider is { } provider
                 ? CommunicationApiBatchStore.ConfirmAsync(target, review, body, request, provider, meta)
                 : CommunicationBatchStore.ConfirmPreviewAsync(target, review, body, request, manualWhatsApp: true),
-            (option, batch, prepareImage) =>
+            (option, batch) =>
             {
                 using Form dispatch = option.Provider is null
-                    ? new CommunicationManualHandoffDialog(batch.BatchId, openFirstChat: !batch.AlreadyConfirmed, prepareImage: prepareImage)
+                    ? new CommunicationManualHandoffDialog(batch.BatchId, openFirstChat: !batch.AlreadyConfirmed)
                     : new CommunicationApiDispatchDialog(batch.BatchId, startConfirmed: !batch.AlreadyConfirmed);
                 dispatch.ShowDialog(this);
             });
@@ -106,7 +111,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         recipientField = HumanUi.Field("Recipient preview", recipients);
         previewField = HumanUi.Field("Message preview", preview);
         preview.ReadOnly = true;
-        var layout = new TableLayoutPanel
+        var layout = composer = new TableLayoutPanel
         {
             Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(AppScale.Scale(14))
         };
@@ -126,9 +131,10 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         layout.Controls.Add(SwitchableRow(templateField, chooseMeta, recipientField), 0, 3);
         layout.Controls.Add(SwitchableRow(messageField, previewField), 0, 4);
         layout.Controls.Add(status, 0, 5);
-        action.Width = AppMetrics.TextWidth("Copy Image & Open Chat", action.Font, AppScale.Scale(32));
+        action.Width = AppMetrics.TextWidth("Copy & Open Chat", action.Font, AppScale.Scale(32));
         layout.Controls.Add(HumanUi.DialogButtons(back, action, cancel), 0, 6);
-        Controls.Add(layout);
+        content.Controls.Add(layout);
+        Controls.Add(content);
 
         scope.SelectedIndexChanged += (_, _) =>
         {
@@ -152,9 +158,13 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         chooseMeta.Click += async (_, _) => await RunAsync(ChooseMetaAsync);
         action.Click += async (_, _) => await RunAsync(review is null ? ReviewAsync : ConfirmAsync);
         back.Click += (_, _) => { review?.Document?.Dispose(); review = null; status.Text = ""; UpdateView(); };
+        Load += (_, _) => SetResponsiveContentMinimum(MinimumSize - (Size - ClientSize));
         Shown += async (_, _) => await RunAsync(LoadOptionsAsync);
-        FormClosing += (_, e) => { if (busy) { e.Cancel = true; DialogResult = DialogResult.None; } };
-        Disposed += (_, _) => review?.Document?.Dispose();
+        FormClosing += (_, e) =>
+        {
+            if (busy || handoff?.IsBusy == true) { e.Cancel = true; DialogResult = DialogResult.None; }
+        };
+        Disposed += (_, _) => { review?.Document?.Dispose(); handoffImage?.Dispose(); };
         feeOptions.VisibleChanged += (_, _) => feeRow.Height = fees && feeOptions.Visible ? AppMetrics.FieldRowHeight : 0;
         UpdateView();
     }
@@ -292,7 +302,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         status.ForeColor = result.Included == 0 ? AppTheme.Danger : AppTheme.MutedText;
         status.Text = result.Included == 0
             ? "No eligible guardian contact for this message."
-            : ShareImage ? "The image is copied when each chat opens. Press Ctrl+V in WhatsApp, review it, then Send."
+            : ShareImage ? "The button copies the image and opens WhatsApp. Paste with Ctrl+V, then press Send."
             : option.Provider is null ? "Press Send in WhatsApp." : "Confirm to send to the reviewed contact. Provider charges may apply.";
         review = new(target, result, body, Guid.NewGuid(), document);
     }
@@ -300,24 +310,67 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     private async Task ConfirmAsync()
     {
         if (review is not { Preview.Included: > 0 } reviewed || SelectedMethod is not { } option) return;
-        using var image = ShareImage && reviewed.Document is { } imageDocument
-            ? await PrepareImageAsync(imageDocument) : null;
-        if (reviewed.Document is { } document)
-            await VerifyDocumentAsync(document);
-        var batch = await operations.Confirm(option, reviewed.Target, reviewed.Preview, reviewed.Body, reviewed.RequestId, metaSelection);
-        EnsureAccess();
-        // The modal handoff owns the image's lifetime. Revalidate before every chat,
-        // including a later sibling contact or a retry; never paste stale financial data.
-        operations.Dispatch(option, batch, image is null ? null : async () =>
+        Bitmap? image = null;
+        try
         {
+            if (ShareImage && reviewed.Document is { } imageDocument)
+                image = await PrepareImageAsync(imageDocument);
+            if (reviewed.Document is { } document)
+                await VerifyDocumentAsync(document);
+            var batch = await operations.Confirm(option, reviewed.Target, reviewed.Preview, reviewed.Body, reviewed.RequestId, metaSelection);
+            EnsureAccess();
+            if (fees && option.Provider is null)
+            {
+                await StartFeeHandoffAsync(batch, reviewed, image);
+                if (!IsDisposed)
+                {
+                    handoffImage = image;
+                    image = null;
+                }
+                return;
+            }
+
+            operations.Dispatch(option, batch);
+            Finish();
+        }
+        finally { image?.Dispose(); }
+    }
+
+    private async Task StartFeeHandoffAsync(CommunicationConfirmation batch, ReviewedMessage reviewed, Bitmap? image)
+    {
+        Func<Task>? copyImage = image is null ? null : async () =>
+        {
+            // Revalidate against current fee data on each attempt before copying the reviewed document.
             await VerifyDocumentAsync(reviewed.Document!);
             EnsureAccess();
             try { (operations.CopyImage ?? Clipboard.SetImage)(image); }
             catch (System.Runtime.InteropServices.ExternalException)
             {
-                throw new CommunicationValidationException("Windows clipboard is busy. Choose Open WhatsApp again to retry copying the image.");
+                throw new CommunicationValidationException("Windows clipboard is busy. Try opening the chat again to copy the image.");
             }
-        });
+        };
+        var session = new CommunicationManualHandoff(batch.BatchId, !batch.AlreadyConfirmed, copyImage,
+            operations.FeeHandoff, compact: true);
+        handoff = session;
+        session.Finished += (_, _) => Finish();
+        composer.Visible = false;
+        content.Controls.Add(session);
+        UiHelper.ApplyModernStyle(session);
+        CancelButton = session.FinishButton;
+        try { await session.StartAsync(); }
+        catch
+        {
+            CancelButton = cancel;
+            content.Controls.Remove(session);
+            session.Dispose();
+            handoff = null;
+            composer.Visible = true;
+            throw;
+        }
+    }
+
+    private void Finish()
+    {
         busy = false;
         DialogResult = DialogResult.OK;
         Close();
@@ -351,7 +404,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         summary.Visible = previewField.Visible = reviewing;
         recipientField.Visible = reviewing && recipients.Items.Count > 0;
         back.Visible = reviewing;
-        action.Text = !reviewing ? "Review Message" : ShareImage ? "Copy Image & Open Chat" : SelectedMethod?.Provider is not null ? "Confirm & Send"
+        action.Text = !reviewing ? "Review Message" : ShareImage ? "Copy & Open Chat" : SelectedMethod?.Provider is not null ? "Confirm & Send"
             : review!.Preview.Included == 1 ? "Open in WhatsApp" : "Start WhatsApp Chats";
         action.Enabled = !busy && (reviewing ? review!.Preview.Included > 0 : SelectedMethod is not null);
         options.Enabled = templateField.Enabled = chooseMeta.Enabled = messageField.Enabled = !busy;
@@ -371,7 +424,11 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         finally
         {
             busy = false;
-            if (!IsDisposed) { UseWaitCursor = false; UpdateView(); }
+            if (!IsDisposed)
+            {
+                UseWaitCursor = false;
+                if (handoff is null) UpdateView();
+            }
         }
     }
 }

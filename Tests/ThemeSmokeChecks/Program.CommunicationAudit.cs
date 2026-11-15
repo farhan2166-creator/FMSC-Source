@@ -421,7 +421,7 @@ internal static partial class Program
         int marks = 0, launches = 0, warnings = 0;
         bool failLaunch = true;
         string message = "Current prepared message & اطلاع";
-        var operations = new CommunicationManualHandoffDialog.Operations(
+        var operations = new CommunicationManualHandoff.Operations(
             _ => Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(new[] { new CommunicationManualRecipient(1,"Synthetic child","4567",state) }),
             (_, _) => Task.FromResult(message),
             _ => { state = "Opened"; return Task.FromResult(new CommunicationManualOpen(true, new Uri("https://wa.me/923001234567?text=fixture"), null, message)); },
@@ -430,34 +430,34 @@ internal static partial class Program
             _ => warnings++);
         using var dialog = new CommunicationManualHandoffDialog(batchId, operations);
         dialog.Show(); Application.DoEvents();
-        Check(Field<ProgressBar>(dialog, "processedProgress").Value == 0,
+        Check(Field<ProgressBar>(dialog.Handoff, "processedProgress").Value == 0,
             "A pending recipient has no completed processing progress");
-        var open = Field<ModernButton>(dialog, "open");
-        var report = Field<ModernButton>(dialog, "reported");
+        var open = Field<ModernButton>(dialog.Handoff, "open");
+        var report = Field<ModernButton>(dialog.Handoff, "reported");
         open.PerformClick(); Application.DoEvents();
         Check(warnings == 1 && !report.Enabled && launches == 0 && marks == 0,
             "Failed external launch cannot enable or record an operator-sent outcome");
-        var mark = dialog.GetType().GetMethod("MarkAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        ((Task)mark.Invoke(dialog, new object[] { "ReportedSent" })!).GetAwaiter().GetResult();
+        var mark = dialog.Handoff.GetType().GetMethod("MarkAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        ((Task)mark.Invoke(dialog.Handoff, new object[] { "ReportedSent" })!).GetAwaiter().GetResult();
         Check(marks == 0, "Direct handler invocation also refuses reporting after a failed launch");
         failLaunch = false; open.PerformClick(); Application.DoEvents();
-        Check(launches == 1 && report.Enabled && Field<ModernTextBox>(dialog,"preparedMessage").Text == message,
+        Check(launches == 1 && report.Enabled && Field<ModernTextBox>(dialog.Handoff,"preparedMessage").Text == message,
             "Successful reopening exposes the exact handed-off message and permits explicit reporting");
-        Check(Field<ProgressBar>(dialog, "processedProgress").Value == 0,
+        Check(Field<ProgressBar>(dialog.Handoff, "processedProgress").Value == 0,
             "Opening a chat alone does not advance completed processing or imply sending");
-        Field<ModernButton>(dialog, "close").PerformClick();
+        Field<ModernButton>(dialog.Handoff, "close").PerformClick();
 
         using var reopened = new CommunicationManualHandoffDialog(batchId, operations);
         reopened.Show(); Application.DoEvents();
-        Check(Field<ModernTextBox>(reopened, "preparedMessage").Text == message
+        Check(Field<ModernTextBox>(reopened.Handoff, "preparedMessage").Text == message
             && launches == 1 && marks == 0,
             "Reopening after Finish Later restores the message before any browser launch or operator report");
-        report = Field<ModernButton>(reopened, "reported");
+        report = Field<ModernButton>(reopened.Handoff, "reported");
         report.PerformClick(); Application.DoEvents();
         Check(marks == 1 && state == "ReportedSent" && !report.Enabled,
             "One explicit report finishes the recipient without a second confirmation or a delivery claim");
-        Check(Field<ProgressBar>(reopened, "processedProgress").Value == 1
-            && Field<ModernTextBox>(reopened, "preparedMessage").Text.Length == 0,
+        Check(Field<ProgressBar>(reopened.Handoff, "processedProgress").Value == 1
+            && Field<ModernTextBox>(reopened.Handoff, "preparedMessage").Text.Length == 0,
             "Explicit operator reporting advances the processed-recipient progress");
         reopened.Close();
 
@@ -471,7 +471,7 @@ internal static partial class Program
             MarkRecovered = _ => { recoveredReports++; return Task.CompletedTask; }
         });
         resumed.Show(); Application.DoEvents();
-        var recovered = Field<ModernButton>(resumed, "reported");
+        var recovered = Field<ModernButton>(resumed.Handoff, "reported");
         recovered.PerformClick();
         Check(recoveredReports == 0, "A prior preparation without shell acknowledgement requires the operator to check WhatsApp.");
         checkedWhatsApp = true;
@@ -485,7 +485,7 @@ internal static partial class Program
         direct.Show(); Application.DoEvents();
         Check(launches == 2 && state == "Opened" && marks == 1,
             "A new single-recipient handoff opens the chat without a second Open click");
-        Field<ModernButton>(direct, "reported").PerformClick(); Application.DoEvents();
+        Field<ModernButton>(direct.Handoff, "reported").PerformClick(); Application.DoEvents();
         Check(marks == 2 && !direct.Visible, "Reporting the single message closes its completed handoff");
 
         // Marking a contact never marks the next contact Sent. The explicit
@@ -537,13 +537,13 @@ internal static partial class Program
         Check(first == "Opened" && second == "Pending" && advancedLaunches == 1,
             "The first chat opens after the reviewed batch is confirmed; the second stays pending");
         clipboardBusy = true;
-        Field<ModernButton>(consecutiveDialog, "reported").PerformClick();
+        Field<ModernButton>(consecutiveDialog.Handoff, "reported").PerformClick();
         Application.DoEvents();
         Check(first == "ReportedSent" && second == "Opened" && advancedLaunches == 1 && advancedMarks == 1
-            && imageCopies == 1 && !Field<ModernButton>(consecutiveDialog, "reported").Enabled,
+            && imageCopies == 1 && !Field<ModernButton>(consecutiveDialog.Handoff, "reported").Enabled,
             "Clipboard failure stops the next chat launch and cannot be reported as sent");
         clipboardBusy = false;
-        Field<ModernButton>(consecutiveDialog, "open").PerformClick(); Application.DoEvents();
+        Field<ModernButton>(consecutiveDialog.Handoff, "open").PerformClick(); Application.DoEvents();
         Check(first == "ReportedSent" && second == "Opened"
             && advancedLaunches == 2 && advancedMarks == 1 && imageCopies == 2,
             "Reporting the first chat opens the next without reporting it sent");
@@ -630,6 +630,9 @@ internal static partial class Program
             new[] { "Communication.Send", "Students.View", "Fees.View" });
         CommunicationTarget? captured = null;
         int confirms = 0, dispatches = 0, renders = 0, copies = 0, documentRevision = 0;
+        int launches = 0, reports = 0, warnings = 0;
+        bool changeAtHandoff = false;
+        string handoffState = "Pending";
         const int studentId = 42;
         var operations = new CommunicationRecordMessageDialog.Operations(
             option => Task.FromResult(option.Provider is null),
@@ -646,13 +649,10 @@ internal static partial class Program
                 Check(target == captured && result.Included == 1 && request != Guid.Empty && body.Length > 0,
                     "Record message confirmation receives the exact reviewed scope, eligible contacts and format");
                 confirms++;
+                handoffState = "Pending";
                 return Task.FromResult(new CommunicationConfirmation(request, result.Included, false));
             },
-            (_, _, prepareImage) =>
-            {
-                dispatches++;
-                prepareImage?.Invoke().GetAwaiter().GetResult();
-            },
+            (_, _) => dispatches++,
             (id, family, receipt) =>
             {
                 var data = new DataTable("FeeDocument");
@@ -663,7 +663,25 @@ internal static partial class Program
                     receipt, receipt ? 500m : family ? 1250m : 825m, receipt ? "R-42" : ""));
             },
             _ => { renders++; return Task.FromResult(new Bitmap(10, 10)); },
-            _ => copies++);
+            _ => copies++,
+            new CommunicationManualHandoff.Operations(
+                _ => Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(
+                    new[] { new CommunicationManualRecipient(1, "Synthetic student", "4567", handoffState) }),
+                (_, _) => Task.FromResult("Prepared fee message"),
+                _ =>
+                {
+                    if (changeAtHandoff) documentRevision++;
+                    handoffState = "Opened";
+                    return Task.FromResult(new CommunicationManualOpen(true, new Uri("https://wa.me/923001234567?text=fixture"),
+                        null, "Prepared fee message"));
+                },
+                (_, outcome) =>
+                {
+                    handoffState = outcome;
+                    if (outcome == "ReportedSent") reports++;
+                    return Task.CompletedTask;
+                },
+                _ => launches++, _ => warnings++));
 
         using (var admission = new CommunicationRecordMessageDialog(studentId, "Synthetic student", false, operations))
         {
@@ -724,10 +742,31 @@ internal static partial class Program
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
         Check(captured is { Audience: CommunicationAudience.FeeStudent, StudentId: studentId }
             && Field<ModernTextBox>(fees, "preview").Text.Contains("R-42"), "A student receipt uses the individual fee scope");
-        Check(renders == 0 && copies == 0, "Reviewing a fee message never renders or copies an attachment");
+        fees.Size = fees.MinimumSize;
+        Application.DoEvents();
+        var viewport = Descendants(fees).OfType<ResponsiveViewport>().Single();
+        Check(new[] { "back", "action", "cancel" }.Select(name => Field<ModernButton>(fees, name)).All(button =>
+            button.Visible && viewport.RectangleToScreen(viewport.ClientRectangle)
+                .Contains(button.RectangleToScreen(button.ClientRectangle))
+                && button.Parent!.Parent!.RectangleToScreen(button.Parent.Parent.ClientRectangle)
+                    .Contains(button.RectangleToScreen(button.ClientRectangle))),
+            "Every fee review action remains fully visible at the minimum dialog size");
+        Check(renders == 0 && copies == 0 && launches == 0, "Reviewing a fee message never prepares an attachment or launches the chat");
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
-        Check(confirms == 2 && dispatches == 2 && renders == 1 && copies == 1 && !fees.Visible,
-            "Confirmation prepares an image and supplies a checked clipboard callback to the manual handoff");
+        var handoff = Descendants(fees).OfType<CommunicationManualHandoff>().Single();
+        var report = Field<ModernButton>(handoff, "reported");
+        Check(confirms == 2 && dispatches == 1 && renders == 1 && copies == 1 && launches == 1 && reports == 0
+            && fees.Visible && handoff.Visible && report.Visible && report.Enabled && !Field<ModernButton>(fees, "action").Visible,
+            "Confirmation copies the image, launches WhatsApp once and shows reporting in the same Fee Message dialog");
+        Check(new[] { "open", "reported", "skip", "close" }.Select(name => Field<ModernButton>(handoff, name)).All(button =>
+            button.Visible && viewport.RectangleToScreen(viewport.ClientRectangle)
+                .Contains(button.RectangleToScreen(button.ClientRectangle))
+                && button.Parent!.RectangleToScreen(button.Parent.ClientRectangle)
+                    .Contains(button.RectangleToScreen(button.ClientRectangle))),
+            "All WhatsApp follow-up actions fit in the Fee Message dialog at its minimum size");
+        report.PerformClick(); Application.DoEvents();
+        Check(reports == 1 && handoffState == "ReportedSent" && !fees.Visible && launches == 1,
+            "Explicit reporting closes Fee Message without reopening WhatsApp");
 
         using (var changed = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations))
         {
@@ -736,7 +775,7 @@ internal static partial class Program
             Field<ModernButton>(changed, "action").PerformClick(); Application.DoEvents();
             documentRevision++;
             Field<ModernButton>(changed, "action").PerformClick(); Application.DoEvents();
-            Check(confirms == 2 && dispatches == 2 && renders == 1 && copies == 1 && changed.Visible,
+            Check(confirms == 2 && dispatches == 1 && renders == 1 && copies == 1 && changed.Visible,
                 "A changed saved receipt blocks confirmation and clipboard access until it is reviewed again");
             changed.Close();
         }
@@ -748,7 +787,7 @@ internal static partial class Program
             failed.Show(); Application.DoEvents();
             Field<ModernButton>(failed, "action").PerformClick(); Application.DoEvents();
             Field<ModernButton>(failed, "action").PerformClick(); Application.DoEvents();
-            Check(confirms == 2 && dispatches == 2 && copies == 1 && failed.Visible
+            Check(confirms == 2 && dispatches == 1 && copies == 1 && failed.Visible
                 && Field<ModernButton>(failed, "action").Enabled,
                 "Rendering failure is recoverable and never confirms or opens a messaging batch");
             failed.Close();
@@ -759,15 +798,19 @@ internal static partial class Program
             Field<CheckBox>(textOnly, "attachImage").Checked = false;
             Field<ModernButton>(textOnly, "action").PerformClick(); Application.DoEvents();
             Field<ModernButton>(textOnly, "action").PerformClick(); Application.DoEvents();
-            Check(confirms == 3 && dispatches == 3 && renders == 1 && copies == 1,
+            Check(confirms == 3 && dispatches == 1 && launches == 2 && renders == 1 && copies == 1,
                 "Text-only fee messaging remains optional and does not touch the clipboard");
+            Field<ModernButton>(Descendants(textOnly).OfType<CommunicationManualHandoff>().Single(), "close").PerformClick();
+            Application.DoEvents();
+            Check(!textOnly.Visible && reports == 1 && handoffState == "Opened",
+                "Finish Later returns to Fee Collection and leaves the opened message available to resume");
         }
         using (var cancelled = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations))
         {
             cancelled.Show(); Application.DoEvents();
             Field<ModernButton>(cancelled, "action").PerformClick(); Application.DoEvents();
             Field<ModernButton>(cancelled, "cancel").PerformClick(); Application.DoEvents();
-            Check(confirms == 3 && dispatches == 3 && renders == 1 && copies == 1,
+            Check(confirms == 3 && dispatches == 1 && launches == 2 && renders == 1 && copies == 1,
                 "Cancelling after fee review never confirms, renders, copies or dispatches");
         }
         using (var changedDuringRender = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations with
@@ -779,21 +822,22 @@ internal static partial class Program
             Field<ModernComboBox>(changedDuringRender, "feeContent").SelectedIndex = 1;
             Field<ModernButton>(changedDuringRender, "action").PerformClick(); Application.DoEvents();
             Field<ModernButton>(changedDuringRender, "action").PerformClick(); Application.DoEvents();
-            Check(confirms == 3 && dispatches == 3 && copies == 1 && changedDuringRender.Visible,
+            Check(confirms == 3 && dispatches == 1 && copies == 1 && launches == 2 && changedDuringRender.Visible,
                 "A receipt changed during rendering is rejected before the batch is confirmed");
             changedDuringRender.Close();
         }
-        using (var changedDuringHandoff = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations with
-        {
-            Dispatch = (_, _, prepareImage) => { documentRevision++; prepareImage!().GetAwaiter().GetResult(); }
-        }))
+        using (var changedDuringHandoff = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations))
         {
             changedDuringHandoff.Show(); Application.DoEvents();
             Field<ModernComboBox>(changedDuringHandoff, "feeContent").SelectedIndex = 1;
             Field<ModernButton>(changedDuringHandoff, "action").PerformClick(); Application.DoEvents();
+            changeAtHandoff = true;
             Field<ModernButton>(changedDuringHandoff, "action").PerformClick(); Application.DoEvents();
-            Check(confirms == 4 && copies == 1 && changedDuringHandoff.Visible,
-                "A fee change while the handoff is open blocks copying the previously rendered receipt");
+            changeAtHandoff = false;
+            var changedHandoff = Descendants(changedDuringHandoff).OfType<CommunicationManualHandoff>().Single();
+            Check(confirms == 4 && copies == 1 && launches == 2 && warnings == 1 && changedDuringHandoff.Visible
+                && !Field<ModernButton>(changedHandoff, "reported").Enabled,
+                "A fee change during handoff blocks copying, opening the chat and reporting the stale receipt as sent");
             changedDuringHandoff.Close();
         }
         using (var sms = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations with
@@ -808,7 +852,7 @@ internal static partial class Program
             int previousRenders = renders;
             Field<ModernButton>(sms, "action").PerformClick(); Application.DoEvents();
             Field<ModernButton>(sms, "action").PerformClick(); Application.DoEvents();
-            Check(confirms == 5 && renders == previousRenders && copies == 1,
+            Check(confirms == 5 && dispatches == 2 && launches == 2 && renders == previousRenders && copies == 1,
                 "API messaging keeps its existing confirmation path without image rendering or clipboard access");
         }
     }

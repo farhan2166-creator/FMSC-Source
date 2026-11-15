@@ -3,16 +3,44 @@ using FMSC_SMS.Core;
 
 namespace FMSC_SMS.Pages.Communication;
 
-/// <summary>
-/// One reviewed WhatsApp Business chat at a time. The operator presses Send
-/// outside FMSC and explicitly reports that action inside FMSC.
-/// This window never claims delivery or automates the WhatsApp client.
-/// </summary>
 internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
+{
+    internal CommunicationManualHandoff Handoff { get; }
+
+    internal CommunicationManualHandoffDialog(Guid batchId, bool openFirstChat = false)
+        : this(batchId, null, openFirstChat) { }
+
+    internal CommunicationManualHandoffDialog(Guid batchId, CommunicationManualHandoff.Operations? operations,
+        bool openFirstChat = false, Func<Task>? prepareImage = null)
+    {
+        Text = "Manual WhatsApp Business · School Communication";
+        StartPosition = FormStartPosition.CenterParent;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = MinimizeBox = ShowInTaskbar = false;
+        ClientSize = new Size(AppScale.Scale(730), AppScale.Scale(410));
+        MinimumSize = ClientSize;
+        BackColor = AppTheme.PageBackground;
+
+        Handoff = new CommunicationManualHandoff(batchId, openFirstChat, prepareImage, operations);
+        Controls.Add(Handoff);
+        CancelButton = Handoff.FinishButton;
+        Shown += async (_, _) =>
+        {
+            try { await Handoff.StartAsync(); }
+            catch (Exception ex) { Handoff.Warn(ex.Message); Close(); }
+        };
+        FormClosing += (_, e) => e.Cancel |= Handoff.IsBusy;
+        Handoff.Finished += (_, _) => Close();
+    }
+}
+
+/// <summary>Opens reviewed chats one at a time and records the operator's report.</summary>
+internal sealed class CommunicationManualHandoff : UserControl
 {
     private readonly Guid batchId;
     private readonly int actorId;
     private readonly bool openFirstChat;
+    private readonly bool closeOnCompletion;
     private readonly Func<Task>? prepareImage;
     private const string HandoffInstructions = "Check the school WhatsApp account and press Send there. "
         + "FMSC only records your report; it cannot verify delivery.";
@@ -65,6 +93,9 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private CommunicationManualRecipient? current;
     private int remainingAfterCurrent;
     private bool busy;
+    internal bool IsBusy => busy;
+    internal IButtonControl FinishButton => close;
+    internal event EventHandler? Finished;
     private FileStream? batchLease;
     private readonly HashSet<long> failedOpen = new();
     internal sealed record Operations(
@@ -80,9 +111,8 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
     private readonly Operations operations;
 
 
-    internal CommunicationManualHandoffDialog(Guid batchId, bool openFirstChat = false, Func<Task>? prepareImage = null)
-        : this(batchId, null, openFirstChat, prepareImage) { }
-    internal CommunicationManualHandoffDialog(Guid batchId, Operations? operations, bool openFirstChat = false, Func<Task>? prepareImage = null)
+    internal CommunicationManualHandoff(Guid batchId, bool openFirstChat, Func<Task>? prepareImage,
+        Operations? operations = null, bool compact = false)
     {
         this.prepareImage = prepareImage;
         explanation.Text = Instructions;
@@ -90,22 +120,18 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             CommunicationPreparedMessages.ReadManualPreviewAsync,
             CommunicationManualHandoffStore.OpenAsync, (id, outcome) => CommunicationManualHandoffStore.MarkAsync(id, outcome, false),
             uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }),
-            message => ModernMessageDialog.Show(this, message, "Manual WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Warning),
+            message => ModernMessageDialog.Show(FindForm(), message, "Manual WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Warning),
             CommunicationManualHandoffStore.RecordShellHandoffAsync,
-            () => ModernMessageDialog.Show(this,
+            () => ModernMessageDialog.Show(FindForm(),
                 "FMSC could not confirm the chat opened. Check the conversation in WhatsApp. Did you already send this message?",
                 "Check WhatsApp", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes,
             id => CommunicationManualHandoffStore.MarkAsync(id, "ReportedSent", true));
         this.batchId=batchId;
         this.openFirstChat = openFirstChat;
+        closeOnCompletion = openFirstChat || compact;
         actorId=CurrentUser.UserId;
-        Text="Manual WhatsApp Business · School Communication";
-        StartPosition=FormStartPosition.CenterParent;
-        FormBorderStyle=FormBorderStyle.FixedDialog;
-        MaximizeBox=MinimizeBox=false;
-        ShowInTaskbar=false;
-        ClientSize=new Size(AppScale.Scale(730),AppScale.Scale(410));
-        MinimumSize=ClientSize;
+        AutoScaleMode = AutoScaleMode.None;
+        Dock = DockStyle.Fill;
         BackColor=AppTheme.PageBackground;
 
         var layout=new TableLayoutPanel
@@ -114,9 +140,9 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             Padding=new Padding(AppScale.Scale(20))
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(45)));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(55)));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(48)));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(compact ? 0 : 45)));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(compact ? 36 : 55)));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(60)));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(60)));
         var progressHeader = new TableLayoutPanel
@@ -128,6 +154,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         progressHeader.RowStyles.Add(new RowStyle(SizeType.Percent, 28));
         progressHeader.Controls.Add(progress, 0, 0);
         progressHeader.Controls.Add(processedProgress, 0, 1);
+        progressHeader.Visible = !compact;
         layout.Controls.Add(progressHeader,0,0);
         layout.Controls.Add(destination,0,1);
         layout.Controls.Add(explanation,0,2);
@@ -140,23 +167,31 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
             Dock=DockStyle.Fill,WrapContents=false,AutoScroll=true,
             FlowDirection=FlowDirection.LeftToRight,Margin=Padding.Empty
         };
+        if (compact)
+        {
+            open.Width = AppScale.Scale(158);
+            reported.Width = AppScale.Scale(130);
+            skip.Width = AppScale.Scale(80);
+            close.Width = AppScale.Scale(115);
+            destination.Font = AppTheme.ButtonFont;
+        }
         actions.Controls.AddRange(new Control[]{open,reported,skip,close});
         layout.Controls.Add(actions,0,4);
         Controls.Add(layout);
         open.Click+=async (_,_)=>await OpenAsync();
         reported.Click+=async (_,_)=>await MarkAsync("ReportedSent");
         skip.Click+=async (_,_)=>await MarkAsync("Skipped");
-        close.Click+=(_,_)=>Close();
-        Shown+=async (_,_)=> {
-            try { batchLease=CommunicationHandoffLease.Acquire(batchId); }
-            catch(Exception ex) { Warn(ex.Message); Close(); return; }
-            await RefreshAsync();
-            if (openFirstChat && !IsDisposed && current?.State == "Pending")
-                await OpenAsync();
-        };
-        FormClosing+=(_,e)=> { if(busy)e.Cancel=true; };
+        close.Click += (_, _) => Finished?.Invoke(this, EventArgs.Empty);
         Disposed+=(_,_)=> { batchLease?.Dispose(); batchLease=null; };
         ApplyAvailability();
+    }
+
+    internal async Task StartAsync()
+    {
+        batchLease = CommunicationHandoffLease.Acquire(batchId);
+        await RefreshAsync();
+        if (openFirstChat && !IsDisposed && current?.State == "Pending")
+            await OpenAsync();
     }
 
     private void ApplyAvailability()
@@ -233,7 +268,7 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
         if(busy||current is null)return;
         if (current.State == "Opened" && !current.ShellHandoffRecorded
             && !failedOpen.Contains(current.RecipientId) && operations.ConfirmRecoveredSend is not null
-            && ModernMessageDialog.Show(this, "Check WhatsApp first. Reopen only if you still need to send this message.",
+            && ModernMessageDialog.Show(FindForm(), "Check WhatsApp first. Reopen only if you still need to send this message.",
                 "Reopen WhatsApp Chat", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
                 MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
         long id=current.RecipientId;
@@ -317,12 +352,13 @@ internal sealed class CommunicationManualHandoffDialog : ApplicationWindowForm
                 if (recorded && current?.State=="Pending"
                     && state is ("ReportedSent" or "Skipped"))
                     await OpenAsync();
-                if (!IsDisposed && openFirstChat && current is null) Close();
+                if (recorded && !IsDisposed && closeOnCompletion && current is null)
+                    Finished?.Invoke(this, EventArgs.Empty);
             }
         }
     }
 
-    private void Warn(string message) => operations.Notify(message);
+    internal void Warn(string message) => operations.Notify(message);
 
     private static string DisplayState(CommunicationManualRecipient recipient) =>
         recipient.State == "Opened" && !recipient.ShellHandoffRecorded
