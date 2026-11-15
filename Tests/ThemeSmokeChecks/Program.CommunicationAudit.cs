@@ -241,6 +241,18 @@ internal static partial class Program
         Guid? resumed = null, viewed = null;
         int confirmations = 0;
         const string savedBody = "Original message [StudentName]";
+        using var recipientFacts = new DataTable();
+        recipientFacts.Columns.Add("RecipientCount", typeof(long));
+        foreach (var column in new[] { "RecipientName", "RecordNumber", "LastFour", "ClassName", "CampusName" })
+            recipientFacts.Columns.Add(column);
+        string queuedRecipient = CommunicationManagementStore.FormatSessionRecipient(
+            recipientFacts.Rows.Add(1L, "Synthetic child", "0042", "0123"));
+        string sentRecipient = CommunicationManagementStore.FormatSessionRecipient(
+            recipientFacts.Rows.Add(1L, "Fictional sibling", "0043", "4567"));
+        string classRecipients = CommunicationManagementStore.FormatSessionRecipient(
+            recipientFacts.Rows.Add(18L, DBNull.Value, DBNull.Value, DBNull.Value, "Class Five", "North Campus"));
+        Check(classRecipients.Contains("Class Five") && classRecipients.Contains("North Campus") && classRecipients.Contains("18"),
+            "Bulk history identifies the saved class and campus and shows the destination count");
         CommunicationHistoryDraft? newDraft = null;
         DataTable Sessions(bool unfinished)
         {
@@ -252,8 +264,10 @@ internal static partial class Program
             rows.Columns.Add("InProgress", typeof(int));
             foreach (var column in new[] { "ManualReported", "ManualOpened", "ManualSkipped" })
                 rows.Columns.Add(column, typeof(int));
-            rows.Rows.Add(unfinished ? pending : completed, "WhatsApp Business (manual)", "School",
-                "Synthetic operator", unfinished ? 1 : 0, unfinished ? 0 : 1, 0, 0);
+            rows.Columns.Add("RecipientText");
+            rows.Rows.Add(unfinished ? pending : completed, "WhatsApp Business (manual)", "FeeStudent",
+                "Synthetic operator", unfinished ? 1 : 0, unfinished ? 0 : 1, 0, 0,
+                unfinished ? queuedRecipient : sentRecipient);
             return rows;
         }
         var operations = new CommunicationCenterPage.Operations(
@@ -282,6 +296,14 @@ internal static partial class Program
         }
         Field<ModernButton>(page, "unfinishedButton").PerformClick();
         PumpUntil(() => queue.Rows.Count == 1 && !page.IsBusy, "Unfinished loads its own session list");
+        string queued = Convert.ToString(queue.Rows[0].Cells["RecipientText"].Value)!;
+        Check(queued.Contains("Synthetic child") && queued.Contains("0042") && queued.Contains("0123"),
+            "Unfinished identifies the exact selected student and preserves leading zeros in the masked destination");
+        var queueSearch = page.Controls.Find("communicationUnfinishedSearch", true).Single();
+        queueSearch.Text = "4567";
+        Check(queue.Rows.Count == 0, "Unfinished filters out sessions with a different saved destination ending");
+        queueSearch.Text = "0123";
+        Check(queue.Rows.Count == 1, "Unfinished search finds a session by its saved destination ending");
         DoubleClick(queue);
         Check(resumed == pending && viewed is null && confirmations == 0 && !archive.Visible,
             "Double-clicking an unfinished session resumes that batch without opening a chat or confirming another send");
@@ -289,12 +311,17 @@ internal static partial class Program
         PumpUntil(() => archive.Rows.Count == 1 && !page.IsBusy, "History loads its separate list");
         var openHistory = (ModernButton)page.Controls.Find("communicationViewHistory", true).Single();
         Check(openHistory.Enabled && !queue.Visible, "A selected history row can be viewed independently of the unfinished queue");
+        string sent = Convert.ToString(archive.Rows[0].Cells["RecipientText"].Value)!;
+        Check(sent.Contains("Fictional sibling") && sent.Contains("0043") && sent.Contains("4567"),
+            "History identifies the student record and saved destination associated with the outcome");
         DoubleClick(archive);
         Check(viewed == completed && resumed == pending && confirmations == 0,
             "Double-clicking History opens the selected message record without resuming or sending");
         page.Controls.Find("communicationHistorySearch", true).Single().Text = "Unmatched fixture";
         Application.DoEvents();
         Check(archive.Rows.Count == 0 && !openHistory.Enabled, "Filtering history removes the open action when no session matches");
+        page.Controls.Find("communicationHistorySearch", true).Single().Text = "fictional sibling";
+        Check(archive.Rows.Count == 1 && openHistory.Enabled, "History search finds the recipient by name regardless of capitalization");
         page.Controls.Find("communicationHistorySearch", true).Single().Text = "";
         newDraft = new CommunicationHistoryDraft(new(CommunicationAudience.School, 0, 0, 0, 0, "WhatsApp"),
             "WhatsAppBusinessManual", savedBody, "", "", null);
@@ -310,14 +337,14 @@ internal static partial class Program
         {
             var rows = new DataTable();
             foreach (var column in new[] { "Body", "RenderedBody", "Audience", "Channel", "SelectedStudentName",
-                "SelectedStaffName", "ProviderCode", "TemplateJson", "Outcome", "RecipientName", "LastFour" })
+                "SelectedStaffName", "ProviderCode", "TemplateJson", "Outcome", "RecipientName", "RecordNumber", "LastFour" })
                 rows.Columns.Add(column);
             foreach (var column in new[] { "CampusId", "ClassId", "StudentId", "StaffId" })
                 rows.Columns.Add(column, typeof(int));
             rows.Rows.Add(savedBody, "Original message First", "School", "Sms", "", "", "Twilio", DBNull.Value,
-                "Delivered", "First", "0123", 0, 0, 0, 0);
+                "Delivered", "First", "0042", "0123", 0, 0, 0, 0);
             rows.Rows.Add(savedBody, "Original message Second", "School", "Sms", "", "", "Twilio", DBNull.Value,
-                "Failed", "Second", "4567", 0, 0, 0, 0);
+                "Failed", "Second", "0043", "4567", 0, 0, 0, 0);
             return Task.FromResult(rows);
         });
         history.Show();
@@ -326,6 +353,9 @@ internal static partial class Program
         Check(historyPreview.ReadOnly && historyPreview.Text == "Original message First" && history.Draft?.Body == savedBody,
             "History shows the exact reviewed API message and keeps the saved format for a new draft");
         var recipients = Field<DataGridView>(history, "recipients");
+        Check(Equals(recipients.Rows[0].Cells["RecordNumber"].Value, "0042")
+            && Equals(recipients.Rows[1].Cells["RecordNumber"].Value, "0043"),
+            "History details distinguish every recipient by their record number next to the destination ending and outcome");
         recipients.CurrentCell = recipients.Rows[1].Cells[0];
         Check(historyPreview.Text == "Original message Second", "History preview follows the selected recipient");
         var unsettled = (DataTable)recipients.DataSource!;

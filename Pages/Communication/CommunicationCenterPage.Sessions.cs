@@ -11,21 +11,22 @@ public sealed partial class CommunicationCenterPage
         card.Header.Visible = false;
         grid.Name = unfinished ? "communicationUnfinishedGrid" : "communicationHistoryGrid";
         grid.AutoGenerateColumns = false;
-        foreach (var (field, caption, width) in new[]
+        foreach (var (field, caption, width, weight) in new[]
         {
-            ("CreatedUtc", "Created (UTC)", 142),
-            ("MethodText", "Method", 155),
-            ("AudienceText", "Audience", 115),
-            ("OperatorName", "Started by", 105),
-            ("StateText", "Outcome", 220),
-            ("InProgress", "Needs attention", 120)
+            ("CreatedUtc", "Created (UTC)", 135, 100),
+            ("MethodText", "Method", 130, 100),
+            ("RecipientText", "Recipient", 210, 210),
+            ("AudienceText", "Audience", 105, 100),
+            ("OperatorName", "Started by", 90, 80),
+            ("StateText", "Outcome", 215, 220),
+            ("InProgress", "Needs attention", 115, 90)
         })
         {
             if (unfinished && field is ("OperatorName" or "StateText")) continue;
             grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = field, DataPropertyName = field, HeaderText = caption,
-                MinimumWidth = AppScale.Scale(width), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = AppScale.Scale(width), FillWeight = weight, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
         }
@@ -137,7 +138,7 @@ public sealed partial class CommunicationCenterPage
         else
         {
             if (!table.Columns.Contains("SearchMatch")) table.Columns.Add("SearchMatch", typeof(bool));
-            string[] columns = { "AudienceText", "MethodText", "OperatorName", "StateText", "CreatedUtc" };
+            string[] columns = { "RecipientText", "AudienceText", "MethodText", "OperatorName", "StateText", "CreatedUtc" };
             foreach (DataRow row in table.Rows)
                 row["SearchMatch"] = columns.Where(table.Columns.Contains).Any(name =>
                     Convert.ToString(row[name])?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true);

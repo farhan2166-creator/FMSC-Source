@@ -32,7 +32,10 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
             Text = $"{session.Audience}  ·  {session.Outcome}"
         };
         recipients.AutoGenerateColumns = false;
-        foreach (var (field, heading) in new[] { ("RecipientName", "Recipient"), ("LastFour", "Number ending"), ("Outcome", "Status") })
+        foreach (var (field, heading) in new[]
+        {
+            ("RecipientName", "Recipient"), ("RecordNumber", "Admission / staff no."), ("LastFour", "Number ending"), ("Outcome", "Status")
+        })
             recipients.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = field, DataPropertyName = field, HeaderText = heading,

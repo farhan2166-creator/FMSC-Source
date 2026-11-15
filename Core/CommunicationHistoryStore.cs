@@ -30,7 +30,7 @@ internal static class CommunicationHistoryStore
                 CASE WHEN M.BatchId IS NOT NULL THEN 'WhatsAppBusinessManual' ELSE A.ProviderCode END ProviderCode,
                 A.TemplateJson,COALESCE(H.State,R.State) Outcome,
                 COALESCE(S.StudentName,T.StaffName,N'School record') RecipientName,
-                RIGHT(R.PhoneE164,4) LastFour,J.RenderedBody
+                COALESCE(S.AdmissionNumber,T.StaffNumber) RecordNumber,RIGHT(R.PhoneE164,4) LastFour,J.RenderedBody
             FROM msg.Batch B
             LEFT JOIN msg.ManualBatch M ON M.BatchId=B.BatchId
             LEFT JOIN msg.ApiBatch A ON A.BatchId=B.BatchId

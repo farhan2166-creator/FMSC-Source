@@ -385,11 +385,19 @@ namespace FMSC_SMS.Core
         }
         protected override void OnPaint(PaintEventArgs e)
         {
-            e.Graphics.SmoothingMode =
-                AppTheme.UseSimpleRendering ? SmoothingMode.None : SmoothingMode.AntiAlias;
-            var rect =
-                new Rectangle(0, 0, Width - 1, Height - 1);
-            using var shape = new UiPaintShape(rect, _radius);
+            bool simple = AppTheme.UseSimpleRendering;
+            e.Graphics.SmoothingMode = simple ? SmoothingMode.None : SmoothingMode.AntiAlias;
+            var rect = new Rectangle(0, 0, Width - 1, Height - 1);
+            bool insetBorder = !simple && _radius > 0 && rect.Width > 2 && rect.Height > 2;
+            // The native rounded region must contain the full anti-aliased stroke.
+            var face = insetBorder ? Rectangle.Inflate(rect, -1, -1) : rect;
+            int radius = insetBorder ? _radius - 1 : _radius;
+            using var shape = new UiPaintShape(face, radius);
+            if (insetBorder && Parent is { } parent)
+            {
+                using var backdrop = new SolidBrush(parent.BackColor);
+                e.Graphics.FillRectangle(backdrop, ClientRectangle);
+            }
             var fillColor =
                 Enabled
                     ? BackColor
@@ -409,11 +417,11 @@ namespace FMSC_SMS.Core
                     : ControlPaint.Dark(fillColor, 0.22f);
                 textColor = GetButtonTextColor(fillColor);
             }
-            if (!AppTheme.UseSimpleRendering && Enabled && !_outline && rect.Width > 4 && rect.Height > 4)
+            if (!simple && Enabled && !_outline && face.Width > 4 && face.Height > 4)
             {
-                var shadowRect = new Rectangle(rect.X, rect.Y + 2, rect.Width, rect.Height);
+                var shadowRect = new Rectangle(face.X, face.Y + 1, face.Width, face.Height);
                 using var shadowPath =
-                    CreateRoundedPath(shadowRect, _radius);
+                    CreateRoundedPath(shadowRect, radius);
                 using var shadowBrush =
                     new SolidBrush(AppTheme.ButtonShadow);
                 e.Graphics.FillPath(shadowBrush, shadowPath);
@@ -428,7 +436,7 @@ namespace FMSC_SMS.Core
             float borderWidth =
                 _outline ? 1.2f : 0.8f;
             using var pen = new Pen(borderColor, borderWidth) {
-                Alignment = PenAlignment.Inset
+                Alignment = insetBorder ? PenAlignment.Center : PenAlignment.Inset
             };
             shape.Draw(e.Graphics, pen);
             // Paint focus AFTER the fill and border, otherwise the fill erases it.
