@@ -7,6 +7,7 @@
     <Compile Include="../../Core/CommunicationRecipientResolver.cs" Link="CommunicationRecipientResolver.cs" />
     <Compile Include="../../Core/CommunicationPreparedMessages.cs" Link="CommunicationPreparedMessages.cs" />
     <Compile Include="../../Core/CommunicationReviewedContent.cs" Link="CommunicationReviewedContent.cs" />
+    <Compile Include="../../Core/CommunicationHistoryStore.cs" Link="CommunicationHistoryStore.cs" />
     <Compile Include="../../Core/CommunicationValidationException.cs" Link="CommunicationValidationException.cs" />
     <Compile Include="../../Core/PakistanPhoneNumber.cs" Link="PakistanPhoneNumber.cs" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />

@@ -114,5 +114,6 @@ internal static class CommunicationApiSqlChecks
             Sql.Proc("msg.EnableApiChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","WhatsApp"),Sql.P("@ProviderCode","MetaCloud"));return Task.CompletedTask;
         },51130);
         Sql.Proc("msg.ConfigureChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","WhatsApp"),Sql.P("@ProviderCode","WhatsAppBusinessManual"));
+        await CommunicationMetaQueueSqlChecks.Run(f,r,student,sibling,batch);
     }
 }

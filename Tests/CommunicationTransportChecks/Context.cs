@@ -15,7 +15,8 @@ namespace FMSC_SMS.Core
     internal static class CurrentUser
     {
         internal static int UserId=>1;
-        internal static bool HasPermission(string permission)=>throw new InvalidOperationException("Permission reads are not part of pure transport tests.");
+        internal static HashSet<string> Permissions {get;} = new(StringComparer.Ordinal);
+        internal static bool HasPermission(string permission)=>Permissions.Contains(permission);
     }
     internal sealed record CommunicationDeliveryOutcome(string State,string? ProviderMessageId,string? FailureCode);
 }
