@@ -111,7 +111,7 @@ internal static partial class Program
         Field<ModernButton>(page, "newMessageButton").PerformClick();
         // Explicit school target keeps this synthetic async read independent
         // of the safer class-by-default choice in the actual user experience.
-        Field<ModernComboBox>(page, "audience").SelectedIndex = (int)CommunicationAudience.School;
+        page.SelectedAudience = CommunicationAudience.School;
         var body = Field<ModernTextBox>(page, "message");
         var next = Field<ModernButton>(page, "next");
         next.PerformClick();
@@ -173,7 +173,7 @@ internal static partial class Program
         singleHost.Controls.Add(singlePage);
         singleHost.Show(); Application.DoEvents();
         Field<ModernButton>(singlePage, "newMessageButton").PerformClick();
-        Field<ModernComboBox>(singlePage, "audience").SelectedIndex = (int)CommunicationAudience.Student;
+        singlePage.SelectedAudience = CommunicationAudience.Student;
         Field<StudentPicker>(singlePage, "student").SetStudent(42, "Synthetic child");
         Field<ModernTextBox>(singlePage, "message").Text = "Hello [StudentName]";
         Field<ModernButton>(singlePage, "next").PerformClick();
@@ -202,7 +202,7 @@ internal static partial class Program
         bulkHost.Controls.Add(bulkPage);
         bulkHost.Show(); Application.DoEvents();
         Field<ModernButton>(bulkPage, "newMessageButton").PerformClick();
-        Field<ModernComboBox>(bulkPage, "audience").SelectedIndex = (int)CommunicationAudience.School;
+        bulkPage.SelectedAudience = CommunicationAudience.School;
         Field<ModernTextBox>(bulkPage, "message").Text = "School notice";
         Field<ModernButton>(bulkPage, "next").PerformClick();
         PumpUntil(() => !bulkPage.IsBusy, "Bulk communication preview finishes");
@@ -220,7 +220,7 @@ internal static partial class Program
         excludedHost.Show();
         Application.DoEvents();
         Field<ModernButton>(excludedPage, "newMessageButton").PerformClick();
-        Field<ModernComboBox>(excludedPage, "audience").SelectedIndex = (int)CommunicationAudience.School;
+        excludedPage.SelectedAudience = CommunicationAudience.School;
         Field<ModernTextBox>(excludedPage, "message").Text = "School notice";
         Field<ModernButton>(excludedPage, "next").PerformClick();
         PumpUntil(() => !excludedPage.IsBusy, "Review with only excluded records finishes");

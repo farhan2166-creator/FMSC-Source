@@ -45,7 +45,6 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private readonly Panel steps = new() { Dock = DockStyle.Fill };
     private readonly List<HumanCard> cards = new();
     private readonly Panel campusField, classField, studentField, staffField;
-    private TableLayoutPanel targetFieldsLayout = null!;
     private readonly ModernButton next = PageButton("communicationReviewMessage", "Review Message", 165, "Primary");
     private readonly ModernButton confirm = PageButton("communicationConfirmMessage", "Open in WhatsApp", 230, "Primary");
     private readonly ModernButton historyButton, unfinishedButton, newMessageButton, templatesButton, configureButton;
@@ -64,6 +63,23 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private int step;
     private int previewReadVersion;
     private const int HistoryStep = 2, UnfinishedStep = 3, AdministrationStep = 4;
+    private sealed record AudienceOption(CommunicationAudience Scope, string Label, string Permission = "Students.View")
+    {
+        public override string ToString() => Label;
+    }
+    private static readonly AudienceOption[] AudienceOptions =
+    {
+        new(CommunicationAudience.Student, "One student"), new(CommunicationAudience.Family, "Family / siblings"),
+        new(CommunicationAudience.Class, "Class"), new(CommunicationAudience.Campus, "Campus"),
+        new(CommunicationAudience.School, "Entire school"), new(CommunicationAudience.OutstandingFees, "Outstanding fees"),
+        new(CommunicationAudience.Staff, "One staff member", "Staff.View")
+    };
+    internal CommunicationAudience SelectedAudience
+    {
+        get => (audience.SelectedItem as AudienceOption)?.Scope ?? CommunicationAudience.Class;
+        set => audience.SelectedItem = audience.Items.OfType<AudienceOption>().FirstOrDefault(option => option.Scope == value);
+    }
+
     internal sealed record Operations(
         Func<CommunicationTarget, Task<CommunicationPreview>> ReadRecipients,
         Func<Task<bool>> ReadManualMode,
@@ -103,12 +119,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         sampleMessage.Dock = DockStyle.Fill;
         // SelectionChanged can fire before CurrentRow moves to the clicked cell.
         previewGrid.CurrentCellChanged += (_, _) => ShowSelectedMessage();
-        audience.Items.AddRange(new object[]
-        {
-            "Entire school", "Campus", "Class", "Outstanding fees",
-            "One student", "Family / siblings", "One staff member"
-        });
-        audience.SelectedIndex = (int)CommunicationAudience.Class;
+        audience.Items.AddRange(AudienceOptions.Where(option => CurrentUser.HasPermission(option.Permission)
+            && (option.Scope != CommunicationAudience.OutstandingFees || CurrentUser.HasPermission("Fees.View"))).ToArray());
+        SelectedAudience = CurrentUser.HasPermission("Students.View") ? CommunicationAudience.Class : CommunicationAudience.Staff;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
 
@@ -163,11 +176,14 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         };
         audience.SelectedIndexChanged += (_, _) => {
             if(IsMeta){metaSelection=null;message.Clear();}
+            if (campus.Items.Count > 0) campus.SelectedIndex = 0;
+            if (cls.Items.Count > 0) cls.SelectedIndex = 0;
             student.SetStudent(0, ""); staff.SetStaff(0, "");
             ChangeAudienceFields(); RefreshTemplateChoices(); InvalidatePreview();
         };
         campus.SelectedIndexChanged += (_, _) => {
             if (cls.Items.Count > 0) cls.SelectedIndex = 0;
+            UpdateClassSelection();
             InvalidatePreview();
         };
         cls.SelectedIndexChanged += (_, _) => InvalidatePreview();
@@ -190,8 +206,6 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         ChangeAudienceFields();
         SetStep(0);
         RefreshTemplateChoices();
-        if (!CurrentUser.HasPermission("Students.View") && CurrentUser.HasPermission("Staff.View"))
-            audience.SelectedIndex = (int)CommunicationAudience.Staff;
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
         bool view = CurrentUser.HasPermission("Communication.View");
         int landing = compose ? UnfinishedStep : view ? HistoryStep : AdministrationStep;
@@ -319,44 +333,63 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private HumanCard TargetCard()
     {
         var card = HumanUi.Card("New Message");
+        card.Header.Visible = false;
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-        targetFieldsLayout = new TableLayoutPanel
+        var fields = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 7,
-            Padding = new Padding(AppScale.Scale(8)), Margin = Padding.Empty
+            Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1, RowCount = 6, MaximumSize = new Size(AppScale.Scale(980), 0),
+            Padding = new Padding(AppScale.Scale(8), 0, AppScale.Scale(8), AppScale.Scale(8)), Margin = Padding.Empty
         };
-        var fields = targetFieldsLayout;
-        fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        for (int row = 0; row <= 2; row++)
-            fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
-        fields.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        fields.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight));
-        fields.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        fields.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        fields.Controls.Add(HumanUi.Field("Send to", audience, true), 0, 0);
-        fields.Controls.Add(HumanUi.Field("Send using", deliveryMethod, true), 1, 0);
-        fields.Controls.Add(campusField, 0, 1);
-        fields.Controls.Add(classField, 1, 1);
-        fields.Controls.Add(studentField, 0, 2);
-        fields.Controls.Add(staffField, 1, 2);
-        fields.Controls.Add(targetIssue, 0, 3);
-        fields.SetColumnSpan(targetIssue, 2);
-        fields.Controls.Add(HumanUi.Field("Quick message (optional)", templateChoice), 0, 4);
-        var editor = HumanUi.Field("Your message", message, true);
-        fields.Controls.Add(editor, 0, 5);
-        fields.SetColumnSpan(editor, 2);
-        fields.Controls.Add(messageIssue, 0, 6);
-        fields.SetColumnSpan(messageIssue, 2);
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (int row = 0; row < fields.RowCount; row++) fields.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var audienceField = HumanUi.Field("Send to", audience, true);
+        var recipients = ComposeFieldRow(audienceField, campusField, classField, studentField, staffField);
+        var methodField = HumanUi.Field("Send using", deliveryMethod, true);
+        var templateField = HumanUi.Field("Template (optional)", templateChoice);
+        var sending = ComposeFieldRow(methodField, templateField);
+        sending.Margin = new Padding(0, AppScale.Scale(6), 0, 0);
+        fields.Controls.Add(recipients, 0, 0);
+        fields.Controls.Add(targetIssue, 0, 1);
+        fields.Controls.Add(sending, 0, 2);
+        var editor = HumanUi.Field("Message", message, true);
+        editor.Height = AppScale.Scale(200);
+        fields.Controls.Add(editor, 0, 3);
+        fields.Controls.Add(messageIssue, 0, 4);
+        var footer = ActionFooter(next);
+        footer.Dock = DockStyle.Fill;
+        fields.Controls.Add(footer, 0, 5);
+        fields.RowStyles[3] = new RowStyle(SizeType.Absolute, editor.Height);
+        fields.RowStyles[5] = new RowStyle(SizeType.Absolute, footer.Height);
         fields.SizeChanged += (_, _) =>
         {
             int width = Math.Max(1, fields.ClientSize.Width - fields.Padding.Horizontal);
+            int columns = Math.Clamp(width / AppScale.Scale(235), 1, 3);
+            int columnWidth = width / columns;
+            audienceField.Width = campusField.Width = classField.Width = columnWidth;
+            studentField.Width = staffField.Width = Math.Min(width, columnWidth * 2);
+            methodField.Width = templateField.Width = width >= AppScale.Scale(470) ? Math.Min(width / 2, AppScale.Scale(360)) : width;
             targetIssue.MaximumSize = messageIssue.MaximumSize = new Size(width, 0);
         };
         scroll.Controls.Add(fields);
         card.Content.Controls.Add(scroll);
-        card.Content.Controls.Add(ActionFooter(next));
         return card;
+    }
+
+    private static FlowLayoutPanel ComposeFieldRow(params Panel[] fields)
+    {
+        var row = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = true, Margin = Padding.Empty, Padding = Padding.Empty
+        };
+        foreach (var field in fields)
+        {
+            field.Height = AppMetrics.FieldRowHeight;
+            row.Controls.Add(field);
+        }
+        return row;
     }
 
     private HumanCard PreviewCard()
@@ -481,31 +514,40 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
 
     private void ChangeAudienceFields()
     {
-        var target = (CommunicationAudience)Math.Max(audience.SelectedIndex, 0);
+        var target = SelectedAudience;
         bool showCampus = target is CommunicationAudience.Campus
             or CommunicationAudience.Class or CommunicationAudience.OutstandingFees;
         bool showClass = target is CommunicationAudience.Class
             or CommunicationAudience.OutstandingFees;
         bool showStudent = target is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.OutstandingFees;
         bool showStaff = target == CommunicationAudience.Staff;
-        targetFieldsLayout.SuspendLayout();
+        Control layout = campusField.Parent!;
+        layout.SuspendLayout();
         campusField.Visible = showCampus;
         classField.Visible = showClass;
         studentField.Visible = showStudent;
         staffField.Visible = showStaff;
         SetFieldCaption(campusField, campus, "Campus", target is CommunicationAudience.Campus or CommunicationAudience.Class);
         SetFieldCaption(classField, cls, "Class", target == CommunicationAudience.Class);
-        SetFieldCaption(studentField, student, target == CommunicationAudience.Family ? "Student in the family" : "Student",
+        SetFieldCaption(studentField, student, target switch
+        {
+            CommunicationAudience.Family => "Student in the family",
+            CommunicationAudience.OutstandingFees => "Student (optional)",
+            _ => "Student"
+        },
             target is CommunicationAudience.Student or CommunicationAudience.Family);
         SetFieldCaption(staffField, staff, "Staff member", showStaff);
         UpdateLookupPrompt(campus, target == CommunicationAudience.OutstandingFees ? "All campuses" : "Select a campus");
-        UpdateLookupPrompt(cls, target == CommunicationAudience.OutstandingFees ? "All classes" : "Select a class");
-        targetFieldsLayout.RowStyles[1].Height = showCampus || showClass ? AppMetrics.FieldRowHeight : 0;
-        targetFieldsLayout.RowStyles[2].Height = showStudent || showStaff ? AppMetrics.FieldRowHeight : 0;
-        int minimumHeight = (int)targetFieldsLayout.RowStyles.Cast<RowStyle>()
-            .Where(row => row.SizeType == SizeType.Absolute).Sum(row => row.Height);
-        targetFieldsLayout.MinimumSize = new Size(0, minimumHeight + AppScale.Scale(180));
-        targetFieldsLayout.ResumeLayout(true);
+        UpdateClassSelection();
+        layout.ResumeLayout(true);
+    }
+
+    private void UpdateClassSelection()
+    {
+        bool mustChooseCampus = SelectedAudience == CommunicationAudience.Class && campus.SelectedId == 0;
+        cls.Enabled = !mustChooseCampus;
+        UpdateLookupPrompt(cls, SelectedAudience == CommunicationAudience.OutstandingFees ? "All classes"
+            : mustChooseCampus ? "Select a campus first" : "Select a class");
     }
 
     private static void SetFieldCaption(Panel field, Control control, string name, bool required)
@@ -583,8 +625,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         metaSelection = null;
         message.Clear();
         templateChoice.SelectedIndex = 0;
-        audience.SelectedIndex = CurrentUser.HasPermission("Students.View")
-            ? (int)CommunicationAudience.Class : (int)CommunicationAudience.Staff;
+        SelectedAudience = CurrentUser.HasPermission("Students.View") ? CommunicationAudience.Class : CommunicationAudience.Staff;
         if (campus.Items.Count > 0) campus.SelectedIndex = 0;
         if (cls.Items.Count > 0) cls.SelectedIndex = 0;
         student.SetStudent(0, "");
@@ -593,7 +634,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
 
     private CommunicationTarget CurrentTarget()
     {
-        var selected = (CommunicationAudience)Math.Max(audience.SelectedIndex, 0);
+        var selected = SelectedAudience;
         bool scoped = selected is CommunicationAudience.Campus or CommunicationAudience.Class or CommunicationAudience.OutstandingFees;
         return new(selected, scoped ? campus.SelectedId : 0,
             selected is CommunicationAudience.Class or CommunicationAudience.OutstandingFees ? cls.SelectedId : 0,
@@ -864,6 +905,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             bool optional = CurrentTarget().Audience == CommunicationAudience.OutstandingFees;
             campus.Bind(campusRows, "CampusId", "CampusName", optional ? "All campuses" : "Select a campus");
             cls.Bind(classRows, "ClassId", "ClassName", optional ? "All classes" : "Select a class");
+            UpdateClassSelection();
         }
         catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }

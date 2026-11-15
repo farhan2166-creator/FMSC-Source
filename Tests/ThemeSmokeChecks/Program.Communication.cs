@@ -1,5 +1,6 @@
 using System.Reflection;
 using FMSC_SMS.Core;
+using FMSC_SMS.Pages.Communication;
 using FMSC_SMS.Pages.Security;
 
 internal static partial class Program
@@ -146,12 +147,11 @@ internal static partial class Program
         Check(manualDialogType is not null,
             "Operator-controlled WhatsApp session can be resumed with a dedicated native dialog.");
 
-        var type = assembly.GetType("FMSC_SMS.Pages.Communication.CommunicationCenterPage")!;
-        using var page = (Control)Activator.CreateInstance(type,
-            BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { false }, null)!;
+        var type = typeof(CommunicationCenterPage);
+        using var page = new CommunicationCenterPage(false);
         var audience = (ModernComboBox)type.GetField("audience", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var audienceOptions = audience.Items.Cast<object>().Select(item => item.ToString()).ToArray();
-        Check(audience.SelectedIndex == (int)CommunicationAudience.Class
+        Check(page.SelectedAudience == CommunicationAudience.Class
             && audienceOptions.Length == (int)CommunicationAudience.Staff + 1
             && audienceOptions.Distinct().Count() == audienceOptions.Length,
             "New communication starts with a scoped class, while all supported audience choices remain available");
@@ -308,26 +308,56 @@ internal static partial class Program
         var classPanel = (Control)type.GetField("classField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var studentPanel = (Control)type.GetField("studentField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var staffPanel = (Control)type.GetField("staffField", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        audience.SelectedIndex = (int)CommunicationAudience.School;
+        page.SelectedAudience = CommunicationAudience.School;
         Application.DoEvents();
         Check(!campusPanel.Visible && !classPanel.Visible && !studentPanel.Visible && !staffPanel.Visible,
             "Entire-school audience needs no extra pickers");
         void ChooseAudience(CommunicationAudience choice)
         {
-            audience.SelectedIndex = (int)choice;
+            page.SelectedAudience = choice;
             Application.DoEvents();
             var selected = (CommunicationTarget)type.GetMethod("CurrentTarget",
                 BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, null)!;
             Check(selected.Audience == choice, "Audience choice maps to its intended target: " + choice);
         }
+        bool Precedes(Control first, Control second)
+        {
+            Point a = first.PointToScreen(Point.Empty), b = second.PointToScreen(Point.Empty);
+            return a.Y < b.Y || a.Y == b.Y && a.X < b.X;
+        }
+        var sendingMethod = Field<ModernComboBox>(page, "deliveryMethod");
+        var body = Field<ModernTextBox>(page, "message");
         ChooseAudience(CommunicationAudience.Campus);
-        Check(campusPanel.Visible && !classPanel.Visible && campusPanel.Top > audienceField.Top,
-            "Campus audience visibly adds the campus selector below Send to");
+        Check(campusPanel.Visible && !classPanel.Visible && Precedes(audienceField, campusPanel)
+            && Precedes(campusPanel, sendingMethod.Parent!) && Precedes(sendingMethod.Parent!, templates.Parent!)
+            && Precedes(templates.Parent!, body.Parent!) && Precedes(body.Parent!, reviewAction),
+            "Campus composition follows recipient, campus, method, template, message and review order");
         ChooseAudience(CommunicationAudience.Class);
-        Check(campusPanel.Visible && classPanel.Visible
-            && classPanel.RectangleToScreen(classPanel.ClientRectangle).Left
-                >= campusPanel.RectangleToScreen(campusPanel.ClientRectangle).Right - 2,
-            "Class audience displays the campus and class selectors side by side");
+        var campus = Field<LookupBox>(page, "campus");
+        var classes = Field<LookupBox>(page, "cls");
+        using var campuses = new DataTable();
+        campuses.Columns.Add("CampusId", typeof(int)); campuses.Columns.Add("CampusName");
+        campuses.Rows.Add(42, "Synthetic campus");
+        campus.Bind(campuses, "CampusId", "CampusName");
+        Check(campusPanel.Visible && classPanel.Visible && Precedes(campusPanel, classPanel) && !classes.Enabled,
+            "The Class scope shows campus first and waits for a campus before enabling class selection");
+        campus.SelectedValue = 42;
+        Check(classes.Enabled, "Selecting a campus enables class selection");
+        ChooseAudience(CommunicationAudience.OutstandingFees);
+        Check(campus.SelectedId == 0 && classes.Enabled && studentPanel.Visible && Precedes(classPanel, studentPanel),
+            "Outstanding fees starts with optional campus, class and student filters without inheriting the previous scope");
+        host.ClientSize = new Size(500, 740);
+        Application.DoEvents();
+        Check(Precedes(audienceField, campusPanel) && Precedes(campusPanel, classPanel) && Precedes(classPanel, studentPanel)
+            && Precedes(studentPanel, sendingMethod.Parent!) && Precedes(sendingMethod.Parent!, templates.Parent!)
+            && new Control[] { audience, campus, classes, sendingMethod, templates, body, reviewAction }.All(control =>
+            {
+                var bounds = control.RectangleToScreen(control.ClientRectangle);
+                var content = targetCard.Content.RectangleToScreen(targetCard.Content.ClientRectangle);
+                return bounds.Width > 0 && bounds.Left >= content.Left && bounds.Right <= content.Right;
+            }), "A narrow composer wraps the fields in order and keeps the inputs and Review action within its width");
+        host.ClientSize = new Size(1200, 780);
+        Application.DoEvents();
         ChooseAudience(CommunicationAudience.Student);
         Check(studentPanel.Visible && !campusPanel.Visible && !classPanel.Visible,
             "Individual audience displays the existing student picker");

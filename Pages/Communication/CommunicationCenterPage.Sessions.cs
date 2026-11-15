@@ -111,8 +111,8 @@ public sealed partial class CommunicationCenterPage
             {
                 nameof(CommunicationAudience.FeeStudent) => "Student fees",
                 nameof(CommunicationAudience.FeeFamily) => "Family fees",
-                _ => Enum.TryParse(code, out CommunicationAudience scope) && (int)scope >= 0 && (int)scope < audience.Items.Count
-                    ? Convert.ToString(audience.Items[(int)scope]) : code
+                _ => Enum.TryParse(code, out CommunicationAudience scope)
+                    ? AudienceOptions.FirstOrDefault(option => option.Scope == scope)?.Label ?? code : code
             };
             if (unfinished) continue;
             row["StateText"] = Convert.ToString(row["Method"]) == "WhatsApp Business (manual)"
@@ -201,7 +201,7 @@ public sealed partial class CommunicationCenterPage
         InvalidatePreview();
         methodChanged = true;
         deliveryMethod.SelectedIndex = draft.Provider switch { "MetaCloud" => 1, "Twilio" => 2, _ => 0 };
-        audience.SelectedIndex = (int)target.Audience;
+        SelectedAudience = target.Audience;
         if (campus.Items.Count > 0) campus.SelectedValue = target.CampusId;
         if (cls.Items.Count > 0) cls.SelectedValue = target.ClassId;
         student.SetStudent(target.StudentId, draft.StudentName);
