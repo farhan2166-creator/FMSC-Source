@@ -1,0 +1,139 @@
+name: '17 - Maintenance - Private Update Feed Health'
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fmsc-updates-feed-maintenance.yml'
+  schedule:
+    # Weekly Monday 04:13 UTC (09:13 Pakistan time).
+    - cron: '13 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview safe cleanup without deleting any merged branches'
+        type: boolean
+        default: true
+
+# Owner-only publishing credential has access to Updates.
+# The Source GITHUB_TOKEN is never given private Updates permissions.
+permissions:
+  contents: read
+
+concurrency:
+  group: fmsc-private-feed-maintenance
+  cancel-in-progress: false
+
+jobs:
+  verify-and-prune:
+    if: github.repository_id == '1412760928' && github.repository_owner_id == '316891609' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Inventory private feed and clean only merged unmodified branches
+        uses: actions/github-script@v9
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        with:
+          github-token: ${{ secrets.FMSC_UPDATES_PUBLISH_TOKEN }}
+          retries: 3
+          script: |
+            const owner = context.repo.owner;
+            const repo = 'FMSC-Updates';
+            const dryRun = context.eventName === 'workflow_dispatch' && process.env.DRY_RUN !== 'false';
+            const { data: metadata } = await github.rest.repos.get({ owner, repo });
+            if (String(metadata.id) !== '1445675367' ||
+                String(metadata.owner.id) !== '316891609' ||
+                !metadata.private || metadata.default_branch !== 'main') {
+              throw new Error('Refusing maintenance: unexpected private update feed identity.');
+            }
+            const [{ data: main }, { data: channelFile }, { data: folders }] = await Promise.all([
+              github.rest.repos.getBranch({ owner, repo, branch: 'main' }),
+              github.rest.repos.getContent({ owner, repo, path: 'channel/stable.json', ref: 'main' }),
+              github.rest.repos.getContent({ owner, repo, path: 'versions', ref: 'main' })
+            ]);
+            if (!Array.isArray(folders) || Array.isArray(channelFile) ||
+                channelFile.type !== 'file') {
+              throw new Error('The private update feed has an invalid tree layout.');
+            }
+            const channel = JSON.parse(Buffer.from(channelFile.content, 'base64').toString('utf8'));
+            const names = folders.filter(x => x.type === 'dir').map(x => x.name).sort();
+            if (channel.format !== 'fmsc-git-updates/v1' ||
+                !names.includes(channel.latestVersion) ||
+                (channel.previousVersion && !names.includes(channel.previousVersion)) ||
+                names.length < 1 || names.length > 2) {
+              throw new Error('Refusing cleanup: private feed versions or stable pointer are inconsistent.');
+            }
+            const [{ data: tip }, { data: listing }] = await Promise.all([
+              github.rest.git.getCommit({ owner, repo, commit_sha: main.commit.sha }),
+              github.rest.git.getTree({ owner, repo, tree_sha: main.commit.sha, recursive: 'true' })
+            ]);
+            if (listing.truncated) throw new Error('Cannot inventory a truncated feed tree.');
+            const blobs = listing.tree.filter(x => x.type === 'blob' && x.path.startsWith('versions/'));
+            const bytes = blobs.reduce((n, x) => n + (x.size || 0), 0);
+            const [branches, openPRs, closedPRs] = await Promise.all([
+              github.paginate(github.rest.repos.listBranches, { owner, repo, per_page: 100 }),
+              github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 }),
+              github.paginate(github.rest.pulls.list, { owner, repo, state: 'closed', per_page: 100 })
+            ]);
+            const ownRepo = metadata.full_name;
+            const openHeads = new Set(openPRs.filter(pr => pr.head.repo?.full_name === ownRepo)
+              .map(pr => pr.head.ref));
+            const mergedHeads = new Map();
+            for (const pr of closedPRs) {
+              if (!pr.merged_at || pr.head.repo?.full_name !== ownRepo) continue;
+              const heads = mergedHeads.get(pr.head.ref) || new Set();
+              heads.add(pr.head.sha);
+              mergedHeads.set(pr.head.ref, heads);
+            }
+            const reserved = name => name === metadata.default_branch ||
+              ['main','master','develop','development','production','staging','stable'].includes(name) ||
+              name.startsWith('release/');
+            let eligible = 0, deleted = 0, changed = 0;
+            for (const branch of branches) {
+              const name = branch.name;
+              if (branch.protected || reserved(name) || openHeads.has(name) ||
+                  !mergedHeads.get(name)?.has(branch.commit.sha)) continue;
+              eligible++;
+              if (dryRun) {
+                core.info(`[preview] Remove completed PR branch: ${name} (${branch.commit.sha})`);
+                continue;
+              }
+              let current;
+              try {
+                ({ data: current } = await github.rest.repos.getBranch({ owner, repo, branch: name }));
+                if (current.protected || current.commit.sha !== branch.commit.sha) { changed++; continue; }
+                const { data: active } = await github.rest.pulls.list({
+                  owner, repo, head: `${owner}:${name}`, state: 'open', per_page: 1
+                });
+                if (active.length) { changed++; continue; }
+                const { data: live } = await github.rest.git.getRef({
+                  owner, repo, ref: `heads/${name}`
+                });
+                if (live.object.sha !== branch.commit.sha) { changed++; continue; }
+                await github.rest.git.deleteRef({ owner, repo, ref: `heads/${name}` });
+                deleted++;
+                core.info(`Removed merged-PR-only branch ${name}`);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                changed++;
+                core.info(`Already removed: ${name}`);
+              }
+            }
+            const extra = branches.filter(b => !reserved(b.name)).length - deleted;
+            if (extra > 0) core.warning(`There are ${extra} non-main branch refs remaining. Workflow 04 intentionally blocks root rotation until they are reviewed.`);
+            if (tip.parents.length !== 0) core.warning('Update feed main currently has a parent commit. Workflow 04 will rotate main to a verified root commit at the next publication.');
+            await core.summary
+              .addHeading(dryRun ? 'Private feed maintenance preview' : 'Private feed maintenance')
+              .addTable([
+                [{data:'Measure',header:true},{data:'Value',header:true}],
+                ['Active versions', names.join(', ')],
+                ['Stable latest / previous', `${channel.latestVersion} / ${channel.previousVersion || '(none)'}`],
+                ['Active package bytes (MiB)', (bytes / 1048576).toFixed(1)],
+                ['GitHub reported repository (MiB)', (metadata.size / 1024).toFixed(1)],
+                ['Root-commit ancestry length', String(tip.parents.length)],
+                ['Safe merged branches eligible', String(eligible)],
+                ['Merged branches removed', String(deleted)],
+                ['Branches skipped after live check', String(changed)]
+              ])
+              .addRaw('All release data stays intact. This job only removes verified merged unmodified branches; history rotation remains exclusively in the owner-authorized Workflow 04 publication gate. No version, tag, manifest or backup is deleted.\n')
+              .write();
