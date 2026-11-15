@@ -27,8 +27,8 @@ internal static partial class Program
             foreach (int width in new[] { 1600, 1000 })
             {
                 host.ClientSize = new Size(width, 740); Application.DoEvents();
-                Check(Math.Abs(actions.Left - Math.Max(0, (actions.Parent!.ClientSize.Width - actions.Width) / 2)) <= 1,
-                    form.GetType().Name + " centers its action row after resize");
+                Check(HorizontallyCentered(actions.Bounds, actions.Parent!.ClientRectangle),
+                    form.GetType().Name + " keeps its action row centered and within its parent after resize");
                 Check(actions.Controls.Cast<Control>().Where(control => control.Visible).Select(control => control.Top).Distinct().Count() == 1,
                     form.GetType().Name + " keeps visible actions on one line");
             }

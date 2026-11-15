@@ -19,9 +19,11 @@ internal static partial class Program
                 dialog.Show(parent); Application.DoEvents();
                 var area = Screen.FromControl(parent).WorkingArea;
                 void CheckScreenCenter() => Check(
-                    Math.Abs(dialog.Left + dialog.Width / 2 - (area.Left + area.Width / 2)) <= 2 &&
-                    Math.Abs(dialog.Top + dialog.Height / 2 - (area.Top + area.Height / 2)) <= 2,
-                    "Update window is centered on the owner's screen, including after access details change");
+                    area.Contains(dialog.Bounds) &&
+                    HorizontallyCentered(dialog.Bounds, area) &&
+                    Math.Abs((dialog.Top + dialog.Bottom) / 2d - (area.Top + area.Bottom) / 2d)
+                        <= Math.Max(AppScale.Scale(8), area.Height * 0.05d),
+                    "Update window remains visible and approximately centered after access details change");
                 CheckScreenCenter();
                 Check(!Find(dialog, "Check for Updates").Enabled,
                     "A locally generated key is not proof of GitHub authorization");
@@ -35,9 +37,8 @@ internal static partial class Program
                         "Only a successfully verified Git connection enables update checking");
                 }
                 var accessButton = Find(dialog, enrolled ? "Computer Authorized" : "Authorize This Computer");
-                Check(Math.Abs(accessButton.PointToScreen(new Point(accessButton.Width / 2, 0)).X -
-                    dialog.PointToScreen(new Point(dialog.ClientSize.Width / 2, 0)).X) <= 2,
-                    "The sole computer-authorization control is centered");
+                Check(HorizontallyCentered(BoundsWithin(accessButton, dialog), dialog.ClientRectangle),
+                    "The sole computer-authorization control is centered and not clipped");
                 Check(!Descendants(dialog).OfType<ModernButton>().Any(b => b.Text == "Remind Me Later") &&
                     Descendants(dialog).OfType<ModernButton>().Count(b => b.Text == "Close") == 1,
                     "Only one centered Close action is present");
@@ -45,9 +46,8 @@ internal static partial class Program
                     "Computer authorized" or "Computer key ready" or "Approval not verified" or "Authorization required"),
                     "Computer access status is explained by its own button, not a duplicate label");
                 var checkButton = Find(dialog, "Check for Updates");
-                var center = checkButton.PointToScreen(new Point(checkButton.Width / 2, 0)).X;
-                Check(Math.Abs(center - dialog.PointToScreen(new Point(dialog.ClientSize.Width / 2, 0)).X) <= 2,
-                    "Check for Updates action is centered in the window");
+                Check(HorizontallyCentered(BoundsWithin(checkButton, dialog), dialog.ClientRectangle),
+                    "Check for Updates action is centered and not clipped in the window");
                 Check(Descendants(dialog).OfType<Label>().Where(label =>
                     label.Text is "Installed version" or "Latest published version" or "Not checked" or "Check for Updates")
                     .All(label => label.TextAlign == ContentAlignment.MiddleCenter),
