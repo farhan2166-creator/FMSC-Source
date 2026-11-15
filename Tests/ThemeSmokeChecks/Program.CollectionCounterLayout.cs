@@ -63,9 +63,10 @@ internal static partial class Program
                     && siblingPanel.GetRow(selectAll) > siblingPanel.GetRow(siblingHint)
                     && selectAll.Anchor == AnchorStyles.None,
                     "Paying For keeps its centered count and a centered Select All layout row");
+                var selectAllBounds = BoundsWithin(selectAll, siblingPanel);
                 Check(!selectAll.Visible ||
-                    HorizontallyCentered(BoundsWithin(selectAll, siblingPanel), siblingPanel.ClientRectangle),
-                    "Visible Select All is centered and not clipped in Paying For");
+                    HorizontallyCentered(selectAllBounds, siblingPanel.ClientRectangle),
+                    $"Visible Select All is centered and not clipped in Paying For (button={selectAllBounds}, panel={siblingPanel.ClientRectangle}, anchor={selectAll.Anchor}, row={siblingPanel.GetRow(selectAll)}, visible={selectAll.Visible})");
                 // Programmatic enrollment binding used to launch an independent
                 // asynchronous reload, invalidating the just-selected student.
                 var enrollment=Field<LookupBox>("enrollment");
