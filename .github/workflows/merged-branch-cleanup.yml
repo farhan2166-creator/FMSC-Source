@@ -103,18 +103,25 @@ jobs:
                 preserved++;
                 continue;
               }
-              const { data: liveRef } = await github.rest.git.getRef({
-                owner, repo, ref: `heads/${name}`
-              });
-              if (liveRef.object.sha !== branch.commit.sha) {
-                core.warning(`Skipped moved branch: ${name}`);
+              // Auto-delete-after-merge or another maintenance run may
+              // remove the ref after the earlier branch lookup.
+              try {
+                const { data: liveRef } = await github.rest.git.getRef({
+                  owner, repo, ref: `heads/${name}`
+                });
+                if (liveRef.object.sha !== branch.commit.sha) {
+                  core.warning(`Skipped moved branch: ${name}`);
+                  preserved++;
+                  continue;
+                }
+                await github.rest.git.deleteRef({ owner, repo, ref: `heads/${name}` });
+                deleted++;
+                core.info(`Deleted merged-PR branch: ${name}`);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                core.warning(`Merged branch ${name} was already removed; continuing`);
                 preserved++;
-                continue;
               }
-
-              await github.rest.git.deleteRef({ owner, repo, ref: `heads/${name}` });
-              deleted++;
-              core.info(`Deleted merged-PR branch: ${name}`);
             }
 
             await core.summary
