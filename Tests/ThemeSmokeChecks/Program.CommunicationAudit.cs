@@ -446,10 +446,8 @@ internal static partial class Program
         Check(templateGrid.Rows.Count > 0 &&
             templateGrid.Rows.Cast<DataGridViewRow>().All(row =>
                 row.DataBoundItem is DataRowView item &&
-                (item.Row.Field<string>("Purpose") == "FeeReminder" ||
-                 (item.Row.Field<string>("Name") ?? "")
-                    .Contains("fee", StringComparison.OrdinalIgnoreCase))),
-            "Selecting Fees & Payments exposes only eligible financial templates");
+                item.Row.Field<string>("DisplayCategory") == "Fees & Payments"),
+            "Selecting Fees & Payments shows only templates classified in that category");
         templateCategory.SelectedItem = "All Categories";
         Application.DoEvents();
         Check(templateGrid.Rows.Count == CommunicationPreparedMessages.BuiltIns.Count + 1,
