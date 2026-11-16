@@ -69,6 +69,26 @@
       "schema": "msg",
       "name": "ReleaseScheduledHold",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadSchoolWeekdays",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SetSchoolWeekday",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadSchoolHolidays",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SetSchoolHoliday",
+      "type": "P"
     }
   ]
 }
