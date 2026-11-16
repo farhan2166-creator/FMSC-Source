@@ -21,6 +21,12 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
     private readonly ModernButton block = new() { Text = "Block a Number…", Enabled = false };
     private readonly Label feedback = new() { Dock = DockStyle.Fill, AutoEllipsis = true };
     private readonly Func<Task<DataTable>> read;
+    private readonly bool useLivePreferences;
+    private readonly ModernComboBox preferredMethod = HumanUi.Combo();
+    private readonly ModernButton savePreferred = new()
+    {
+        Name="communicationSavePreferredMethod",Text="Save Default",ThemeRole="Secondary"
+    };
     private readonly TableLayoutPanel layout;
     private readonly TabControl settingsTabs = new() { Dock = DockStyle.Fill };
     private readonly Label queueFeedback = new() { AutoSize = true, ForeColor = AppTheme.MutedText };
@@ -45,6 +51,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
 
     internal CommunicationSendingOptionsDialog(Func<Task<DataTable>>? read = null)
     {
+        useLivePreferences = read is null;
         this.read = read ?? CommunicationManagementStore.ReadSettingsAsync;
         Text = "Communication Settings";
         StartPosition = FormStartPosition.CenterParent;
@@ -55,7 +62,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         BackColor = AppTheme.PageBackground;
         layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(AppScale.Scale(14))
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(AppScale.Scale(14))
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         foreach (var method in new[]
@@ -68,16 +75,34 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / 3));
             layout.Controls.Add(BuildMethod(method), 0, methods.Count - 1);
         }
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(60)));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(40)));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonHeight + AppScale.Scale(8)));
-        layout.Controls.Add(feedback, 0, 3);
+        var preferenceRow = new TableLayoutPanel
+        {
+            Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,Margin=Padding.Empty
+        };
+        preferenceRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,75));
+        preferenceRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));
+        preferredMethod.Name="communicationPreferredMethod";
+        preferredMethod.Items.AddRange(new object[]
+        {
+            "WhatsApp Business · manual", "WhatsApp · Meta API", "SMS · Twilio"
+        });
+        preferredMethod.SelectedIndex=0;
+        savePreferred.Dock=DockStyle.Fill;
+        savePreferred.Enabled=useLivePreferences;
+        preferenceRow.Controls.Add(HumanUi.Field("Default sending method",preferredMethod),0,0);
+        preferenceRow.Controls.Add(savePreferred,1,0);
+        layout.Controls.Add(preferenceRow,0,3);
+        layout.Controls.Add(feedback, 0, 4);
         var footer = new Panel { Dock = DockStyle.Fill };
         block.Dock = DockStyle.Left;
         block.Width = AppScale.Scale(175);
         close.Dock = DockStyle.Right;
         close.Width = AppScale.Scale(100);
         footer.Controls.AddRange(new Control[] { block, close });
-        layout.Controls.Add(footer, 0, 4);
+        layout.Controls.Add(footer, 0, 5);
         var sendingTab = new TabPage("Sending") { BackColor = AppTheme.PageBackground };
         sendingTab.Controls.Add(layout);
         settingsTabs.TabPages.Add(sendingTab);
@@ -97,6 +122,20 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         FormClosing += (_, e) => e.Cancel |= busy;
         Shown += async (_, _) => await RunAsync(RefreshAsync);
         block.Click += async (_, _) => await RunAsync(RecordOptOutAsync);
+        savePreferred.Click += async (_, _) => await RunAsync(async () =>
+        {
+            var choice = preferredMethod.SelectedIndex switch
+            {
+                0 => ("WhatsApp","WhatsAppBusinessManual"),
+                1 => ("WhatsApp","MetaCloud"),
+                2 => ("Sms","Twilio"),
+                _ => throw new InvalidOperationException("Select a supported sending method.")
+            };
+            await CommunicationQueuePolicyStore.SavePreferredMethodAsync(
+                choice.Item1,choice.Item2);
+            Changed=true;
+            feedback.Text="Default sending method saved. Users may still change it for a message.";
+        });
         FormClosed += (_, _) => { ruleData?.Dispose(); quotaData?.Dispose(); };
     }
 
@@ -417,6 +456,22 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             row.Toggle.Enabled = row.Active || (!enabled && channel is not null && (manual || (selected && hasProfile)));
         }
         block.Enabled = true;
+        if (useLivePreferences)
+        {
+            using var preferred = await CommunicationQueuePolicyStore.ReadPreferredMethodAsync();
+            if (preferred.Rows.Count == 1)
+            {
+                var row = preferred.Rows[0];
+                preferredMethod.SelectedIndex = (Convert.ToString(row["PreferredChannel"]),
+                    Convert.ToString(row["PreferredProviderCode"])) switch
+                {
+                    ("WhatsApp","WhatsAppBusinessManual") => 0,
+                    ("WhatsApp","MetaCloud") => 1,
+                    ("Sms","Twilio") => 2,
+                    _ => 0
+                };
+            }
+        }
     }
 
     private static bool HasProfile(Method method)
