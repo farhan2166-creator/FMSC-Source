@@ -169,11 +169,19 @@ internal static partial class Program
                     return Task.FromResult(rows);
                 }));
         var audience = (ModernComboBox)type.GetField("audience", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        var audienceOptions = audience.Items.Cast<object>().Select(item => item.ToString()).ToArray();
+        var audienceScopes = audience.Items.Cast<object>()
+            .Select(item => (CommunicationAudience)item.GetType().GetProperty("Scope")!.GetValue(item)!)
+            .ToArray();
+        var expectedScopes = new[] {
+            CommunicationAudience.Class,CommunicationAudience.Campus,CommunicationAudience.School,
+            CommunicationAudience.Student,CommunicationAudience.Family,CommunicationAudience.Staff,
+            CommunicationAudience.OutstandingFees,CommunicationAudience.FeeStudent,
+            CommunicationAudience.FeeFamily
+        };
         Check(page.SelectedAudience == CommunicationAudience.Class
-            && audienceOptions.Length == (int)CommunicationAudience.Staff + 1
-            && audienceOptions.Distinct().Count() == audienceOptions.Length,
-            "New communication starts with a scoped class, while all supported audience choices remain available");
+            && expectedScopes.All(audienceScopes.Contains)
+            && audienceScopes.Distinct().Count() == audienceScopes.Length,
+            "New communication starts with a class and supports every configured recipient audience without a fixed list length");
         var send = (ModernButton)type.GetField("confirm", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var templates = (ModernComboBox)type.GetField("templateChoice",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
