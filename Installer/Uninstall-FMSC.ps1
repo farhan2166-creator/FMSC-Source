@@ -254,10 +254,19 @@ function Remove-FmscCloudBackupTasks {
 function Invoke-FmscUninstall {
     $mutex = New-Object Threading.Mutex($false,'Global\FMSCInstallerActivation')
     $held = $false
+    $workerMutex = $null
+    $workerHeld = $false
     try {
         try { $held = $mutex.WaitOne(0) }
         catch [Threading.AbandonedMutexException] { $held = $true }
         if (-not $held) { throw 'FMSC installation or update is running. Uninstall refused.' }
+        # Stop new provider attempts while preserving any in-flight HTTP request.
+        # Uninstall must not delete the application or private credential vault
+        # until the communication worker relinquishes this mutex.
+        $workerMutex = New-Object Threading.Mutex($false,'Global\FMSCCommunicationWorker')
+        try { $workerHeld = $workerMutex.WaitOne(120000) }
+        catch [Threading.AbandonedMutexException] { $workerHeld = $true }
+        if (-not $workerHeld) { throw 'Communication sending is still active. Uninstall refused.' }
         Assert-FmscUninstallReady
         $roots = @(Get-FmscDeletionRoots)
         foreach ($root in $roots) { Test-FmscNoLinks $root.Path }
@@ -304,6 +313,8 @@ function Invoke-FmscUninstall {
         }
         Write-FmscUninstallStatus ('Uninstall complete. School data and archived encrypted recovery material remain in ' + $DataDirectory)
     } finally {
+        if ($workerHeld) { $workerMutex.ReleaseMutex() }
+        if ($workerMutex) { $workerMutex.Dispose() }
         if ($held) { $mutex.ReleaseMutex() }
         $mutex.Dispose()
     }
