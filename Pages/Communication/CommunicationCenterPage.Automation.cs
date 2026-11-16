@@ -18,7 +18,9 @@ public sealed partial class CommunicationCenterPage
         // Selecting a suggestion never confirms a batch or starts sending.
         pendingAutomationSuggestion=null;
         SetStep(0);
-        SelectedAudience=CommunicationAudience.Student;
+        bool financial=eventSuggestion.EventCode is
+            "OutstandingFees" or "UpcomingDue" or "OverdueFollowUp";
+        SelectedAudience=financial ? CommunicationAudience.FeeFamily : CommunicationAudience.Student;
         student.SetStudent(eventSuggestion.AdmissionId,eventSuggestion.StudentName);
         if(!IsMeta)
         {
@@ -46,8 +48,11 @@ public sealed partial class CommunicationCenterPage
         CommunicationTarget target,Guid confirmedBatchId)
     {
         if(pendingAutomationSuggestion is not { } suggestion)return;
-        if(target.Audience!=CommunicationAudience.Student ||
-           target.StudentId!=suggestion.AdmissionId)
+        bool financial=suggestion.EventCode is "OutstandingFees" or "UpcomingDue" or "OverdueFollowUp";
+        bool validAudience=financial
+            ? target.Audience is CommunicationAudience.FeeFamily or CommunicationAudience.FeeStudent
+            : target.Audience==CommunicationAudience.Student;
+        if(!validAudience || target.StudentId!=suggestion.AdmissionId)
         {
             pendingAutomationSuggestion=null;
             // The operator composed a different audience. The original
