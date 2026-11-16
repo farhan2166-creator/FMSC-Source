@@ -20,6 +20,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private string ComposeChannel => deliveryMethod.SelectedIndex == 2 ? "Sms" : "WhatsApp";
     private string ApiProvider => IsMeta ? "MetaCloud" : "Twilio";
     private readonly ModernComboBox templateChoice = HumanUi.Combo();
+    private readonly ModernTextBox templateSearch = HumanUi.TextBox(false, 100);
+    private Panel? templateSearchField;
     private IReadOnlyList<CommunicationPreparedMessages.ComposeTemplate> composeTemplates = CommunicationPreparedMessages.BuiltInChoices;
     private readonly ModernTextBox message = HumanUi.TextBox(true, 1600);
     private readonly CheckBox showExcluded = new()
@@ -124,6 +126,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         SelectedAudience = CurrentUser.HasPermission("Students.View") ? CommunicationAudience.Class : CommunicationAudience.Staff;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
+        templateSearch.Name = "communicationComposeTemplateSearch";
+        templateSearch.PlaceholderText = "Search relevant templates";
 
         campusField = HumanUi.Field("Campus", campus);
         classField = HumanUi.Field("Class", cls);
@@ -201,6 +205,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             if (templateChoice.SelectedItem is CommunicationPreparedMessages.ComposeTemplate selected)
                 message.Text = selected.Body;
         };
+        templateSearch.TextChanged += (_, _) => RefreshTemplateChoices();
         message.TextChanged += (_, _) => InvalidatePreview();
 
         ChangeAudienceFields();
@@ -348,7 +353,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         var recipients = ComposeFieldRow(audienceField, campusField, classField, studentField, staffField);
         var methodField = HumanUi.Field("Send using", deliveryMethod, true);
         var templateField = HumanUi.Field("Template (optional)", templateChoice);
-        var sending = ComposeFieldRow(methodField, templateField);
+        templateSearchField = HumanUi.Field("Find template", templateSearch);
+        var sending = ComposeFieldRow(methodField, templateSearchField, templateField);
         sending.Margin = new Padding(0, AppScale.Scale(6), 0, 0);
         fields.Controls.Add(recipients, 0, 0);
         fields.Controls.Add(targetIssue, 0, 1);
@@ -382,7 +388,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 int columnWidth = width / columns;
                 audienceField.Width = campusField.Width = classField.Width = columnWidth;
                 studentField.Width = staffField.Width = Math.Min(width, columnWidth * 2);
-                methodField.Width = templateField.Width = columnWidth;
+                methodField.Width = templateSearchField!.Width = templateField.Width = columnWidth;
                 fields.RowStyles[0].Height = WrappedRowsHeight(recipients, width);
                 fields.RowStyles[2].Height = WrappedRowsHeight(sending, width) + sending.Margin.Vertical;
                 targetIssue.MaximumSize = messageIssue.MaximumSize = new Size(width, 0);
@@ -419,6 +425,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private HumanCard PreviewCard()
     {
         var card = HumanUi.Card("Review Message");
+        showExcluded.Visible = false;
+        previewGrid.Visible = false;
         previewGrid.AutoGenerateColumns = false;
         foreach (var (field, name, size) in new[]
         {
@@ -528,11 +536,15 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             templateChoice.Items.Add("Choose an approved Meta template");
             templateChoice.Items.Add("Browse approved templates…");
             templateChoice.SelectedIndex=0;
+            if (templateSearchField is not null) templateSearchField.Visible = false;
             return;
         }
+        var query = templateSearch.Text.Trim();
         foreach (var item in composeTemplates)
-            if (item.Matches(target))
+            if (item.Matches(target) && (query.Length == 0
+                || item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)))
                 templateChoice.Items.Add(item);
+        if (templateSearchField is not null) templateSearchField.Visible = true;
         templateChoice.SelectedIndex = 0;
     }
 
@@ -641,6 +653,20 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         // Editing the target or text returns to editable composition without a
         // Back button; stale preview and confirmation are immediately invalid.
         if (step == 1) SetStep(0);
+        else if (step == 0) UpdateLiveDraftPreview();
+    }
+
+    private void UpdateLiveDraftPreview()
+    {
+        // The live draft is intentionally not an eligibility or personalization claim.
+        // Final rendered per-recipient content is shown only after a fresh review.
+        if (previewCaption is null || step != 0) return;
+        previewCaption.Text = "Live draft preview";
+        sampleMessage.Text = message.Text;
+        summary.Text = "Personalized recipient examples and exclusions appear after Review Message.";
+        reviewNote.Text = "";
+        showExcluded.Visible = false;
+        previewGrid.Visible = false;
     }
 
     private void ClearReviewedDraft()
@@ -673,10 +699,10 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         // Review appears next to the editable draft rather than replacing it
         // with another full-screen wizard page.
         composerLayout.SuspendLayout();
-        composerLayout.ColumnStyles[0].Width = step == 1 ? 48 : 100;
-        composerLayout.ColumnStyles[1].Width = step == 1 ? 52 : 0;
+        composerLayout.ColumnStyles[0].Width = step == 1 ? 48 : 58;
+        composerLayout.ColumnStyles[1].Width = step == 1 ? 52 : 42;
         cards[0].Visible = composing;
-        cards[1].Visible = step == 1;
+        cards[1].Visible = composing;
         composerLayout.ResumeLayout(true);
         composerLayout.Visible = composing;
         for (int index = HistoryStep; index < cards.Count; index++) cards[index].Visible = step == index;
@@ -686,6 +712,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         next.Visible = compose && step == 0;
         confirm.Visible = compose && step == 1;
         confirm.Text = IsManual ? (preview?.Included == 1 ? "Open in WhatsApp" : "Start WhatsApp Chats") : "Confirm & Send";
+        if (step == 0) UpdateLiveDraftPreview();
         confirm.Enabled = step == 1 && manualModeAvailable && preview is { Included: > 0 }
             && CurrentUser.HasPermission("Communication.Send");
         historyButton.Visible = CurrentUser.HasPermission("Communication.View");

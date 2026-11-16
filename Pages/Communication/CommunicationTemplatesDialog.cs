@@ -10,6 +10,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
     private const string CustomizeTemplateText = "Customize Template…";
     private readonly DataGridView templates = HumanUi.Grid(false);
     private readonly ModernTextBox search = HumanUi.TextBox(false, 100);
+    private readonly ModernComboBox category = HumanUi.Combo();
     private readonly ModernTextBox preview = HumanUi.TextBox(true, 1600);
     private readonly ModernButton edit = new() { Text = CustomizeTemplateText, Enabled = false };
     private readonly ModernButton add = new() { Text = "New Template…", ThemeRole = "Primary", Enabled = false };
@@ -33,8 +34,17 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         BackColor = AppTheme.PageBackground;
         search.Name = "communicationTemplateSearch";
         var searchField = HumanUi.Field("Search templates", search);
-        searchField.Margin = new Padding(templates.Margin.Left, 0, templates.Margin.Right, 0);
-        searchField.Padding = new Padding(0, 0, 0, AppScale.Scale(6));
+        category.Name = "communicationTemplateCategory";
+        category.Items.AddRange(new object[] { "All templates", "Fees & Payments", "Admissions & Students",
+            "Announcements & Examinations", "Staff" });
+        category.SelectedIndex = 0;
+        var categoryField = HumanUi.Field("Category", category);
+        var filters = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        filters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        filters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        searchField.Dock = categoryField.Dock = DockStyle.Fill;
+        filters.Controls.Add(searchField, 0, 0);
+        filters.Controls.Add(categoryField, 1, 0);
         templates.AutoGenerateColumns = false;
         foreach (var (field, title, weight) in new[]
         {
@@ -72,7 +82,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(30)));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonHeight + AppScale.Scale(10)));
-        layout.Controls.Add(searchField, 0, 0);
+        layout.Controls.Add(filters, 0, 0);
         layout.Controls.Add(templates, 0, 1);
         layout.Controls.Add(HumanUi.Field("Template preview", preview), 0, 2);
         layout.Controls.Add(feedback, 0, 3);
@@ -83,6 +93,10 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             if (templates.DataSource is not DataTable rows) return;
             ApplySearch(rows);
             ShowSelected();
+        };
+        category.SelectedIndexChanged += (_, _) =>
+        {
+            if (templates.DataSource is DataTable rows) { ApplySearch(rows); ShowSelected(); }
         };
         templates.CurrentCellChanged += (_, _) => ShowSelected();
         templates.CellDoubleClick += async (_, e) =>
@@ -112,20 +126,28 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         ? "WhatsApp / SMS"
         : row.Field<string>("Channel") is "Sms" ? "SMS" : row.Field<string>("Channel") ?? "";
 
+    private static string CategoryForPurpose(string purpose) => purpose switch
+    {
+        "FeeReminder" => "Fees & Payments",
+        "Individual" => "Admissions & Students",
+        "Staff" => "Staff",
+        _ => "Announcements & Examinations"
+    };
+
     private void ApplySearch(DataTable rows)
     {
         string[] terms = search.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         UiHelper.SetGridEmptyMessage(templates, terms.Length == 0 ? "No templates available." : "No templates match your search.");
-        if (terms.Length == 0)
-        {
-            rows.DefaultView.RowFilter = "";
-        }
+        string selected = category.Text;
+        if (terms.Length == 0 && selected == "All templates") rows.DefaultView.RowFilter = "";
         else
         {
             var matches = rows.AsEnumerable().Where(row =>
             {
+                string purpose = row.Field<string>("Purpose") ?? "";
+                if (selected != "All templates" && CategoryForPurpose(purpose) != selected) return false;
                 string searchableText = string.Join(" ", row.Field<string>("Name"), ChannelLabel(row),
-                    CommunicationTemplateDialog.PurposeLabel(row.Field<string>("Purpose") ?? ""), row.Field<string>("Body"));
+                    CommunicationTemplateDialog.PurposeLabel(purpose), row.Field<string>("Body"));
                 return terms.All(term => searchableText.Contains(term, StringComparison.CurrentCultureIgnoreCase));
             }).Select(row => row.Field<int>("TemplateId").ToString(CultureInfo.InvariantCulture)).ToArray();
             // Only numeric IDs enter the expression, so punctuation in the search is matched literally.
