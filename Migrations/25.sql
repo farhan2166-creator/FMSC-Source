@@ -247,6 +247,63 @@ AS BEGIN
  COMMIT;
 END');
 
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadAutomationFamilyExceptions @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ EXEC dbo.RequirePermission @UserId,N''Students.View'';
+ SELECT E.ExceptionId,E.FamilyId,E.EventCode,E.UntilUtc,E.Reason,E.CreatedUtc,
+   COALESCE(Student.StudentName,N''Family record'') Representative
+ FROM msg.AutomationException E
+ OUTER APPLY(SELECT TOP(1) S.StudentName FROM dbo.FamilyMembers FM
+   JOIN dbo.Students S ON S.AdmissionId=FM.AdmissionId
+   WHERE FM.FamilyId=E.FamilyId AND S.Status=N''Active''
+   ORDER BY S.AdmissionId DESC) Student
+ WHERE E.RevokedUtc IS NULL AND (E.UntilUtc IS NULL OR E.UntilUtc>SYSUTCDATETIME())
+ ORDER BY E.CreatedUtc DESC,E.ExceptionId DESC;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveAutomationFamilyException
+ @UserId int,@AdmissionId int,@EventCode varchar(32),
+ @UntilUtc datetime2(3)=NULL,@Reason nvarchar(200)
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ EXEC dbo.RequirePermission @UserId,N''Students.View'';
+ IF @AdmissionId<=0 OR @EventCode IS NULL OR
+   NOT EXISTS(SELECT 1 FROM msg.AutomationRule WHERE EventCode=@EventCode) OR
+   @Reason IS NULL OR LEN(LTRIM(RTRIM(@Reason)))=0 OR
+   (@UntilUtc IS NOT NULL AND @UntilUtc<=SYSUTCDATETIME())
+  THROW 51290,''A valid student, event, reason and future expiry are required.'',1;
+ BEGIN TRANSACTION;
+ DECLARE @FamilyId int;
+ IF (SELECT COUNT(DISTINCT FM.FamilyId) FROM dbo.FamilyMembers FM WITH(UPDLOCK,HOLDLOCK)
+     JOIN dbo.Students S WITH(HOLDLOCK) ON S.AdmissionId=FM.AdmissionId
+     WHERE FM.AdmissionId=@AdmissionId AND S.Status=N''Active'')<>1
+   THROW 51291,''The chosen active student must belong to one registered family.'',1;
+ SELECT @FamilyId=FM.FamilyId FROM dbo.FamilyMembers FM WITH(HOLDLOCK)
+ WHERE FM.AdmissionId=@AdmissionId;
+ UPDATE msg.AutomationException WITH(UPDLOCK,HOLDLOCK)
+ SET RevokedBy=@UserId,RevokedUtc=SYSUTCDATETIME()
+ WHERE FamilyId=@FamilyId AND EventCode=@EventCode AND RevokedUtc IS NULL;
+ INSERT msg.AutomationException(FamilyId,EventCode,UntilUtc,Reason,CreatedBy)
+ VALUES(@FamilyId,@EventCode,@UntilUtc,LTRIM(RTRIM(@Reason)),@UserId);
+ SELECT CONVERT(bigint,SCOPE_IDENTITY()) ExceptionId,@FamilyId FamilyId;
+ COMMIT;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.RevokeAutomationFamilyException
+ @UserId int,@ExceptionId bigint
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @ExceptionId<=0 THROW 51292,''Select a valid family exception.'',1;
+ UPDATE msg.AutomationException WITH(UPDLOCK)
+ SET RevokedBy=@UserId,RevokedUtc=SYSUTCDATETIME()
+ WHERE ExceptionId=@ExceptionId AND RevokedUtc IS NULL;
+ IF @@ROWCOUNT<>1 THROW 51292,''This family exception is already inactive.'',1;
+END');
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'25',SYSDATETIME(),SUSER_SNAME(),
 N'Review-only admission, payment and birthday event suggestion intake with source idempotency');
