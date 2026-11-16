@@ -29,6 +29,16 @@
       "schema": "msg",
       "name": "SaveAutomationMode",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "AutomationScanControl",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "ClaimAutomationReviewScan",
+      "type": "P"
     }
   ]
 }
