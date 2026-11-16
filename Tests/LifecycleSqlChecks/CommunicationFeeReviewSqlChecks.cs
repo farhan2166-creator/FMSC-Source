@@ -46,10 +46,19 @@ internal static class CommunicationFeeReviewSqlChecks
         using(var before=Sql.Proc("msg.ReadFeeReviewCandidates",Sql.P("@UserId",f.Admin)))
             r.Check(before.Rows.Count==0,
                 "A new school creates no fee-review candidates while every event rule is Off.");
+        using(var disabled=Sql.Proc("msg.ClaimAutomationReviewScan",Sql.P("@UserId",f.Admin)))
+            r.Check(disabled.Rows.Count==1 && !Convert.ToBoolean(disabled.Rows[0]["ShouldScan"]),
+                "No background event scan is scheduled when all event rules are Off.");
 
         Sql.Proc("msg.SaveAutomationMode",
             Sql.P("@UserId",f.Admin),Sql.P("@EventCode","OutstandingFees"),
             Sql.P("@Mode","Review"),Sql.P("@CampusId",0),Sql.P("@ClassId",0));
+        using(var first=Sql.Proc("msg.ClaimAutomationReviewScan",Sql.P("@UserId",f.Admin)))
+            r.Check(first.Rows.Count==1 && Convert.ToBoolean(first.Rows[0]["ShouldScan"]),
+                "Only one authorized background scan can claim the school review slot.");
+        using(var second=Sql.Proc("msg.ClaimAutomationReviewScan",Sql.P("@UserId",f.Admin)))
+            r.Check(second.Rows.Count==1 && !Convert.ToBoolean(second.Rows[0]["ShouldScan"]),
+                "The school coordinator prevents another full event scan within thirty minutes.");
         var scan=Sql.Proc("msg.ScanFeeReviewCandidates",Sql.P("@UserId",f.Admin));
         r.Check(scan.Rows.Count==1 && Convert.ToInt32(scan.Rows[0]["NewSuggestions"])>=1,
             "Enabling fee review collects current outstanding balances without replaying paid charges.");
