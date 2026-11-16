@@ -7,6 +7,12 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
 {
     private readonly DataGridView recipients = HumanUi.Grid(false);
     private readonly ModernTextBox preview = HumanUi.TextBox(true, 1600);
+    private readonly Label evidence = new()
+    {
+        Name = "communicationHistoryEvidence",
+        Dock = DockStyle.Fill, AutoEllipsis = false,
+        ForeColor = AppTheme.MutedText
+    };
     private readonly ModernButton sendAgain = new()
     {
         Name = "communicationSendAgain", Text = "Send Again…", ThemeRole = "Secondary",
@@ -21,8 +27,8 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(AppScale.Scale(720), AppScale.Scale(470));
-        MinimumSize = new Size(AppScale.Scale(530), AppScale.Scale(380));
+        ClientSize = new Size(AppScale.Scale(760), AppScale.Scale(540));
+        MinimumSize = new Size(AppScale.Scale(570), AppScale.Scale(445));
         BackColor = AppTheme.PageBackground;
 
         var details = new Label
@@ -34,7 +40,8 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         recipients.AutoGenerateColumns = false;
         foreach (var (field, heading) in new[]
         {
-            ("RecipientName", "Recipient"), ("RecordNumber", "Admission / staff no."), ("LastFour", "Number ending"), ("Outcome", "Status")
+            ("RecipientName", "Recipient"), ("RecordNumber", "Admission / staff no."),
+            ("LastFour", "Number ending"), ("Outcome", "Status")
         })
             recipients.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -53,17 +60,19 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         buttons.Dock = DockStyle.Fill;
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(AppScale.Scale(16))
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(AppScale.Scale(16))
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(32)));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 52));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 48));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(48)));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(68)));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonHeight + AppScale.Scale(10)));
         layout.Controls.Add(details, 0, 0);
         layout.Controls.Add(recipients, 0, 1);
-        layout.Controls.Add(message, 0, 2);
-        layout.Controls.Add(buttons, 0, 3);
+        layout.Controls.Add(evidence, 0, 2);
+        layout.Controls.Add(message, 0, 3);
+        layout.Controls.Add(buttons, 0, 4);
         Controls.Add(layout);
         recipients.CurrentCellChanged += (_, _) => ShowMessage();
         Shown += async (_, _) =>
@@ -78,6 +87,11 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
                     return;
                 }
                 recipients.DataSource = rows;
+                DataRow first = rows.Rows[0];
+                string prepared = DisplayValue(first, "PreparedByName");
+                string approved = DisplayValue(first, "ApprovedByName");
+                details.Text = $"{session.Audience} · Prepared by {prepared} ({LocalWhen(first, "PreparedUtc")})"
+                    + (approved.Length == 0 ? "" : $" · Approved by {approved} ({LocalWhen(first, "ApprovedUtc")})");
                 if (rows.Rows[0]["ProviderCode"] is "WhatsAppBusinessManual")
                     message.Controls.OfType<Label>().Single().Text = "Saved message format";
                 ShowMessage();
@@ -92,10 +106,74 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         FormClosed += (_, _) => (recipients.DataSource as DataTable)?.Dispose();
     }
 
+    internal static string OutcomeExplanation(string? provider, string? state)
+    {
+        if (provider == "WhatsAppBusinessManual")
+            return state switch
+            {
+                "ReportedSent" => "Manually reported sent — delivery is not provider-verified",
+                "Opened" => "WhatsApp opened — sending is not confirmed",
+                "Skipped" => "Skipped by operator — no delivery claim",
+                "Excluded" => "Excluded — no message sent",
+                _ => "Waiting for operator handoff"
+            };
+        return state switch
+        {
+            "Delivered" => "Provider-confirmed delivered",
+            "Accepted" => "Accepted by provider — delivery not yet confirmed",
+            "Submitted" => "Submitted to provider — waiting for confirmation",
+            "Unknown" => "Outcome unknown — do not resend automatically",
+            "Failed" => "Provider reported failure — review before retry",
+            "Excluded" => "Excluded — no message sent",
+            "Pending" => "Waiting for a reviewed provider attempt",
+            _ => "Outcome requires review"
+        };
+    }
+
+    private static string DisplayValue(DataRow row, string name)
+    {
+        return row.Table.Columns.Contains(name) && row[name] != DBNull.Value
+            ? Convert.ToString(row[name])?.Trim() ?? "" : "";
+    }
+
+    private static string LocalWhen(DataRow row, string field)
+    {
+        if (!row.Table.Columns.Contains(field) || row[field] is not DateTime date)
+            return "time not recorded";
+        return DateTime.SpecifyKind(date, DateTimeKind.Utc)
+            .ToLocalTime().ToString("dd MMM yyyy HH:mm");
+    }
+
     private void ShowMessage()
     {
         DataRow? row = (recipients.CurrentRow?.DataBoundItem as DataRowView)?.Row
             ?? (recipients.DataSource as DataTable)?.AsEnumerable().FirstOrDefault();
-        preview.Text = row is null ? "" : row["RenderedBody"] as string ?? (string)row["Body"];
+        if (row is null) { preview.Text = evidence.Text = ""; return; }
+        preview.Text = row["RenderedBody"] as string ?? (string)row["Body"];
+        string provider = DisplayValue(row, "ProviderCode");
+        string state = DisplayValue(row, "Outcome");
+        string narrative = OutcomeExplanation(provider, state);
+        if (provider == "WhatsAppBusinessManual")
+        {
+            string reporter = DisplayValue(row, "ManualReportedByName");
+            if (state == "ReportedSent")
+                narrative += $" · Reported {LocalWhen(row, "ReportedUtc")}"
+                    + (reporter.Length == 0 ? "" : " by " + reporter);
+            else if (state == "Opened")
+                narrative += $" · Opened {LocalWhen(row, "LastOpenedUtc")}";
+        }
+        else
+        {
+            string id = DisplayValue(row, "ProviderMessageId");
+            string failure = DisplayValue(row, "FailureCode");
+            if (id.Length > 0)
+                narrative += " · Provider reference ending " + id.Substring(Math.Max(0, id.Length - 12));
+            if (failure.Length > 0) narrative += " · Failure code " + failure;
+            if (row.Table.Columns.Contains("RequestUtc") && row["RequestUtc"] != DBNull.Value)
+                narrative += $" · Sent {LocalWhen(row, "RequestUtc")}";
+            if (row.Table.Columns.Contains("ResponseUtc") && row["ResponseUtc"] != DBNull.Value)
+                narrative += $" · Updated {LocalWhen(row, "ResponseUtc")}";
+        }
+        evidence.Text = narrative;
     }
 }

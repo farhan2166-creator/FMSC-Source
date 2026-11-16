@@ -60,6 +60,15 @@ internal static partial class Program
             Check(Uri.UnescapeDataString(link.Query).Contains(rendered) && link.Host == "wa.me", "Unicode, quotes, ampersands and newlines survive official WhatsApp handoff encoding");
             using (var template = new CommunicationTemplateDialog("Saved email template", "Email", "Announcement", "School notice"))
                 Check(template.Channel == "Email", "Editing a saved email template preserves its channel rather than silently converting it to SMS");
+            Check(CommunicationHistoryDialog.OutcomeExplanation("MetaCloud", "Accepted")
+                    .Contains("not yet confirmed", StringComparison.OrdinalIgnoreCase)
+                && CommunicationHistoryDialog.OutcomeExplanation("Twilio", "Delivered")
+                    .Contains("Provider-confirmed", StringComparison.Ordinal)
+                && CommunicationHistoryDialog.OutcomeExplanation("WhatsAppBusinessManual", "ReportedSent")
+                    .Contains("not provider-verified", StringComparison.Ordinal)
+                && CommunicationHistoryDialog.OutcomeExplanation("Twilio", "Unknown")
+                    .Contains("do not resend", StringComparison.OrdinalIgnoreCase),
+                "History distinguishes provider acceptance, independently verified delivery, uncertain attempts and manually reported sends.");
             CheckProviderBodyDeadline();
             CheckCommunicationAsyncAndCancellation();
             CheckCommunicationSessionsAndOptions();

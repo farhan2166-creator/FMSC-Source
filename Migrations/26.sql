@@ -12,14 +12,17 @@ ALTER TABLE msg.AutomationRule ADD
   CONSTRAINT DF_MsgFeeReminderGapDays DEFAULT(7),
  FeeRemindersPerMonth int NOT NULL
   CONSTRAINT DF_MsgFeeRemindersPerMonth DEFAULT(2);
-ALTER TABLE msg.AutomationRule ADD
- CONSTRAINT CK_MsgFeeReminderGapDays CHECK(FeeReminderGapDays BETWEEN 1 AND 90),
- CONSTRAINT CK_MsgFeeRemindersPerMonth CHECK(FeeRemindersPerMonth BETWEEN 1 AND 12);
+-- SQL Server binds CHECK expressions before a preceding ALTER ADD in the
+-- same installer batch; defer compilation until those columns really exist.
+EXEC(N'ALTER TABLE msg.AutomationRule ADD CONSTRAINT CK_MsgFeeReminderGapDays
+ CHECK(FeeReminderGapDays BETWEEN 1 AND 90)');
+EXEC(N'ALTER TABLE msg.AutomationRule ADD CONSTRAINT CK_MsgFeeRemindersPerMonth
+ CHECK(FeeRemindersPerMonth BETWEEN 1 AND 12)');
 ALTER TABLE msg.DispatchControl ADD
  RoutineFamilyDailyLimit int NOT NULL
   CONSTRAINT DF_MsgRoutineFamilyDailyLimit DEFAULT(3);
-ALTER TABLE msg.DispatchControl ADD
- CONSTRAINT CK_MsgRoutineFamilyDailyLimit CHECK(RoutineFamilyDailyLimit BETWEEN 1 AND 20);
+EXEC(N'ALTER TABLE msg.DispatchControl ADD CONSTRAINT CK_MsgRoutineFamilyDailyLimit
+ CHECK(RoutineFamilyDailyLimit BETWEEN 1 AND 20)');
 
 EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveFeeReminderPolicy
  @UserId int,@EventCode varchar(32),@GapDays int,@PerMonth int,@PerDay int
