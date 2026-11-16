@@ -59,6 +59,61 @@
       "schema": "msg",
       "name": "SaveTemplateUrdu",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "DispatchSettings",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "AutomationRule",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "BatchSchedule",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "FamilyAutomationException",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadDispatchSettings",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveDispatchSettings",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadAutomationRules",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveAutomationRule",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveBatchSchedule",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_Attempt_ScheduleGuard",
+      "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_ManualHandoff_ScheduleGuard",
+      "type": "TR"
     }
   ],
   "columns": [

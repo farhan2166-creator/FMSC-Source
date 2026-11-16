@@ -167,5 +167,205 @@ BEGIN
 END');
 
 
+-- Sending policy is inert by default. No unattended sender or event automation
+-- becomes active because of a schema upgrade.
+CREATE TABLE msg.DispatchSettings(
+ Id tinyint NOT NULL CONSTRAINT PK_MsgDispatchSettings PRIMARY KEY,
+ UnattendedEnabled bit NOT NULL CONSTRAINT DF_MsgDispatchEnabled DEFAULT(0),
+ SendFrom time(0) NOT NULL CONSTRAINT DF_MsgDispatchFrom DEFAULT('08:00'),
+ SendUntil time(0) NOT NULL CONSTRAINT DF_MsgDispatchUntil DEFAULT('18:00'),
+ WorkingDaysMask tinyint NOT NULL CONSTRAINT DF_MsgDispatchDays DEFAULT(127),
+ MaximumPerMinute int NOT NULL CONSTRAINT DF_MsgDispatchRate DEFAULT(60),
+ MaximumSmsDaily int NOT NULL CONSTRAINT DF_MsgDispatchSmsDaily DEFAULT(0),
+ MaximumWhatsAppDaily int NOT NULL CONSTRAINT DF_MsgDispatchWhatsAppDaily DEFAULT(0),
+ MaximumRoutineFamilyDaily tinyint NOT NULL CONSTRAINT DF_MsgDispatchFamilyDaily DEFAULT(3),
+ PriorityReservePercent tinyint NOT NULL CONSTRAINT DF_MsgDispatchReserve DEFAULT(10),
+ UpdatedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgDispatchUpdated DEFAULT(SYSUTCDATETIME()),
+ UpdatedBy int NULL,
+ CONSTRAINT CK_MsgDispatchSingleton CHECK(Id=1),
+ CONSTRAINT CK_MsgDispatchHours CHECK(SendFrom<SendUntil),
+ CONSTRAINT CK_MsgDispatchDays CHECK(WorkingDaysMask BETWEEN 1 AND 127),
+ CONSTRAINT CK_MsgDispatchRate CHECK(MaximumPerMinute BETWEEN 1 AND 600),
+ CONSTRAINT CK_MsgDispatchSmsDaily CHECK(MaximumSmsDaily BETWEEN 0 AND 100000),
+ CONSTRAINT CK_MsgDispatchWhatsAppDaily CHECK(MaximumWhatsAppDaily BETWEEN 0 AND 100000),
+ CONSTRAINT CK_MsgDispatchFamilyDaily CHECK(MaximumRoutineFamilyDaily BETWEEN 1 AND 20),
+ CONSTRAINT CK_MsgDispatchReserve CHECK(PriorityReservePercent BETWEEN 0 AND 50)
+);
+INSERT msg.DispatchSettings(Id) VALUES(1);
+CREATE TABLE msg.AutomationRule(
+ EventCode varchar(30) NOT NULL CONSTRAINT PK_MsgAutomationRule PRIMARY KEY,
+ Mode varchar(10) NOT NULL CONSTRAINT DF_MsgAutomationMode DEFAULT('Off'),
+ CampusId int NOT NULL CONSTRAINT DF_MsgAutomationCampus DEFAULT(0),
+ ClassId int NOT NULL CONSTRAINT DF_MsgAutomationClass DEFAULT(0),
+ Channel varchar(10) NULL,
+ ActivatedUtc datetime2(3) NULL,
+ UpdatedBy int NULL,
+ UpdatedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgAutomationChanged DEFAULT(SYSUTCDATETIME()),
+ CONSTRAINT CK_MsgAutomationMode CHECK(Mode IN ('Off','Review','Automatic')),
+ CONSTRAINT CK_MsgAutomationChannel CHECK(Channel IS NULL OR Channel IN ('Sms','WhatsApp')),
+ CONSTRAINT CK_MsgAutomationScope CHECK(CampusId>=0 AND ClassId>=0 AND (ClassId=0 OR CampusId>0))
+);
+INSERT msg.AutomationRule(EventCode) VALUES
+ ('StudentAdmitted'),('PaymentReceived'),('OutstandingFee'),('UpcomingDue'),
+ ('OverdueFee'),('SchoolAnnouncement'),('ExaminationsResults'),('BirthdayGreeting');
+
+CREATE TABLE msg.BatchSchedule(
+ BatchId uniqueidentifier NOT NULL CONSTRAINT PK_MsgBatchSchedule PRIMARY KEY
+  CONSTRAINT FK_MsgBatchScheduleBatch REFERENCES msg.Batch(BatchId),
+ SendAtUtc datetime2(3) NOT NULL,
+ ExpiresUtc datetime2(3) NOT NULL,
+ State varchar(10) NOT NULL CONSTRAINT DF_MsgBatchScheduleState DEFAULT('Ready'),
+ CreatedBy int NOT NULL,
+ UpdatedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgBatchScheduleModified DEFAULT(SYSUTCDATETIME()),
+ CONSTRAINT CK_MsgBatchScheduleRange CHECK(SendAtUtc<ExpiresUtc),
+ CONSTRAINT CK_MsgBatchScheduleState CHECK(State IN ('Ready','Paused','Cancelled'))
+);
+CREATE INDEX IX_MsgBatchScheduleUpcoming ON msg.BatchSchedule(State,SendAtUtc) INCLUDE(ExpiresUtc);
+
+CREATE TABLE msg.FamilyAutomationException(
+ AdmissionId int NOT NULL,
+ EventCode varchar(30) NOT NULL CONSTRAINT FK_MsgFamilyExceptionEvent REFERENCES msg.AutomationRule(EventCode),
+ Reason nvarchar(200) NOT NULL,
+ ExpiresUtc datetime2(3) NULL,
+ RecordedBy int NOT NULL,
+ RecordedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgFamilyExceptionCreated DEFAULT(SYSUTCDATETIME()),
+ CONSTRAINT PK_MsgFamilyAutomationException PRIMARY KEY(AdmissionId,EventCode),
+ CONSTRAINT CK_MsgFamilyExceptionReason CHECK(LEN(LTRIM(RTRIM(Reason)))>0)
+);
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadDispatchSettings @UserId int
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ SELECT UnattendedEnabled,SendFrom,SendUntil,WorkingDaysMask,MaximumPerMinute,
+        MaximumSmsDaily,MaximumWhatsAppDaily,MaximumRoutineFamilyDaily,
+        PriorityReservePercent FROM msg.DispatchSettings WHERE Id=1;
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveDispatchSettings
+ @UserId int,@SendFrom time(0),@SendUntil time(0),@WorkingDaysMask tinyint,
+ @MaximumPerMinute int,@MaximumSmsDaily int,@MaximumWhatsAppDaily int,
+ @MaximumRoutineFamilyDaily tinyint,@PriorityReservePercent tinyint
+AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @SendFrom IS NULL OR @SendUntil IS NULL OR @SendFrom>=@SendUntil
+    OR @WorkingDaysMask NOT BETWEEN 1 AND 127
+    OR @MaximumPerMinute NOT BETWEEN 1 AND 600
+    OR @MaximumSmsDaily NOT BETWEEN 0 AND 100000
+    OR @MaximumWhatsAppDaily NOT BETWEEN 0 AND 100000
+    OR @MaximumRoutineFamilyDaily NOT BETWEEN 1 AND 20
+    OR @PriorityReservePercent NOT BETWEEN 0 AND 50
+    OR @WorkingDaysMask IS NULL OR @MaximumPerMinute IS NULL
+    OR @MaximumSmsDaily IS NULL OR @MaximumWhatsAppDaily IS NULL
+    OR @MaximumRoutineFamilyDaily IS NULL OR @PriorityReservePercent IS NULL
+    THROW 51275,''Invalid communication schedule or daily capacity.'',1;
+ UPDATE msg.DispatchSettings
+ SET SendFrom=@SendFrom,SendUntil=@SendUntil,WorkingDaysMask=@WorkingDaysMask,
+ MaximumPerMinute=@MaximumPerMinute,MaximumSmsDaily=@MaximumSmsDaily,
+ MaximumWhatsAppDaily=@MaximumWhatsAppDaily,
+ MaximumRoutineFamilyDaily=@MaximumRoutineFamilyDaily,PriorityReservePercent=@PriorityReservePercent,
+ UpdatedBy=@UserId,UpdatedUtc=SYSUTCDATETIME()
+ WHERE Id=1;
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadAutomationRules @UserId int
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ SELECT EventCode,Mode,CampusId,ClassId,Channel,ActivatedUtc FROM msg.AutomationRule ORDER BY
+ CASE EventCode WHEN ''StudentAdmitted'' THEN 1 WHEN ''PaymentReceived'' THEN 2
+ WHEN ''OutstandingFee'' THEN 3 WHEN ''UpcomingDue'' THEN 4 WHEN ''OverdueFee'' THEN 5
+ WHEN ''SchoolAnnouncement'' THEN 6 WHEN ''ExaminationsResults'' THEN 7 ELSE 8 END;
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveAutomationRule
+ @UserId int,@EventCode varchar(30),@Mode varchar(10),@CampusId int=0,@ClassId int=0,@Channel varchar(10)=NULL
+AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @Mode NOT IN (''Off'',''Review'',''Automatic'') OR @Mode IS NULL
+ OR @CampusId<0 OR @ClassId<0 OR (@ClassId>0 AND @CampusId=0)
+ OR @Channel NOT IN (''Sms'',''WhatsApp'') AND @Channel IS NOT NULL
+ OR NOT EXISTS(SELECT 1 FROM msg.AutomationRule WHERE EventCode=@EventCode)
+   THROW 51276,''Invalid school automation rule.'',1;
+ -- Until an audited unattended processor has been authorized, no sending
+ -- rule may silently transition out of Off.
+ IF @Mode<>''Off'' AND NOT EXISTS(
+ SELECT 1 FROM msg.DispatchSettings WHERE Id=1 AND UnattendedEnabled=1)
+   THROW 51276,''Configure and authorize background sending before enabling automation.'',1;
+ UPDATE msg.AutomationRule
+ SET Mode=@Mode,CampusId=@CampusId,ClassId=@ClassId,Channel=@Channel,
+ ActivatedUtc=CASE WHEN Mode=''Off'' AND @Mode<>''Off'' THEN SYSUTCDATETIME()
+     WHEN @Mode=''Off'' THEN NULL ELSE ActivatedUtc END,
+ UpdatedBy=@UserId,UpdatedUtc=SYSUTCDATETIME()
+ WHERE EventCode=@EventCode;
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveBatchSchedule
+ @UserId int,@BatchId uniqueidentifier,@SendAtUtc datetime2(3),@ExpiresUtc datetime2(3)
+AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ IF @BatchId IS NULL OR @SendAtUtc IS NULL OR @ExpiresUtc IS NULL
+    OR @SendAtUtc>=@ExpiresUtc OR @ExpiresUtc<=SYSUTCDATETIME()
+    THROW 51277,''A valid future schedule and expiry are required.'',1;
+ BEGIN TRANSACTION;
+ IF NOT EXISTS(SELECT 1 FROM msg.Batch B WITH(UPDLOCK,HOLDLOCK)
+     WHERE B.BatchId=@BatchId AND B.CreatedBy=@UserId AND B.ConfirmedUtc IS NOT NULL
+       AND B.State NOT IN (''Cancelled'',''Completed''))
+ OR EXISTS(SELECT 1 FROM msg.Attempt A JOIN msg.Recipient R ON R.RecipientId=A.RecipientId
+    WHERE R.BatchId=@BatchId)
+ OR EXISTS(SELECT 1 FROM msg.ManualHandoff H JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
+    WHERE R.BatchId=@BatchId AND H.State NOT IN (''Pending''))
+     THROW 51277,''Only untouched confirmed batches can be scheduled.'',1;
+ IF EXISTS(SELECT 1 FROM msg.BatchSchedule WITH(UPDLOCK,HOLDLOCK)
+    WHERE BatchId=@BatchId AND State<>''Ready'')
+     THROW 51277,''Paused or cancelled schedules require administrator review.'',1;
+ IF EXISTS(SELECT 1 FROM msg.BatchSchedule WHERE BatchId=@BatchId)
+ UPDATE msg.BatchSchedule SET SendAtUtc=@SendAtUtc,ExpiresUtc=@ExpiresUtc,UpdatedUtc=SYSUTCDATETIME()
+ WHERE BatchId=@BatchId;
+ ELSE
+ INSERT msg.BatchSchedule(BatchId,SendAtUtc,ExpiresUtc,CreatedBy)
+ VALUES(@BatchId,@SendAtUtc,@ExpiresUtc,@UserId);
+ COMMIT TRANSACTION;
+END');
+
+
+EXEC(N'CREATE OR ALTER TRIGGER msg.TR_Attempt_ScheduleGuard ON msg.Attempt AFTER INSERT AS
+BEGIN
+ SET NOCOUNT ON;
+ IF EXISTS(
+   SELECT 1 FROM inserted I
+   JOIN msg.Recipient R ON R.RecipientId=I.RecipientId
+   JOIN msg.BatchSchedule S WITH(HOLDLOCK) ON S.BatchId=R.BatchId
+   WHERE S.State<>''Ready'' OR S.SendAtUtc>SYSUTCDATETIME() OR S.ExpiresUtc<=SYSUTCDATETIME())
+   THROW 51277,''The reviewed batch schedule is paused, not yet due, or expired.'',1;
+END');
+
+
+EXEC(N'CREATE OR ALTER TRIGGER msg.TR_ManualHandoff_ScheduleGuard ON msg.ManualHandoff AFTER UPDATE AS
+BEGIN
+ SET NOCOUNT ON;
+ IF EXISTS(
+   SELECT 1 FROM inserted I
+   JOIN deleted D ON D.RecipientId=I.RecipientId
+   JOIN msg.Recipient R ON R.RecipientId=I.RecipientId
+   JOIN msg.BatchSchedule S WITH(HOLDLOCK) ON S.BatchId=R.BatchId
+   WHERE I.State=''Opened'' AND D.State<>''Opened''
+     AND (S.State<>''Ready'' OR S.SendAtUtc>SYSUTCDATETIME() OR S.ExpiresUtc<=SYSUTCDATETIME()))
+   THROW 51277,''This manual WhatsApp batch is not ready to open.'',1;
+END');
+
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'23',SYSDATETIME(),SUSER_SNAME(),N'Administrator API master pause and action-focused queue projection');
