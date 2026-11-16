@@ -170,5 +170,45 @@ internal static class CommunicationApiSqlChecks
         },51130);
         Sql.Proc("msg.ConfigureChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","WhatsApp"),Sql.P("@ProviderCode","WhatsAppBusinessManual"));
         await CommunicationMetaQueueSqlChecks.Run(f,r,student,sibling,batch);
+
+        // The worker's SQL identity and per-school lease are tested without
+        // Windows task registration, real credentials or any provider network.
+        Guid enrollment=Guid.NewGuid(),nonce=Guid.NewGuid();
+        string syntheticSid="S-1-5-21-101-202-303-404";
+        byte[] secretHash=System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes("fictional-worker-proof-no-credentials"));
+        Sql.Proc("msg.RegisterBackgroundWorker",
+            Sql.P("@UserId",f.Admin),Sql.P("@EnrollmentId",enrollment),
+            Sql.P("@WindowsSid",syntheticSid),Sql.P("@SecretHash",secretHash));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.DispatchControl WHERE UnattendedEnabled=0")==1,
+            "Enrolling a worker never enables unattended sending without administrator opt-in.");
+        await r.Refused("Unprivileged user cannot enable unattended dispatch",()=>{
+            Sql.Proc("msg.SetUnattendedSending",Sql.P("@UserId",f.Restricted),Sql.P("@Enabled",true));
+            return Task.CompletedTask;
+        },50003);
+        Sql.Proc("msg.SetUnattendedSending",Sql.P("@UserId",f.Admin),Sql.P("@Enabled",true));
+        DataTable verified=Sql.Proc("msg.VerifyBackgroundWorker",
+            Sql.P("@UserId",f.Admin),Sql.P("@EnrollmentId",enrollment),
+            Sql.P("@WindowsSid",syntheticSid),Sql.P("@SecretHash",secretHash));
+        r.Check(verified.Rows.Count==1 && Convert.ToBoolean(verified.Rows[0]["Authorized"]),
+            "An authorized enrolled school administrator can verify a bounded headless worker.");
+        var lease=Sql.Proc("msg.AcquireBackgroundLease",
+            Sql.P("@UserId",f.Admin),Sql.P("@EnrollmentId",enrollment),
+            Sql.P("@WindowsSid",syntheticSid),Sql.P("@SecretHash",secretHash),
+            Sql.P("@LeaseNonce",nonce));
+        r.Check(lease.Rows.Count==1 && Convert.ToBoolean(lease.Rows[0]["Acquired"]),
+            "School-wide SQL lease can be acquired by exactly one verified worker.");
+        var competed=Sql.Proc("msg.AcquireBackgroundLease",
+            Sql.P("@UserId",f.Admin),Sql.P("@EnrollmentId",enrollment),
+            Sql.P("@WindowsSid",syntheticSid),Sql.P("@SecretHash",secretHash),
+            Sql.P("@LeaseNonce",Guid.NewGuid()));
+        r.Check(competed.Rows.Count==1 && !Convert.ToBoolean(competed.Rows[0]["Acquired"]),
+            "A second worker cannot acquire an active school lease.");
+        Sql.Proc("msg.ReleaseBackgroundLease",
+            Sql.P("@UserId",f.Admin),Sql.P("@EnrollmentId",enrollment),
+            Sql.P("@LeaseNonce",nonce));
+        Sql.Proc("msg.SetUnattendedSending",Sql.P("@UserId",f.Admin),Sql.P("@Enabled",false));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.DispatchControl WHERE UnattendedEnabled=0")==1,
+            "Unattended sending can be disabled without any messages being created.");
     }
 }
