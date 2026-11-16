@@ -15,18 +15,12 @@ DROP INDEX IX_MsgAutomationExceptionActive ON msg.AutomationException;
 ALTER TABLE msg.AutomationException DROP CONSTRAINT CK_MsgAutomationExceptionFamily;
 ALTER TABLE msg.AutomationException ALTER COLUMN FamilyId int NULL;
 ALTER TABLE msg.AutomationException ADD AdmissionId int NULL;
-ALTER TABLE msg.AutomationException ADD CONSTRAINT CK_MsgAutomationExceptionScope
- CHECK((FamilyId>0 AND AdmissionId IS NULL)
-   OR (FamilyId IS NULL AND AdmissionId>0));
-CREATE INDEX IX_MsgAutomationExceptionActive
- ON msg.AutomationException(FamilyId,AdmissionId,EventCode,RevokedUtc)
- INCLUDE(UntilUtc);
-CREATE UNIQUE INDEX UX_MsgAutomationExceptionActiveFamily
- ON msg.AutomationException(FamilyId,EventCode)
- WHERE FamilyId IS NOT NULL AND RevokedUtc IS NULL;
-CREATE UNIQUE INDEX UX_MsgAutomationExceptionActiveStudent
- ON msg.AutomationException(AdmissionId,EventCode)
- WHERE AdmissionId IS NOT NULL AND RevokedUtc IS NULL;
+-- Bind the new column after ALTER TABLE completes: SQL Server compiles
+-- indexes and CHECK constraints at batch start otherwise.
+EXEC(N'ALTER TABLE msg.AutomationException ADD CONSTRAINT CK_MsgAutomationExceptionScope CHECK((FamilyId>0 AND AdmissionId IS NULL) OR (FamilyId IS NULL AND AdmissionId>0))');
+EXEC(N'CREATE INDEX IX_MsgAutomationExceptionActive ON msg.AutomationException(FamilyId,AdmissionId,EventCode,RevokedUtc) INCLUDE(UntilUtc)');
+EXEC(N'CREATE UNIQUE INDEX UX_MsgAutomationExceptionActiveFamily ON msg.AutomationException(FamilyId,EventCode) WHERE FamilyId IS NOT NULL AND RevokedUtc IS NULL');
+EXEC(N'CREATE UNIQUE INDEX UX_MsgAutomationExceptionActiveStudent ON msg.AutomationException(AdmissionId,EventCode) WHERE AdmissionId IS NOT NULL AND RevokedUtc IS NULL');
 
 CREATE TABLE msg.AutomationCandidate (
  CandidateId bigint IDENTITY(1,1) CONSTRAINT PK_MsgAutomationCandidate PRIMARY KEY,
