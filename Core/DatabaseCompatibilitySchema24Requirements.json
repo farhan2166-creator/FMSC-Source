@@ -1,0 +1,74 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "BackgroundWorkerEnrollment",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "BackgroundWorkerLease",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "NonWorkingWeekday",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "SchoolHoliday",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "RegisterBackgroundWorker",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "VerifyBackgroundWorker",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "AcquireBackgroundLease",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "RenewBackgroundLease",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReleaseBackgroundLease",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadNextScheduledRecipient",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "HoldScheduledBatch",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReportWorkerStateDivergence",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SetUnattendedSending",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReleaseScheduledHold",
+      "type": "P"
+    }
+  ]
+}
