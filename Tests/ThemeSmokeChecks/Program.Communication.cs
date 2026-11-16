@@ -270,6 +270,36 @@ internal static partial class Program
             "Review appears beside the editable message, without replacing the composer");
         setStep.Invoke(page, new object[] { 0 });
         Application.DoEvents();
+        // Search across every saved recipient (not only the group's display
+        // label); exports must respect the filtered rows and neutralize formulas.
+        var historyGridForSearch = (DataGridView)type.GetField("historyGrid",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        var historyFixture = new DataTable();
+        historyFixture.Columns.Add("CreatedUtc", typeof(DateTime));
+        foreach (string column in new[] { "MethodText", "RecipientText", "RecipientSearchText",
+            "AudienceText", "OperatorName", "StateText" })
+            historyFixture.Columns.Add(column, typeof(string));
+        historyFixture.Rows.Add(new DateTime(2026,11,16), "WhatsApp · manual",
+            "=HYPERLINK(\"https://example.com\")", "Ayesha 352 guardian Shama",
+            "Class", "Admin", "Sent, \"confirmed\"");
+        historyFixture.Rows.Add(new DateTime(2026,11,15), "SMS · Twilio",
+            "Other student", "Bilal 900 guardian Salma", "Class", "Admin", "Accepted");
+        historyGridForSearch.DataSource = historyFixture;
+        var filterHistory = type.GetMethod("FilterSessions",
+            BindingFlags.Instance | BindingFlags.NonPublic)!;
+        filterHistory.Invoke(page, new object[] { historyGridForSearch, "Shama 352", false });
+        Check(historyFixture.DefaultView.Count == 1,
+            "History searches multiple terms across saved group member and guardian identities.");
+        var csvFormatter = type.GetMethod("FormatHistoryCsv",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        string historyCsv = (string)csvFormatter.Invoke(null,
+            new object[] { historyFixture.DefaultView })!;
+        Check(historyCsv.Contains("'=HYPERLINK", StringComparison.Ordinal)
+            && historyCsv.Contains("Sent, \"\"confirmed\"\"", StringComparison.Ordinal)
+            && !historyCsv.Contains("Bilal", StringComparison.Ordinal)
+            && !historyCsv.Contains("https://wa.me", StringComparison.Ordinal),
+            "Filtered history CSV quotes content, neutralizes formulas and excludes nonmatching recipients.");
+
         // The production formatter is internal: exercise it through reflection
         // without weakening accessibility or exposing student data to tests.
         var prepared = assembly.GetType("FMSC_SMS.Core.CommunicationPreparedMessages")!;
