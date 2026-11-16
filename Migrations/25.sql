@@ -21,9 +21,9 @@ CREATE TABLE msg.AutomationCandidate (
  ReviewedUtc datetime2(3) NULL,
  BatchId uniqueidentifier NULL,
  CONSTRAINT UQ_MsgCandidateSource UNIQUE(EventCode,SourceKey),
- CONSTRAINT CK_MsgCandidateState CHECK(State IN ('Pending','Prepared','Dismissed')),
+ CONSTRAINT CK_MsgCandidateState CHECK(State IN ('Pending','Prepared','Dismissed','Expired')),
  CONSTRAINT CK_MsgCandidateReview CHECK(
-   (State='Pending' AND ReviewedBy IS NULL AND ReviewedUtc IS NULL AND BatchId IS NULL)
+   (State IN ('Pending','Expired') AND ReviewedBy IS NULL AND ReviewedUtc IS NULL AND BatchId IS NULL)
    OR (State='Dismissed' AND ReviewedBy IS NOT NULL AND ReviewedUtc IS NOT NULL AND BatchId IS NULL)
    OR (State='Prepared' AND ReviewedBy IS NOT NULL AND ReviewedUtc IS NOT NULL AND BatchId IS NOT NULL)),
  CONSTRAINT FK_MsgCandidateBatch FOREIGN KEY(BatchId) REFERENCES msg.Batch(BatchId)
@@ -76,6 +76,19 @@ AS BEGIN
   @Resource=N''FMSC_msg_automation_intake'',@LockMode=''Exclusive'',
   @LockOwner=''Transaction'',@LockTimeout=10000;
  IF @LockResult<0 THROW 51281,''Automation review intake is busy.'',1;
+ -- Expire unprepared suggestions; never silently send a late birthday or
+ -- old transaction announcement. Historical keys remain as dedupe tombstones.
+ UPDATE msg.AutomationCandidate
+ SET State=''Expired''
+ WHERE State=''Pending'' AND (
+   (EventCode=''Admission'' AND CreatedUtc<DATEADD(day,-7,SYSUTCDATETIME()))
+   OR (EventCode=''PaymentReceived'' AND CreatedUtc<DATEADD(day,-2,SYSUTCDATETIME()))
+   OR (EventCode=''Birthday'' AND (
+      SourceKey<>CONCAT(''BD:'',YEAR(@Day),'':'',AdmissionId)
+      OR CONVERT(date,
+         (CreatedUtc AT TIME ZONE ''UTC'') AT TIME ZONE
+         (SELECT TimeZoneId FROM msg.DispatchControl WHERE ControlId=1))<>@Day))
+ );
  DECLARE @Candidate TABLE(
   EventCode varchar(32) NOT NULL,SourceKey varchar(96) NOT NULL,
   AdmissionId int NOT NULL,SourceRecordId bigint NOT NULL,
@@ -150,6 +163,9 @@ AS BEGIN
  EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
  EXEC dbo.RequirePermission @UserId,N''Students.View'';
  EXEC dbo.RequirePermission @UserId,N''Fees.View'';
+ DECLARE @Today date=CONVERT(date,
+  (SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE
+  (SELECT TimeZoneId FROM msg.DispatchControl WHERE ControlId=1));
  SELECT TOP(200) C.CandidateId,C.EventCode,C.SourceRecordId,C.AdmissionId,
    S.StudentName,S.AdmissionNumber,C.CreatedUtc
  FROM msg.AutomationCandidate C
@@ -158,13 +174,18 @@ AS BEGIN
  OUTER APPLY msg.RecordGuardian(S.AdmissionId) G
  LEFT JOIN dbo.FamilyMembers FM ON FM.AdmissionId=S.AdmissionId
  WHERE C.State=''Pending'' AND G.HasConsent=1 AND G.PhoneE164 IS NOT NULL
+   AND (C.EventCode<>''Birthday'' OR
+       (C.SourceKey=CONCAT(''BD:'',YEAR(@Today),'':'',C.AdmissionId)
+        AND MONTH(S.DateOfBirth)=MONTH(@Today) AND DAY(S.DateOfBirth)=DAY(@Today)))
    AND NOT EXISTS(SELECT 1 FROM msg.AutomationException X
      WHERE X.FamilyId=FM.FamilyId AND X.EventCode=C.EventCode
        AND X.RevokedUtc IS NULL AND (X.UntilUtc IS NULL OR X.UntilUtc>SYSUTCDATETIME()))
    AND (C.EventCode<>''PaymentReceived'' OR EXISTS(
      SELECT 1 FROM dbo.FeePayments P
       WHERE P.FeePaymentId=C.SourceRecordId AND P.AdmissionId=C.AdmissionId
-        AND P.Status=N''Completed'' AND P.RelatedFeePaymentId IS NULL))
+        AND P.Status=N''Completed'' AND P.RelatedFeePaymentId IS NULL
+        AND NOT EXISTS(SELECT 1 FROM dbo.FeePayments Adjustment
+          WHERE Adjustment.RelatedFeePaymentId=P.FeePaymentId)))
  ORDER BY C.CreatedUtc,C.CandidateId;
 END');
 
