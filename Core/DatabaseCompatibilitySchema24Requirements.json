@@ -89,6 +89,16 @@
       "schema": "msg",
       "name": "SetSchoolHoliday",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadPreferredMethod",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SavePreferredMethod",
+      "type": "P"
     }
   ]
 }
