@@ -98,6 +98,24 @@ internal static class CommunicationBackgroundWorker
             }
             CommunicationBackgroundEnrollment.JournalObserved(databaseWatermark);
 
+            // Prepare-for-Review rules discover source events during the
+            // authorized worker's periodic pass, even when the WinForms UI is
+            // closed. The scanner only stores idempotent review suggestions:
+            // it cannot confirm batches, enqueue dispatch or contact APIs.
+            // Failure to read a fee/student source must not prevent an
+            // otherwise authorized, already reviewed API batch from sending.
+            try
+            {
+                using var suggestions = await DatabaseHelper.QuerySqlAsync(
+                    "EXEC msg.ScanAutomationCandidates @UserId;",
+                    token, DatabaseHelper.Int("@UserId",enrollment.UserId));
+            }
+            catch(SqlException ex) when(ex.Number==50003)
+            {
+                AppExceptionHandler.LogNonFatal(ex,
+                    "Communication event review scan needs renewed school permissions");
+            }
+
             var started=DateTime.UtcNow;
             bool computerAuthorizationChecked=false;
             // Bounded processor invocation: other logon-bound task invocations
