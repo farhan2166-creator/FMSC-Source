@@ -17,12 +17,29 @@ internal static class ReplacementTemplateGuard
                 WHERE S.index_id IN (0,1) AND S.row_count>0 AND NOT (
                     N.name=N'dbo' AND T.name IN (N'DatabaseVersion',N'Roles',N'Permissions',
                         N'RolePermissions',N'BillingAutomationState',N'FeeTypes',N'AdmissionNumberCounter')
-                    OR N.name=N'msg' AND T.name=N'ChannelSettings'))
+                    OR N.name=N'msg' AND T.name IN
+                       (N'ChannelSettings',N'DispatchControl',N'AutomationRule')))
                 OR EXISTS (SELECT 1 FROM dbo.AdmissionNumberCounter
                            WHERE CounterId<>1 OR LastNumber<>0)
                 OR EXISTS (SELECT 1 FROM msg.ChannelSettings
                            WHERE Channel NOT IN ('Sms','WhatsApp','Email') OR Enabled<>0
                               OR ProviderCode IS NOT NULL OR UpdatedBy IS NOT NULL)
+                -- Only precisely seeded, inert communication controls are
+                -- valid on a never-used school. Any configured sending or
+                -- changed automation is evidence of an initialized school.
+                OR (SELECT COUNT(*) FROM msg.DispatchControl)<>1
+                OR EXISTS (SELECT 1 FROM msg.DispatchControl WHERE ControlId<>1
+                    OR MasterPaused<>0 OR UnattendedEnabled<>0
+                    OR WindowStart<>CONVERT(time(0),'08:00')
+                    OR WindowEnd<>CONVERT(time(0),'18:00')
+                    OR TimeZoneId<>N'Pakistan Standard Time'
+                    OR MaxPerMinute<>60 OR UpdatedBy IS NOT NULL)
+                OR (SELECT COUNT(*) FROM msg.AutomationRule)<>8
+                OR EXISTS (SELECT 1 FROM msg.AutomationRule
+                    WHERE EventCode NOT IN ('Admission','PaymentReceived','OutstandingFees',
+                      'UpcomingDue','OverdueFollowUp','Announcement','ExaminationResult','Birthday')
+                      OR Mode<>'Off' OR CampusId<>0 OR ClassId<>0
+                      OR ActivationBaselineUtc IS NOT NULL OR UpdatedBy IS NOT NULL)
                 THEN 1 ELSE 0 END;
             """, connection);
         if (Convert.ToInt32(check.ExecuteScalar()) != 0)
