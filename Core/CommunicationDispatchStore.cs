@@ -13,8 +13,19 @@ internal static class CommunicationDispatchStore
 {
     internal sealed record DispatchResult(bool Claimed, long? AttemptId, string State, string? ExclusionCode);
 
-    internal static async Task<DispatchResult> SendOneReviewedAsync(
-        long recipientId,string channel,CancellationToken token=default)
+    internal static Task<DispatchResult> SendOneReviewedAsync(
+        long recipientId,string channel,CancellationToken token=default) =>
+        SendOneCoreAsync(recipientId,channel,null,token);
+
+    /// <summary>For unattended dispatch only: durably journal the SQL attempt
+    /// before the external POST. A journal failure leaves SQL Unknown without
+    /// contacting the provider, never an unrecorded automatic retry.</summary>
+    internal static Task<DispatchResult> SendOneWithClaimJournalAsync(
+        long recipientId,string channel,Action<long> journal,CancellationToken token=default) =>
+        SendOneCoreAsync(recipientId,channel,journal ?? throw new ArgumentNullException(nameof(journal)),token);
+
+    private static async Task<DispatchResult> SendOneCoreAsync(
+        long recipientId,string channel,Action<long>? journal,CancellationToken token)
     {
         if (recipientId<=0) throw new ArgumentOutOfRangeException(nameof(recipientId));
         if (channel is not ("Sms" or "WhatsApp"))
@@ -54,6 +65,11 @@ internal static class CommunicationDispatchStore
             || Convert.ToString(row["ProviderCode"])!=adapter.ProviderCode
             || Convert.ToString(row["Channel"])!=channel)
             throw new InvalidOperationException("Provider claim identity changed; the attempt remains Unknown.");
+
+        // This callback must finish a durable local write before any provider
+        // traffic. If the process is interrupted afterward, a restored older
+        // database is detectable by the worker's higher attempt watermark.
+        journal?.Invoke(attemptId);
 
         // Do not retry on cancellation, timeouts, 5xx or lost SQL responses.
         // The corresponding recipient is already Unknown until resolved.
