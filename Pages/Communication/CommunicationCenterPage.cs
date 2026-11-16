@@ -27,6 +27,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         AutoSize = true, Dock = DockStyle.Top, ForeColor = AppTheme.Text
     };
     private readonly ModernTextBox sampleMessage = HumanUi.TextBox(true, 2400);
+    // Live draft view is deliberately not a recipient-specific send preview.
+    // Actual personalized text and current eligibility still require Review.
+    private readonly ModernTextBox draftPreview = HumanUi.TextBox(true, 1600);
     private readonly Label summary = new()
     {
         Dock = DockStyle.Top, AutoSize = true, ForeColor = AppTheme.Text,
@@ -114,6 +117,11 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         deliveryMethod.Name="communicationDeliveryMethod";
         deliveryMethod.Items.AddRange(new object[]{"WhatsApp Business · manual","WhatsApp · Meta API","SMS · Twilio"});
         deliveryMethod.SelectedIndex=0;
+        draftPreview.Name = "communicationDraftPreview";
+        draftPreview.ReadOnly = true;
+        draftPreview.TabStop = false;
+        draftPreview.ScrollBars = ScrollBars.Vertical;
+        draftPreview.Text = "";
         sampleMessage.ReadOnly = true;
         sampleMessage.ScrollBars = ScrollBars.Vertical;
         sampleMessage.Dock = DockStyle.Fill;
@@ -201,14 +209,20 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             if (templateChoice.SelectedItem is CommunicationPreparedMessages.ComposeTemplate selected)
                 message.Text = selected.Body;
         };
-        message.TextChanged += (_, _) => InvalidatePreview();
+        message.TextChanged += (_, _) =>
+        {
+            draftPreview.Text = message.Text;
+            InvalidatePreview();
+        };
 
         ChangeAudienceFields();
         SetStep(0);
         RefreshTemplateChoices();
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
         bool view = CurrentUser.HasPermission("Communication.View");
-        int landing = compose ? UnfinishedStep : view ? HistoryStep : AdministrationStep;
+        // The everyday entry point is the composer, not a work-in-progress
+        // list. Queue remains one click away when there is work to resume.
+        int landing = compose ? 0 : view ? HistoryStep : AdministrationStep;
         SetStep(landing);
         if (initialize)
         {
@@ -338,7 +352,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         var fields = new TableLayoutPanel
         {
             Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 1, RowCount = 6, MaximumSize = new Size(AppScale.Scale(980), 0),
+            ColumnCount = 1, RowCount = 7, MaximumSize = new Size(AppScale.Scale(980), 0),
             Padding = new Padding(AppScale.Scale(8), 0, AppScale.Scale(8), AppScale.Scale(8)), Margin = Padding.Empty
         };
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -357,6 +371,10 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         editor.Height = AppScale.Scale(200);
         fields.Controls.Add(editor, 0, 3);
         fields.Controls.Add(messageIssue, 0, 4);
+        var livePreview = HumanUi.Field("Live draft preview · review for personalized messages", draftPreview);
+        livePreview.Height = AppScale.Scale(140);
+        draftPreview.Dock = DockStyle.Fill;
+        fields.Controls.Add(livePreview, 0, 5);
         foreach (var issue in new[] { targetIssue, messageIssue })
         {
             issue.Visible = false;
@@ -364,11 +382,12 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         }
         var footer = ActionFooter(next);
         footer.Dock = DockStyle.Fill;
-        fields.Controls.Add(footer, 0, 5);
+        fields.Controls.Add(footer, 0, 6);
         fields.RowStyles[0] = new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight);
         fields.RowStyles[2] = new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight + sending.Margin.Vertical);
         fields.RowStyles[3] = new RowStyle(SizeType.Absolute, editor.Height);
-        fields.RowStyles[5] = new RowStyle(SizeType.Absolute, footer.Height);
+        fields.RowStyles[5] = new RowStyle(SizeType.Absolute, livePreview.Height);
+        fields.RowStyles[6] = new RowStyle(SizeType.Absolute, footer.Height);
         bool fitting = false;
         void FitFields()
         {
