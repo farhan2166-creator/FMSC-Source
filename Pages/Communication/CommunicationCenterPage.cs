@@ -257,6 +257,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 Defer(LoadComposeTemplatesAsync);
                 Defer(SelectReadyMethodAsync);
                 Defer(SelectSchoolLanguageAsync);
+                Defer(RefreshQueueAttentionAsync);
             }
             if (landing is HistoryStep or UnfinishedStep)
                 Defer(() => step == landing ? NavigateSessionsAsync(landing == UnfinishedStep) : Task.CompletedTask);

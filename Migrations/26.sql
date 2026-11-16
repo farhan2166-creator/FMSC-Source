@@ -62,12 +62,13 @@ CREATE TABLE msg.TemplateRevision(
   CHECK(Operation IN ('Baseline','Created','Edited','Restored')),
  CONSTRAINT CK_MsgTemplateRevisionNumber CHECK(RevisionNumber>=1)
 );
-INSERT msg.TemplateRevision
+-- Bind the newly added LanguageCode column only after ALTER TABLE
+-- completes: SQL Server compiles ordinary DML before all ALTERs in a batch.
+EXEC(N'INSERT msg.TemplateRevision
  (TemplateId,RevisionNumber,Name,Channel,Purpose,LanguageCode,Body,Active,
   Operation,ChangedBy,ChangedUtc)
-SELECT TemplateId,1,Name,Channel,Purpose,LanguageCode,Body,Active,
- 'Baseline',UpdatedBy,UpdatedUtc
-FROM msg.Template;
+ SELECT TemplateId,1,Name,Channel,Purpose,LanguageCode,Body,Active,
+  ''Baseline'',UpdatedBy,UpdatedUtc FROM msg.Template');
 
 EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadTemplateRevisions
  @UserId int,@TemplateId int

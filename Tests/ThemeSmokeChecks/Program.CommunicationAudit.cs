@@ -85,6 +85,10 @@ internal static partial class Program
                     "Changing the compose language never translates or overwrites an existing draft.");
             }
 
+            Check(CommunicationCenterPage.QueueAttentionCaption(0, 0) == "Queue"
+                && CommunicationCenterPage.QueueAttentionCaption(0, 4) == "Queue (4)"
+                && CommunicationCenterPage.QueueAttentionCaption(2, 4).Contains("2 attention"),
+                "The composer home navigation surfaces actionable Queue counts without exposing guardian content.");
             Check(CommunicationHistoryDialog.OutcomeExplanation("MetaCloud", "Accepted")
                     .Contains("not yet confirmed", StringComparison.OrdinalIgnoreCase)
                 && CommunicationHistoryDialog.OutcomeExplanation("Twilio", "Delivered")

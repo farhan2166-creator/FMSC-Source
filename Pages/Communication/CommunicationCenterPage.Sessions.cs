@@ -7,6 +7,37 @@ namespace FMSC_SMS.Pages.Communication;
 
 public sealed partial class CommunicationCenterPage
 {
+    internal static string QueueAttentionCaption(int attention, int total)
+    {
+        if (attention < 0 || total < 0 || attention > total)
+            throw new ArgumentOutOfRangeException(nameof(attention));
+        return attention > 0 ? $"Queue · {attention:N0} attention"
+            : total > 0 ? $"Queue ({total:N0})" : "Queue";
+    }
+
+    private async Task RefreshQueueAttentionAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Send")) return;
+        int actor=CurrentUser.UserId;
+        try
+        {
+            using var rows=await (operations.ReadSessions is { } fixture
+                ? fixture(true) : CommunicationManagementStore.ReadMyUnfinishedBatchesAsync());
+            if (IsDisposed || actor!=CurrentUser.UserId) return;
+            int attention=rows.Columns.Contains("QueueStatus")
+                ? rows.AsEnumerable().Count(row => string.Equals(
+                    Convert.ToString(row["QueueStatus"]), "Needs Attention", StringComparison.Ordinal))
+                : 0;
+            unfinishedButton.Text=QueueAttentionCaption(attention,rows.Rows.Count);
+            AppMetrics.FitButtonWidth(unfinishedButton,minWidth:AppScale.Scale(140));
+        }
+        catch(Exception ex)
+        {
+            // Navigation is always usable even when the optional count fails.
+            AppExceptionHandler.LogNonFatal(ex,"Communication Queue summary could not load");
+        }
+    }
+
     private readonly ModernComboBox queueView = HumanUi.Combo();
     private readonly ModernButton eventSuggestionsButton =
         PageButton("communicationEventSuggestions","Event Suggestions",168);
@@ -293,7 +324,8 @@ public sealed partial class CommunicationCenterPage
         var statuses = table.AsEnumerable().Select(row => row.Field<string>("QueueStatus")).ToArray();
         queueView.SelectedIndex = statuses.Contains("Needs Attention", StringComparer.Ordinal)
             ? 0 : statuses.Contains("Upcoming", StringComparer.Ordinal) ? 1 : 2;
-        unfinishedButton.Text = table.Rows.Count == 0 ? "Queue" : $"Queue ({table.Rows.Count:N0})";
+        unfinishedButton.Text = QueueAttentionCaption(
+            statuses.Count(status => status == "Needs Attention"), table.Rows.Count);
         AppMetrics.FitButtonWidth(unfinishedButton, minWidth: AppScale.Scale(140));
     }
 
