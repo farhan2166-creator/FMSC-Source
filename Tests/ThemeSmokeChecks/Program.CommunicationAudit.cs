@@ -439,6 +439,21 @@ internal static partial class Program
         Application.DoEvents();
         Check(templateGrid.Rows.Count == CommunicationPreparedMessages.BuiltIns.Count + 1,
             "Clearing search restores built-in and school templates");
+        var templateCategory = (ModernComboBox)templates.Controls
+            .Find("communicationTemplateCategory", true).Single();
+        templateCategory.SelectedItem = "Fees & Payments";
+        Application.DoEvents();
+        Check(templateGrid.Rows.Count > 0 &&
+            templateGrid.Rows.Cast<DataGridViewRow>().All(row =>
+                row.DataBoundItem is DataRowView item &&
+                (item.Row.Field<string>("Purpose") == "FeeReminder" ||
+                 (item.Row.Field<string>("Name") ?? "")
+                    .Contains("fee", StringComparison.OrdinalIgnoreCase))),
+            "Selecting Fees & Payments exposes only eligible financial templates");
+        templateCategory.SelectedItem = "All Categories";
+        Application.DoEvents();
+        Check(templateGrid.Rows.Count == CommunicationPreparedMessages.BuiltIns.Count + 1,
+            "Clearing category restores built-in and school templates");
         templates.Close();
         CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
             new[] { "Communication.Send", "Students.View", "Fees.View" });
