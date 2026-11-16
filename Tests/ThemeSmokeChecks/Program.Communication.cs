@@ -408,6 +408,24 @@ internal static partial class Program
         Check(Descendants(targetCard).Contains(templates)
             && Descendants(targetCard).OfType<ModernTextBox>().Any(),
             "Audience, prepared templates and message editing are reachable in the composition step");
+        using (var events = new CommunicationAutomationInboxDialog(
+            () => Task.FromResult<IReadOnlyList<CommunicationAutomationInboxStore.Suggestion>>(
+                new[] { new CommunicationAutomationInboxStore.Suggestion(
+                    91,"Admission",101,101,"Synthetic admissions student","FMSC-101",DateTime.UtcNow) }),
+            _ => Task.CompletedTask))
+        {
+            events.Show(host);
+            Application.DoEvents();
+            var eventGrid=(DataGridView)events.Controls.Find("communicationAutomationInbox",true).Single();
+            var prepare=(ModernButton)events.Controls.Find("communicationPrepareEvent",true).Single();
+            Check(eventGrid.Rows.Count==1 && prepare.Enabled,
+                "School event suggestions show an actionable, permission-independent synthetic preview.");
+            prepare.PerformClick();
+            Application.DoEvents();
+            Check(events.SelectedSuggestion?.CandidateId==91,
+                "Preparing an event only returns its source identity to the normal composer.");
+            events.Close();
+        }
         host.Close();
     }
 }
