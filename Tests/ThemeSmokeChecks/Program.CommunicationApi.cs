@@ -5,6 +5,21 @@ internal static partial class Program
 {
     private static void CheckCommunicationApiWorkflow()
     {
+        var schoolZone=TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time");
+        using(var schedule=new CommunicationScheduleDialog(schoolZone))
+        {
+            schedule.Show();
+            Application.DoEvents();
+            var when=Field<DateTimePicker>(schedule,"when");
+            var chosen=CommunicationSchoolTime.LocalNow(schoolZone).AddHours(2);
+            when.Value=chosen;
+            ((ModernButton)schedule.Controls.Find("communicationConfirmSchedule",true).Single()).PerformClick();
+            Check(schedule.DialogResult==DialogResult.OK
+                && schedule.Due.Offset==schoolZone.GetUtcOffset(chosen)
+                && Math.Abs((schedule.Due.DateTime-chosen).TotalSeconds)<1,
+                "Scheduling preserves the operator's school wall time and configured timezone independently of the PC");
+            schedule.Close();
+        }
         using(var page=new CommunicationCenterPage(false))
         {
             var method=Field<ModernComboBox>(page,"deliveryMethod");

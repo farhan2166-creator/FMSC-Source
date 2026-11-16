@@ -79,7 +79,7 @@ public sealed partial class CommunicationCenterPage
             grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "DueLocal", DataPropertyName = "DueLocal",
-                HeaderText = "Scheduled for", MinimumWidth = AppScale.Scale(135),
+                HeaderText = "Scheduled (school time)", MinimumWidth = AppScale.Scale(135),
                 FillWeight = 95, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill
             });
             grid.Columns["DueLocal"]!.DefaultCellStyle.Format = "dd MMM yyyy HH:mm";
@@ -308,8 +308,8 @@ public sealed partial class CommunicationCenterPage
             if (unfinished)
             {
                 if (table.Columns.Contains("DueUtc") && row["DueUtc"] != DBNull.Value)
-                    row["DueLocal"] = DateTime.SpecifyKind(
-                        Convert.ToDateTime(row["DueUtc"]), DateTimeKind.Utc).ToLocalTime();
+                    row["DueLocal"] = table.Columns.Contains("DueSchool")
+                        ? row["DueSchool"] : row["DueUtc"];
                 continue;
             }
             row["StateText"] = Convert.ToString(row["Method"]) == "WhatsApp Business (manual)"

@@ -1,0 +1,177 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "ReadSendingTimeZone",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "PreparedEventEligible",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "ManualOpenEvidence",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "ActiveFamilyFeeMembers",
+      "type": "IF"
+    }
+  ],
+  "parameters": [
+    {
+      "schema": "msg",
+      "objectName": "ReadSendingTimeZone",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordShellHandoff",
+      "name": "@OpenCount",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordShellHandoff",
+      "name": "@RenderedBody",
+      "type": "nvarchar",
+      "maxLength": 3200,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecordShellHandoff",
+      "name": "@ShellOpened",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isOutput": false
+    }
+  ],
+  "columns": [
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "RecipientId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "OpenCount",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "RenderedBody",
+      "type": "nvarchar",
+      "maxLength": 3200,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "PreparedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "PreparedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "LaunchedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "LaunchedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    }
+  ],
+  "uniqueIndexes": [
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "PK_MsgManualOpenEvidence",
+      "keys": "RecipientId,OpenCount"
+    }
+  ],
+  "checkConstraints": [
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "CK_MsgManualOpenEvidenceLaunch"
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "CK_MsgManualOpenEvidenceCount"
+    },
+    {
+      "schema": "msg",
+      "objectName": "ManualOpenEvidence",
+      "name": "CK_MsgManualOpenEvidenceBody"
+    }
+  ]
+}

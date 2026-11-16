@@ -42,7 +42,8 @@ internal static class CommunicationHistoryStore
                 Evidence.AttemptId,Evidence.RequestUtc,Evidence.ResponseUtc,
                 Evidence.ProviderMessageId,Evidence.FailureCode,
                 COALESCE(S.StudentName,T.StaffName,N'School record') RecipientName,
-                COALESCE(S.AdmissionNumber,T.StaffNumber) RecordNumber,RIGHT(R.PhoneE164,4) LastFour,J.RenderedBody
+                COALESCE(S.AdmissionNumber,T.StaffNumber) RecordNumber,RIGHT(R.PhoneE164,4) LastFour,
+                COALESCE(J.RenderedBody,ManualEvidence.RenderedBody) RenderedBody
             FROM msg.Batch B
             LEFT JOIN msg.ManualBatch M ON M.BatchId=B.BatchId
             LEFT JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
@@ -72,6 +73,10 @@ internal static class CommunicationHistoryStore
                 WITH (Kind varchar(8),RecordId int,Phone varchar(16),RenderedBody nvarchar(1600) '$.Text') X
                 WHERE X.Kind=R.RecipientKind AND X.RecordId=COALESCE(R.AdmissionId,R.StaffId) AND X.Phone=R.PhoneE164
             ) J
+            OUTER APPLY (
+                SELECT TOP(1) E.RenderedBody FROM msg.ManualOpenEvidence E
+                WHERE E.RecipientId=R.RecipientId ORDER BY E.OpenCount DESC
+            ) ManualEvidence
             WHERE B.BatchId=@BatchId
             ORDER BY R.RecipientId;
             """;

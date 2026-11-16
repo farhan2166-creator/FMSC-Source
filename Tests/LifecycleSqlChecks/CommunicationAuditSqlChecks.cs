@@ -32,7 +32,7 @@ internal static class CommunicationAuditSqlChecks
         var b = Admit("Audit B sibling", "+923008000001", true, a.Id, days: 1);
         var otherClass = Admit("Audit C another class", "03008000002", true);
         var otherCampus = Admit("Audit D another campus", "03008000003", true);
-        var declined = Admit("Audit E declined", "03008000001", false, a.Id);
+        var declined = Admit("Audit E declined", "03008000001", false);
         var unknown = Admit("Audit F unknown", "03008000004", null);
         var invalid = Admit("Audit G invalid", null, true);
         var inactive = Admit("Audit H inactive", "03008000005", true);
@@ -81,7 +81,7 @@ internal static class CommunicationAuditSqlChecks
         decimal? familyBalance=CommunicationPreparedMessages.FromPreview(
             familyFeeAudience.Entries.Single(e=>e.Included)).Outstanding;
         r.Check(singleBalance==Due(a.Id) &&
-            familyBalance==Due(a.Id)+Due(b.Id)+Due(declined.Id),
+            familyBalance==Due(a.Id)+Due(b.Id),
             "The single-student notice uses only that student's live charges; the family notice includes linked active siblings.");
         r.Check(familyFeeAudience.Included==1,
             "The shared guardian receives one family-fee communication rather than one per sibling.");
@@ -100,6 +100,10 @@ internal static class CommunicationAuditSqlChecks
             if (scope.Audience == CommunicationAudience.OutstandingFees)
                 foreach (var entry in reviewed.Entries.Where(e => e.EligiblePhone is not null))
                     feeMembers.Rows.Add(entry.Kind, entry.RecordId, entry.EligiblePhone);
+            if(scope.Audience==CommunicationAudience.FeeFamily)
+                foreach(var entry in reviewed.Entries.Where(e=>e.Included))
+                    foreach(var member in entry.FamilyFees)
+                        feeMembers.Rows.Add("Student",member.RecordId,entry.PhoneE164);
             return Sql.Proc("msg.ConfirmReviewedManualBatch", Sql.P("@UserId", actor ?? f.Admin), Sql.P("@ClientRequestId", key ?? Guid.NewGuid()),
                 Sql.P("@Channel", scope.Channel), Sql.P("@Purpose", scope.Purpose), Sql.P("@Body", body), Sql.P("@Audience", scope.Audience.ToString()),
                 Sql.P("@CampusId", scope.CampusId), Sql.P("@ClassId", scope.ClassId), Sql.P("@StudentId", scope.StudentId), Sql.P("@StaffId", scope.StaffId),
@@ -193,6 +197,16 @@ internal static class CommunicationAuditSqlChecks
                 Sql.P("@Id",templateId))==3,
             "A missing version cannot change the template or append false history.");
 
+        await Task.WhenAll(new[]{"Concurrent first notice","Concurrent second notice"}.Select(body=>Task.Run(()=>
+        {
+            using var savedTemplate=Sql.Proc("msg.SaveTemplate",Sql.P("@UserId",f.Admin),Sql.P("@TemplateId",templateId),
+                Sql.P("@Name","Audit template"),Sql.P("@Channel","WhatsApp"),Sql.P("@Purpose","Announcement"),
+                Sql.P("@Body",body),Sql.P("@Active",true));
+        })));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.TemplateRevision WHERE TemplateId=@Id",Sql.P("@Id",templateId))==5
+            && Sql.Count("SELECT COUNT(*) FROM msg.TemplateRevision WHERE TemplateId=@Id AND Body IN(N'Concurrent first notice',N'Concurrent second notice')",Sql.P("@Id",templateId))==2,
+            "Concurrent template edits serialize into distinct durable versions without overwriting either historical body.");
+
         var one = Confirm(fees with { StudentId = b.Id }, single);
         r.Check(Convert.ToInt64(one.Rows[0]["RecipientCount"]) == 1, "SQL confirms exactly the single-student fee audience reviewed in Collection.");
         Guid key = Guid.NewGuid();
@@ -237,14 +251,15 @@ internal static class CommunicationAuditSqlChecks
         bool addedSiblingRefused = false;
         try { await CommunicationPreparedMessages.ReadLiveAsync(feeRecipient, true); }
         catch (CommunicationValidationException) { addedSiblingRefused = true; }
-        r.Check(addedSiblingRefused, "A newly eligible sibling cannot be added to a reviewed WhatsApp fee message.");
+        r.Check(addedSiblingRefused, "A newly eligible unrelated record cannot be added to a reviewed WhatsApp fee message.");
         Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin), Sql.P("@AdmissionId", declined.Id), Sql.P("@Consent", false), Sql.P("@Authority", "Students.Admit"));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND ShellHandoffUtc IS NULL",
             Sql.P("@Id", recipient)) == 1, "SQL preparation does not acknowledge a browser handoff.");
-        Sql.Proc("msg.RecordShellHandoff", Sql.P("@UserId", f.Admin), Sql.P("@RecipientId", recipient));
+        Sql.Proc("msg.RecordShellHandoff", Sql.P("@UserId", f.Admin), Sql.P("@RecipientId", recipient), Sql.P("@OpenCount", Sql.Count("SELECT OpenCount FROM msg.ManualHandoff WHERE RecipientId=@Id", Sql.P("@Id", recipient))), Sql.P("@RenderedBody", "Synthetic opened message & اطلاع"), Sql.P("@ShellOpened",true));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND ShellHandoffUtc IS NOT NULL",
             Sql.P("@Id", recipient)) == 1, "Acknowledging the shell handoff is durable for resumed sessions.");
         Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin), Sql.P("@AdmissionId", a.Id), Sql.P("@Consent", false), Sql.P("@Authority", "Students.Admit"));
+        Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin), Sql.P("@AdmissionId", b.Id), Sql.P("@Consent", false), Sql.P("@Authority", "Students.Admit"));
         var excluded = Sql.Proc("msg.OpenManualHandoff", Sql.P("@UserId", f.Admin), Sql.P("@RecipientId", recipient));
         r.Check(!Convert.ToBoolean(excluded.Rows[0]["Opened"]), "Withdrawal between preparation and reopening exposes neither destination nor message.");
         var history = Sql.Proc("msg.ReadHistory", Sql.P("@UserId", f.Admin)).AsEnumerable().Single(row => (Guid)row["BatchId"] == batch);
@@ -265,6 +280,25 @@ internal static class CommunicationAuditSqlChecks
         r.Check(chosen.Entries.Single() is { Included: true, PhoneE164: "+923008000022" }
             && thisStudent.Entries.Single() is { Included: true, PhoneE164: "+923008000022" },
             "Individual and family messages use one valid guardian number from the latest linked admission.");
+        var familyClass = await CommunicationRecipientResolver.ReadAsync(target);
+        var sharedClass = familyClass.Entries.Where(e => e.FamilyId == chosen.Entries.Single().FamilyId).ToArray();
+        r.Check(sharedClass.Length == 3 && sharedClass.Count(e => e.Included) == 1
+            && sharedClass.All(e => e.EligiblePhone == "+923008000022"),
+            "Class-wide communication shares affirmative family consent and the latest valid guardian number, deduplicated once.");
+        var schoolBatch = Confirm(target, familyClass);
+        long sharedClassRecipient = Convert.ToInt64(Sql.Scalar(
+            "SELECT R.RecipientId FROM msg.Recipient R WHERE R.BatchId=@Batch AND R.PhoneE164='+923008000022'",
+            Sql.P("@Batch", (Guid)schoolBatch.Rows[0]["BatchId"])));
+        using (var opened = Sql.Proc("msg.OpenManualHandoff", Sql.P("@UserId", f.Admin),
+            Sql.P("@RecipientId", sharedClassRecipient)))
+            r.Check(Convert.ToBoolean(opened.Rows[0]["Opened"]),
+                "SQL confirmation and manual handoff use the same shared contact as the class preview.");
+        Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin), Sql.P("@AdmissionId", noPhone.Id), Sql.P("@Consent", false), Sql.P("@Authority", "Students.Admit"));
+        using (var revoked = Sql.Proc("msg.OpenManualHandoff", Sql.P("@UserId", f.Admin),
+            Sql.P("@RecipientId", sharedClassRecipient)))
+            r.Check(!Convert.ToBoolean(revoked.Rows[0]["Opened"]),
+                "Revoking the family's only affirmative consent blocks class-wide handoff at dispatch.");
+        Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin), Sql.P("@AdmissionId", noPhone.Id), Sql.P("@Consent", true), Sql.P("@Authority", "Students.Admit"));
         var reviewedGuardian = Confirm(familyFees, chosen);
         long guardianRecipient = Recipient((Guid)reviewedGuardian.Rows[0]["BatchId"]);
         Sql.Query("UPDATE dbo.Students SET ContactNumber=N'03008000023' WHERE AdmissionId=@Id", Sql.P("@Id", newerPhone.Id));

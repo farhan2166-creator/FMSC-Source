@@ -51,6 +51,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
     private DataTable? ruleData;
     private DataTable? quotaData;
     private bool masterPaused, backgroundEnabled;
+    private string schoolTimeZoneId = "";
     private bool busy;
     internal bool Changed { get; private set; }
 
@@ -256,7 +257,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         {
             await CommunicationQueuePolicyStore.SaveSendingWindowAsync(
                 TimeOnly.FromDateTime(startTime.Value), TimeOnly.FromDateTime(endTime.Value),
-                TimeZoneInfo.Local.Id, Decimal.ToInt32(speed.Value), backgroundEnabled);
+                schoolTimeZoneId, Decimal.ToInt32(speed.Value), backgroundEnabled);
             Changed = true;
             queueFeedback.Text = "Sending hours saved. Background processing remains opt-in.";
         });
@@ -308,6 +309,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         using var rows = await CommunicationQueuePolicyStore.ReadDispatchControlAsync();
         if (rows.Rows.Count != 1) throw new InvalidOperationException("Sending controls are not available.");
         DataRow row = rows.Rows[0];
+        schoolTimeZoneId = Convert.ToString(row["TimeZoneId"]) ?? "";
         masterPaused = row.Field<bool>("MasterPaused");
         backgroundEnabled = row.Field<bool>("UnattendedEnabled");
         workerToggle.Text = backgroundEnabled ? "Disable Background Sending" : "Enable Background Sending";

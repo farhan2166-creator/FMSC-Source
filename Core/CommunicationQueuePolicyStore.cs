@@ -3,9 +3,8 @@ using System.Data;
 namespace FMSC_SMS.Core;
 
 /// <summary>
-/// Permission-checked configuration boundary for future unattended communication.
-/// Schema 23 starts with background automation Off, and SQL ClaimRecipient remains
-/// the final authority for master pause and reviewed batch due dates.
+/// Persistent, permission-checked sending configuration. Background processing
+/// starts Off; SQL ClaimRecipient enforces pause, limits and reviewed due dates.
 /// </summary>
 internal static class CommunicationQueuePolicyStore
 {
@@ -19,6 +18,17 @@ internal static class CommunicationQueuePolicyStore
     {
         RequireAdministrator();
         return DatabaseHelper.QueryUserAsync("msg.ReadDispatchControl");
+    }
+
+    internal static async Task<TimeZoneInfo> ReadSchoolTimeZoneAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Send"))
+            throw new UnauthorizedAccessException("Communication.Send is required.");
+        int actor = CurrentUser.UserId;
+        using var rows = await DatabaseHelper.QueryUserAsync("msg.ReadSendingTimeZone");
+        if (actor != CurrentUser.UserId || rows.Rows.Count != 1)
+            throw new CommunicationValidationException("School sending time could not be verified. Open the schedule again.");
+        return TimeZoneInfo.FindSystemTimeZoneById(Convert.ToString(rows.Rows[0]["TimeZoneId"])!);
     }
 
     internal static Task<DataTable> ReadProviderQuotasAsync()

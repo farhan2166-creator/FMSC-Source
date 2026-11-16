@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.Json;
 
 namespace FMSC_SMS.Core;
 
@@ -38,7 +39,11 @@ internal sealed record CommunicationPreviewEntry(
     // Declined, unrecorded, invalid and suppressed rows never expose one.
     internal string? EligiblePhone { get; init; }
     internal CommunicationPreparedMessages.Values? PreparedValues { get; init; }
+    internal IReadOnlyList<CommunicationFamilyFeeMember> FamilyFees { get; init; } = Array.Empty<CommunicationFamilyFeeMember>();
 }
+
+internal sealed record CommunicationFamilyFeeMember(int RecordId,string? RecordName,
+    string? AdmissionNumber,DateTime? AdmissionDate,decimal Outstanding);
 
 internal sealed class CommunicationPreview
 {
@@ -69,12 +74,16 @@ internal static class CommunicationRecipientResolver
         SELECT S.AdmissionId RecordId, S.StudentName RecordName,
                S.AdmissionNumber, S.AdmissionDate, S.FatherName,
                CASE WHEN E.Status=N'Active' THEN ClassRecord.ClassName END ClassName,
-               CASE WHEN @StudentId>0 AND @Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily') THEN Guardian.PhoneE164 ELSE S.ContactNumber END ContactNumber,
-               CASE WHEN @StudentId>0 AND @Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily') THEN Guardian.HasConsent ELSE S.SchoolMessageConsent END SchoolMessageConsent,
-               CONVERT(varchar(8),'Student') Kind, B.Outstanding, FM.FamilyId
+               Guardian.PhoneE164 ContactNumber,
+               Guardian.HasConsent SchoolMessageConsent,
+               CONVERT(varchar(8),'Student') Kind, B.Outstanding, FM.FamilyId,
+               (SELECT F.AdmissionId RecordId,F.StudentName RecordName,F.AdmissionNumber,
+                    F.AdmissionDate,F.Outstanding
+                FROM msg.ActiveFamilyFeeMembers(S.AdmissionId) F
+                WHERE @Audience=N'FeeFamily' ORDER BY F.AdmissionId FOR JSON PATH) FamilyFeesJson
         FROM dbo.Students S
         LEFT JOIN dbo.FamilyMembers FM ON FM.AdmissionId=S.AdmissionId
-        OUTER APPLY msg.RecordGuardian(CASE WHEN @Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily') THEN @StudentId ELSE 0 END) Guardian
+        OUTER APPLY msg.RecordGuardian(S.AdmissionId) Guardian
         OUTER APPLY (
             SELECT TOP (1) E.ClassSectionId, E.Status
             FROM dbo.Enrollments E WHERE E.AdmissionId=S.AdmissionId
@@ -163,6 +172,9 @@ internal static class CommunicationRecipientResolver
         var preview = BuildPreview(candidates, blocked.AsEnumerable()
             .Select(row => Convert.ToString(row["PhoneE164"]) ?? "")
             .ToHashSet(StringComparer.Ordinal), target.Audience == CommunicationAudience.Staff);
+        if(target.Audience==CommunicationAudience.FeeFamily &&
+            preview.Entries.Any(e=>e.Included && e.FamilyFees.Count==0))
+            throw new CommunicationValidationException("The family fee review is incomplete. Refresh the family records before continuing.");
         return target.Audience == CommunicationAudience.OutstandingFees ? PrepareFeePreview(preview) : preview;
     }
 
@@ -221,17 +233,30 @@ internal static class CommunicationRecipientResolver
                 : !destinations.Add(number) ? "Duplicate destination"
                 : "Included";
             // Never show denied-consent phone numbers in the user-facing preview.
-            entries.Add(new CommunicationPreviewEntry(id, name, kind,
+            var entry = new CommunicationPreviewEntry(id, name, kind,
                 reason == "Included" ? number : null, reason, balance,
                 admissionNumber, admissionDate) {
                 EligiblePhone = reason is "Included" or "Duplicate destination" ? number : null,
                 FatherName = reason == "Included" ? fatherName : null,
                 ClassName = reason == "Included" ? className : null,
                 FamilyId = candidates.Columns.Contains("FamilyId") && !row.IsNull("FamilyId")
-                    ? Convert.ToInt32(row["FamilyId"]) : null
-            });
+                    ? Convert.ToInt32(row["FamilyId"]) : null,
+                FamilyFees = reason=="Included" ? ReadFamilyFees(row) : Array.Empty<CommunicationFamilyFeeMember>()
+            };
+            if(entry.FamilyFees.Count>0)
+                entry=entry with { PreparedValues=CommunicationPreparedMessages.FamilyFeeValues(entry) };
+            entries.Add(entry);
         }
         return new CommunicationPreview(entries);
+    }
+
+    private static IReadOnlyList<CommunicationFamilyFeeMember> ReadFamilyFees(DataRow row)
+    {
+        if(!row.Table.Columns.Contains("FamilyFeesJson") || row.IsNull("FamilyFeesJson"))
+            return Array.Empty<CommunicationFamilyFeeMember>();
+        string json=Convert.ToString(row["FamilyFeesJson"]) ?? "";
+        return string.IsNullOrWhiteSpace(json) ? Array.Empty<CommunicationFamilyFeeMember>()
+            : JsonSerializer.Deserialize<CommunicationFamilyFeeMember[]>(json) ?? Array.Empty<CommunicationFamilyFeeMember>();
     }
 
     internal static CommunicationPreview PrepareFeePreview(CommunicationPreview preview)

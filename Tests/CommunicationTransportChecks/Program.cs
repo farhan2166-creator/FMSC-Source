@@ -7,6 +7,16 @@ using FMSC_SMS.Core;
 int count=0;
 void Check(bool value,string description){if(!value)throw new Exception(description);count++;}
 void Refuse(Action action,string description){try{action();}catch(InvalidOperationException){count++;return;}throw new Exception(description);}
+// School scheduling must not depend on the operator computer's timezone.
+var schoolZone=TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time");
+var schoolInstant=CommunicationSchoolTime.ToInstant(new DateTime(2030,1,15,10,30,0,DateTimeKind.Local),schoolZone);
+Check(schoolInstant.UtcDateTime==new DateTime(2030,1,15,5,30,0,DateTimeKind.Utc),
+    "School wall time converts using the configured timezone, ignoring the PC DateTime kind");
+var dstZone=TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+Refuse(()=>CommunicationSchoolTime.ToInstant(new DateTime(2030,3,10,2,30,0),dstZone),
+    "A nonexistent school time cannot silently shift a paid message");
+Refuse(()=>CommunicationSchoolTime.ToInstant(new DateTime(2030,11,3,1,30,0),dstZone),
+    "An ambiguous school time requires another explicit scheduling choice");
 var credential=new CommunicationProviderCredentialStore.Credential(1,"WhatsApp","MetaCloud","123456789","987654321","fictional-token-never-real","");
 CommunicationMetaTransport.ValidateCredentials(credential);
 Check(!credential.ToString().Contains(credential.ApiToken),"Credential diagnostics redact secrets");
@@ -40,6 +50,21 @@ var savedReview=JsonSerializer.Deserialize<CommunicationReviewedContent.Reviewed
 Check(CommunicationReviewedContent.Matches(savedReview,target,preview,entry,"Due [OutstandingAmount]")
     && !CommunicationReviewedContent.Matches(savedReview with {Text="A different reviewed message"},target,preview,entry,"Due [OutstandingAmount]"),
     "Dispatch refuses a saved preview whose text differs from the actual rendered message, even if its hash was retained");
+var familyTarget=target with {Audience=CommunicationAudience.FeeFamily,StudentId=1,CampusId=0,ClassId=0};
+var familyEntry=entry with {Outstanding=2800,PreparedValues=null,FamilyFees=new[]{
+    new CommunicationFamilyFeeMember(1,"First child","001",new DateTime(2026,1,1),2300),
+    new CommunicationFamilyFeeMember(2,"Second child","002",new DateTime(2026,2,1),500)}};
+var familyValues=CommunicationPreparedMessages.FamilyFeeValues(familyEntry);
+Check(familyValues.RecordName=="First child, Second child" && familyValues.Outstanding==2800
+    && familyValues.FatherName is null && familyValues.ClassName is null && familyValues.AdmissionDate is null,
+    "Family fee fields describe every included child without assigning one child's class or admission date to the family");
+var reviewedFamily=familyEntry with {PreparedValues=familyValues};
+string familyReview=CommunicationReviewedContent.ReviewJson(familyTarget,new(new[]{reviewedFamily}),"Family fee notice.");
+Check(familyReview!=CommunicationReviewedContent.ReviewJson(familyTarget,
+    new(new[]{reviewedFamily with {FamilyFees=new[]{familyEntry.FamilyFees[0],familyEntry.FamilyFees[1] with {RecordId=3}}}}),"Family fee notice."),
+    "Swapping a family member while preserving the same balance invalidates even a literal family message");
+Check(JsonSerializer.Deserialize<CommunicationReviewedContent.Reviewed[]>(familyReview)![0].FeeMembers.Length==2,
+    "SQL claim evidence includes every active family member and balance");
 string approved="""{"data":[{"name":"fee_reminder","language":"en_US","status":"APPROVED","components":[{"type":"HEADER","format":"TEXT","text":"School"},{"type":"BODY","text":"Dear {{1}}, balance PKR {{2}}."},{"type":"FOOTER","text":"Thank you"}]},{"name":"draft","language":"en","status":"PENDING","components":[{"type":"BODY","text":"Draft"}]},{"name":"media","language":"en","status":"APPROVED","components":[{"type":"HEADER","format":"IMAGE"},{"type":"BODY","text":"Body"}]},{"name":"buttons","language":"en","status":"APPROVED","components":[{"type":"BODY","text":"Body"},{"type":"BUTTONS","buttons":[]}]}]}""";
 var handler=new Fake(async request=>{
     Check(request.RequestUri!.Host=="graph.facebook.com" && request.RequestUri.Scheme=="https","Only official fixed HTTPS host used");
@@ -59,6 +84,16 @@ using(var client=new HttpClient(handler))
     var outcome=await CommunicationMetaTransport.SendOnceAsync(credential,"+923001234567",selection.Payload(values),client,default);
     Check(outcome.State=="Accepted" && outcome.ProviderMessageId=="wamid.fictional","Submission never claims sent or delivered");
     Check(handler.Posts==1,"One explicit send makes exactly one POST");
+}
+foreach(var status in new[]{HttpStatusCode.TooManyRequests,HttpStatusCode.ServiceUnavailable})
+{
+    var unavailable=new Fake(_=>Task.FromResult(Json(status,"{}")));
+    using var readClient=new HttpClient(unavailable);
+    bool temporary=false;
+    try { await CommunicationMetaTransport.ReadTemplatesAsync(credential,readClient,default); }
+    catch(CommunicationValidationException ex) { temporary=ex.IsTemporary; }
+    Check(temporary && unavailable.Posts==0,
+        "A transient read-only Meta outage defers its channel without authorizing or retrying a message POST");
 }
 foreach(var scenario in new[]{(HttpStatusCode.BadRequest,"{}","Failed"),(HttpStatusCode.Unauthorized,"{}","Failed"),
     (HttpStatusCode.InternalServerError,"{}","Unknown"),(HttpStatusCode.TooManyRequests,"{}","Unknown"),

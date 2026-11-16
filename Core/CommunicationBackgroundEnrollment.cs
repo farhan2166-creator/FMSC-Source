@@ -37,12 +37,14 @@ internal static class CommunicationBackgroundEnrollment
             !CurrentUser.HasPermission("Communication.Configure") ||
             !CurrentUser.HasPermission("Communication.Send"))
             throw new UnauthorizedAccessException("An authorized FMSC administrator must enroll the background processor.");
+        int actor=CurrentUser.UserId;
         if (!UpdateDeviceKey.IsEnrolled)
             throw new UnauthorizedAccessException("Authorize this computer for FMSC updates before enrolling unattended communication.");
         var authorization=await UpdateGitReader.CheckAsync(token);
         if (!authorization.Authorized)
             throw new UnauthorizedAccessException("Computer authorization could not be confirmed. " + authorization.Message);
-        int actor=CurrentUser.UserId;
+        if (actor!=CurrentUser.UserId || !CurrentUser.IsAdministrator)
+            throw new UnauthorizedAccessException("The school administrator changed during enrollment.");
         string sid=CurrentSid();
         byte[] secret=RandomNumberGenerator.GetBytes(32);
         try
@@ -57,18 +59,29 @@ internal static class CommunicationBackgroundEnrollment
                 DatabaseHelper.Int("@UserId",actor));
             long max=water.Rows.Count==1 ? Convert.ToInt64(water.Rows[0]["MaxAttemptId"])
                 : throw new InvalidOperationException("Could not establish the school attempt watermark.");
+            RequireSameAdministrator(actor);
             // SQL registration holds all existing schedules for deliberate
             // review; a restored or preexisting pending batch never auto-starts.
             await DatabaseHelper.ExecuteUserAsync("msg.RegisterBackgroundWorker",
                 DatabaseHelper.P("@EnrollmentId",enrollmentId),
                 DatabaseHelper.P("@WindowsSid",sid),
                 new SqlParameter("@SecretHash",SqlDbType.VarBinary,32) { Value=hash });
+            RequireSameAdministrator(actor);
             Write(new Enrollment(enrollmentId,actor,sid,Convert.ToBase64String(secret),max));
             await CommunicationBackgroundTaskSchedule.ConfigureAsync(true,token);
+            RequireSameAdministrator(actor);
             await DatabaseHelper.ExecuteUserAsync("msg.SetUnattendedSending",
                 DatabaseHelper.Bit("@Enabled",true));
         }
         finally { CryptographicOperations.ZeroMemory(secret); }
+    }
+
+    private static void RequireSameAdministrator(int actor)
+    {
+        if(actor!=CurrentUser.UserId || !CurrentUser.IsAdministrator ||
+            !CurrentUser.HasPermission("Communication.Configure") ||
+            !CurrentUser.HasPermission("Communication.Send"))
+            throw new UnauthorizedAccessException("The school administrator changed during enrollment.");
     }
 
     internal static async Task DisableAsync(CancellationToken token=default)

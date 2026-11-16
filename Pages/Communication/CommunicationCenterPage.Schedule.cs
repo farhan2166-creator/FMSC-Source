@@ -22,11 +22,14 @@ public sealed partial class CommunicationCenterPage
                 request == Guid.Empty || reviewed.Included <= 0)
                 throw new CommunicationValidationException(
                     "The recipients or message changed. Review the message again before scheduling.");
-            using var dialog = new CommunicationScheduleDialog();
+            int openingActor = CurrentUser.UserId;
+            var schoolZone = await CommunicationQueuePolicyStore.ReadSchoolTimeZoneAsync();
+            if (IsDisposed || openingActor != CurrentUser.UserId) return;
+            using var dialog = new CommunicationScheduleDialog(schoolZone);
             if (dialog.ShowDialog(FindForm()) != DialogResult.OK)
                 return;
             if (!Confirm($"Schedule {reviewed.Included:N0} reviewed API message(s) for " +
-                dialog.Due.ToLocalTime().ToString("dd MMM yyyy h:mm tt") +
+                dialog.SchoolTimeLabel +
                 "? Provider charges may apply when the approved messages are sent.",
                 "Confirm Schedule", false))
                 return;

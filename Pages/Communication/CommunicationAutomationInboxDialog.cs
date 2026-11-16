@@ -126,7 +126,7 @@ internal sealed class CommunicationAutomationInboxDialog : ApplicationWindowForm
                 " suggestion for "+selected.StudentName+"?",
                 Text,MessageBoxButtons.YesNo,MessageBoxIcon.Question,
                 MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
-            await dismissAction(selected.CandidateId);
+            await this.dismissAction(selected.CandidateId);
             await LoadRowsAsync();
         });
         Shown+=async (_,_)=>await RunAsync(LoadRowsAsync);

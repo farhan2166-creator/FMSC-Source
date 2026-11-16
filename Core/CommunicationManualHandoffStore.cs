@@ -11,7 +11,7 @@ internal sealed record CommunicationManualRecipient(
     long RecipientId, string RecordName, string LastFour, string State, bool ShellHandoffRecorded = false);
 
 internal sealed record CommunicationManualOpen(
-    bool Allowed, Uri? Link, string? ExclusionCode, string? Message = null);
+    bool Allowed, Uri? Link, string? ExclusionCode, string? Message = null, int OpenCount = 0);
 
 internal static class CommunicationManualHandoffStore
 {
@@ -58,7 +58,8 @@ internal static class CommunicationManualHandoffStore
             var fields = await CommunicationPreparedMessages.ReadLiveAsync(recipientId, feeAmount);
             body = CommunicationPreparedMessages.Render(body, fields);
         }
-        return new CommunicationManualOpen(true,BuildClickToChatLink(phone,body),null,body);
+        return new CommunicationManualOpen(true,BuildClickToChatLink(phone,body),null,body,
+            Convert.ToInt32(row["OpenCount"]));
     }
 
     internal static Task MarkAsync(long recipientId,string result, bool recoveredReport)
@@ -72,8 +73,17 @@ internal static class CommunicationManualHandoffStore
             DatabaseHelper.Bit("@RecoveredReport", recoveredReport));
     }
 
-    internal static Task RecordShellHandoffAsync(long recipientId) =>
-        DatabaseHelper.ExecuteUserAsync("msg.RecordShellHandoff", DatabaseHelper.BigInt("@RecipientId", recipientId));
+    internal static Task RecordHandoffEvidenceAsync(long recipientId, CommunicationManualOpen opened, bool shellOpened)
+    {
+        RequireSender();
+        if(!opened.Allowed || opened.OpenCount<=0 || string.IsNullOrWhiteSpace(opened.Message) || opened.Message.Length>1600)
+            throw new CommunicationValidationException("Open and review the current WhatsApp message first.");
+        return DatabaseHelper.ExecuteUserAsync("msg.RecordShellHandoff",
+            DatabaseHelper.BigInt("@RecipientId", recipientId),
+            DatabaseHelper.Int("@OpenCount",opened.OpenCount),
+            DatabaseHelper.P("@RenderedBody",opened.Message),
+            DatabaseHelper.Bit("@ShellOpened",shellOpened));
+    }
 
     /// <summary>
     /// Official WhatsApp click-to-chat URL: digits-only E.164 and a pre-filled

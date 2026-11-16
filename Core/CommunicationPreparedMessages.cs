@@ -221,6 +221,25 @@ internal static class CommunicationPreparedMessages
         };
     }
 
+    internal static Values FamilyFeeValues(CommunicationPreviewEntry selected)
+    {
+        var members=selected.FamilyFees.OrderBy(m=>m.RecordId).ToArray();
+        if(members.Length==0 || members.Any(m=>m.RecordId<=0 || m.Outstanding<0) ||
+            members.Select(m=>m.RecordId).Distinct().Count()!=members.Length ||
+            members.All(m=>m.RecordId!=selected.RecordId) ||
+            members.Sum(m=>m.Outstanding)!=(selected.Outstanding ?? 0))
+            throw new CommunicationValidationException("The family fee records changed. Review the family balance again.");
+        var values=FromPreview(selected);
+        if(members.Length==1) return values;
+        return values with {
+            RecordName=string.Join(", ",members.Select(m=>CommunicationRecipientResolver.DisplayName("Student",m.RecordId,m.RecordName))),
+            AdmissionNumber=string.Join(", ",members.Select(m=>string.IsNullOrWhiteSpace(m.AdmissionNumber)
+                ? m.RecordId.ToString(CultureInfo.InvariantCulture) : m.AdmissionNumber)),
+            AdmissionDate=members.All(m=>m.AdmissionDate==members[0].AdmissionDate) ? members[0].AdmissionDate : null,
+            FatherName=null,ClassName=null
+        };
+    }
+
     // The identical classroom/campus/active-enrollment rules used by both
     // preview and msg.OpenManualHandoff are re-applied immediately before
     // preparing the human-controlled WhatsApp URL. No unrelated family or
@@ -244,7 +263,8 @@ internal static class CommunicationPreparedMessages
         FROM msg.ManualHandoff H
         JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
         JOIN msg.Batch B ON B.BatchId=R.BatchId
-        JOIN dbo.Students S ON msg.NormalizeMobile(S.ContactNumber)=R.PhoneE164
+        CROSS JOIN dbo.Students S
+        CROSS APPLY msg.RecordGuardian(S.AdmissionId) Guardian
         OUTER APPLY (
             SELECT TOP (1) E.ClassSectionId,E.Status
             FROM dbo.Enrollments E WHERE E.AdmissionId=S.AdmissionId
@@ -260,7 +280,7 @@ internal static class CommunicationPreparedMessages
           AND B.Audience='OutstandingFees'
           AND (H.State='Opened' OR (@PreviewBatchId=B.BatchId AND H.State='Pending'))
           AND R.State='Pending' AND B.State IN ('Confirmed','Sending')
-          AND S.Status=N'Active' AND S.SchoolMessageConsent=1
+          AND S.Status=N'Active' AND Guardian.HasConsent=1 AND Guardian.PhoneE164=R.PhoneE164
           AND E.Status=N'Active'
           AND (B.CampusId=0 OR CCS.CampusId=B.CampusId)
           AND (B.ClassId=0 OR CCS.ClassId=B.ClassId)
@@ -334,12 +354,15 @@ internal static class CommunicationPreparedMessages
                          NULLIF(LTRIM(RTRIM(T.StaffName)),N''),N'') RecordName,
                 S.AdmissionNumber,S.AdmissionDate,S.FatherName,
                 CASE WHEN E.Status=N'Active' THEN ClassRecord.ClassName END AS ClassName,
-                F.Outstanding,@Audience AS Audience,@Body AS Body
+                F.Outstanding,@Audience AS Audience,@Body AS Body,R.PhoneE164,
+                (SELECT STRING_AGG(CONVERT(varchar(max),M.AdmissionId),',')
+                    WITHIN GROUP(ORDER BY M.AdmissionId)
+                 FROM msg.ReviewedFeeStudent M WHERE M.RecipientId=R.RecipientId) ReviewedFamilyIds
             FROM msg.ManualHandoff H
             JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
             LEFT JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
             LEFT JOIN dbo.Staff T ON T.StaffId=R.StaffId
-            OUTER APPLY msg.RecordGuardian(CASE WHEN @Audience IN ('Student','Family','FeeStudent','FeeFamily') THEN @StudentId ELSE 0 END) Guardian
+            OUTER APPLY msg.RecordGuardian(S.AdmissionId) Guardian
             OUTER APPLY (SELECT TOP(1) E.ClassSectionId,E.Status FROM dbo.Enrollments E
                 WHERE E.AdmissionId=S.AdmissionId
                 ORDER BY CASE WHEN E.Status=N'Active' THEN 0 ELSE 1 END,E.EnrollmentId DESC) E
@@ -362,13 +385,14 @@ internal static class CommunicationPreparedMessages
             WHERE H.RecipientId=@RecipientId
               AND (H.State='Opened' OR (@PreviewBatchId IS NOT NULL AND H.State='Pending'))
               AND R.State='Pending'
+              AND EXISTS(SELECT 1 FROM msg.PreparedEventEligible(R.BatchId))
               AND NOT EXISTS (
                   SELECT 1 FROM msg.Suppression O
                   WHERE O.Channel='WhatsApp' AND O.PhoneE164=R.PhoneE164)
               AND ((S.AdmissionId IS NOT NULL AND S.Status=N'Active'
                     AND ((@Audience IN ('Student','Family','FeeStudent','FeeFamily') AND S.AdmissionId=@StudentId
                         AND Guardian.HasConsent=1 AND Guardian.PhoneE164=R.PhoneE164)
-                    OR (S.SchoolMessageConsent=1 AND msg.NormalizeMobile(S.ContactNumber)=R.PhoneE164
+                    OR (Guardian.HasConsent=1 AND Guardian.PhoneE164=R.PhoneE164
                     AND (@Audience='School'
                       OR (@Audience='Campus' AND E.Status=N'Active' AND CCS.CampusId=@CampusId)
                       OR (@Audience='Class' AND E.Status=N'Active' AND CCS.CampusId=@CampusId AND CCS.ClassId=@ClassId)
@@ -399,6 +423,16 @@ internal static class CommunicationPreparedMessages
         };
         if (string.Equals(Convert.ToString(row["Audience"]), "OutstandingFees", StringComparison.Ordinal))
             selected = await ReadSharedFeeValuesAsync(recipientId, actor, selected, previewBatchId);
+        if (string.Equals(Convert.ToString(row["Audience"]), "FeeFamily", StringComparison.Ordinal))
+        {
+            var family=await CommunicationRecipientResolver.ReadAsync(
+                new(CommunicationAudience.FeeFamily,0,0,selected.RecordId,0,"WhatsApp"));
+            var current=family.Entries.SingleOrDefault(e=>e.Included);
+            if(actor!=CurrentUser.UserId || current is null || current.PhoneE164!=Convert.ToString(row["PhoneE164"]) ||
+                string.Join(",",current.FamilyFees.Select(m=>m.RecordId).Order())!=Convert.ToString(row["ReviewedFamilyIds"]))
+                throw new CommunicationValidationException("The reviewed family changed. Review a new family fee message; no chat was opened.");
+            selected=FromPreview(current);
+        }
         return (selected, (string)row["Body"]);
     }
 }

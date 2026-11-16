@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.Json;
 using Microsoft.Data.SqlClient;
 
 namespace FMSC_SMS.Core;
@@ -129,6 +130,8 @@ internal static class CommunicationBackgroundWorker
 
             var started=DateTime.UtcNow;
             bool computerAuthorizationChecked=false;
+            bool skipSms=false, skipWhatsApp=false;
+            var deferredBatches=new HashSet<Guid>();
             // Bounded processor invocation: other logon-bound task invocations
             // cannot overtake this one while its lease is healthy.
             while(DateTime.UtcNow-started<TimeSpan.FromSeconds(45))
@@ -138,7 +141,10 @@ internal static class CommunicationBackgroundWorker
                     CommunicationBackgroundEnrollment.Proof(enrollment,leaseNonce));
                 using var due=await DatabaseHelper.QueryUserAsync("msg.ReadNextScheduledRecipient",token,
                     DatabaseHelper.P("@EnrollmentId",enrollment.EnrollmentId),
-                    DatabaseHelper.P("@LeaseNonce",leaseNonce));
+                    DatabaseHelper.P("@LeaseNonce",leaseNonce),
+                    DatabaseHelper.Bit("@SkipSms",skipSms),
+                    DatabaseHelper.Bit("@SkipWhatsApp",skipWhatsApp),
+                    DatabaseHelper.P("@DeferredBatches",JsonSerializer.Serialize(deferredBatches)));
                 if(due.Rows.Count==0) break;
                 DataRow next=due.Rows[0];
                 long recipientId=Convert.ToInt64(next["RecipientId"]);
@@ -193,9 +199,35 @@ internal static class CommunicationBackgroundWorker
                 // The SQL attempt moves to Unknown before the external POST.
                 // Persist a higher disk watermark synchronously before that
                 // network request can start, without blindly retrying Unknown.
-                var result=await CommunicationDispatchStore.SendOneWithClaimJournalAsync(
-                    recipientId,channel,CommunicationBackgroundEnrollment.JournalClaim,token);
-                if(result.State=="Unknown") break;
+                try
+                {
+                    var result=await CommunicationDispatchStore.SendOneWithClaimJournalAsync(
+                        recipientId,channel,CommunicationBackgroundEnrollment.JournalClaim,token);
+                    if(result.State=="Unknown") break;
+                }
+                catch(SqlException ex) when(ex.Number is 51092 or 51249 or 51250)
+                {
+                    // Channel pause/quota/speed changes defer only this channel.
+                    // No failed or uncertain attempt is returned to Pending.
+                    if(channel=="Sms") skipSms=true; else skipWhatsApp=true;
+                }
+                catch(SqlException ex) when(ex.Number is 51293 or 51294)
+                {
+                    deferredBatches.Add(batchId);
+                }
+                catch(CommunicationValidationException ex) when(ex.IsTemporary)
+                {
+                    if(channel=="Sms") skipSms=true; else skipWhatsApp=true;
+                }
+                catch(Exception ex) when(ex is CommunicationValidationException ||
+                    ex is SqlException { Number: 51133 or 51248 })
+                {
+                    // Stale review, unavailable credentials or missing allowance
+                    // needs operator attention. Do not let it block other batches.
+                    await DatabaseHelper.ExecuteUserAsync("msg.HoldScheduledBatch",
+                        DatabaseHelper.P("@BatchId",batchId));
+                }
+                if(deferredBatches.Count>=80) break;
             }
             return 0;
         }

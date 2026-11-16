@@ -584,13 +584,19 @@ internal static partial class Program
         int marks = 0, launches = 0, warnings = 0;
         bool failLaunch = true;
         string message = "Current prepared message & اطلاع";
+        var evidence=new List<bool>();
         var operations = new CommunicationManualHandoff.Operations(
             _ => Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(new[] { new CommunicationManualRecipient(1,"Synthetic child","4567",state) }),
             (_, _) => Task.FromResult(message),
             _ => { state = "Opened"; return Task.FromResult(new CommunicationManualOpen(true, new Uri("https://wa.me/923001234567?text=fixture"), null, message)); },
             (_, result) => { marks++; state = result; return Task.CompletedTask; },
             _ => { if (failLaunch) throw new System.ComponentModel.Win32Exception("Synthetic missing browser"); launches++; },
-            _ => warnings++);
+            _ => warnings++,
+            (_,opened,launched)=>{
+                Check(opened.Message==message,"Manual evidence records the exact reviewed Unicode text.");
+                evidence.Add(launched);
+                return Task.CompletedTask;
+            });
         using var dialog = new CommunicationManualHandoffDialog(batchId, operations);
         dialog.Show(); Application.DoEvents();
         Check(Field<ProgressBar>(dialog.Handoff, "processedProgress").Value == 0,
@@ -606,6 +612,8 @@ internal static partial class Program
         failLaunch = false; open.PerformClick(); Application.DoEvents();
         Check(launches == 1 && report.Enabled && Field<ModernTextBox>(dialog.Handoff,"preparedMessage").Text == message,
             "Successful reopening exposes the exact handed-off message and permits explicit reporting");
+        Check(evidence.SequenceEqual(new[]{false,false,true}),
+            "Text evidence persists before each shell attempt; a failed launch never records a successful handoff.");
         Check(Field<ProgressBar>(dialog.Handoff, "processedProgress").Value == 0,
             "Opening a chat alone does not advance completed processing or imply sending");
         Field<ModernButton>(dialog.Handoff, "close").PerformClick();

@@ -218,14 +218,14 @@ internal static class CommunicationApiSqlChecks
         long feeId=Convert.ToInt64(Sql.Scalar("SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Batch AND PhoneE164='+923008000077'",Sql.P("@Batch",feeBatch)));
         int feeRepresentative=Sql.Count("SELECT AdmissionId FROM msg.Recipient WHERE RecipientId=@Id",Sql.P("@Id",feeId));
         int changedSibling=feeRepresentative==student ? sibling : student;
-        Sql.Proc("msg.RecordAdmissionConsent",Sql.P("@UserId",f.Admin),Sql.P("@AdmissionId",changedSibling),Sql.P("@Consent",false),Sql.P("@Authority","Students.Admit"));
-        await r.Refused("Withdrawn sibling consent is rechecked inside the atomic provider claim",()=>{
+        Sql.Query("UPDATE dbo.Students SET Status=N'Left' WHERE AdmissionId=@Id",Sql.P("@Id",changedSibling));
+        await r.Refused("A sibling leaving school is rechecked inside the atomic provider claim",()=>{
             Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",feeId),Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));return Task.CompletedTask;
         },51133);
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Id",Sql.P("@Id",feeId))==0
             && Sql.Count("SELECT COUNT(*) FROM msg.Recipient WHERE RecipientId=@Id AND State='Pending'",Sql.P("@Id",feeId))==1,
             "A changed shared-guardian fee review rolls back the claim before any external request.");
-        Sql.Proc("msg.RecordAdmissionConsent",Sql.P("@UserId",f.Admin),Sql.P("@AdmissionId",changedSibling),Sql.P("@Consent",true),Sql.P("@Authority","Students.Admit"));
+        Sql.Query("UPDATE dbo.Students SET Status=N'Active' WHERE AdmissionId=@Id",Sql.P("@Id",changedSibling));
         Guid feeAttempt=Guid.NewGuid();
         var validFee=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",feeId),Sql.P("@AttemptKey",feeAttempt),Sql.P("@ExpectedProviderCode","Twilio"));
         r.Check(Convert.ToBoolean(validFee.Rows[0]["Claimed"]),"An unchanged, consented shared-guardian fee review can be claimed.");
@@ -347,6 +347,8 @@ internal static class CommunicationApiSqlChecks
             Sql.P("@Date",holidayDate))==0,
             "Removing a holiday does not change school messages or any financial records.");
         await CommunicationAutomationSqlChecks.Run(f,r);
+        await CommunicationDispatchBoundarySqlChecks.Run(f,r);
+        await CommunicationFamilyFeeSqlChecks.Run(f,r);
         await CommunicationFeeReviewSqlChecks.Run(f,r);
 
     }

@@ -106,7 +106,7 @@ internal sealed class CommunicationManualHandoff : UserControl
         Func<long, string, Task> Mark,
         Action<Uri> Launch,
         Action<string> Notify,
-        Func<long, Task>? RecordShellHandoff = null,
+        Func<long, CommunicationManualOpen, bool, Task>? RecordHandoffEvidence = null,
         Func<bool>? ConfirmRecoveredSend = null,
         Func<long, Task>? MarkRecovered = null);
     private readonly Operations operations;
@@ -123,7 +123,7 @@ internal sealed class CommunicationManualHandoff : UserControl
             CommunicationManualHandoffStore.OpenAsync, (id, outcome) => CommunicationManualHandoffStore.MarkAsync(id, outcome, false),
             uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }),
             message => ModernMessageDialog.Show(FindForm(), message, "Manual WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Warning),
-            CommunicationManualHandoffStore.RecordShellHandoffAsync,
+            CommunicationManualHandoffStore.RecordHandoffEvidenceAsync,
             () => ModernMessageDialog.Show(FindForm(),
                 "FMSC could not confirm the chat opened. Check the conversation in WhatsApp. Did you already send this message?",
                 "Check WhatsApp", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes,
@@ -294,14 +294,22 @@ internal sealed class CommunicationManualHandoff : UserControl
                 explanation.Text = Instructions;
                 // Browser or linked app opens only after SQL has persisted
                 // Opened. No automatic Send or delivery acknowledgement.
+                if(await operations.ReadPreview(batchId,id)!=handoff.Message)
+                    throw new CommunicationValidationException("The recipient or message changed while preparing the handoff. Review it again; no chat was opened.");
+                // Persist the exact prepared text before leaving FMSC. If the
+                // shell acknowledgment is lost, recovered reports still have
+                // honest immutable content evidence without a delivery claim.
+                if (operations.RecordHandoffEvidence is not null)
+                    await operations.RecordHandoffEvidence(id,handoff,false);
+                if(actorId!=CurrentUser.UserId) throw new InvalidOperationException("Signed-in account changed. No chat was launched.");
                 try { operations.Launch(handoff.Link); }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
                 {
                     throw new CommunicationValidationException("Windows could not open the WhatsApp link.");
                 }
                 failedOpen.Remove(id);
-                if (operations.RecordShellHandoff is not null)
-                    await operations.RecordShellHandoff(id);
+                if (operations.RecordHandoffEvidence is not null)
+                    await operations.RecordHandoffEvidence(id,handoff,true);
             }
             else if(!IsDisposed&&!handoff.Allowed)
                 Warn("Recipient is no longer eligible: "+handoff.ExclusionCode+".");

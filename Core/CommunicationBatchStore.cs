@@ -61,6 +61,10 @@ internal static class CommunicationBatchStore
             if (target.Audience == CommunicationAudience.OutstandingFees)
                 foreach (var item in preview.Entries.Where(item => item.EligiblePhone is not null))
                     reviewedFees.Rows.Add(item.Kind, item.RecordId, item.EligiblePhone);
+            if (target.Audience == CommunicationAudience.FeeFamily)
+                foreach(var item in preview.Entries.Where(item=>item.Included))
+                    foreach(var member in item.FamilyFees)
+                        reviewedFees.Rows.Add("Student",member.RecordId,item.PhoneE164);
             parameters.Add(new("@ReviewedFees", SqlDbType.Structured)
                 { TypeName = "msg.RecipientSelection", Value = reviewedFees });
         }

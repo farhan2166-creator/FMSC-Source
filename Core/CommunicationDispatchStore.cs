@@ -5,8 +5,8 @@ using Microsoft.Data.SqlClient;
 namespace FMSC_SMS.Core;
 
 /// <summary>
-/// Provider-neutral, explicitly confirmed API dispatch boundary. No background worker,
-/// no automatic retry, no UI activation, and no sender startup side effects.
+/// Provider-neutral dispatch for explicitly confirmed foreground or scheduled batches.
+/// No automatic retry, UI activation, or sender startup side effects.
 /// Each outbound attempt is persisted by SQL BEFORE HTTP is invoked.
 /// </summary>
 internal static class CommunicationDispatchStore

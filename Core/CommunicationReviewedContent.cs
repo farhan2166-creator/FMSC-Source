@@ -17,7 +17,8 @@ internal static class CommunicationReviewedContent
             .OrderBy(e=>e.Kind,StringComparer.Ordinal).ThenBy(e=>e.RecordId).Select(e=>new Reviewed(
                 e.Kind,e.RecordId,e.PhoneE164!,Signature(target,preview,e,body),
                 CommunicationPreparedMessages.Render(body,CommunicationPreparedMessages.FromPreview(e)),
-                target.Audience!=CommunicationAudience.OutstandingFees ? Array.Empty<FeeMember>() : preview.Entries
+                target.Audience==CommunicationAudience.FeeFamily ? e.FamilyFees.Select(m=>new FeeMember(m.RecordId,m.Outstanding)).ToArray()
+                : target.Audience!=CommunicationAudience.OutstandingFees ? Array.Empty<FeeMember>() : preview.Entries
                     .Where(m=>m.EligiblePhone==e.PhoneE164).OrderBy(m=>m.RecordId)
                     .Select(m=>new FeeMember(m.RecordId,m.Outstanding ?? 0)).ToArray())).ToArray());
     }
@@ -31,7 +32,9 @@ internal static class CommunicationReviewedContent
         string rendered=CommunicationPreparedMessages.Render(body,CommunicationPreparedMessages.FromPreview(entry));
         // Fee membership matters even when the grand total has not changed.
         // Never silently substitute another child sharing a guardian number.
-        string members=target.Audience!=CommunicationAudience.OutstandingFees ? "" : JsonSerializer.Serialize(
+        string members=target.Audience==CommunicationAudience.FeeFamily
+            ? JsonSerializer.Serialize(entry.FamilyFees.OrderBy(m=>m.RecordId))
+            : target.Audience!=CommunicationAudience.OutstandingFees ? "" : JsonSerializer.Serialize(
             preview.Entries.Where(e=>e.EligiblePhone==entry.PhoneE164).OrderBy(e=>e.RecordId)
             .Select(e=>new {e.RecordId,e.RecordName,e.AdmissionNumber,e.Outstanding}));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {
