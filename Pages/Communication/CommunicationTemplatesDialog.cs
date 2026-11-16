@@ -160,7 +160,8 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             ? "No templates available." : "No templates match your search or category.");
         var matches = rows.AsEnumerable().Where(row =>
         {
-            if (selectedCategory != "All Categories" && TemplateCategory(row) != selectedCategory)
+            if (selectedCategory != "All Categories" &&
+                row.Field<string>("DisplayCategory") != selectedCategory)
                 return false;
             string searchableText = string.Join(" ", row.Field<string>("Name"), ChannelLabel(row),
                 CommunicationTemplateDialog.PurposeLabel(row.Field<string>("Purpose") ?? ""), row.Field<string>("Body"));
@@ -185,6 +186,12 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             row["Active"] = true;
             rows.Rows.InsertAt(row, index);
         }
+        // Expose the resolved presentation category as metadata, so grid
+        // filtering and behavioral UI tests share one classification source.
+        if (!rows.Columns.Contains("DisplayCategory"))
+            rows.Columns.Add("DisplayCategory",typeof(string));
+        foreach (DataRow row in rows.Rows)
+            row["DisplayCategory"]=TemplateCategory(row);
         var old = templates.DataSource as DataTable;
         ApplySearch(rows);
         templates.DataSource = rows;
