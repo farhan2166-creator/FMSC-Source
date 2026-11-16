@@ -249,5 +249,210 @@ BEGIN
  UpdatedUtc=SYSUTCDATETIME() WHERE BatchId=@BatchId;
 END');
 
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ClaimRecipient
+    @UserId int,
+    @RecipientId bigint,
+    @AttemptKey uniqueidentifier,
+    @ExpectedProviderCode varchar(40)
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+    IF @RecipientId IS NULL OR @RecipientId<=0
+       OR @AttemptKey IS NULL OR @AttemptKey=''00000000-0000-0000-0000-000000000000''
+       OR NULLIF(LTRIM(RTRIM(@ExpectedProviderCode)),'''') IS NULL
+        THROW 51090,''A valid recipient, attempt key and approved provider are required.'',1;
+
+    BEGIN TRANSACTION;
+
+    -- The global stop and reviewed due date are authoritative at the same
+    -- transaction boundary that reserves an external provider attempt.
+    IF EXISTS(SELECT 1 FROM msg.DispatchControl WITH(UPDLOCK,HOLDLOCK)
+              WHERE ControlId=1 AND MasterPaused=1)
+        THROW 51240,''Communication sending is paused by the administrator.'',1;
+    IF EXISTS(
+        SELECT 1 FROM msg.BatchSchedule S WITH(UPDLOCK,HOLDLOCK)
+        JOIN msg.Recipient R WITH(HOLDLOCK) ON R.BatchId=S.BatchId
+        WHERE R.RecipientId=@RecipientId AND
+             (S.DueUtc>SYSUTCDATETIME()
+              OR S.HoldForReview=1
+              OR (S.ExpiresUtc IS NOT NULL AND S.ExpiresUtc<=SYSUTCDATETIME()))
+    )
+        THROW 51241,''This batch is scheduled, expired or awaiting review.'',1;
+
+    DECLARE @BatchId uniqueidentifier,@Kind varchar(8),@AdmissionId int,@StaffId int,
+        @SnapshotPhone varchar(16),@RecipientState varchar(12),@BatchState varchar(14),
+        @Channel varchar(10),@Purpose varchar(20),@Body nvarchar(1600),
+        @Audience varchar(20),@CampusId int,@ClassId int,@StudentId int,@TargetStaffId int,
+        @ProviderCode varchar(40),@CurrentPhone varchar(16),@Exclusion varchar(32),
+        @AttemptId bigint;
+
+    -- This UPDLOCK serializes competing workers before any attempt is created.
+    SELECT @BatchId=R.BatchId,@Kind=R.RecipientKind,@AdmissionId=R.AdmissionId,
+        @StaffId=R.StaffId,@SnapshotPhone=R.PhoneE164,@RecipientState=R.State,
+        @BatchState=B.State,@Channel=B.Channel,@Purpose=B.Purpose,@Body=B.Body,
+        @Audience=B.Audience,@CampusId=B.CampusId,@ClassId=B.ClassId,
+        @StudentId=CASE WHEN B.Audience=''OutstandingFees'' AND B.SingleStudentScope=0 THEN 0 ELSE B.StudentId END,@TargetStaffId=B.StaffId
+    FROM msg.Recipient R WITH(UPDLOCK,HOLDLOCK)
+    JOIN msg.Batch B WITH(HOLDLOCK) ON B.BatchId=R.BatchId
+    WHERE R.RecipientId=@RecipientId;
+    IF @BatchId IS NULL OR @BatchState NOT IN (''Confirmed'',''Sending'')
+       OR @RecipientState<>''Pending''
+        THROW 51093,''Recipient is not pending. Never resend an uncertain attempt.'',1;
+
+
+    -- Scheduled work cannot outlive the originating sender's authority.
+    -- An administrator takeover will need its own explicit audit action.
+    IF EXISTS(SELECT 1 FROM msg.BatchSchedule WHERE BatchId=@BatchId)
+    BEGIN
+        DECLARE @OriginalSenderId int,@StartHour time(0),@EndHour time(0),
+                @Zone sysname,@LocalTime datetimeoffset,@LocalDate date,@IsoDay tinyint;
+        SELECT @OriginalSenderId=B.CreatedBy FROM msg.Batch B WHERE B.BatchId=@BatchId;
+        EXEC dbo.RequirePermission @OriginalSenderId,N''Communication.Send'';
+        SELECT @StartHour=WindowStart,@EndHour=WindowEnd,@Zone=TimeZoneId
+        FROM msg.DispatchControl WITH(HOLDLOCK) WHERE ControlId=1;
+        SET @LocalTime=(SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE @Zone;
+        SET @LocalDate=CONVERT(date,@LocalTime);
+        SET @IsoDay=CONVERT(tinyint,((DATEDIFF(day,''19000101'',@LocalDate)%7)+7)%7+1);
+        IF CONVERT(time(0),@LocalTime)<@StartHour OR CONVERT(time(0),@LocalTime)>=@EndHour
+          OR EXISTS(SELECT 1 FROM msg.NonWorkingWeekday WHERE IsoWeekday=@IsoDay AND Enabled=0)
+          OR EXISTS(SELECT 1 FROM msg.SchoolHoliday WHERE HolidayDate=@LocalDate)
+          THROW 51251,''Scheduled sending is outside approved school hours or working days.'',1;
+    END;
+
+    IF @Kind=''Staff''
+        EXEC dbo.RequirePermission @UserId,N''Staff.View'';
+    ELSE
+        EXEC dbo.RequirePermission @UserId,N''Students.View'';
+    IF @Audience IN (''OutstandingFees'',''FeeStudent'',''FeeFamily'')
+        EXEC dbo.RequirePermission @UserId,N''Fees.View'';
+
+    SELECT @ProviderCode=C.ProviderCode FROM msg.ChannelSettings C WITH(HOLDLOCK)
+    WHERE C.Channel=@Channel AND C.Enabled=1;
+    IF @ProviderCode IS NULL OR @ProviderCode<>@ExpectedProviderCode
+        THROW 51092,''Channel is paused or runtime provider does not match the approved profile.'',1;
+
+    -- Re-read live records while locks protect the verification transaction.
+    -- The persisted scope prevents a campus/class/fee/family target from silently
+    -- becoming eligible just because an old batch retained a valid phone.
+    IF @Kind=''Staff''
+    BEGIN
+        IF @Audience=''Staff'' AND @TargetStaffId=@StaffId
+            SELECT @CurrentPhone=msg.NormalizeMobile(S.ContactNumber)
+            FROM dbo.Staff S WITH(HOLDLOCK)
+            WHERE S.StaffId=@StaffId AND S.Status=N''Active'';
+    END
+    ELSE IF @Audience IN (''Student'',''Family'',''FeeStudent'',''FeeFamily'')
+    BEGIN
+        SELECT @CurrentPhone=G.PhoneE164 FROM msg.RecordGuardian(@StudentId) G
+        WHERE G.AdmissionId=@AdmissionId AND G.HasConsent=1;
+    END
+    ELSE
+    BEGIN
+        SELECT @CurrentPhone=msg.NormalizeMobile(S.ContactNumber)
+        FROM dbo.Students S WITH(HOLDLOCK)
+        OUTER APPLY (
+            SELECT TOP(1) E.ClassSectionId,E.Status
+            FROM dbo.Enrollments E WITH(HOLDLOCK)
+            WHERE E.AdmissionId=S.AdmissionId
+            ORDER BY CASE WHEN E.Status=N''Active'' THEN 0 ELSE 1 END,E.EnrollmentId DESC
+        ) E
+        LEFT JOIN dbo.CampusClassSections CCS WITH(HOLDLOCK)
+            ON CCS.ClassSectionId=E.ClassSectionId
+        OUTER APPLY (
+            SELECT SUM(dbo.GetFeeChargeBalance(BC.BillingChargeId)) Outstanding
+            FROM dbo.BillingCharges BC WITH(HOLDLOCK)
+            WHERE @Audience=''OutstandingFees''
+              AND BC.AdmissionId=S.AdmissionId AND BC.Status<>N''Cancelled''
+        ) F
+        WHERE S.AdmissionId=@AdmissionId AND S.Status=N''Active''
+          AND S.SchoolMessageConsent=1
+          AND (@Audience=''School''
+            OR (@Audience=''Campus'' AND E.Status=N''Active'' AND CCS.CampusId=@CampusId)
+            OR (@Audience=''Class'' AND E.Status=N''Active''
+                AND CCS.CampusId=@CampusId AND CCS.ClassId=@ClassId)
+            OR (@Audience=''OutstandingFees'' AND E.Status=N''Active''
+                AND (@CampusId=0 OR CCS.CampusId=@CampusId)
+                AND (@ClassId=0 OR CCS.ClassId=@ClassId)
+                AND (@StudentId=0 OR S.AdmissionId=@StudentId) AND F.Outstanding>0));
+    END;
+
+    SET @Exclusion=CASE
+        WHEN @CurrentPhone IS NULL THEN ''NoLongerEligible''
+        WHEN @CurrentPhone<>@SnapshotPhone THEN ''DestinationChanged''
+        WHEN EXISTS(SELECT 1 FROM msg.Suppression O WITH(HOLDLOCK)
+                    WHERE O.Channel=@Channel AND O.PhoneE164=@CurrentPhone)
+            THEN ''ChannelOptOut''
+        ELSE NULL END;
+    IF @Exclusion IS NOT NULL
+    BEGIN
+        UPDATE msg.Recipient
+        SET State=''Excluded'',ExclusionCode=@Exclusion,UpdatedUtc=SYSUTCDATETIME()
+        WHERE RecipientId=@RecipientId;
+        -- No provider call may occur after an excluded result.
+        SELECT CONVERT(bit,0) Claimed,CONVERT(bigint,NULL) AttemptId,
+               CONVERT(uniqueidentifier,NULL) AttemptKey,
+               CONVERT(varchar(16),NULL) PhoneE164,
+               CONVERT(varchar(10),NULL) Channel,
+               CONVERT(varchar(40),NULL) ProviderCode,
+               CONVERT(nvarchar(1600),NULL) Body,@Exclusion ExclusionCode;
+        COMMIT TRANSACTION; RETURN;
+    END;
+
+    DECLARE @Ordinal int;
+    SELECT @Ordinal=COUNT(*)+1 FROM msg.Attempt WITH(HOLDLOCK) WHERE RecipientId=@RecipientId;
+    IF @Ordinal>3 OR EXISTS(
+        SELECT 1 FROM msg.Attempt WITH(HOLDLOCK)
+        WHERE RecipientId=@RecipientId AND (Outcome<>''Failed'' OR RetryApprovedBy IS NULL))
+        THROW 51093,''The prior attempt requires definitive failure and explicit retry approval.'',1;
+
+    -- Quota rows serialize every reservation through the same provider.
+    -- A reserved attempt consumes capacity even if its result later becomes
+    -- Unknown: never reuse that allowance to create a duplicate request.
+    DECLARE @Limit int,@Reserve int,@MinuteLimit int,@Priority varchar(10),
+            @NowUtc datetime2(3)=SYSUTCDATETIME();
+    SELECT @Limit=DailyLimit,@Reserve=ReservedImportant
+      FROM msg.ProviderQuota WITH(UPDLOCK,HOLDLOCK)
+      WHERE ProviderCode=@ExpectedProviderCode;
+    IF @Limit IS NULL AND EXISTS(
+        SELECT 1 FROM msg.Recipient R JOIN msg.BatchSchedule S ON S.BatchId=R.BatchId
+        WHERE R.RecipientId=@RecipientId)
+        THROW 51248,''A scheduled API batch requires a configured daily provider limit.'',1;
+    SELECT @MinuteLimit=MaxPerMinute FROM msg.DispatchControl WITH(HOLDLOCK) WHERE ControlId=1;
+    SELECT @Priority=COALESCE(S.Priority,''Normal'')
+      FROM msg.Recipient R JOIN msg.Batch B ON B.BatchId=R.BatchId
+      LEFT JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId
+      WHERE R.RecipientId=@RecipientId;
+    IF @Limit IS NOT NULL
+    BEGIN
+    DECLARE @TodayUtc datetime2(3)=CONVERT(datetime2(3),CONVERT(date,@NowUtc));
+    DECLARE @Used bigint=(
+      SELECT COUNT_BIG(*) FROM msg.Attempt T WITH(HOLDLOCK)
+      WHERE T.ProviderCode=@ExpectedProviderCode AND
+       T.RequestUtc>=@TodayUtc AND T.RequestUtc<DATEADD(day,1,@TodayUtc));
+    IF @Used>=@Limit OR (@Priority<>''High'' AND @Used>=@Limit-@Reserve)
+        THROW 51249,''The provider daily allowance is exhausted or reserved for priority messages.'',1;
+    IF (SELECT COUNT_BIG(*) FROM msg.Attempt T WITH(HOLDLOCK)
+        WHERE T.ProviderCode=@ExpectedProviderCode AND
+          T.RequestUtc>DATEADD(minute,-1,@NowUtc)) >= @MinuteLimit
+        THROW 51250,''Provider sending speed limit reached. Retry a pending recipient later.'',1;
+    END;
+
+    -- Reserve the attempt BEFORE HTTP. Unknown is deliberately conservative:
+    -- a crash/timeout must never make this recipient eligible for blind replay.
+    INSERT msg.Attempt(RecipientId,AttemptNumber,AttemptKey,Channel,ProviderCode,Outcome)
+    VALUES(@RecipientId,@Ordinal,@AttemptKey,@Channel,@ProviderCode,''Unknown'');
+    SET @AttemptId=CONVERT(bigint,SCOPE_IDENTITY());
+    UPDATE msg.Recipient
+    SET State=''Unknown'',UpdatedUtc=SYSUTCDATETIME()
+    WHERE RecipientId=@RecipientId;
+    UPDATE msg.Batch SET State=''Sending''
+    WHERE BatchId=@BatchId AND State=''Confirmed'';
+    SELECT CONVERT(bit,1) Claimed,@AttemptId AttemptId,@AttemptKey AttemptKey,
+           @CurrentPhone PhoneE164,@Channel Channel,@ProviderCode ProviderCode,
+           @Body Body,CONVERT(varchar(32),NULL) ExclusionCode;
+    COMMIT TRANSACTION;
+END');
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'24',SYSDATETIME(),SUSER_SNAME(),N'Opt-in authorized communication background worker and SQL lease');
