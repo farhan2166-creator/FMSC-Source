@@ -95,6 +95,7 @@ internal static class CommunicationFeeReviewSqlChecks
             if(candidate is not null)
             {
                 long candidateId=Convert.ToInt64(candidate["CandidateId"]);
+                int candidateStudent=Convert.ToInt32(candidate["AdmissionId"]);
                 // A transaction-local synthetic confirmed message stands in for
                 // an already reviewed family reminder. All fake batch and ledger
                 // changes are rolled back; only the policy predicate is observed.
@@ -110,11 +111,12 @@ internal static class CommunicationFeeReviewSqlChecks
                     SET State='Prepared',ReviewedBy=@Admin,
                         ReviewedUtc=SYSUTCDATETIME(),BatchId=@Batch
                     WHERE CandidateId=@Candidate;
+                    IF @@ROWCOUNT<>1 THROW 51299,'Synthetic candidate was not prepared.',1;
                     DECLARE @Result int=(SELECT COUNT(*) FROM msg.FeeReminderEligible(
                         @Student,'OutstandingFees',CONVERT(date,SYSUTCDATETIME())));
                     ROLLBACK TRANSACTION;
                     SELECT @Result;
-                    """,Sql.P("@Student",student),Sql.P("@Candidate",candidateId),
+                    """,Sql.P("@Student",candidateStudent),Sql.P("@Candidate",candidateId),
                     Sql.P("@Admin",f.Admin));
                 r.Check(eligibleAfterPriorReview==0 &&
                     Sql.Count("SELECT COUNT(*) FROM msg.AutomationCandidate WHERE CandidateId=@Candidate AND State='Pending'",

@@ -135,10 +135,11 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
     // Presentation-only grouping: existing SQL template purposes and saved
     // content remain unchanged. A newly created template is immediately
     // available in its appropriate category without schema migration.
-    private static string TemplateCategory(DataRow row)
+    private static string TemplateCategory(DataRow row) => CategoryFor(
+        row.Field<string>("Purpose") ?? "", row.Field<string>("Name") ?? "");
+
+    internal static string CategoryFor(string purpose, string name)
     {
-        string purpose = row.Field<string>("Purpose") ?? "";
-        string name = row.Field<string>("Name") ?? "";
         if (purpose == "FeeReminder" ||
             new[] { "fee", "payment", "receipt", "bill", "outstanding", "dues" }
                 .Any(term => name.Contains(term, StringComparison.OrdinalIgnoreCase)))

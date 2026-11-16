@@ -69,6 +69,20 @@ internal static partial class Program
                 && CommunicationHistoryDialog.OutcomeExplanation("Twilio", "Unknown")
                     .Contains("do not resend", StringComparison.OrdinalIgnoreCase),
                 "History distinguishes provider acceptance, independently verified delivery, uncertain attempts and manually reported sends.");
+            using (var browser = new CommunicationComposerTemplateBrowser(
+                CommunicationPreparedMessages.BuiltInChoices.Where(option =>
+                    option.Matches(new CommunicationTarget(CommunicationAudience.Student,0,0,42,0,"Sms")))))
+            {
+                var matching = (DataGridView)browser.Controls.Find("communicationComposerTemplateResults", true).Single();
+                var templateSearch = (ModernTextBox)browser.Controls.Find("communicationComposerTemplateSearch", true).Single();
+                Check(matching.Rows.Count > 0 && matching.Rows.Cast<DataGridViewRow>().All(row =>
+                    !Convert.ToString(row.Cells["Name"].Value)!.Contains("(Urdu)", StringComparison.Ordinal)),
+                    "Sender template browser keeps Urdu manual-WhatsApp drafts out of SMS.");
+                templateSearch.Text = "new admission welcome";
+                Check(matching.Rows.Count == 1
+                    && Convert.ToString(matching.Rows[0].Cells["Name"].Value) == "New admission welcome",
+                    "Sender template browser searches context-compatible templates without selecting a recipient or sending.");
+            }
             CheckProviderBodyDeadline();
             CheckCommunicationAsyncAndCancellation();
             CheckCommunicationSessionsAndOptions();

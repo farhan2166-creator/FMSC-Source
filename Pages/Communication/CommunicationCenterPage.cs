@@ -210,6 +210,13 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 await RunBusyAsync("Reading approved Meta templates…",ChooseMetaTemplateAsync,this);
                 return;
             }
+            if (!IsMeta && templateChoice.SelectedItem is string action
+                && action == "Search matching templates…")
+            {
+                templateChoice.SelectedIndex = 0;
+                OpenComposerTemplateBrowser();
+                return;
+            }
             if (templateChoice.SelectedItem is CommunicationPreparedMessages.ComposeTemplate selected)
                 message.Text = selected.Body;
         };
@@ -553,10 +560,29 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             templateChoice.SelectedIndex=0;
             return;
         }
+        templateChoice.Items.Add("Search matching templates…");
         foreach (var item in composeTemplates)
             if (item.Matches(target))
                 templateChoice.Items.Add(item);
         templateChoice.SelectedIndex = 0;
+    }
+
+    private void OpenComposerTemplateBrowser()
+    {
+        if (IsBusy || IsMeta || !CurrentUser.HasPermission("Communication.Send")) return;
+        int actor = CurrentUser.UserId;
+        CommunicationTarget target = CurrentTarget();
+        var compatible = composeTemplates.Where(item => item.Matches(target)).ToArray();
+        using var dialog = new CommunicationComposerTemplateBrowser(compatible);
+        if (dialog.ShowDialog(FindForm()) != DialogResult.OK ||
+            dialog.SelectedTemplate is not { } selected) return;
+        if (IsDisposed || actor != CurrentUser.UserId || target != CurrentTarget()
+            || IsMeta || !CurrentUser.HasPermission("Communication.Send")) return;
+        if (message.Text.Length > 0 && message.Text != selected.Body &&
+            !Confirm("Replace your current message draft with the selected template?",
+                "Replace Draft", false)) return;
+        message.Text = selected.Body;
+        InvalidatePreview();
     }
 
     private void ChangeAudienceFields()
