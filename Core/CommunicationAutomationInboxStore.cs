@@ -33,17 +33,24 @@ internal static class CommunicationAutomationInboxStore
             if(generated.Rows.Count!=1)
                 throw new InvalidOperationException("School event suggestions could not be refreshed.");
         }
+        using(var generated=await DatabaseHelper.QueryUserAsync("msg.ScanFeeReviewCandidates"))
+        {
+            if(generated.Rows.Count!=1)
+                throw new InvalidOperationException("Fee review suggestions could not be refreshed.");
+        }
         using var table=await DatabaseHelper.QueryUserAsync("msg.ReadAutomationCandidates");
+        using var feeTable=await DatabaseHelper.QueryUserAsync("msg.ReadFeeReviewCandidates");
         if(actor!=CurrentUser.UserId || !CurrentUser.HasPermission("Communication.Configure"))
             throw new UnauthorizedAccessException("School communication administrator changed.");
-        return table.AsEnumerable().Select(row=>new Suggestion(
+        return table.AsEnumerable().Concat(feeTable.AsEnumerable()).Select(row=>new Suggestion(
             Convert.ToInt64(row["CandidateId"]),
             Convert.ToString(row["EventCode"])??"",
             Convert.ToInt64(row["SourceRecordId"]),
             Convert.ToInt32(row["AdmissionId"]),
             Convert.ToString(row["StudentName"])??"",
             row.IsNull("AdmissionNumber") ? null : Convert.ToString(row["AdmissionNumber"]),
-            Convert.ToDateTime(row["CreatedUtc"]))).ToArray();
+            Convert.ToDateTime(row["CreatedUtc"])))
+            .OrderBy(suggestion=>suggestion.CreatedUtc).ThenBy(suggestion=>suggestion.CandidateId).ToArray();
     }
 
     internal static Task DismissAsync(long candidateId)
@@ -108,6 +115,10 @@ internal static class CommunicationAutomationInboxStore
             .Single(t=>t.Name=="Payment received acknowledgement").Body,
         "Birthday" => CommunicationPreparedMessages.BuiltIns
             .Single(t=>t.Name=="Student birthday greeting").Body,
+        "OutstandingFees" => CommunicationPreparedMessages.BuiltIns
+            .Single(t=>t.Name=="Outstanding fee reminder").Body,
+        "UpcomingDue" => "Dear parent/guardian, a fee for [StudentName] (admission [AdmissionNumber]) is approaching its due date. Please review the current school fee statement or contact the accounts office.",
+        "OverdueFollowUp" => "Dear parent/guardian, a fee for [StudentName] (admission [AdmissionNumber]) is now past its due date. Please contact the accounts office to review the current balance.",
         _ => throw new ArgumentOutOfRangeException(nameof(eventCode),
             "This event does not have an approved school message suggestion.")
     };
@@ -117,6 +128,9 @@ internal static class CommunicationAutomationInboxStore
         "Admission" => "New admission",
         "PaymentReceived" => "Payment received",
         "Birthday" => "Birthday greeting",
+        "OutstandingFees" => "Outstanding fees",
+        "UpcomingDue" => "Upcoming fee due",
+        "OverdueFollowUp" => "Overdue fee follow-up",
         _ => code
     };
 }
