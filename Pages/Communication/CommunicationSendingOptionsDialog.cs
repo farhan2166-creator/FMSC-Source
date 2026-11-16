@@ -325,8 +325,27 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         content.Controls.Add(rule, 0, 1);
         content.Controls.Add(mode, 0, 2);
         var save = new ModernButton { Text = "Save Automation Mode", ThemeRole = "Primary", Width = AppScale.Scale(205) };
-        content.Controls.Add(save, 0, 3);
+        var exceptions = new ModernButton
+        {
+            Name = "communicationFamilyExceptions", Text = "Family Exceptions…",
+            ThemeRole = "Secondary", Width = AppScale.Scale(185)
+        };
+        var automationActions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty
+        };
+        save.Height = exceptions.Height = AppMetrics.ButtonHeight;
+        automationActions.Controls.Add(save);
+        automationActions.Controls.Add(exceptions);
+        content.Controls.Add(automationActions, 0, 3);
         content.Controls.Add(automationFeedback, 0, 4);
+        exceptions.Click += (_, _) =>
+        {
+            if (busy || !CurrentUser.HasPermission("Communication.Configure")) return;
+            using var dialog = new CommunicationFamilyExceptionsDialog();
+            dialog.ShowDialog(this);
+            if (dialog.Changed) Changed = true;
+        };
         automationEvent.SelectedIndexChanged += (_, _) => ApplySelectedRule();
         save.Click += async (_, _) => await RunAsync(async () =>
         {
