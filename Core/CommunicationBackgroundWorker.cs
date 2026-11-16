@@ -109,6 +109,9 @@ internal static class CommunicationBackgroundWorker
                 using var suggestions = await DatabaseHelper.QuerySqlAsync(
                     "EXEC msg.ScanAutomationCandidates @UserId;",
                     token, DatabaseHelper.Int("@UserId",enrollment.UserId));
+                using var feeSuggestions = await DatabaseHelper.QuerySqlAsync(
+                    "EXEC msg.ScanFeeReviewCandidates @UserId;",
+                    token, DatabaseHelper.Int("@UserId",enrollment.UserId));
             }
             catch(SqlException ex) when(ex.Number==50003)
             {
