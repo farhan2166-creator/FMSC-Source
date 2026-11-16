@@ -120,7 +120,11 @@ EXEC(N'CREATE OR ALTER PROCEDURE msg.AcquireBackgroundLease
 AS
 BEGIN
  SET NOCOUNT ON; SET XACT_ABORT ON;
- EXEC msg.VerifyBackgroundWorker @UserId,@EnrollmentId,@WindowsSid,@SecretHash;
+ DECLARE @Verified TABLE(Authorized bit,MaxAttemptId bigint);
+ INSERT @Verified EXEC msg.VerifyBackgroundWorker
+    @UserId,@EnrollmentId,@WindowsSid,@SecretHash;
+ IF NOT EXISTS(SELECT 1 FROM @Verified WHERE Authorized=1)
+   THROW 51261,'The school rejected background sending authorization.',1;
  IF @LeaseNonce IS NULL OR @LeaseNonce=''00000000-0000-0000-0000-000000000000''
    THROW 51263,''A unique worker lease token is required.'',1;
  BEGIN TRANSACTION;
