@@ -211,6 +211,11 @@ BEGIN
  IF @Mode NOT IN (''Off'',''Review'',''Automatic'') OR @CampusId<0 OR @ClassId<0
    OR (@ClassId>0 AND @CampusId=0)
    THROW 51246,''Invalid automation mode or audience.'',1;
+ -- Do not persist apparent auto-send approvals while the event discovery,
+ -- snapshot, review and deduplication pipeline is still under construction.
+ -- Otherwise a later binary could silently activate old saved choices.
+ IF @Mode<>''Off''
+   THROW 51247,''Automatic event messaging is not yet enabled in this development build.'',1;
  UPDATE msg.AutomationRule SET Mode=@Mode,CampusId=@CampusId,ClassId=@ClassId,
   ActivationBaselineUtc=CASE WHEN Mode=''Off'' AND @Mode<>''Off''
     THEN SYSUTCDATETIME() ELSE ActivationBaselineUtc END,
