@@ -10,7 +10,7 @@ namespace FMSC_SMS.Core;
 /// </summary>
 internal static class CommunicationBackgroundWorker
 {
-    internal static async Task<int> RunScheduledAsync(CancellationToken token=default)
+    internal static Task<int> RunScheduledAsync(CancellationToken token=default)
     {
         // Both the complete installer and updater first take the activation
         // mutex, then wait for this worker mutex to finish its current attempt.
@@ -19,11 +19,15 @@ internal static class CommunicationBackgroundWorker
         bool owns=false;
         try { owns=workerMutex.WaitOne(0); }
         catch(AbandonedMutexException) { owns=true; }
-        if(!owns) return 0;
+        if(!owns) return Task.FromResult(0);
         try
         {
-            if(!IsUpdaterIdle()) return 0;
-            return await RunAuthorizedAsync(token);
+            if(!IsUpdaterIdle()) return Task.FromResult(0);
+            // OS mutexes are thread-owned. Keep this headless invocation
+            // synchronous on the acquiring thread across awaited provider
+            // operations; releasing a Mutex on an async continuation thread
+            // would fail and could permit unsafe installer coordination.
+            return Task.FromResult(RunAuthorizedAsync(token).GetAwaiter().GetResult());
         }
         finally { workerMutex.ReleaseMutex(); }
     }
