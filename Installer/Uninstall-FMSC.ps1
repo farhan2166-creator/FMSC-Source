@@ -238,7 +238,16 @@ function Remove-FmscCloudBackupTasks {
     $scheduler.Connect()
     $folder = $scheduler.GetFolder('\')
     foreach ($task in @($folder.GetTasks(1))) {
-        $backupTask = $task.Name -match '^FMSC Cloud Backup S-1-5-21-(?:[0-9]+-){3}[0-9]+
+        $backupTask = $task.Name -match '^FMSC Cloud Backup S-1-5-21-(?:[0-9]+-){3}[0-9]+$'
+        $communicationTask = $task.Name -match '^FMSC Communication Queue S-1-5-21-(?:[0-9]+-){3}[0-9]+$'
+        if (-not ($backupTask -or $communicationTask)) { continue }
+        $expected = if ($backupTask) { '--cloud-backup-scheduled' } else { '--communication-queue-worker' }
+        $actions = @($task.Definition.Actions)
+        if ($actions.Count -ne 1 -or $actions[0].Type -ne 0 -or
+            $actions[0].Path.Trim('"') -ine (Join-Path $AppDirectory 'FMSC_SMS.exe') -or
+            $actions[0].Arguments.Trim() -cne $expected) {
+            throw 'An FMSC-named scheduled task has an unexpected action. Uninstall stopped for review.'
+        }
         $folder.DeleteTask($task.Name, 0)
     }
 }
