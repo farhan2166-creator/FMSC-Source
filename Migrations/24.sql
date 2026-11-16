@@ -124,7 +124,7 @@ BEGIN
  INSERT @Verified EXEC msg.VerifyBackgroundWorker
     @UserId,@EnrollmentId,@WindowsSid,@SecretHash;
  IF NOT EXISTS(SELECT 1 FROM @Verified WHERE Authorized=1)
-   THROW 51261,'The school rejected background sending authorization.',1;
+   THROW 51261,''The school rejected background sending authorization.'',1;
  IF @LeaseNonce IS NULL OR @LeaseNonce=''00000000-0000-0000-0000-000000000000''
    THROW 51263,''A unique worker lease token is required.'',1;
  BEGIN TRANSACTION;
@@ -305,7 +305,7 @@ BEGIN
         THROW 51093,''Recipient is not pending. Never resend an uncertain attempt.'',1;
 
 
-    -- Scheduled work cannot outlive the originating sender's authority.
+    -- Scheduled work cannot outlive the originating sender''s authority.
     -- An administrator takeover will need its own explicit audit action.
     IF EXISTS(SELECT 1 FROM msg.BatchSchedule WHERE BatchId=@BatchId)
     BEGIN
