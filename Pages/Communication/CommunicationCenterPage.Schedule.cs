@@ -41,6 +41,7 @@ public sealed partial class CommunicationCenterPage
                     "Open it in Queue before scheduling or sending.");
             // No dispatch operation is performed here. SQL makes the due date
             // authoritative and rejects any premature API claim.
+            await LinkPendingCorrectionAsync(saved.BatchId);
             await CommunicationQueuePolicyStore.ScheduleReviewedBatchAsync(
                 saved.BatchId, dialog.Due, dialog.Expires, dialog.Priority);
             await MarkAutomationSuggestionPreparedAsync(target,saved.BatchId);

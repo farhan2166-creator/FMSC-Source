@@ -175,7 +175,12 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         configureButton = PageButton("communicationConfigureSending", "Settings", 120);
         newMessageButton.Click += (_, _) =>
         {
-            if (!IsBusy) SetStep(preview is null ? 0 : 1);
+            if (!IsBusy)
+            {
+                pendingCorrectionOriginal=null;
+                pendingCorrectionReason=null;
+                SetStep(preview is null ? 0 : 1);
+            }
         };
         unfinishedButton.Click += async (_, _) => await NavigateSessionsAsync(unfinished: true);
         historyButton.Click += async (_, _) => await NavigateSessionsAsync(unfinished: false);
@@ -747,6 +752,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
 
     private void ClearReviewedDraft()
     {
+        pendingCorrectionOriginal=null;
+        pendingCorrectionReason=null;
         pendingAutomationSuggestion=null;
         InvalidatePreview();
         metaSelection = null;
@@ -844,6 +851,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             if(IsDisposed || actor!=CurrentUser.UserId)return;
             if(request!=manualRequestId || target!=CurrentTarget() || body!=message.Text)
                 throw new CommunicationValidationException("The batch was saved, but the current review changed. Open it in Queue; nothing was sent.");
+            await LinkPendingCorrectionAsync(saved.BatchId);
             await MarkAutomationSuggestionPreparedAsync(target,saved.BatchId);
             using(var dialog=new CommunicationApiDispatchDialog(saved.BatchId,startConfirmed:!saved.AlreadyConfirmed))dialog.ShowDialog(FindForm());
             if (!IsDisposed)
@@ -902,6 +910,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 Warn("The reviewed batch was saved, but the current message changed. Review that batch in Queue; no chat was opened.");
                 return;
             }
+            await LinkPendingCorrectionAsync(saved.BatchId);
             await MarkAutomationSuggestionPreparedAsync(target,saved.BatchId);
             // The operator has reviewed and confirmed this batch. Open the first
             // chat now rather than requiring another redundant click. No message

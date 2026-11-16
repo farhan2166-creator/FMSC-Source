@@ -364,14 +364,18 @@ public sealed partial class CommunicationCenterPage
         {
             if (!CurrentUser.HasPermission("Communication.View")) return;
             CommunicationHistoryDraft? draft;
+            string? correctionReason=null;
             if (operations.ViewHistory is not null) draft = operations.ViewHistory(session);
             else
             {
                 using var dialog = new CommunicationHistoryDialog(session);
                 draft = dialog.ShowDialog(FindForm()) == DialogResult.OK ? dialog.Draft : null;
+                correctionReason=dialog.CorrectionReason;
             }
             if (!IsDisposed && draft is not null)
-                await RunBusyAsync("Preparing a new message from History.", () => CopyHistoryDraftAsync(draft), this);
+                await RunBusyAsync("Preparing a new message from History.",
+                    () => CopyHistoryDraftAsync(draft,
+                        correctionReason is null ? null : session.BatchId,correctionReason), this);
             return;
         }
         if (!CurrentUser.HasPermission("Communication.Send")) return;
@@ -388,7 +392,19 @@ public sealed partial class CommunicationCenterPage
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
 
-    private async Task CopyHistoryDraftAsync(CommunicationHistoryDraft draft)
+    private Guid? pendingCorrectionOriginal;
+    private string? pendingCorrectionReason;
+
+    private async Task LinkPendingCorrectionAsync(Guid newBatchId)
+    {
+        if (pendingCorrectionOriginal is not Guid original) return;
+        string reason=pendingCorrectionReason ??
+            throw new CommunicationValidationException("Correction reason is missing. Restart from History.");
+        await CommunicationManagementStore.LinkCorrectionBatchAsync(original,newBatchId,reason);
+    }
+
+    private async Task CopyHistoryDraftAsync(CommunicationHistoryDraft draft,
+        Guid? correctionSource=null,string? correctionReason=null)
     {
         if (!CommunicationAccess.CanCompose(CurrentUser.HasPermission)) return;
         if (message.Text.Length > 0 && !Confirm("Replace your current draft with a new draft from this message?",
@@ -415,7 +431,11 @@ public sealed partial class CommunicationCenterPage
         staff.SetStaff(target.StaffId, draft.StaffName);
         metaSelection = draft.MetaTemplate;
         message.Text = IsMeta && metaSelection is null ? "" : draft.Body;
+        pendingCorrectionOriginal=correctionSource;
+        pendingCorrectionReason=correctionReason;
         SetStep(0);
+        if(correctionSource is not null)
+            SetStatus("Correction draft: edit the message, review current recipients, and confirm. Original History is preserved.");
     }
 
     private static bool AvailableIn(LookupBox lookup, int id) => id == 0

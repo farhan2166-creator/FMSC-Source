@@ -94,6 +94,16 @@
       "schema": "msg",
       "name": "RestoreTemplateRevision",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "BatchCorrection",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "LinkCorrectionBatch",
+      "type": "P"
     }
   ],
   "checkConstraints": [
@@ -136,6 +146,16 @@
       "schema": "msg",
       "objectName": "TemplateRevision",
       "name": "CK_MsgTemplateRevisionNumber"
+    },
+    {
+      "schema": "msg",
+      "objectName": "BatchCorrection",
+      "name": "CK_MsgBatchCorrectionDistinct"
+    },
+    {
+      "schema": "msg",
+      "objectName": "BatchCorrection",
+      "name": "CK_MsgBatchCorrectionReason"
     }
   ],
   "columns": [
@@ -176,6 +196,12 @@
       "objectName": "TemplateRevision",
       "name": "UQ_MsgTemplateRevisionNumber",
       "keys": "TemplateId,RevisionNumber"
+    },
+    {
+      "schema": "msg",
+      "objectName": "BatchCorrection",
+      "name": "PK_MsgBatchCorrection",
+      "keys": "CorrectionBatchId"
     }
   ]
 }

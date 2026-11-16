@@ -162,6 +162,35 @@ internal static class CommunicationApiSqlChecks
         Sql.Proc("msg.CancelPendingApiMessages",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",batch));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Recipient WHERE RecipientId=@Id AND State='Unknown'",Sql.P("@Id",recipient))==1,"Cancel pending cannot erase an uncertain attempted message.");
         Sql.Proc("msg.RecordProviderResult",Sql.P("@UserId",f.Admin),Sql.P("@AttemptKey",attempt),Sql.P("@Outcome","Accepted"),Sql.P("@ProviderMessageId","SM"+new string('c',32)),Sql.P("@FailureCode",null));
+        // A correction is a separate, confirmed, unsent batch with a durable
+        // original reference. Never update the earlier provider result.
+        var correction=Confirm(Guid.NewGuid(),new string('E',64));
+        Guid correctedBatch=(Guid)correction.Rows[0]["BatchId"];
+        const string correctionReason="Correcting an earlier fictional school notice";
+        Sql.Proc("msg.LinkCorrectionBatch",Sql.P("@UserId",f.Admin),
+            Sql.P("@OriginalBatchId",batch),Sql.P("@CorrectionBatchId",correctedBatch),
+            Sql.P("@Reason",correctionReason));
+        Sql.Proc("msg.LinkCorrectionBatch",Sql.P("@UserId",f.Admin),
+            Sql.P("@OriginalBatchId",batch),Sql.P("@CorrectionBatchId",correctedBatch),
+            Sql.P("@Reason",correctionReason));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.BatchCorrection WHERE CorrectionBatchId=@New AND OriginalBatchId=@Old",
+            Sql.P("@New",correctedBatch),Sql.P("@Old",batch))==1,
+            "An approved correction has exactly one durable reference to the original.");
+        await r.Refused("A sender without History permission cannot attach a correction",()=>{
+            Sql.Proc("msg.LinkCorrectionBatch",Sql.P("@UserId",f.Restricted),
+                Sql.P("@OriginalBatchId",batch),Sql.P("@CorrectionBatchId",correctedBatch),
+                Sql.P("@Reason",correctionReason));return Task.CompletedTask;
+        },50003);
+        await r.Refused("A correction retry cannot silently replace its approved reason",()=>{
+            Sql.Proc("msg.LinkCorrectionBatch",Sql.P("@UserId",f.Admin),
+                Sql.P("@OriginalBatchId",batch),Sql.P("@CorrectionBatchId",correctedBatch),
+                Sql.P("@Reason","Different reason on repeated request"));return Task.CompletedTask;
+        },51324);
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt A JOIN msg.Recipient R ON R.RecipientId=A.RecipientId WHERE R.BatchId=@New",
+            Sql.P("@New",correctedBatch))==0,
+            "Creating a correction audit link never sends or records a provider attempt.");
+        Sql.Proc("msg.CancelPendingApiMessages",Sql.P("@UserId",f.Admin),
+            Sql.P("@BatchId",correctedBatch));
         var history=Sql.Proc("msg.ReadHistory",Sql.P("@UserId",f.Admin)).AsEnumerable().Single(row=>(Guid)row["BatchId"]==batch);
         r.Check(Convert.ToInt32(history["Accepted"])==1 && Convert.ToInt32(history["Delivered"])==0 && Convert.ToInt32(history["InProgress"])==0,
             "History separates API acceptance from delivery and unsent work.");

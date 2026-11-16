@@ -114,6 +114,79 @@ AS BEGIN
  COMMIT TRANSACTION;
 END');
 
+
+-- Corrections preserve the original message and every external attempt.
+CREATE TABLE msg.BatchCorrection(
+ CorrectionBatchId uniqueidentifier NOT NULL CONSTRAINT PK_MsgBatchCorrection PRIMARY KEY
+  CONSTRAINT FK_MsgBatchCorrectionBatch REFERENCES msg.Batch(BatchId),
+ OriginalBatchId uniqueidentifier NOT NULL
+  CONSTRAINT FK_MsgBatchCorrectionOriginal REFERENCES msg.Batch(BatchId),
+ Reason nvarchar(200) NOT NULL,
+ LinkedBy int NOT NULL,
+ LinkedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgBatchCorrectionUtc DEFAULT SYSUTCDATETIME(),
+ CONSTRAINT CK_MsgBatchCorrectionDistinct CHECK(CorrectionBatchId<>OriginalBatchId),
+ CONSTRAINT CK_MsgBatchCorrectionReason CHECK(LEN(LTRIM(RTRIM(Reason))) BETWEEN 8 AND 200)
+);
+CREATE INDEX IX_MsgBatchCorrectionOriginal ON msg.BatchCorrection(OriginalBatchId,LinkedUtc);
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.LinkCorrectionBatch
+ @UserId int,@OriginalBatchId uniqueidentifier,@CorrectionBatchId uniqueidentifier,
+ @Reason nvarchar(200)
+AS BEGIN
+ SET NOCOUNT ON;SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.View'';
+ IF @OriginalBatchId IS NULL OR @CorrectionBatchId IS NULL
+    OR @OriginalBatchId=@CorrectionBatchId OR @Reason IS NULL
+    OR LEN(LTRIM(RTRIM(@Reason))) NOT BETWEEN 8 AND 200
+  THROW 51320,''Choose a previously sent message and explain the correction.'',1;
+ BEGIN TRANSACTION;
+ DECLARE @OA varchar(20),@NA varchar(20),@OP varchar(20),@NP varchar(20),
+ @OC int,@NC int,@OL int,@NL int,@OS int,@NS int,@OT int,@NT int,
+ @OFlag bit,@NFlag bit,@Approved datetime2(3),@NewApproved datetime2(3),
+ @Owner int,@NewState varchar(14);
+ SELECT @OA=Audience,@OP=Purpose,@OC=CampusId,@OL=ClassId,
+ @OS=StudentId,@OT=StaffId,@OFlag=SingleStudentScope,@Approved=ConfirmedUtc
+ FROM msg.Batch WITH(UPDLOCK,HOLDLOCK) WHERE BatchId=@OriginalBatchId;
+ SELECT @NA=Audience,@NP=Purpose,@NC=CampusId,@NL=ClassId,
+ @NS=StudentId,@NT=StaffId,@NFlag=SingleStudentScope,@NewApproved=ConfirmedUtc,
+ @Owner=CreatedBy,@NewState=State
+ FROM msg.Batch WITH(UPDLOCK,HOLDLOCK) WHERE BatchId=@CorrectionBatchId;
+ IF @OA IS NULL OR @NA IS NULL OR @Approved IS NULL OR @NewApproved IS NULL
+   OR @Owner<>@UserId OR @NewState<>''Confirmed'' OR @OA<>@NA OR @OP<>@NP
+   OR @OC<>@NC OR @OL<>@NL OR @OS<>@NS OR @OT<>@NT OR @OFlag<>@NFlag
+  THROW 51321,''Correction requires a new approved review of the original message audience and type.'',1;
+ IF @OA=''Staff'' EXEC dbo.RequirePermission @UserId,N''Staff.View'';
+ ELSE EXEC dbo.RequirePermission @UserId,N''Students.View'';
+ IF @OA IN (''OutstandingFees'',''FeeStudent'',''FeeFamily'')
+  EXEC dbo.RequirePermission @UserId,N''Fees.View'';
+ IF NOT EXISTS(SELECT 1 FROM msg.Attempt A JOIN msg.Recipient R
+     ON R.RecipientId=A.RecipientId WHERE R.BatchId=@OriginalBatchId
+     AND A.Outcome IN (''Submitted'',''Accepted'',''Delivered''))
+   AND NOT EXISTS(SELECT 1 FROM msg.ManualHandoff H JOIN msg.Recipient R
+     ON R.RecipientId=H.RecipientId WHERE R.BatchId=@OriginalBatchId
+     AND H.State=''ReportedSent'')
+  THROW 51322,''The original batch lacks recorded sending evidence.'',1;
+ IF NOT EXISTS(SELECT 1 FROM msg.Recipient WHERE BatchId=@CorrectionBatchId)
+    OR EXISTS(SELECT 1 FROM msg.Attempt A JOIN msg.Recipient R
+       ON R.RecipientId=A.RecipientId WHERE R.BatchId=@CorrectionBatchId)
+    OR EXISTS(SELECT 1 FROM msg.ManualHandoff H JOIN msg.Recipient R
+       ON R.RecipientId=H.RecipientId WHERE R.BatchId=@CorrectionBatchId
+       AND H.State<>''Pending'')
+  THROW 51323,''Correction has started dispatch or has no reviewed recipients.'',1;
+ IF EXISTS(SELECT 1 FROM msg.BatchCorrection WITH(UPDLOCK,HOLDLOCK)
+     WHERE CorrectionBatchId=@CorrectionBatchId)
+ BEGIN
+   IF NOT EXISTS(SELECT 1 FROM msg.BatchCorrection WHERE CorrectionBatchId=@CorrectionBatchId
+      AND OriginalBatchId=@OriginalBatchId AND LinkedBy=@UserId AND Reason=@Reason)
+     THROW 51324,''Correction already has a different original or recorded reason.'',1;
+ END
+ ELSE
+   INSERT msg.BatchCorrection(CorrectionBatchId,OriginalBatchId,Reason,LinkedBy)
+   VALUES(@CorrectionBatchId,@OriginalBatchId,@Reason,@UserId);
+ COMMIT TRANSACTION;
+END');
+
 EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadMessageLanguage @UserId int
 AS BEGIN
  SET NOCOUNT ON;

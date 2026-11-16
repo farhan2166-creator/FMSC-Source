@@ -270,6 +270,19 @@ internal static class CommunicationManagementStore
             DatabaseHelper.P("@Channel", channel));
     }
 
+    internal static Task LinkCorrectionBatchAsync(Guid originalBatch, Guid correctionBatch, string reason)
+    {
+        if (!CurrentUser.HasPermission("Communication.Send") || !CurrentUser.HasPermission("Communication.View"))
+            throw new UnauthorizedAccessException("A correction requires Send and History access.");
+        if (originalBatch==Guid.Empty || correctionBatch==Guid.Empty || originalBatch==correctionBatch ||
+            string.IsNullOrWhiteSpace(reason) || reason.Trim().Length is <8 or >200)
+            throw new ArgumentException("Choose the original message and explain the correction.");
+        return DatabaseHelper.ExecuteUserAsync("msg.LinkCorrectionBatch",
+            DatabaseHelper.P("@OriginalBatchId",originalBatch),
+            DatabaseHelper.P("@CorrectionBatchId",correctionBatch),
+            DatabaseHelper.P("@Reason",reason.Trim()));
+    }
+
     internal static Task<DataTable> ReadTemplateRevisionsAsync(int templateId)
     {
         if (!CurrentUser.HasPermission("Communication.Configure"))

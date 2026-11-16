@@ -15,6 +15,10 @@ internal static partial class Program
         {
             CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
                 new[] { "Communication.Send", "Students.View", "Fees.View" });
+            bool unauthorizedCorrection=false;
+            try { using var correctionDialog=new CommunicationCorrectionReasonDialog(); }
+            catch(UnauthorizedAccessException) { unauthorizedCorrection=true; }
+            Check(unauthorizedCorrection,"Send-only staff cannot prepare a correction without History access.");
             Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission) && !CurrentUser.HasPermission("Communication.View"),
                 "A sender can open messaging without being granted history access");
             foreach (string bad in new[] { "Hello [Typo]", "Hello [StudentName", "Hello StudentName]", "Hello {{StudentName}}" })
@@ -184,6 +188,14 @@ internal static partial class Program
                 Check(versions.Controls.Find("communicationTemplateVersionGrid", true).Length == 1
                     && versions.Controls.Find("communicationRestoreTemplateVersion", true).Length == 1,
                     "Administrators can open the separate audited template version and restore screen.");
+            using (var reason = new CommunicationCorrectionReasonDialog())
+                Check(reason.Controls.Find("communicationCorrectionReason",true).Length==1
+                    && reason.Controls.Find("communicationSaveCorrectionReason",true).Length==1,
+                    "Preparing a correction requires an explicit operator reason.");
+            using (var correctionHistory = new CommunicationHistoryDialog(
+                new CommunicationSessionRow(Guid.NewGuid(),"Twilio","Accepted","Student")))
+                Check(correctionHistory.Controls.Find("communicationPrepareCorrection",true).Length==1,
+                    "History contains a separate correction action without changing the original.");
             using var takeover = new CommunicationTakeoverDialog();
             Check(takeover.Controls.Find("communicationTakeoverQueue", true).Length == 1
                 && takeover.Controls.Find("communicationTakeoverReason", true).Length == 1,

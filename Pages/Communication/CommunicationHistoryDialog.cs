@@ -29,7 +29,18 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         Enabled = false, Visible = false
     };
 
+    private readonly ModernButton correct = new()
+    {
+        Name="communicationPrepareCorrection",Text="Correct…",
+        ThemeRole="Secondary",Enabled=false,Visible=false
+    };
     internal CommunicationHistoryDraft? Draft { get; private set; }
+    internal string? CorrectionReason { get; private set; }
+
+    internal static bool CanPrepareCorrection(DataTable rows) =>
+        rows.AsEnumerable().Any(row =>
+            Convert.ToString(row["Outcome"]) is "Accepted" or "Delivered" or "Submitted" or "ReportedSent");
+
 
     internal CommunicationHistoryDialog(CommunicationSessionRow session,
         Func<Guid, Task<DataTable>>? read = null, Func<long,Task<string>>? poll = null)
@@ -71,8 +82,17 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         var close = new ModernButton { Text = "Close", DialogResult = DialogResult.Cancel };
         CancelButton = close;
         sendAgain.Click += (_, _) => { if (Draft is not null) DialogResult = DialogResult.OK; };
+        correct.Click += (_, _) =>
+        {
+            if (Draft is null || !CurrentUser.HasPermission("Communication.View")
+                || !CurrentUser.HasPermission("Communication.Send")) return;
+            using var reason=new CommunicationCorrectionReasonDialog();
+            if (reason.ShowDialog(this)!=DialogResult.OK) return;
+            CorrectionReason=reason.Reason;
+            DialogResult=DialogResult.OK;
+        };
         checkDelivery.Click += async (_, _) => await CheckDeliveryAsync();
-        var buttons = HumanUi.DialogButtons(checkDelivery, sendAgain, close);
+        var buttons = HumanUi.DialogButtons(checkDelivery, sendAgain, correct, close);
         buttons.Dock = DockStyle.Fill;
         var layout = new TableLayoutPanel
         {
@@ -111,11 +131,18 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
                 string takeover = DisplayValue(first, "TakeoverApprovedBy");
                 if (takeover.Length > 0)
                     details.Text += $" · Reassigned by {takeover} ({LocalWhen(first, "TakeoverUtc")})";
+                string correction=DisplayValue(first,"CorrectionReason");
+                if(correction.Length>0)
+                    details.Text += " · Correction: " + correction;
                 if (rows.Rows[0]["ProviderCode"] is "WhatsAppBusinessManual")
                     message.Controls.OfType<Label>().Single().Text = "Saved message format";
                 ShowMessage();
                 Draft = CommunicationHistoryStore.CreateDraft(rows);
                 sendAgain.Visible = sendAgain.Enabled = Draft is not null;
+                correct.Visible = correct.Enabled = Draft is not null
+                    && CurrentUser.HasPermission("Communication.View")
+                    && CurrentUser.HasPermission("Communication.Send")
+                    && CanPrepareCorrection(rows);
             }
             catch (Exception ex)
             {

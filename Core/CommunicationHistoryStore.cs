@@ -33,6 +33,9 @@ internal static class CommunicationHistoryStore
                 COALESCE(Creator.Username,CONVERT(nvarchar(30),B.CreatedBy)) PreparedByName,
                 COALESCE(Approver.Username,CONVERT(nvarchar(30),B.ConfirmedBy)) ApprovedByName,
                 Takeover.ApprovedUtc TakeoverUtc,Takeover.Reason TakeoverReason,
+                Correction.OriginalBatchId CorrectionOfBatchId,
+                Correction.Reason CorrectionReason,
+                Correction.LinkedUtc CorrectionLinkedUtc,
                 COALESCE(TakeoverActor.Username,CONVERT(nvarchar(30),Takeover.ApprovedBy)) TakeoverApprovedBy,
                 H.LastOpenedUtc,H.ReportedUtc,
                 COALESCE(Reporter.Username,CONVERT(nvarchar(30),H.ChangedBy)) ManualReportedByName,
@@ -54,6 +57,7 @@ internal static class CommunicationHistoryStore
                 ORDER BY T.TakeoverId DESC
             ) Takeover
             LEFT JOIN dbo.Users TakeoverActor ON TakeoverActor.UserId=Takeover.ApprovedBy
+            LEFT JOIN msg.BatchCorrection Correction ON Correction.CorrectionBatchId=B.BatchId
             OUTER APPLY (
                 SELECT TOP(1) X.AttemptId,X.RequestUtc,X.ResponseUtc,X.ProviderMessageId,X.FailureCode
                 FROM msg.Attempt X WHERE X.RecipientId=R.RecipientId
