@@ -217,6 +217,24 @@ BEGIN
  IF @@ROWCOUNT<>1 THROW 51246,''Unknown automation event.'',1;
 END');
 
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadAutomationRules @UserId int
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ SELECT EventCode,Mode,CampusId,ClassId,ActivationBaselineUtc,UpdatedUtc
+ FROM msg.AutomationRule ORDER BY EventCode;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadProviderQuota @UserId int
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ SELECT Channel,ProviderCode,DailyLimit,ReservedImportant,UpdatedUtc
+ FROM msg.ProviderQuota ORDER BY ProviderCode;
+END');
+
 -- Replace the existing claim body in place so no executable legacy bypass remains.
 -- Holds SQL locks until a provider attempt is reserved. Unscheduled reviewed API
 -- batches remain eligible for the existing explicitly confirmed Send Now path.
