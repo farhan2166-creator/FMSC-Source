@@ -9,6 +9,15 @@ IF ISNULL((SELECT TOP(1) TRY_CONVERT(int,VersionNumber)
 ALTER TABLE msg.AutomationRule ADD
  BaselineAdmissionId int NOT NULL CONSTRAINT DF_MsgAutoBaselineAdmission DEFAULT(0),
  BaselinePaymentId bigint NOT NULL CONSTRAINT DF_MsgAutoBaselinePayment DEFAULT(0);
+-- A guardian with one unlinked student also needs a temporary event opt-out.
+-- Exactly one scope (registered family OR individual admission) is authoritative.
+ALTER TABLE msg.AutomationException DROP CONSTRAINT CK_MsgAutomationExceptionFamily;
+ALTER TABLE msg.AutomationException ALTER COLUMN FamilyId int NULL;
+ALTER TABLE msg.AutomationException ADD AdmissionId int NULL;
+ALTER TABLE msg.AutomationException ADD CONSTRAINT CK_MsgAutomationExceptionScope
+ CHECK((FamilyId>0 AND AdmissionId IS NULL)
+   OR (FamilyId IS NULL AND AdmissionId>0));
+
 CREATE TABLE msg.AutomationCandidate (
  CandidateId bigint IDENTITY(1,1) CONSTRAINT PK_MsgAutomationCandidate PRIMARY KEY,
  EventCode varchar(32) NOT NULL CONSTRAINT FK_MsgCandidateRule REFERENCES msg.AutomationRule(EventCode),
@@ -107,7 +116,7 @@ AS BEGIN
  AND NOT EXISTS(SELECT 1 FROM msg.AutomationCandidate Existing WITH(UPDLOCK,HOLDLOCK)
   WHERE Existing.EventCode=''Admission'' AND Existing.SourceKey=CONCAT(''AD:'',S.AdmissionId))
  AND NOT EXISTS(SELECT 1 FROM msg.AutomationException X WITH(HOLDLOCK)
-  WHERE X.FamilyId=FM.FamilyId AND X.EventCode=''Admission''
+  WHERE (X.FamilyId=FM.FamilyId OR X.AdmissionId=S.AdmissionId) AND X.EventCode=''Admission''
    AND X.RevokedUtc IS NULL AND (X.UntilUtc IS NULL OR X.UntilUtc>SYSUTCDATETIME()))
  ORDER BY S.AdmissionId;
  -- Payment acknowledgement: payment insert identity, not mutable payment date.
@@ -126,7 +135,7 @@ AS BEGIN
        WHERE Existing.EventCode=''PaymentReceived''
        AND Existing.SourceKey=CONCAT(''PAY:'',P.FeePaymentId))
    AND NOT EXISTS(SELECT 1 FROM msg.AutomationException X WITH(HOLDLOCK)
-      WHERE X.FamilyId=FM.FamilyId AND X.EventCode=''PaymentReceived''
+      WHERE (X.FamilyId=FM.FamilyId OR X.AdmissionId=S.AdmissionId) AND X.EventCode=''PaymentReceived''
        AND X.RevokedUtc IS NULL AND (X.UntilUtc IS NULL OR X.UntilUtc>SYSUTCDATETIME()))
  ORDER BY P.FeePaymentId;
  -- Birthdays: today in the configured school timezone only, one per calendar
@@ -145,7 +154,7 @@ AS BEGIN
       WHERE Existing.EventCode=''Birthday''
       AND Existing.SourceKey=CONCAT(''BD:'',DATEPART(year,@Day),'':'',S.AdmissionId))
    AND NOT EXISTS(SELECT 1 FROM msg.AutomationException X WITH(HOLDLOCK)
-      WHERE X.FamilyId=FM.FamilyId AND X.EventCode=''Birthday''
+      WHERE (X.FamilyId=FM.FamilyId OR X.AdmissionId=S.AdmissionId) AND X.EventCode=''Birthday''
        AND X.RevokedUtc IS NULL AND (X.UntilUtc IS NULL OR X.UntilUtc>SYSUTCDATETIME()))
  ORDER BY S.AdmissionId;
  INSERT msg.AutomationCandidate(EventCode,SourceKey,AdmissionId,SourceRecordId)
@@ -178,7 +187,7 @@ AS BEGIN
        (C.SourceKey=CONCAT(''BD:'',YEAR(@Today),'':'',C.AdmissionId)
         AND MONTH(S.DateOfBirth)=MONTH(@Today) AND DAY(S.DateOfBirth)=DAY(@Today)))
    AND NOT EXISTS(SELECT 1 FROM msg.AutomationException X
-     WHERE X.FamilyId=FM.FamilyId AND X.EventCode=C.EventCode
+     WHERE (X.FamilyId=FM.FamilyId OR X.AdmissionId=S.AdmissionId) AND X.EventCode=C.EventCode
        AND X.RevokedUtc IS NULL AND (X.UntilUtc IS NULL OR X.UntilUtc>SYSUTCDATETIME()))
    AND (C.EventCode<>''PaymentReceived'' OR EXISTS(
      SELECT 1 FROM dbo.FeePayments P
@@ -223,7 +232,7 @@ AS BEGIN
    WHERE S.AdmissionId=@StudentId AND S.Status=N''Active''
       AND Guardian.HasConsent=1 AND Guardian.PhoneE164 IS NOT NULL
       AND NOT EXISTS(SELECT 1 FROM msg.AutomationException X
-         WHERE X.FamilyId=Family.FamilyId AND X.EventCode=@EventCode
+         WHERE (X.FamilyId=Family.FamilyId OR X.AdmissionId=S.AdmissionId) AND X.EventCode=@EventCode
          AND X.RevokedUtc IS NULL AND (X.UntilUtc IS NULL OR X.UntilUtc>SYSUTCDATETIME()))
       AND (@EventCode<>''Birthday'' OR
           (MONTH(S.DateOfBirth)=MONTH(@Today) AND DAY(S.DateOfBirth)=DAY(@Today)))
@@ -257,7 +266,9 @@ AS BEGIN
  FROM msg.AutomationException E
  OUTER APPLY(SELECT TOP(1) S.StudentName FROM dbo.FamilyMembers FM
    JOIN dbo.Students S ON S.AdmissionId=FM.AdmissionId
-   WHERE FM.FamilyId=E.FamilyId AND S.Status=N''Active''
+   WHERE S.Status=N''Active'' AND
+     ((E.FamilyId IS NOT NULL AND FM.FamilyId=E.FamilyId)
+      OR (E.AdmissionId IS NOT NULL AND S.AdmissionId=E.AdmissionId))
    ORDER BY S.AdmissionId DESC) Student
  WHERE E.RevokedUtc IS NULL AND (E.UntilUtc IS NULL OR E.UntilUtc>SYSUTCDATETIME())
  ORDER BY E.CreatedUtc DESC,E.ExceptionId DESC;
@@ -276,19 +287,25 @@ AS BEGIN
    (@UntilUtc IS NOT NULL AND @UntilUtc<=SYSUTCDATETIME())
   THROW 51290,''A valid student, event, reason and future expiry are required.'',1;
  BEGIN TRANSACTION;
- DECLARE @FamilyId int;
- IF (SELECT COUNT(DISTINCT FM.FamilyId) FROM dbo.FamilyMembers FM WITH(UPDLOCK,HOLDLOCK)
-     JOIN dbo.Students S WITH(HOLDLOCK) ON S.AdmissionId=FM.AdmissionId
-     WHERE FM.AdmissionId=@AdmissionId AND S.Status=N''Active'')<>1
-   THROW 51291,''The chosen active student must belong to one registered family.'',1;
- SELECT @FamilyId=FM.FamilyId FROM dbo.FamilyMembers FM WITH(HOLDLOCK)
- WHERE FM.AdmissionId=@AdmissionId;
+ IF NOT EXISTS(SELECT 1 FROM dbo.Students WITH(HOLDLOCK)
+      WHERE AdmissionId=@AdmissionId AND Status=N''Active'')
+   THROW 51291,''Choose an active school student for this exception.'',1;
+ DECLARE @FamilyId int,@StandaloneAdmissionId int;
+ IF (SELECT COUNT(DISTINCT FamilyId) FROM dbo.FamilyMembers WITH(UPDLOCK,HOLDLOCK)
+     WHERE AdmissionId=@AdmissionId)>1
+   THROW 51291,''The student has inconsistent family membership.'',1;
+ SELECT @FamilyId=MIN(FamilyId) FROM dbo.FamilyMembers WITH(HOLDLOCK)
+ WHERE AdmissionId=@AdmissionId;
+ SET @StandaloneAdmissionId=CASE WHEN @FamilyId IS NULL THEN @AdmissionId END;
  UPDATE msg.AutomationException WITH(UPDLOCK,HOLDLOCK)
  SET RevokedBy=@UserId,RevokedUtc=SYSUTCDATETIME()
- WHERE FamilyId=@FamilyId AND EventCode=@EventCode AND RevokedUtc IS NULL;
- INSERT msg.AutomationException(FamilyId,EventCode,UntilUtc,Reason,CreatedBy)
- VALUES(@FamilyId,@EventCode,@UntilUtc,LTRIM(RTRIM(@Reason)),@UserId);
- SELECT CONVERT(bigint,SCOPE_IDENTITY()) ExceptionId,@FamilyId FamilyId;
+ WHERE ((@FamilyId IS NOT NULL AND FamilyId=@FamilyId)
+   OR (@StandaloneAdmissionId IS NOT NULL AND AdmissionId=@StandaloneAdmissionId))
+   AND EventCode=@EventCode AND RevokedUtc IS NULL;
+ INSERT msg.AutomationException(FamilyId,AdmissionId,EventCode,UntilUtc,Reason,CreatedBy)
+ VALUES(@FamilyId,@StandaloneAdmissionId,@EventCode,@UntilUtc,LTRIM(RTRIM(@Reason)),@UserId);
+ SELECT CONVERT(bigint,SCOPE_IDENTITY()) ExceptionId,
+    @FamilyId FamilyId,@StandaloneAdmissionId AdmissionId;
  COMMIT;
 END');
 
