@@ -396,11 +396,21 @@ BEGIN
       WHERE R.RecipientId=@RecipientId;
     IF @Limit IS NOT NULL
     BEGIN
-    DECLARE @TodayUtc datetime2(3)=CONVERT(datetime2(3),CONVERT(date,@NowUtc));
+    -- A provider allowance is for the school's calendar day, not UTC.
+    -- Compute both local-midnight boundaries separately to respect DST.
+    DECLARE @QuotaZone sysname,@LocalDay date,@LocalMidnight datetime2(3),
+            @StartUtc datetime2(3),@NextUtc datetime2(3);
+    SELECT @QuotaZone=TimeZoneId FROM msg.DispatchControl WHERE ControlId=1;
+    SET @LocalDay=CONVERT(date,(@NowUtc AT TIME ZONE ''UTC'') AT TIME ZONE @QuotaZone);
+    SET @LocalMidnight=CONVERT(datetime2(3),@LocalDay);
+    SET @StartUtc=CONVERT(datetime2(3),
+      (@LocalMidnight AT TIME ZONE @QuotaZone) AT TIME ZONE ''UTC'');
+    SET @NextUtc=CONVERT(datetime2(3),
+      (DATEADD(day,1,@LocalMidnight) AT TIME ZONE @QuotaZone) AT TIME ZONE ''UTC'');
     DECLARE @Used bigint=(
       SELECT COUNT_BIG(*) FROM msg.Attempt T WITH(HOLDLOCK)
       WHERE T.ProviderCode=@ExpectedProviderCode AND
-       T.RequestUtc>=@TodayUtc AND T.RequestUtc<DATEADD(day,1,@TodayUtc));
+       T.RequestUtc>=@StartUtc AND T.RequestUtc<@NextUtc);
     IF @Used>=@Limit OR (@Priority<>''High'' AND @Used>=@Limit-@Reserve)
         THROW 51249,''The provider daily allowance is exhausted or reserved for priority messages.'',1;
     IF (SELECT COUNT_BIG(*) FROM msg.Attempt T WITH(HOLDLOCK)
