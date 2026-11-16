@@ -64,6 +64,42 @@ internal static class CommunicationAutomationInboxStore
             DatabaseHelper.P("@BatchId",batchId));
     }
 
+    internal static Task<DataTable> ReadFamilyExceptionsAsync()
+    {
+        if(!CurrentUser.HasPermission("Communication.Configure") ||
+            !CurrentUser.HasPermission("Students.View"))
+            throw new UnauthorizedAccessException("Communication administrator and student access are required.");
+        return DatabaseHelper.QueryUserAsync("msg.ReadAutomationFamilyExceptions");
+    }
+
+    internal static async Task SaveFamilyExceptionAsync(
+        int admissionId,string eventCode,DateTime? expiryUtc,string reason)
+    {
+        if(!CurrentUser.HasPermission("Communication.Configure") ||
+           !CurrentUser.HasPermission("Students.View"))
+            throw new UnauthorizedAccessException("Communication administrator and student access are required.");
+        if(admissionId<=0 || string.IsNullOrWhiteSpace(eventCode) ||
+           string.IsNullOrWhiteSpace(reason) || reason.Length>200 ||
+           (expiryUtc is { } date && date<=DateTime.UtcNow))
+            throw new ArgumentException("Choose a valid student, event and reason; expiry must be in the future.");
+        using var result=await DatabaseHelper.QueryUserAsync("msg.SaveAutomationFamilyException",
+            DatabaseHelper.Int("@AdmissionId",admissionId),
+            DatabaseHelper.P("@EventCode",eventCode),
+            DatabaseHelper.P("@UntilUtc",expiryUtc),
+            DatabaseHelper.P("@Reason",reason.Trim()));
+        if(result.Rows.Count!=1)
+            throw new InvalidOperationException("The family exception could not be confirmed.");
+    }
+
+    internal static Task RevokeFamilyExceptionAsync(long exceptionId)
+    {
+        if(!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication.Configure is required.");
+        if(exceptionId<=0)throw new ArgumentOutOfRangeException(nameof(exceptionId));
+        return DatabaseHelper.ExecuteUserAsync("msg.RevokeAutomationFamilyException",
+            DatabaseHelper.P("@ExceptionId",exceptionId));
+    }
+
     internal static string SuggestedBody(string eventCode) => eventCode switch
     {
         "Admission" => CommunicationPreparedMessages.BuiltIns
