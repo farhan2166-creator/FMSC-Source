@@ -40,6 +40,8 @@ internal static class CommunicationManagementStore
         try
         {
             sessions.Columns.Add(new DataColumn("RecipientText", typeof(string)) { DefaultValue = "Restricted" });
+            // Search only identities from already permission-filtered saved batches.
+            sessions.Columns.Add(new DataColumn("RecipientSearchText", typeof(string)) { DefaultValue = "" });
             if (sessions.Rows.Count == 0 || actor != CurrentUser.UserId || (!students && !staff)) return sessions;
 
             // Keep the queue and outcome rules in their existing procedures.
@@ -67,20 +69,38 @@ internal static class CommunicationManagementStore
                 SELECT R.BatchId,R.RecipientCount,COALESCE(S.StudentName,T.StaffName) RecipientName,
                     COALESCE(S.AdmissionNumber,T.StaffNumber) RecordNumber,
                     CASE WHEN R.RecipientCount=1 THEN R.LastFour END LastFour,
-                    C.CampusName,K.ClassName
+                    C.CampusName,K.ClassName,Q.SearchText RecipientSearchText
                 FROM SavedRecipients R
                 LEFT JOIN dbo.Students S ON R.RecipientCount=1 AND S.AdmissionId=R.AdmissionId
                 LEFT JOIN dbo.Staff T ON R.RecipientCount=1 AND T.StaffId=R.StaffId
                 LEFT JOIN dbo.Campuses C ON C.CampusId=R.CampusId
-                LEFT JOIN dbo.Classes K ON K.ClassId=R.ClassId;
+                LEFT JOIN dbo.Classes K ON K.ClassId=R.ClassId
+                OUTER APPLY (
+                    SELECT STRING_AGG(CONVERT(nvarchar(max),
+                        CONCAT(COALESCE(SS.StudentName,ST.StaffName,N''),N' ',
+                               COALESCE(SS.AdmissionNumber,ST.StaffNumber,N''),N' ',
+                               COALESCE(SS.FatherName,ST.FatherName,N''),N' ',
+                               COALESCE(SS.GuardianName,N''))),N' ') SearchText
+                    FROM msg.Recipient SR
+                    LEFT JOIN dbo.Students SS ON SS.AdmissionId=SR.AdmissionId
+                    LEFT JOIN dbo.Staff ST ON ST.StaffId=SR.StaffId
+                    WHERE SR.BatchId=R.BatchId
+                ) Q;
                 """, DatabaseHelper.Int("@UserId", actor), DatabaseHelper.Bit("@Unfinished", unfinished),
                 DatabaseHelper.Bit("@Students", students), DatabaseHelper.Bit("@Fees", fees), DatabaseHelper.Bit("@Staff", staff),
                 DatabaseHelper.P("@BatchIds", JsonSerializer.Serialize(sessions.AsEnumerable().Select(row => row.Field<Guid>("BatchId")))));
             if (actor != CurrentUser.UserId) return sessions;
 
             var labels = recipients.AsEnumerable().ToDictionary(row => row.Field<Guid>("BatchId"), FormatSessionRecipient);
+            var searchable = recipients.AsEnumerable().ToDictionary(
+                row => row.Field<Guid>("BatchId"),
+                row => row.Field<string>("RecipientSearchText") ?? "");
             foreach (DataRow session in sessions.Rows)
-                if (labels.TryGetValue(session.Field<Guid>("BatchId"), out string? label)) session["RecipientText"] = label;
+            {
+                var id = session.Field<Guid>("BatchId");
+                if (labels.TryGetValue(id, out string? label)) session["RecipientText"] = label;
+                if (searchable.TryGetValue(id, out string? names)) session["RecipientSearchText"] = names;
+            }
             return sessions;
         }
         catch
