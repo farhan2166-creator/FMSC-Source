@@ -87,6 +87,40 @@ internal static class CommunicationQueuePolicyStore
             DatabaseHelper.Int("@ClassId", classId));
     }
 
+    internal static Task<DataTable> ReadSchoolWeekdaysAsync()
+    {
+        RequireAdministrator();
+        return DatabaseHelper.QueryUserAsync("msg.ReadSchoolWeekdays");
+    }
+
+    internal static Task SetSchoolWeekdayAsync(int isoWeekday, bool enabled)
+    {
+        RequireAdministrator();
+        if (isoWeekday is < 1 or > 7)
+            throw new ArgumentOutOfRangeException(nameof(isoWeekday));
+        return DatabaseHelper.ExecuteUserAsync("msg.SetSchoolWeekday",
+            DatabaseHelper.Int("@IsoWeekday", isoWeekday),
+            DatabaseHelper.Bit("@Enabled", enabled));
+    }
+
+    internal static Task<DataTable> ReadSchoolHolidaysAsync()
+    {
+        RequireAdministrator();
+        return DatabaseHelper.QueryUserAsync("msg.ReadSchoolHolidays");
+    }
+
+    internal static Task SetSchoolHolidayAsync(DateOnly date, string? description, bool remove)
+    {
+        RequireAdministrator();
+        if (date.Year is < 2000 or > 2100 || (!remove &&
+            (string.IsNullOrWhiteSpace(description) || description.Length > 150)))
+            throw new ArgumentException("Choose a valid date and short holiday description.");
+        return DatabaseHelper.ExecuteUserAsync("msg.SetSchoolHoliday",
+            DatabaseHelper.P("@HolidayDate", date.ToDateTime(TimeOnly.MinValue)),
+            DatabaseHelper.P("@Description", description),
+            DatabaseHelper.Bit("@Remove", remove));
+    }
+
     internal static Task<DataTable> ReadScheduledBatchesAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Send"))
