@@ -110,9 +110,7 @@ internal static class CommunicationRecipientResolver
                 AND (@ClassId=0 OR CCS.ClassId=@ClassId)
                 AND (@StudentId=0 OR S.AdmissionId=@StudentId)
                 AND B.Outstanding>0)
-            OR (@Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily')
-                AND S.AdmissionId=@StudentId
-                AND (@Audience NOT IN (N'FeeStudent',N'FeeFamily') OR B.Outstanding>0))
+            OR (@Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily') AND S.AdmissionId=@StudentId)
         )
         ORDER BY S.StudentName, S.AdmissionId;
         """;
