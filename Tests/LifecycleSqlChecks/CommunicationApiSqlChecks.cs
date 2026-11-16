@@ -17,6 +17,32 @@ internal static class CommunicationApiSqlChecks
         args.Single(p=>p.ParameterName=="@ContactNumber").Value="03008000077";
         int student=Convert.ToInt32(Sql.Proc("AdmitStudent",args).Rows[0]["AdmissionId"]);
         Sql.Proc("msg.RecordAdmissionConsent",Sql.P("@UserId",f.Admin),Sql.P("@AdmissionId",student),Sql.P("@Consent",true),Sql.P("@Authority","Students.Admit"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.RoutineFamilyDailyEligible(@Student,SYSUTCDATETIME())",
+            Sql.P("@Student",student))==1,
+            "A newly admitted family starts below the routine school-day message ceiling.");
+        int allowedAfterThree = Sql.Count("""
+            SET NOCOUNT ON; SET XACT_ABORT ON;
+            BEGIN TRANSACTION;
+            DECLARE @Batch uniqueidentifier=NEWID();
+            INSERT msg.Batch(BatchId,ClientRequestId,Channel,Purpose,Body,
+                Audience,StudentId,State,CreatedBy,ConfirmedBy,ConfirmedUtc)
+            VALUES(@Batch,NEWID(),'Sms','Announcement',N'Fixture routine notice',
+                'Student',@Student,'Confirmed',@Admin,@Admin,SYSUTCDATETIME());
+            INSERT msg.Recipient(BatchId,RecipientKind,AdmissionId,PhoneE164)
+            VALUES(@Batch,'Student',@Student,'+923008000077');
+            DECLARE @Recipient bigint=CONVERT(bigint,SCOPE_IDENTITY());
+            INSERT msg.Attempt(RecipientId,AttemptNumber,AttemptKey,
+                Channel,ProviderCode,Outcome)
+            VALUES(@Recipient,1,NEWID(),'Sms','Twilio','Unknown'),
+                  (@Recipient,2,NEWID(),'Sms','Twilio','Accepted'),
+                  (@Recipient,3,NEWID(),'Sms','Twilio','Failed');
+            DECLARE @Allowed int=(SELECT COUNT(*) FROM msg.RoutineFamilyDailyEligible(
+                @Student,SYSUTCDATETIME()));
+            ROLLBACK TRANSACTION;
+            SELECT @Allowed;
+            """,Sql.P("@Student",student),Sql.P("@Admin",f.Admin));
+        r.Check(allowedAfterThree==0 && Sql.Count("SELECT COUNT(*) FROM msg.Attempt")==before,
+            "Three routine attempts use the family ceiling, including uncertain and failed submissions; synthetic attempts roll back.");
         using var recipients=new DataTable();recipients.Columns.Add("RecipientKind");recipients.Columns.Add("RecordId",typeof(int));recipients.Columns.Add("PhoneE164");
         recipients.Rows.Add("Student",student,"+923008000077");
         string Review(string hash)=>JsonSerializer.Serialize(new[]{new {Kind="Student",RecordId=student,Phone="+923008000077",Hash=hash,Text="Hello API fictional student"}});

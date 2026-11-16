@@ -509,6 +509,37 @@ AS BEGIN
  ORDER BY B.CreatedUtc DESC;
 END');
 
+-- Routine messages share a conservative family-level daily ceiling across
+-- providers and both manual and unattended API dispatch. The count includes
+-- unknown attempts because the provider may have charged for them.
+-- Transactional acknowledgements are not routine fee/announcement attempts.
+EXEC(N'CREATE OR ALTER FUNCTION msg.RoutineFamilyDailyEligible
+(@AdmissionId int,@NowUtc datetime2(3))
+RETURNS TABLE
+AS RETURN
+(
+ SELECT CONVERT(bit,1) Allowed
+ FROM msg.DispatchControl D
+ OUTER APPLY (SELECT TOP(1) FamilyId FROM dbo.FamilyMembers
+   WHERE AdmissionId=@AdmissionId ORDER BY FamilyId) Family
+ WHERE D.ControlId=1 AND @AdmissionId>0
+  AND (
+    SELECT COUNT_BIG(*) FROM msg.Attempt T WITH(HOLDLOCK)
+    JOIN msg.Recipient R WITH(HOLDLOCK) ON R.RecipientId=T.RecipientId
+    JOIN msg.Batch B WITH(HOLDLOCK) ON B.BatchId=R.BatchId
+    WHERE B.Purpose IN (''Announcement'',''FeeReminder'')
+      AND R.AdmissionId IS NOT NULL
+      AND T.RequestUtc>DATEADD(day,-2,@NowUtc)
+      AND CONVERT(date,(T.RequestUtc AT TIME ZONE ''UTC'') AT TIME ZONE D.TimeZoneId)
+          =CONVERT(date,(@NowUtc AT TIME ZONE ''UTC'') AT TIME ZONE D.TimeZoneId)
+      AND (CASE WHEN Family.FamilyId IS NULL
+          THEN CASE WHEN R.AdmissionId=@AdmissionId THEN 1 ELSE 0 END
+          ELSE CASE WHEN EXISTS(SELECT 1 FROM dbo.FamilyMembers F
+               WHERE F.FamilyId=Family.FamilyId AND F.AdmissionId=R.AdmissionId)
+               THEN 1 ELSE 0 END END)=1
+  )<D.RoutineFamilyDailyLimit
+)');
+
 EXEC(N'CREATE OR ALTER PROCEDURE msg.TakeOverScheduledBatch
  @UserId int,@BatchId uniqueidentifier,@Reason nvarchar(200)
 AS BEGIN
@@ -751,6 +782,29 @@ BEGIN
                CONVERT(varchar(40),NULL) ProviderCode,
                CONVERT(nvarchar(1600),NULL) Body,@Exclusion ExclusionCode;
         COMMIT TRANSACTION; RETURN;
+    END;
+
+    -- All routine student/family fee and announcement messages respect the
+    -- same school-day ceiling, even when different staff or devices reserve
+    -- different siblings simultaneously. The local app lock is transaction-
+    -- owned; a crash cannot release it before the SQL attempt is persisted.
+    IF @Kind=''Student'' AND @Purpose IN (''Announcement'',''FeeReminder'')
+    BEGIN
+       DECLARE @FamilyForRate int;
+       SELECT TOP(1) @FamilyForRate=FM.FamilyId
+       FROM dbo.FamilyMembers FM WITH(HOLDLOCK)
+       WHERE FM.AdmissionId=@AdmissionId ORDER BY FM.FamilyId;
+       DECLARE @RateLock int,@RateResource nvarchar(255)=
+          CASE WHEN @FamilyForRate IS NULL
+             THEN CONCAT(N''FMSC_msg_daily_student_'',@AdmissionId)
+             ELSE CONCAT(N''FMSC_msg_daily_family_'',@FamilyForRate) END;
+       EXEC @RateLock=sys.sp_getapplock @Resource=@RateResource,
+          @LockMode=''Exclusive'',@LockOwner=''Transaction'',@LockTimeout=10000;
+       IF @RateLock<0
+          THROW 51293,''Family routine sending is busy. No provider request was created.'',1;
+       IF NOT EXISTS(SELECT 1 FROM msg.RoutineFamilyDailyEligible(
+           @AdmissionId,SYSUTCDATETIME()))
+          THROW 51294,''This family reached the daily routine message limit. Try the next school day after review.'',1;
     END;
 
     DECLARE @Ordinal int;

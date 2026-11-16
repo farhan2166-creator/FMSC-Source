@@ -120,6 +120,30 @@ internal static partial class Program
                 && familyEnglish.Contains("family",StringComparison.OrdinalIgnoreCase)
                 && !familyEnglish.Contains("[StudentName]",StringComparison.Ordinal),
                 "Family fee suggestions avoid misrepresenting the household's amount as one student's bill.");
+            using (var allowedSessions = new DataTable("CommunicationSessionPermissions"))
+            {
+                allowedSessions.Columns.Add("Audience",typeof(string));
+                foreach (string audience in new[] { "Staff","Student","FeeFamily","School" })
+                    allowedSessions.Rows.Add(audience);
+                using var staffOnly = allowedSessions.Copy();
+                CommunicationManagementStore.LimitVisibleSessions(
+                    staffOnly, canSeeStudents:false, canSeeStaff:true, canSeeFees:false);
+                Check(staffOnly.Rows.Count==1
+                    && Convert.ToString(staffOnly.Rows[0]["Audience"])=="Staff",
+                    "A staff-only History viewer cannot see student, campus or financial session metadata.");
+                using var studentsOnly = allowedSessions.Copy();
+                CommunicationManagementStore.LimitVisibleSessions(
+                    studentsOnly, canSeeStudents:true, canSeeStaff:false, canSeeFees:false);
+                Check(studentsOnly.Rows.Count==2
+                    && studentsOnly.AsEnumerable().All(row =>
+                        Convert.ToString(row["Audience"]) is "Student" or "School"),
+                    "Student history without Fees.View excludes fee and staff metadata.");
+                using var none = allowedSessions.Copy();
+                CommunicationManagementStore.LimitVisibleSessions(
+                    none, canSeeStudents:false, canSeeStaff:false, canSeeFees:false);
+                Check(none.Rows.Count==0,
+                    "A history-only viewer without source-record grants sees no session metadata.");
+            }
             CheckProviderBodyDeadline();
             CheckCommunicationAsyncAndCancellation();
             CheckCommunicationSessionsAndOptions();

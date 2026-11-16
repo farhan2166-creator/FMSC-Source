@@ -39,6 +39,9 @@ internal static class CommunicationManagementStore
             : DatabaseHelper.QueryUserAsync("msg.ReadHistory", DatabaseHelper.Int("@Limit", limit)));
         try
         {
+            if (actor != CurrentUser.UserId)
+                throw new UnauthorizedAccessException("The signed-in school operator changed.");
+            LimitVisibleSessions(sessions, students, staff, fees);
             sessions.Columns.Add(new DataColumn("RecipientText", typeof(string)) { DefaultValue = "Restricted" });
             // Search only identities from already permission-filtered saved batches.
             sessions.Columns.Add(new DataColumn("RecipientSearchText", typeof(string)) { DefaultValue = "" });
@@ -110,6 +113,31 @@ internal static class CommunicationManagementStore
             sessions.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// The SQL history grant is distinct from staff/student/finance grants.
+    /// Never surface a session summary for a record type the viewer cannot
+    /// see, even when it contains no recipient name or phone.
+    /// </summary>
+    internal static void LimitVisibleSessions(DataTable sessions,
+        bool canSeeStudents, bool canSeeStaff, bool canSeeFees)
+    {
+        if (!sessions.Columns.Contains("Audience"))
+            throw new InvalidDataException("Communication session audience is missing.");
+        foreach (DataRow row in sessions.Rows.Cast<DataRow>().ToArray())
+        {
+            string audience = Convert.ToString(row["Audience"]) ?? "";
+            bool visible = audience switch
+            {
+                "Staff" => canSeeStaff,
+                "OutstandingFees" or "FeeStudent" or "FeeFamily" =>
+                    canSeeStudents && canSeeFees,
+                _ => canSeeStudents
+            };
+            if (!visible) row.Delete();
+        }
+        sessions.AcceptChanges();
     }
 
     internal static string FormatSessionRecipient(DataRow row)

@@ -199,7 +199,7 @@ internal static class CommunicationBackgroundWorker
             }
             return 0;
         }
-        catch(SqlException ex) when(ex.Number is 51261 or 51262 or 51263 or 51240 or 51241 or 51249 or 51250 or 51251)
+        catch(SqlException ex) when(ex.Number is 51261 or 51262 or 51263 or 51240 or 51241 or 51249 or 51250 or 51251 or 51293 or 51294)
         {
             AppExceptionHandler.LogNonFatal(ex,"Communication processor paused or restricted");
             return 20;

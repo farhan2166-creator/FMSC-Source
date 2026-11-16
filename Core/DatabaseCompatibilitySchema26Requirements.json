@@ -74,6 +74,11 @@
       "schema": "msg",
       "name": "TakeOverScheduledBatch",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "RoutineFamilyDailyEligible",
+      "type": "IF"
     }
   ],
   "checkConstraints": [
