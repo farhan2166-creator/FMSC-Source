@@ -199,13 +199,25 @@ internal static partial class Program
                 $"{button.Name}: button={button.Bounds}, panel={button.Parent?.ClientRectangle}")));
         host.ClientSize = new Size(1200, 780);
         Application.DoEvents();
+        var liveDraft = (ModernTextBox)Descendants(page)
+            .Single(control => control.Name == "communicationDraftPreview");
+        Check(targetCard.Visible && liveDraft.Visible && liveDraft.ReadOnly,
+            "New Message opens on the composer and shows a read-only live draft view");
+        var draftEditor = (ModernTextBox)type.GetField("message",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        draftEditor.Text = "FMSC draft preview fixture";
+        Check(liveDraft.Text == draftEditor.Text && !send.Enabled,
+            "Typing updates the live preview but never authorizes sending without review");
+        draftEditor.Clear();
+        ((ModernButton)navigation[1]).PerformClick();
+        Application.DoEvents();
         Check(Descendants(page).Single(control => control.Name == "communicationUnfinishedGrid").Visible,
-            "The center opens on the dedicated unfinished queue");
+            "Queue navigation opens the dedicated unfinished-batch list");
         var unfinishedSearch = page.Controls.Find("communicationUnfinishedSearch", true).Single();
         int buttonBottom = navigation.Max(button => button.RectangleToScreen(button.ClientRectangle).Bottom);
         int gap = unfinishedSearch.PointToScreen(Point.Empty).Y - buttonBottom;
         Check(gap >= 0 && gap < navigation[0].Height,
-            $"The session search starts directly below the navigation, with a gap smaller than a button (gap: {gap}px).");
+            $"The queue search starts directly below navigation (gap: {gap}px).");
         ((ModernButton)navigation[0]).PerformClick();
         Application.DoEvents();
         var workspace = (TableLayoutPanel)type.GetField("composerLayout",
