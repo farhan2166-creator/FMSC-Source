@@ -55,7 +55,7 @@ internal static class CommunicationApiSqlChecks
                 Sql.P("@CampusId",0),Sql.P("@ClassId",0));
             return Task.CompletedTask;
         },51247);
-        var scheduled=Confirm(Guid.NewGuid(),new string('S',64));
+        var scheduled=Confirm(Guid.NewGuid(),new string('E',64));
         Guid scheduleBatch=(Guid)scheduled.Rows[0]["BatchId"];
         long scheduleRecipient=Convert.ToInt64(Sql.Scalar(
             "SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Batch",
