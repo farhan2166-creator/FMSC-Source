@@ -11,12 +11,16 @@ ALTER TABLE msg.AutomationRule ADD
  BaselinePaymentId bigint NOT NULL CONSTRAINT DF_MsgAutoBaselinePayment DEFAULT(0);
 -- A guardian with one unlinked student also needs a temporary event opt-out.
 -- Exactly one scope (registered family OR individual admission) is authoritative.
+DROP INDEX IX_MsgAutomationExceptionActive ON msg.AutomationException;
 ALTER TABLE msg.AutomationException DROP CONSTRAINT CK_MsgAutomationExceptionFamily;
 ALTER TABLE msg.AutomationException ALTER COLUMN FamilyId int NULL;
 ALTER TABLE msg.AutomationException ADD AdmissionId int NULL;
 ALTER TABLE msg.AutomationException ADD CONSTRAINT CK_MsgAutomationExceptionScope
  CHECK((FamilyId>0 AND AdmissionId IS NULL)
    OR (FamilyId IS NULL AND AdmissionId>0));
+CREATE INDEX IX_MsgAutomationExceptionActive
+ ON msg.AutomationException(FamilyId,AdmissionId,EventCode,RevokedUtc)
+ INCLUDE(UntilUtc);
 
 CREATE TABLE msg.AutomationCandidate (
  CandidateId bigint IDENTITY(1,1) CONSTRAINT PK_MsgAutomationCandidate PRIMARY KEY,
