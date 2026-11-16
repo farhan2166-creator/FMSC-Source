@@ -308,8 +308,8 @@ internal static class CommunicationPreparedMessages
             IF @Owner<>@UserId EXEC dbo.RequirePermission @UserId,N'Communication.View';
             IF @Audience='Staff' EXEC dbo.RequirePermission @UserId,N'Staff.View';
             ELSE EXEC dbo.RequirePermission @UserId,N'Students.View';
-            IF @NeedFees=1 AND @Audience<>'OutstandingFees'
-                THROW 51120,'Fee amounts require the outstanding-fee audience.',1;
+            IF @NeedFees=1 AND @Audience NOT IN ('OutstandingFees','FeeStudent','FeeFamily')
+                THROW 51120,'Fee amounts require a fee-specific audience.',1;
             IF @Audience IN ('OutstandingFees','FeeStudent','FeeFamily') EXEC dbo.RequirePermission @UserId,N'Fees.View';
             SELECT COALESCE(R.AdmissionId,R.StaffId) RecordId,
                 COALESCE(NULLIF(LTRIM(RTRIM(S.StudentName)),N''),
@@ -330,12 +330,21 @@ internal static class CommunicationPreparedMessages
             OUTER APPLY (
                 SELECT SUM(dbo.GetFeeChargeBalance(C.BillingChargeId)) Outstanding
                 FROM dbo.BillingCharges C
-                WHERE (@NeedFees=1 OR @Audience='OutstandingFees') AND C.AdmissionId=S.AdmissionId
+                JOIN dbo.Students FeeStudent
+                  ON FeeStudent.AdmissionId=C.AdmissionId AND FeeStudent.Status=N'Active'
+                WHERE (@NeedFees=1 OR @Audience IN ('OutstandingFees','FeeStudent','FeeFamily'))
                   AND C.Status<>N'Cancelled'
+                  AND (C.AdmissionId=S.AdmissionId
+                    OR (@Audience='FeeFamily' AND EXISTS (
+                      SELECT 1 FROM dbo.FamilyMembers Origin
+                      JOIN dbo.FamilyMembers Related ON Related.FamilyId=Origin.FamilyId
+                      WHERE Origin.AdmissionId=S.AdmissionId
+                        AND Related.AdmissionId=C.AdmissionId)))
             ) F
             WHERE H.RecipientId=@RecipientId
               AND (H.State='Opened' OR (@PreviewBatchId IS NOT NULL AND H.State='Pending'))
               AND R.State='Pending'
+              AND (@Audience NOT IN ('FeeStudent','FeeFamily') OR F.Outstanding>0)
               AND NOT EXISTS (
                   SELECT 1 FROM msg.Suppression O
                   WHERE O.Channel='WhatsApp' AND O.PhoneE164=R.PhoneE164)
