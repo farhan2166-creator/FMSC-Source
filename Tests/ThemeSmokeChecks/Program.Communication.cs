@@ -323,6 +323,22 @@ internal static partial class Program
             && builtinChoices.Any(item => TemplateProperty(item, "Name") == "New admission welcome"
                 && TemplateProperty(item, "Channel").Length == 0),
             "Urdu prepared formats are explicitly selectable only on free WhatsApp, never paid SMS.");
+        var smsChargeDisclosure = type.GetMethod("SmsChargeDisclosure",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        var unicodeStudent = new CommunicationPreviewEntry(23, "عائشہ", "Student",
+            "+923001234567", "Included", null, "F-0023");
+        var smsAudience = new CommunicationTarget(CommunicationAudience.Student,0,0,23,0,"Sms");
+        var waAudience = smsAudience with { Channel = "WhatsApp" };
+        var unicodePreview = new CommunicationPreview(new[] { unicodeStudent });
+        string smsNotice = (string)smsChargeDisclosure.Invoke(null,
+            new object[] { smsAudience, unicodePreview, "Dear [StudentName]" })!;
+        string waNotice = (string)smsChargeDisclosure.Invoke(null,
+            new object[] { waAudience, unicodePreview, "Dear [StudentName]" })!;
+        Check(smsNotice.Contains("Unicode", StringComparison.Ordinal)
+            && smsNotice.Contains("billed", StringComparison.Ordinal)
+            && !waNotice.Contains("Unicode", StringComparison.Ordinal),
+            "SMS confirmation warns about Unicode even when it comes only from a personalized student name.");
+
         var valuesType = prepared.GetNestedType("Values", BindingFlags.NonPublic)!;
         object Details(decimal? amount) => Activator.CreateInstance(valuesType,
             23, "Sample Student", "F-0023", new DateTime(2026, 11, 9), amount)!;
