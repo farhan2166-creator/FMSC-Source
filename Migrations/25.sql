@@ -21,6 +21,12 @@ ALTER TABLE msg.AutomationException ADD CONSTRAINT CK_MsgAutomationExceptionScop
 CREATE INDEX IX_MsgAutomationExceptionActive
  ON msg.AutomationException(FamilyId,AdmissionId,EventCode,RevokedUtc)
  INCLUDE(UntilUtc);
+CREATE UNIQUE INDEX UX_MsgAutomationExceptionActiveFamily
+ ON msg.AutomationException(FamilyId,EventCode)
+ WHERE FamilyId IS NOT NULL AND RevokedUtc IS NULL;
+CREATE UNIQUE INDEX UX_MsgAutomationExceptionActiveStudent
+ ON msg.AutomationException(AdmissionId,EventCode)
+ WHERE AdmissionId IS NOT NULL AND RevokedUtc IS NULL;
 
 CREATE TABLE msg.AutomationCandidate (
  CandidateId bigint IDENTITY(1,1) CONSTRAINT PK_MsgAutomationCandidate PRIMARY KEY,
