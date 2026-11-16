@@ -154,6 +154,16 @@
       "schema": "msg",
       "name": "TR_Attempt_DailyAndRateLimits",
       "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "RevokeWorker",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ExcludeChangedPending",
+      "type": "P"
     }
   ],
   "columns": [

@@ -542,5 +542,29 @@ BEGIN
 END');
 
 
+EXEC(N'CREATE OR ALTER PROCEDURE msg.RevokeWorker
+ @UserId int,@WorkerId uniqueidentifier
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''System.Administration'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ UPDATE msg.WorkerAuthorization SET Enabled=0 WHERE WorkerId=@WorkerId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ExcludeChangedPending
+ @UserId int,@RecipientId bigint,@ExclusionCode varchar(32)
+AS
+BEGIN
+ SET NOCOUNT ON;SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ IF @ExclusionCode NOT IN (''ChangedSinceReview'',''ScheduledExpired'')
+  OR @ExclusionCode IS NULL THROW 51287,''Invalid exclusion code.'',1;
+ UPDATE R SET State=''Excluded'',ExclusionCode=@ExclusionCode,UpdatedUtc=SYSUTCDATETIME()
+ FROM msg.Recipient R JOIN msg.Batch B ON B.BatchId=R.BatchId
+ WHERE R.RecipientId=@RecipientId AND R.State=''Pending'' AND B.CreatedBy=@UserId
+  AND NOT EXISTS(SELECT 1 FROM msg.Attempt WHERE RecipientId=@RecipientId);
+END');
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'23',SYSDATETIME(),SUSER_SNAME(),N'Administrator API master pause and action-focused queue projection');
