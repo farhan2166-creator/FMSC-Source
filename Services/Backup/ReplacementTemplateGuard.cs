@@ -34,7 +34,9 @@ internal static class ReplacementTemplateGuard
                     OR WindowStart<>CONVERT(time(0),'08:00')
                     OR WindowEnd<>CONVERT(time(0),'18:00')
                     OR TimeZoneId<>N'Pakistan Standard Time'
-                    OR MaxPerMinute<>60 OR UpdatedBy IS NOT NULL)
+                    OR MaxPerMinute<>60 OR PreferredChannel<>'WhatsApp'
+                    OR PreferredProviderCode<>'WhatsAppBusinessManual'
+                    OR UpdatedBy IS NOT NULL)
                 OR (SELECT COUNT(*) FROM msg.AutomationRule)<>8
                 OR EXISTS (SELECT 1 FROM msg.AutomationRule
                     WHERE EventCode NOT IN ('Admission','PaymentReceived','OutstandingFees',
