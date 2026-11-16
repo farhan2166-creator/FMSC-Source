@@ -20,7 +20,7 @@ INSERT msg.SendControl(Id,Paused) VALUES(1,0);
 CREATE TABLE msg.HistoryExportAudit(
     ExportId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_MsgHistoryExportAudit PRIMARY KEY,
     RequestedBy int NOT NULL,
-    RowCount int NOT NULL CONSTRAINT CK_MsgHistoryExportRowCount CHECK(RowCount>0),
+    ExportedRows int NOT NULL CONSTRAINT CK_MsgHistoryExportRowCount CHECK(ExportedRows>0),
     FileType varchar(3) NOT NULL CONSTRAINT CK_MsgHistoryExportFileType CHECK(FileType IN ('CSV','PDF')),
     RequestedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgHistoryExportDate DEFAULT(SYSUTCDATETIME())
 );
@@ -94,7 +94,7 @@ BEGIN
  EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
  IF @RowCount IS NULL OR @RowCount<1 OR @FileType NOT IN (''PDF'',''CSV'')
      THROW 51265,''Only nonempty PDF or CSV history exports are allowed.'',1;
- INSERT msg.HistoryExportAudit(RequestedBy,RowCount,FileType)
+ INSERT msg.HistoryExportAudit(RequestedBy,ExportedRows,FileType)
  VALUES(@UserId,@RowCount,@FileType);
 END');
 
