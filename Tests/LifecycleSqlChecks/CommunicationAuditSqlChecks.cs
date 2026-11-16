@@ -72,6 +72,19 @@ internal static class CommunicationAuditSqlChecks
         r.Check(single.Included == 1 && single.Entries.Single(e => e.Included).RecordId == b.Id
             && CommunicationPreparedMessages.FromPreview(single.Entries.Single(e => e.Included)).Outstanding == Due(b.Id),
             "Collection's selected-student fee scope excludes other children, including a shared guardian's sibling.");
+        var singleFeeAudience = await CommunicationRecipientResolver.ReadAsync(
+            new CommunicationTarget(CommunicationAudience.FeeStudent,0,0,a.Id,0,"WhatsApp"));
+        var familyFeeAudience = await CommunicationRecipientResolver.ReadAsync(
+            new CommunicationTarget(CommunicationAudience.FeeFamily,0,0,a.Id,0,"WhatsApp"));
+        decimal? singleBalance=CommunicationPreparedMessages.FromPreview(
+            singleFeeAudience.Entries.Single(e=>e.Included)).Outstanding;
+        decimal? familyBalance=CommunicationPreparedMessages.FromPreview(
+            familyFeeAudience.Entries.Single(e=>e.Included)).Outstanding;
+        r.Check(singleBalance==Due(a.Id) &&
+            familyBalance==Due(a.Id)+Due(b.Id)+Due(declined.Id),
+            "The single-student notice uses only that student's live charges; the family notice includes linked active siblings.");
+        r.Check(familyFeeAudience.Included==1,
+            "The shared guardian receives one family-fee communication rather than one per sibling.");
         var ambiguous = Admit("Audit I unrelated guardian", "03008000001", true);
         bool refused = false;
         try { await CommunicationRecipientResolver.ReadAsync(fees); }
