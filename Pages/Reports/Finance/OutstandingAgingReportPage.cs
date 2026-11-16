@@ -14,7 +14,7 @@ public sealed class OutstandingAgingReportPage : CanonicalFinanceReportPage
     }
     private readonly ModernNumericTextBox minimumBalance = new() { Minimum = 0, Maximum = 1000000000m, ZeroAsPlaceholder = true };
     private readonly ModernTextBox minimumDays = HumanUi.TextBox(false, 6), maximumDays = HumanUi.TextBox(false, 6);
-    private ModernButton? openStatement;
+    private ModernButton? openStatement, sendMessage;
     public OutstandingAgingReportPage() : base(
         "Outstanding & Aging", "Unpaid fees, split into overdue, due today and upcoming amounts. Students without linked siblings appear individually.",
         "GetOutstandingAndAgingReport", "FMSC_Outstanding_Aging",
@@ -35,7 +35,9 @@ public sealed class OutstandingAgingReportPage : CanonicalFinanceReportPage
     {
         openStatement = AddBusyAction("Open Student Account", OpenStatementAsync, "Secondary");
         openStatement.Enabled = false;
-        return new[] { openStatement };
+        sendMessage = AddBusyAction("Message Student…", OpenFeeMessageAsync, "Secondary");
+        sendMessage.Enabled = false;
+        return new[] { openStatement, sendMessage };
     }
     protected override IEnumerable<(string, Control)> AdditionalReportFilters() => new (string, Control)[] {
         ("Due status", dueStatus), ("Minimum outstanding (Rs.)", minimumBalance),
@@ -84,13 +86,68 @@ public sealed class OutstandingAgingReportPage : CanonicalFinanceReportPage
     protected override void ReportAvailabilityChanged() { base.ReportAvailabilityChanged(); UpdateStatementAction(); }
     internal static bool CanOpenStudentAccount => StudentAccountStatementPage.CanOpenAccount
         && CurrentUser.HasPermission("Fees.View");
+    internal static bool CanComposeReportFeeMessage =>
+        CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission, fees: true)
+        && (CurrentUser.HasPermission("Reports.View") || CurrentUser.HasPermission("Fees.Collect"));
     private void UpdateStatementAction()
     {
         if (openStatement is null) return;
+        if (sendMessage is not null)
+        {
+            sendMessage.Visible = CanComposeReportFeeMessage;
+            sendMessage.Enabled = CanComposeReportFeeMessage && CurrentReportAvailable
+                && ViewName is ("Students" or "Charges")
+                && Grid.CurrentRow?.DataBoundItem is DataRowView;
+        }
         openStatement.Visible = CanOpenStudentAccount;
         openStatement.Enabled = CurrentReportAvailable && ViewName is "Students" or "Charges"
             && CanOpenStudentAccount && Grid.CurrentRow?.DataBoundItem is DataRowView;
     }
+    /// <summary>
+    /// This optional row action opens the same compact, permission-checked
+    /// Fee Message flow used by Fee Collection. It never sends, writes, or
+    /// changes report filters and never assumes an aggregate Aging row is
+    /// one student.
+    /// </summary>
+    private async Task OpenFeeMessageAsync()
+    {
+        if (!CurrentReportAvailable || !CanComposeReportFeeMessage
+            || ViewName is not ("Students" or "Charges")
+            || Grid.CurrentRow?.DataBoundItem is not DataRowView selected) return;
+        string reference=Convert.ToString(selected.Row["Adm. / QR No."])?.Trim() ?? "";
+        if (reference.Length==0) { Warn("Select a student record first."); return; }
+        string signature=ReportFilterSignature();
+        int actor=CurrentUser.UserId;
+        try
+        {
+            using var students=await Task.Run(() => DatabaseHelper.QuerySql("""
+                EXEC dbo.RequireAnyPermission @UserId,N'Reports.View',N'Fees.Collect';
+                EXEC dbo.RequirePermission @UserId,N'Fees.View';
+                EXEC dbo.RequirePermission @UserId,N'Students.View';
+                EXEC dbo.RequirePermission @UserId,N'Communication.Send';
+                SELECT AdmissionId FROM dbo.Students WHERE
+                    COALESCE(NULLIF(AdmissionNumber,N''),NULLIF(QuickReference,N''),
+                    CONCAT(N'ID-',AdmissionId))=@Reference;
+                """,DatabaseHelper.Int("@UserId",actor),
+                DatabaseHelper.P("@Reference",reference)));
+            if (IsDisposed || actor!=CurrentUser.UserId
+                || !CanComposeReportFeeMessage || !CurrentReportAvailable
+                || signature!=ReportFilterSignature()
+                || Grid.CurrentRow?.DataBoundItem is not DataRowView current
+                || Convert.ToString(current.Row["Adm. / QR No."])?.Trim()!=reference)
+                return;
+            if (students.Rows.Count!=1)
+            {
+                Warn("The selected student's record changed. Refresh the report before messaging.");
+                return;
+            }
+            CommunicationRecordEntry.Open(this,
+                Convert.ToInt32(students.Rows[0]["AdmissionId"]),
+                "Admission " + reference, fees:true);
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+    }
+
     private async Task OpenStatementAsync()
     {
         if (!CurrentReportAvailable || !CanOpenStudentAccount || ViewName is not ("Students" or "Charges")

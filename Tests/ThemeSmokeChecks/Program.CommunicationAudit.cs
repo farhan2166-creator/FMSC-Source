@@ -3,6 +3,7 @@ using FMSC_SMS.Core;
 using FMSC_SMS.Pages.Communication;
 using FMSC_SMS.Pages.Security;
 using FMSC_SMS.Pages.Finance.Collection;
+using FMSC_SMS.Pages.Reports.Finance;
 using FMSC_SMS.Pages.Students.Admissions;
 
 internal static partial class Program
@@ -755,10 +756,13 @@ internal static partial class Program
         Check(opens == 2 && fromFees && captured?.StudentId == 42 && captured.Audience == CommunicationAudience.FeeStudent
             && reference.Text == "Unsaved payment reference" && remarks.Text == "Unsaved payment remarks",
             "Optional Collection messaging scopes current fees to the main student and never reloads or clears the payment draft");
+        Check(OutstandingAgingReportPage.CanComposeReportFeeMessage,
+            "A fee-report sender may open a student-scoped optional message without changing the report.");
         CurrentUser.SignIn(7204, "Viewer", "Read-only fixture", false, new[] { "Students.View", "Fees.View" });
         admission.OpenStudentMessage(Cancel); fees.OpenStudentMessage(Cancel);
-        Check(opens == 2 && !CommunicationAccess.CanOpen(CurrentUser.HasPermission),
-            "Opening either integration is independently refused after sender permission is removed");
+        Check(opens == 2 && !CommunicationAccess.CanOpen(CurrentUser.HasPermission)
+            && !OutstandingAgingReportPage.CanComposeReportFeeMessage,
+            "Admission, Fee Collection and a fee report all hide messaging without sender permission.");
     }
 
     private static void CheckRecordMessageDialog()
