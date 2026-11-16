@@ -7,6 +7,15 @@ IF ISNULL((SELECT TOP(1) TRY_CONVERT(int,VersionNumber)
  FROM dbo.DatabaseVersion ORDER BY VersionId DESC),0)<>23
  THROW 51280,'Background processor requires schema 23.',1;
 
+ALTER TABLE msg.DispatchControl ADD
+ PreferredChannel varchar(10) NOT NULL
+  CONSTRAINT DF_MsgPreferredChannel DEFAULT('WhatsApp'),
+ PreferredProviderCode varchar(40) NOT NULL
+  CONSTRAINT DF_MsgPreferredProvider DEFAULT('WhatsAppBusinessManual');
+ALTER TABLE msg.DispatchControl ADD CONSTRAINT CK_MsgPreferredMethod
+ CHECK((PreferredChannel='WhatsApp' AND PreferredProviderCode IN ('WhatsAppBusinessManual','MetaCloud'))
+    OR (PreferredChannel='Sms' AND PreferredProviderCode='Twilio'));
+
 CREATE TABLE msg.BackgroundWorkerEnrollment (
  EnrollmentId uniqueidentifier NOT NULL CONSTRAINT PK_MsgWorkerEnrollment PRIMARY KEY,
  UserId int NOT NULL,
@@ -522,6 +531,27 @@ AS BEGIN
    VALUES(@HolidayDate,LTRIM(RTRIM(@Description)),@UserId);
  END
  COMMIT;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadPreferredMethod @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ SELECT PreferredChannel,PreferredProviderCode
+ FROM msg.DispatchControl WHERE ControlId=1;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SavePreferredMethod @UserId int,
+ @Channel varchar(10),@ProviderCode varchar(40)
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF NOT ((@Channel=''WhatsApp'' AND @ProviderCode IN (''WhatsAppBusinessManual'',''MetaCloud''))
+   OR (@Channel=''Sms'' AND @ProviderCode=''Twilio''))
+  THROW 51276,''Select a supported preferred communication channel.'',1;
+ UPDATE msg.DispatchControl SET PreferredChannel=@Channel,
+  PreferredProviderCode=@ProviderCode,UpdatedUtc=SYSUTCDATETIME(),UpdatedBy=@UserId
+ WHERE ControlId=1;
 END');
 
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
