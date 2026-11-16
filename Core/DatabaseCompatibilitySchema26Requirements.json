@@ -1,0 +1,34 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "LiveFeeEventEligible",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "ScanFeeReviewCandidates",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadFeeReviewCandidates",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadAutomationCandidates",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "MarkAutomationCandidatePrepared",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveAutomationMode",
+      "type": "P"
+    }
+  ]
+}
