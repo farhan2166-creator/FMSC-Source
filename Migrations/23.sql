@@ -410,10 +410,22 @@ BEGIN
  BEGIN TRANSACTION;
  UPDATE msg.WorkerAuthorization SET Enabled=0
   WHERE WindowsProof=@WindowsProof AND DeviceProof=@DeviceProof;
- INSERT msg.WorkerAuthorization(WorkerId,TokenHash,WindowsProof,DeviceProof,
-    ActorId,CredentialProof,Enabled,RegisteredBy)
- VALUES(@WorkerId,HASHBYTES(''SHA2_256'',@Token),@WindowsProof,@DeviceProof,
-    @UserId,@CredentialProof,0,@UserId);
+ IF EXISTS(SELECT 1 FROM msg.WorkerAuthorization WITH(UPDLOCK,HOLDLOCK)
+           WHERE WorkerId=@WorkerId)
+ BEGIN
+   IF NOT EXISTS(SELECT 1 FROM msg.WorkerAuthorization
+       WHERE WorkerId=@WorkerId AND ActorId=@UserId
+       AND WindowsProof=@WindowsProof AND DeviceProof=@DeviceProof)
+       THROW 51282,''A previously enrolled worker belongs to another owner or computer.'',1;
+   UPDATE msg.WorkerAuthorization SET TokenHash=HASHBYTES(''SHA2_256'',@Token),
+     CredentialProof=@CredentialProof,RegisteredUtc=SYSUTCDATETIME(),RegisteredBy=@UserId
+   WHERE WorkerId=@WorkerId;
+ END
+ ELSE
+   INSERT msg.WorkerAuthorization(WorkerId,TokenHash,WindowsProof,DeviceProof,
+      ActorId,CredentialProof,Enabled,RegisteredBy)
+   VALUES(@WorkerId,HASHBYTES(''SHA2_256'',@Token),@WindowsProof,@DeviceProof,
+      @UserId,@CredentialProof,0,@UserId);
  COMMIT TRANSACTION;
 END');
 
