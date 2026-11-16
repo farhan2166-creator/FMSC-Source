@@ -28,6 +28,53 @@ internal static class CommunicationManagementStore
     internal static Task<DataTable> ReadMyUnfinishedBatchesAsync() =>
         ReadSessionsAsync(unfinished: true);
 
+    internal static Task<DataTable> ReadDispatchSettingsAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication administrator permission is required.");
+        return DatabaseHelper.QueryUserAsync("msg.ReadDispatchSettings");
+    }
+
+    internal static Task SaveDispatchSettingsAsync(TimeSpan from, TimeSpan until, byte workingDays,
+        int ratePerMinute, int smsDaily, int whatsappDaily, byte familyDaily, byte priorityReserve)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication administrator permission is required.");
+        if (from < TimeSpan.Zero || until > TimeSpan.FromHours(24) || from >= until
+            || workingDays is < 1 or > 127 || ratePerMinute is < 1 or > 600
+            || smsDaily is < 0 or > 100000 || whatsappDaily is < 0 or > 100000
+            || familyDaily is < 1 or > 20 || priorityReserve > 50)
+            throw new ArgumentException("Choose valid sending hours, days, rate and limits.");
+        return DatabaseHelper.ExecuteUserAsync("msg.SaveDispatchSettings",
+            DatabaseHelper.P("@SendFrom",from),
+            DatabaseHelper.P("@SendUntil",until),
+            DatabaseHelper.P("@WorkingDaysMask",workingDays),
+            DatabaseHelper.Int("@MaximumPerMinute",ratePerMinute),
+            DatabaseHelper.Int("@MaximumSmsDaily",smsDaily),
+            DatabaseHelper.Int("@MaximumWhatsAppDaily",whatsappDaily),
+            DatabaseHelper.P("@MaximumRoutineFamilyDaily",familyDaily),
+            DatabaseHelper.P("@PriorityReservePercent",priorityReserve));
+    }
+
+    internal static Task<DataTable> ReadAutomationRulesAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication administrator permission is required.");
+        return DatabaseHelper.QueryUserAsync("msg.ReadAutomationRules");
+    }
+
+    internal static Task SaveAutomationRuleAsync(string code,string mode,int campus,int cls,string? channel)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication administrator permission is required.");
+        if (mode is not ("Off" or "Review" or "Automatic"))
+            throw new ArgumentException("Choose Off, Prepare for Review, or Send Automatically.");
+        return DatabaseHelper.ExecuteUserAsync("msg.SaveAutomationRule",
+            DatabaseHelper.P("@EventCode",code), DatabaseHelper.P("@Mode",mode),
+            DatabaseHelper.Int("@CampusId",campus), DatabaseHelper.Int("@ClassId",cls),
+            DatabaseHelper.P("@Channel",channel));
+    }
+
     internal static Task<DataTable> ReadSendControlAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Configure"))

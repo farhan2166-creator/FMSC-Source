@@ -515,7 +515,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private void OpenSendingOptions()
     {
         if (IsBusy || !CurrentUser.HasPermission("Communication.Configure")) return;
-        using var dialog = new CommunicationSendingOptionsDialog();
+        using var dialog = new CommunicationSettingsDialog();
         dialog.ShowDialog(FindForm());
         if (!dialog.Changed) return;
         InvalidatePreview();
