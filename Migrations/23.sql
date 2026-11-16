@@ -423,6 +423,37 @@ BEGIN
     COMMIT TRANSACTION;
 END');
 
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadMyUnfinishedBatches @UserId int
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ SELECT B.BatchId,B.Channel,B.Audience,B.CreatedUtc,COUNT_BIG(*) InProgress,
+   CONVERT(varchar(40),CASE WHEN M.BatchId IS NOT NULL
+     THEN ''WhatsApp Business (manual)'' ELSE A.ProviderCode END) Method,
+   S.DueUtc,
+   CONVERT(varchar(20),CASE
+     WHEN SUM(CASE WHEN R.State IN (''Unknown'',''Failed'') THEN 1 ELSE 0 END)>0
+       OR S.HoldForReview=1 OR (S.ExpiresUtc IS NOT NULL AND S.ExpiresUtc<=SYSUTCDATETIME())
+       THEN ''Needs Attention''
+     WHEN S.DueUtc>SYSUTCDATETIME() THEN ''Upcoming''
+     ELSE ''All Active'' END) QueueStatus
+ FROM msg.Batch B JOIN msg.Recipient R ON R.BatchId=B.BatchId
+ LEFT JOIN msg.ManualBatch M ON M.BatchId=B.BatchId
+ LEFT JOIN msg.ManualHandoff H ON H.RecipientId=R.RecipientId
+ LEFT JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
+ LEFT JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId
+ WHERE B.CreatedBy=@UserId AND
+   ((M.BatchId IS NOT NULL AND H.State IN (''Pending'',''Opened''))
+   OR (A.BatchId IS NOT NULL AND
+     (R.State IN (''Pending'',''Unknown'',''Submitted'',''Failed'')
+      OR (R.State=''Accepted'' AND NOT
+       (A.ProviderCode=''MetaCloud'' AND B.Channel=''WhatsApp'')))))
+ GROUP BY B.BatchId,B.Channel,B.Audience,B.CreatedUtc,M.BatchId,A.ProviderCode,
+  S.DueUtc,S.HoldForReview,S.ExpiresUtc
+ ORDER BY B.CreatedUtc DESC,B.BatchId;
+END');
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'23',SYSDATETIME(),SUSER_SNAME(),
  N'Communication schedule, automation configuration, master pause and claim gating');
