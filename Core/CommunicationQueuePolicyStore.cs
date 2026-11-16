@@ -102,6 +102,30 @@ internal static class CommunicationQueuePolicyStore
             DatabaseHelper.Int("@PerDay", familyDailyLimit));
     }
 
+    internal static Task<DataTable> ReadTakeoverCandidatesAsync()
+    {
+        RequireAdministrator();
+        foreach (string permission in new[] { "Communication.Send", "Communication.View",
+            "Students.View", "Staff.View", "Fees.View" })
+            if (!CurrentUser.HasPermission(permission))
+                throw new UnauthorizedAccessException("Administrator review requires school record and communication access.");
+        return DatabaseHelper.QueryUserAsync("msg.ReadTakeoverCandidates");
+    }
+
+    internal static Task TakeOverScheduledBatchAsync(Guid batchId, string reason)
+    {
+        RequireAdministrator();
+        foreach (string permission in new[] { "Communication.Send", "Communication.View",
+            "Students.View", "Staff.View", "Fees.View" })
+            if (!CurrentUser.HasPermission(permission))
+                throw new UnauthorizedAccessException("Administrator takeover requires school record and communication access.");
+        if (batchId == Guid.Empty || string.IsNullOrWhiteSpace(reason)
+            || reason.Trim().Length is < 5 or > 200)
+            throw new ArgumentException("Choose a held batch and enter a reason of 5–200 characters.");
+        return DatabaseHelper.ExecuteUserAsync("msg.TakeOverScheduledBatch",
+            DatabaseHelper.P("@BatchId", batchId), DatabaseHelper.P("@Reason", reason.Trim()));
+    }
+
     internal static Task<DataTable> ReadPreferredMethodAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Send"))

@@ -464,6 +464,350 @@ AS BEGIN
  SELECT CONVERT(bit,CASE WHEN @@ROWCOUNT=1 THEN 1 ELSE 0 END) ShouldScan;
 END');
 
+-- An administrator may explicitly assume responsibility for a held,
+-- previously reviewed API batch. The original creator and confirmation remain
+-- immutable. Never store full provider credentials or duplicate recipients.
+CREATE TABLE msg.BatchTakeover(
+ TakeoverId bigint IDENTITY(1,1) NOT NULL
+  CONSTRAINT PK_MsgBatchTakeover PRIMARY KEY,
+ BatchId uniqueidentifier NOT NULL
+  CONSTRAINT FK_MsgBatchTakeoverBatch REFERENCES msg.Batch(BatchId),
+ PriorOwnerId int NOT NULL,
+ NewOwnerId int NOT NULL,
+ ApprovedBy int NOT NULL,
+ ApprovedUtc datetime2(3) NOT NULL
+  CONSTRAINT DF_MsgBatchTakeoverUtc DEFAULT SYSUTCDATETIME(),
+ Reason nvarchar(200) NOT NULL,
+ CONSTRAINT CK_MsgBatchTakeoverReason CHECK(LEN(LTRIM(RTRIM(Reason))) BETWEEN 5 AND 200)
+);
+CREATE INDEX IX_MsgBatchTakeoverLatest ON msg.BatchTakeover(BatchId,TakeoverId DESC)
+ INCLUDE(NewOwnerId,ApprovedBy,ApprovedUtc);
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadTakeoverCandidates @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.View'';
+ EXEC dbo.RequirePermission @UserId,N''Students.View'';
+ EXEC dbo.RequirePermission @UserId,N''Staff.View'';
+ EXEC dbo.RequirePermission @UserId,N''Fees.View'';
+ SELECT TOP(100) B.BatchId,B.CreatedUtc,B.Channel,B.Audience,
+   B.CreatedBy OriginalCreatorId,COALESCE(Owner.Username,CONVERT(nvarchar(30),
+     COALESCE(Takeover.NewOwnerId,B.CreatedBy))) CurrentOwner,
+   COUNT_BIG(R.RecipientId) PendingRecipients
+ FROM msg.Batch B
+ JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
+ JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId AND S.HoldForReview=1
+ JOIN msg.Recipient R ON R.BatchId=B.BatchId AND R.State=''Pending''
+ OUTER APPLY (SELECT TOP(1) NewOwnerId FROM msg.BatchTakeover
+    WHERE BatchId=B.BatchId ORDER BY TakeoverId DESC) Takeover
+ LEFT JOIN dbo.Users Owner ON Owner.UserId=COALESCE(Takeover.NewOwnerId,B.CreatedBy)
+ WHERE B.State IN (''Confirmed'',''Sending'')
+ GROUP BY B.BatchId,B.CreatedUtc,B.Channel,B.Audience,B.CreatedBy,
+    Owner.Username,Takeover.NewOwnerId
+ ORDER BY B.CreatedUtc DESC;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.TakeOverScheduledBatch
+ @UserId int,@BatchId uniqueidentifier,@Reason nvarchar(200)
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.View'';
+ EXEC dbo.RequirePermission @UserId,N''Students.View'';
+ EXEC dbo.RequirePermission @UserId,N''Staff.View'';
+ EXEC dbo.RequirePermission @UserId,N''Fees.View'';
+ IF @BatchId IS NULL OR LEN(LTRIM(RTRIM(ISNULL(@Reason,N'''')))) NOT BETWEEN 5 AND 200
+   THROW 51296,''Choose a held batch and record why its responsibility is changing.'',1;
+ BEGIN TRANSACTION;
+ DECLARE @OldOwner int,@Channel varchar(10),@ProviderCode varchar(40);
+ SELECT @OldOwner=COALESCE(T.NewOwnerId,B.CreatedBy),
+        @Channel=B.Channel,@ProviderCode=A.ProviderCode
+ FROM msg.Batch B WITH(UPDLOCK,HOLDLOCK)
+ JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
+ JOIN msg.BatchSchedule S WITH(UPDLOCK,HOLDLOCK)
+    ON S.BatchId=B.BatchId AND S.HoldForReview=1
+ OUTER APPLY (SELECT TOP(1) H.NewOwnerId FROM msg.BatchTakeover H
+    WHERE H.BatchId=B.BatchId ORDER BY H.TakeoverId DESC) T
+ WHERE B.BatchId=@BatchId AND B.State IN (''Confirmed'',''Sending'')
+   AND EXISTS (SELECT 1 FROM msg.Recipient R WITH(HOLDLOCK)
+       WHERE R.BatchId=B.BatchId AND R.State=''Pending'');
+ IF @OldOwner IS NULL
+   THROW 51296,''Only a held, reviewed, unfinished API batch can be taken over.'',1;
+ IF EXISTS(SELECT 1 FROM msg.DispatchControl WHERE ControlId=1 AND MasterPaused=1)
+   THROW 51296,''Master Pause is active. Review recovery or administrator holds before resuming.'',1;
+ IF NOT EXISTS(SELECT 1 FROM msg.ChannelSettings WITH(HOLDLOCK)
+    WHERE Channel=@Channel AND ProviderCode=@ProviderCode AND Enabled=1)
+   THROW 51296,''The original reviewed provider is no longer active. Re-review before sending.'',1;
+ IF EXISTS(SELECT 1 FROM msg.Recipient R WITH(HOLDLOCK)
+    JOIN msg.Attempt A WITH(HOLDLOCK) ON A.RecipientId=R.RecipientId
+    WHERE R.BatchId=@BatchId AND R.State=''Pending''
+      AND A.Outcome IN (''Unknown'',''Submitted'',''Accepted''))
+   THROW 51296,''An uncertain recipient cannot be released through takeover.'',1;
+ INSERT msg.BatchTakeover(BatchId,PriorOwnerId,NewOwnerId,ApprovedBy,Reason)
+ VALUES(@BatchId,@OldOwner,@UserId,@UserId,LTRIM(RTRIM(@Reason)));
+ -- Atomic release is safe: the original provider and reviewed scope are
+ -- still checked again by ClaimRecipient before any external request.
+ UPDATE msg.BatchSchedule SET HoldForReview=0,UpdatedBy=@UserId,
+   UpdatedUtc=SYSUTCDATETIME() WHERE BatchId=@BatchId;
+ IF @@ROWCOUNT<>1 THROW 51296,''The held batch changed during review.'',1;
+ COMMIT;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadNextScheduledRecipient
+ @UserId int,@EnrollmentId uniqueidentifier,@LeaseNonce uniqueidentifier
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ IF NOT EXISTS(SELECT 1 FROM msg.BackgroundWorkerLease WITH(HOLDLOCK)
+    WHERE LeaseId=1 AND EnrollmentId=@EnrollmentId AND LeaseNonce=@LeaseNonce
+      AND LeaseUntilUtc>SYSUTCDATETIME())
+  THROW 51263,''Background worker lease is not owned by this process.'',1;
+ IF NOT EXISTS(SELECT 1 FROM msg.DispatchControl
+   WHERE ControlId=1 AND UnattendedEnabled=1 AND MasterPaused=0)
+  RETURN;
+ DECLARE @Start time(0),@End time(0),@Zone sysname,@Local datetimeoffset;
+ SELECT @Start=WindowStart,@End=WindowEnd,@Zone=TimeZoneId
+ FROM msg.DispatchControl WHERE ControlId=1;
+ SET @Local=(SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE @Zone;
+ IF CONVERT(time(0),@Local)<@Start OR CONVERT(time(0),@Local)>=@End RETURN;
+ DECLARE @SchoolDate date=CONVERT(date,@Local);
+ DECLARE @Day tinyint=CONVERT(tinyint,((DATEDIFF(day,''19000101'',@SchoolDate)%7)+7)%7+1);
+ IF EXISTS(SELECT 1 FROM msg.NonWorkingWeekday WHERE IsoWeekday=@Day AND Enabled=0) RETURN;
+ IF EXISTS(SELECT 1 FROM msg.SchoolHoliday WHERE HolidayDate=@SchoolDate) RETURN;
+ SELECT TOP(1) R.RecipientId,B.BatchId,B.Channel,B.Audience,
+  COALESCE(Takeover.NewOwnerId,B.CreatedBy) CreatedBy,S.Priority
+ FROM msg.BatchSchedule S
+ JOIN msg.Batch B ON B.BatchId=S.BatchId
+ JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
+ JOIN msg.Recipient R ON R.BatchId=B.BatchId
+ OUTER APPLY (SELECT TOP(1) T.NewOwnerId FROM msg.BatchTakeover T
+   WHERE T.BatchId=B.BatchId ORDER BY T.TakeoverId DESC) Takeover
+ WHERE S.HoldForReview=0 AND S.DueUtc<=SYSUTCDATETIME()
+   AND (S.ExpiresUtc IS NULL OR S.ExpiresUtc>SYSUTCDATETIME())
+   AND B.State IN (''Confirmed'',''Sending'') AND R.State=''Pending''
+ ORDER BY CASE S.Priority WHEN ''High'' THEN 0 WHEN ''Normal'' THEN 1 ELSE 2 END,
+          S.DueUtc,R.RecipientId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ClaimRecipient
+    @UserId int,
+    @RecipientId bigint,
+    @AttemptKey uniqueidentifier,
+    @ExpectedProviderCode varchar(40)
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+    IF @RecipientId IS NULL OR @RecipientId<=0
+       OR @AttemptKey IS NULL OR @AttemptKey=''00000000-0000-0000-0000-000000000000''
+       OR NULLIF(LTRIM(RTRIM(@ExpectedProviderCode)),'''') IS NULL
+        THROW 51090,''A valid recipient, attempt key and approved provider are required.'',1;
+
+    BEGIN TRANSACTION;
+
+    -- The global stop and reviewed due date are authoritative at the same
+    -- transaction boundary that reserves an external provider attempt.
+    IF EXISTS(SELECT 1 FROM msg.DispatchControl WITH(UPDLOCK,HOLDLOCK)
+              WHERE ControlId=1 AND MasterPaused=1)
+        THROW 51240,''Communication sending is paused by the administrator.'',1;
+    IF EXISTS(
+        SELECT 1 FROM msg.BatchSchedule S WITH(UPDLOCK,HOLDLOCK)
+        JOIN msg.Recipient R WITH(HOLDLOCK) ON R.BatchId=S.BatchId
+        WHERE R.RecipientId=@RecipientId AND
+             (S.DueUtc>SYSUTCDATETIME()
+              OR S.HoldForReview=1
+              OR (S.ExpiresUtc IS NOT NULL AND S.ExpiresUtc<=SYSUTCDATETIME()))
+    )
+        THROW 51241,''This batch is scheduled, expired or awaiting review.'',1;
+
+    DECLARE @BatchId uniqueidentifier,@Kind varchar(8),@AdmissionId int,@StaffId int,
+        @SnapshotPhone varchar(16),@RecipientState varchar(12),@BatchState varchar(14),
+        @Channel varchar(10),@Purpose varchar(20),@Body nvarchar(1600),
+        @Audience varchar(20),@CampusId int,@ClassId int,@StudentId int,@TargetStaffId int,
+        @ProviderCode varchar(40),@CurrentPhone varchar(16),@Exclusion varchar(32),
+        @AttemptId bigint;
+
+    -- This UPDLOCK serializes competing workers before any attempt is created.
+    SELECT @BatchId=R.BatchId,@Kind=R.RecipientKind,@AdmissionId=R.AdmissionId,
+        @StaffId=R.StaffId,@SnapshotPhone=R.PhoneE164,@RecipientState=R.State,
+        @BatchState=B.State,@Channel=B.Channel,@Purpose=B.Purpose,@Body=B.Body,
+        @Audience=B.Audience,@CampusId=B.CampusId,@ClassId=B.ClassId,
+        @StudentId=CASE WHEN B.Audience=''OutstandingFees'' AND B.SingleStudentScope=0 THEN 0 ELSE B.StudentId END,@TargetStaffId=B.StaffId
+    FROM msg.Recipient R WITH(UPDLOCK,HOLDLOCK)
+    JOIN msg.Batch B WITH(HOLDLOCK) ON B.BatchId=R.BatchId
+    WHERE R.RecipientId=@RecipientId;
+    IF @BatchId IS NULL OR @BatchState NOT IN (''Confirmed'',''Sending'')
+       OR @RecipientState<>''Pending''
+        THROW 51093,''Recipient is not pending. Never resend an uncertain attempt.'',1;
+
+
+    -- Scheduled work cannot outlive the originating sender''s authority.
+    -- An administrator takeover will need its own explicit audit action.
+    IF EXISTS(SELECT 1 FROM msg.BatchSchedule WHERE BatchId=@BatchId)
+    BEGIN
+        DECLARE @OriginalSenderId int,@StartHour time(0),@EndHour time(0),
+                @Zone sysname,@LocalTime datetimeoffset,@LocalDate date,@IsoDay tinyint;
+        SELECT @OriginalSenderId=COALESCE(Takeover.NewOwnerId,B.CreatedBy)
+        FROM msg.Batch B
+        OUTER APPLY (SELECT TOP(1) T.NewOwnerId FROM msg.BatchTakeover T
+           WHERE T.BatchId=B.BatchId ORDER BY T.TakeoverId DESC) Takeover
+        WHERE B.BatchId=@BatchId;
+        EXEC dbo.RequirePermission @OriginalSenderId,N''Communication.Send'';
+        IF @Kind=''Staff''
+            EXEC dbo.RequirePermission @OriginalSenderId,N''Staff.View'';
+        ELSE
+            EXEC dbo.RequirePermission @OriginalSenderId,N''Students.View'';
+        IF @Audience IN (''OutstandingFees'',''FeeStudent'',''FeeFamily'')
+            EXEC dbo.RequirePermission @OriginalSenderId,N''Fees.View'';
+        SELECT @StartHour=WindowStart,@EndHour=WindowEnd,@Zone=TimeZoneId
+        FROM msg.DispatchControl WITH(HOLDLOCK) WHERE ControlId=1;
+        SET @LocalTime=(SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE @Zone;
+        SET @LocalDate=CONVERT(date,@LocalTime);
+        SET @IsoDay=CONVERT(tinyint,((DATEDIFF(day,''19000101'',@LocalDate)%7)+7)%7+1);
+        IF CONVERT(time(0),@LocalTime)<@StartHour OR CONVERT(time(0),@LocalTime)>=@EndHour
+          OR EXISTS(SELECT 1 FROM msg.NonWorkingWeekday WHERE IsoWeekday=@IsoDay AND Enabled=0)
+          OR EXISTS(SELECT 1 FROM msg.SchoolHoliday WHERE HolidayDate=@LocalDate)
+          THROW 51251,''Scheduled sending is outside approved school hours or working days.'',1;
+    END;
+
+    IF @Kind=''Staff''
+        EXEC dbo.RequirePermission @UserId,N''Staff.View'';
+    ELSE
+        EXEC dbo.RequirePermission @UserId,N''Students.View'';
+    IF @Audience IN (''OutstandingFees'',''FeeStudent'',''FeeFamily'')
+        EXEC dbo.RequirePermission @UserId,N''Fees.View'';
+
+    SELECT @ProviderCode=C.ProviderCode FROM msg.ChannelSettings C WITH(HOLDLOCK)
+    WHERE C.Channel=@Channel AND C.Enabled=1;
+    IF @ProviderCode IS NULL OR @ProviderCode<>@ExpectedProviderCode
+        THROW 51092,''Channel is paused or runtime provider does not match the approved profile.'',1;
+
+    -- Re-read live records while locks protect the verification transaction.
+    -- The persisted scope prevents a campus/class/fee/family target from silently
+    -- becoming eligible just because an old batch retained a valid phone.
+    IF @Kind=''Staff''
+    BEGIN
+        IF @Audience=''Staff'' AND @TargetStaffId=@StaffId
+            SELECT @CurrentPhone=msg.NormalizeMobile(S.ContactNumber)
+            FROM dbo.Staff S WITH(HOLDLOCK)
+            WHERE S.StaffId=@StaffId AND S.Status=N''Active'';
+    END
+    ELSE IF @Audience IN (''Student'',''Family'',''FeeStudent'',''FeeFamily'')
+    BEGIN
+        SELECT @CurrentPhone=G.PhoneE164 FROM msg.RecordGuardian(@StudentId) G
+        WHERE G.AdmissionId=@AdmissionId AND G.HasConsent=1;
+    END
+    ELSE
+    BEGIN
+        SELECT @CurrentPhone=msg.NormalizeMobile(S.ContactNumber)
+        FROM dbo.Students S WITH(HOLDLOCK)
+        OUTER APPLY (
+            SELECT TOP(1) E.ClassSectionId,E.Status
+            FROM dbo.Enrollments E WITH(HOLDLOCK)
+            WHERE E.AdmissionId=S.AdmissionId
+            ORDER BY CASE WHEN E.Status=N''Active'' THEN 0 ELSE 1 END,E.EnrollmentId DESC
+        ) E
+        LEFT JOIN dbo.CampusClassSections CCS WITH(HOLDLOCK)
+            ON CCS.ClassSectionId=E.ClassSectionId
+        OUTER APPLY (
+            SELECT SUM(dbo.GetFeeChargeBalance(BC.BillingChargeId)) Outstanding
+            FROM dbo.BillingCharges BC WITH(HOLDLOCK)
+            WHERE @Audience=''OutstandingFees''
+              AND BC.AdmissionId=S.AdmissionId AND BC.Status<>N''Cancelled''
+        ) F
+        WHERE S.AdmissionId=@AdmissionId AND S.Status=N''Active''
+          AND S.SchoolMessageConsent=1
+          AND (@Audience=''School''
+            OR (@Audience=''Campus'' AND E.Status=N''Active'' AND CCS.CampusId=@CampusId)
+            OR (@Audience=''Class'' AND E.Status=N''Active''
+                AND CCS.CampusId=@CampusId AND CCS.ClassId=@ClassId)
+            OR (@Audience=''OutstandingFees'' AND E.Status=N''Active''
+                AND (@CampusId=0 OR CCS.CampusId=@CampusId)
+                AND (@ClassId=0 OR CCS.ClassId=@ClassId)
+                AND (@StudentId=0 OR S.AdmissionId=@StudentId) AND F.Outstanding>0));
+    END;
+
+    SET @Exclusion=CASE
+        WHEN @CurrentPhone IS NULL THEN ''NoLongerEligible''
+        WHEN @CurrentPhone<>@SnapshotPhone THEN ''DestinationChanged''
+        WHEN EXISTS(SELECT 1 FROM msg.Suppression O WITH(HOLDLOCK)
+                    WHERE O.Channel=@Channel AND O.PhoneE164=@CurrentPhone)
+            THEN ''ChannelOptOut''
+        ELSE NULL END;
+    IF @Exclusion IS NOT NULL
+    BEGIN
+        UPDATE msg.Recipient
+        SET State=''Excluded'',ExclusionCode=@Exclusion,UpdatedUtc=SYSUTCDATETIME()
+        WHERE RecipientId=@RecipientId;
+        -- No provider call may occur after an excluded result.
+        SELECT CONVERT(bit,0) Claimed,CONVERT(bigint,NULL) AttemptId,
+               CONVERT(uniqueidentifier,NULL) AttemptKey,
+               CONVERT(varchar(16),NULL) PhoneE164,
+               CONVERT(varchar(10),NULL) Channel,
+               CONVERT(varchar(40),NULL) ProviderCode,
+               CONVERT(nvarchar(1600),NULL) Body,@Exclusion ExclusionCode;
+        COMMIT TRANSACTION; RETURN;
+    END;
+
+    DECLARE @Ordinal int;
+    SELECT @Ordinal=COUNT(*)+1 FROM msg.Attempt WITH(HOLDLOCK) WHERE RecipientId=@RecipientId;
+    IF @Ordinal>3 OR EXISTS(
+        SELECT 1 FROM msg.Attempt WITH(HOLDLOCK)
+        WHERE RecipientId=@RecipientId AND (Outcome<>''Failed'' OR RetryApprovedBy IS NULL))
+        THROW 51093,''The prior attempt requires definitive failure and explicit retry approval.'',1;
+
+    -- Quota rows serialize every reservation through the same provider.
+    -- A reserved attempt consumes capacity even if its result later becomes
+    -- Unknown: never reuse that allowance to create a duplicate request.
+    DECLARE @Limit int,@Reserve int,@MinuteLimit int,@Priority varchar(10),
+            @NowUtc datetime2(3)=SYSUTCDATETIME();
+    SELECT @Limit=DailyLimit,@Reserve=ReservedImportant
+      FROM msg.ProviderQuota WITH(UPDLOCK,HOLDLOCK)
+      WHERE ProviderCode=@ExpectedProviderCode;
+    IF @Limit IS NULL AND EXISTS(
+        SELECT 1 FROM msg.Recipient R JOIN msg.BatchSchedule S ON S.BatchId=R.BatchId
+        WHERE R.RecipientId=@RecipientId)
+        THROW 51248,''A scheduled API batch requires a configured daily provider limit.'',1;
+    SELECT @MinuteLimit=MaxPerMinute FROM msg.DispatchControl WITH(HOLDLOCK) WHERE ControlId=1;
+    SELECT @Priority=COALESCE(S.Priority,''Normal'')
+      FROM msg.Recipient R JOIN msg.Batch B ON B.BatchId=R.BatchId
+      LEFT JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId
+      WHERE R.RecipientId=@RecipientId;
+    IF @Limit IS NOT NULL
+    BEGIN
+    DECLARE @TodayUtc datetime2(3)=CONVERT(datetime2(3),CONVERT(date,@NowUtc));
+    DECLARE @Used bigint=(
+      SELECT COUNT_BIG(*) FROM msg.Attempt T WITH(HOLDLOCK)
+      WHERE T.ProviderCode=@ExpectedProviderCode AND
+       T.RequestUtc>=@TodayUtc AND T.RequestUtc<DATEADD(day,1,@TodayUtc));
+    IF @Used>=@Limit OR (@Priority<>''High'' AND @Used>=@Limit-@Reserve)
+        THROW 51249,''The provider daily allowance is exhausted or reserved for priority messages.'',1;
+    IF (SELECT COUNT_BIG(*) FROM msg.Attempt T WITH(HOLDLOCK)
+        WHERE T.ProviderCode=@ExpectedProviderCode AND
+          T.RequestUtc>DATEADD(minute,-1,@NowUtc)) >= @MinuteLimit
+        THROW 51250,''Provider sending speed limit reached. Retry a pending recipient later.'',1;
+    END;
+
+    -- Reserve the attempt BEFORE HTTP. Unknown is deliberately conservative:
+    -- a crash/timeout must never make this recipient eligible for blind replay.
+    INSERT msg.Attempt(RecipientId,AttemptNumber,AttemptKey,Channel,ProviderCode,Outcome)
+    VALUES(@RecipientId,@Ordinal,@AttemptKey,@Channel,@ProviderCode,''Unknown'');
+    SET @AttemptId=CONVERT(bigint,SCOPE_IDENTITY());
+    UPDATE msg.Recipient
+    SET State=''Unknown'',UpdatedUtc=SYSUTCDATETIME()
+    WHERE RecipientId=@RecipientId;
+    UPDATE msg.Batch SET State=''Sending''
+    WHERE BatchId=@BatchId AND State=''Confirmed'';
+    SELECT CONVERT(bit,1) Claimed,@AttemptId AttemptId,@AttemptKey AttemptKey,
+           @CurrentPhone PhoneE164,@Channel Channel,@ProviderCode ProviderCode,
+           @Body Body,CONVERT(varchar(32),NULL) ExclusionCode;
+    COMMIT TRANSACTION;
+END');
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'26',SYSDATETIME(),SUSER_SNAME(),
  N'Review-only fee event suggestions with family grouping, current charges and due-date eligibility');

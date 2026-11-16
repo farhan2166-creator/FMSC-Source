@@ -59,6 +59,21 @@
       "schema": "msg",
       "name": "SaveMessageLanguage",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "BatchTakeover",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadTakeoverCandidates",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "TakeOverScheduledBatch",
+      "type": "P"
     }
   ],
   "checkConstraints": [
@@ -86,6 +101,11 @@
       "schema": "msg",
       "objectName": "DispatchControl",
       "name": "CK_MsgDefaultMessageLanguage"
+    },
+    {
+      "schema": "msg",
+      "objectName": "BatchTakeover",
+      "name": "CK_MsgBatchTakeoverReason"
     }
   ],
   "columns": [
@@ -112,6 +132,14 @@
       "isNullable": false,
       "isIdentity": false,
       "isComputed": false
+    }
+  ],
+  "uniqueIndexes": [
+    {
+      "schema": "msg",
+      "objectName": "BatchTakeover",
+      "name": "PK_MsgBatchTakeover",
+      "keys": "TakeoverId"
     }
   ]
 }

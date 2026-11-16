@@ -32,6 +32,8 @@ internal static class CommunicationHistoryStore
                 B.CreatedUtc PreparedUtc,B.ConfirmedUtc ApprovedUtc,
                 COALESCE(Creator.Username,CONVERT(nvarchar(30),B.CreatedBy)) PreparedByName,
                 COALESCE(Approver.Username,CONVERT(nvarchar(30),B.ConfirmedBy)) ApprovedByName,
+                Takeover.ApprovedUtc TakeoverUtc,Takeover.Reason TakeoverReason,
+                COALESCE(TakeoverActor.Username,CONVERT(nvarchar(30),Takeover.ApprovedBy)) TakeoverApprovedBy,
                 H.LastOpenedUtc,H.ReportedUtc,
                 COALESCE(Reporter.Username,CONVERT(nvarchar(30),H.ChangedBy)) ManualReportedByName,
                 Evidence.AttemptId,Evidence.RequestUtc,Evidence.ResponseUtc,
@@ -46,6 +48,12 @@ internal static class CommunicationHistoryStore
             LEFT JOIN dbo.Users Creator ON Creator.UserId=B.CreatedBy
             LEFT JOIN dbo.Users Approver ON Approver.UserId=B.ConfirmedBy
             LEFT JOIN dbo.Users Reporter ON Reporter.UserId=H.ChangedBy
+            OUTER APPLY (
+                SELECT TOP(1) T.ApprovedUtc,T.ApprovedBy,T.Reason
+                FROM msg.BatchTakeover T WHERE T.BatchId=B.BatchId
+                ORDER BY T.TakeoverId DESC
+            ) Takeover
+            LEFT JOIN dbo.Users TakeoverActor ON TakeoverActor.UserId=Takeover.ApprovedBy
             OUTER APPLY (
                 SELECT TOP(1) X.AttemptId,X.RequestUtc,X.ResponseUtc,X.ProviderMessageId,X.FailureCode
                 FROM msg.Attempt X WHERE X.RecipientId=R.RecipientId

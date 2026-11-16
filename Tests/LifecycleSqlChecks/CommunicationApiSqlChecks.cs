@@ -68,6 +68,42 @@ internal static class CommunicationApiSqlChecks
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.BatchSchedule WHERE BatchId=@Batch AND DueUtc>@Now",
             Sql.P("@Batch",scheduleBatch),Sql.P("@Now",DateTime.UtcNow))==1,
             "Scheduling persists a future due time without dispatching a provider request.");
+        Sql.Proc("msg.HoldScheduledBatch",
+            Sql.P("@UserId",f.Admin),Sql.P("@BatchId",scheduleBatch));
+        using (var held=Sql.Proc("msg.ReadTakeoverCandidates",Sql.P("@UserId",f.Admin)))
+            r.Check(held.AsEnumerable().Any(row=>(Guid)row["BatchId"]==scheduleBatch),
+                "A held, previously reviewed API batch is available for administrator takeover.");
+        await r.Refused("Unprivileged staff cannot take over reviewed communication",()=>{
+            Sql.Proc("msg.TakeOverScheduledBatch",Sql.P("@UserId",f.Restricted),
+                Sql.P("@BatchId",scheduleBatch),Sql.P("@Reason","Synthetic owner review"));
+            return Task.CompletedTask;
+        },50003);
+        await r.Refused("A takeover without a recorded reason cannot release held work",()=>{
+            Sql.Proc("msg.TakeOverScheduledBatch",Sql.P("@UserId",f.Admin),
+                Sql.P("@BatchId",scheduleBatch),Sql.P("@Reason",""));
+            return Task.CompletedTask;
+        },51296);
+        Sql.Proc("msg.SetMasterPause",Sql.P("@UserId",f.Admin),Sql.P("@Paused",true));
+        await r.Refused("Administrator takeover cannot bypass Master Pause",()=>{
+            Sql.Proc("msg.TakeOverScheduledBatch",Sql.P("@UserId",f.Admin),
+                Sql.P("@BatchId",scheduleBatch),Sql.P("@Reason","Synthetic owner review"));
+            return Task.CompletedTask;
+        },51296);
+        Sql.Proc("msg.SetMasterPause",Sql.P("@UserId",f.Admin),Sql.P("@Paused",false));
+        Sql.Proc("msg.TakeOverScheduledBatch",Sql.P("@UserId",f.Admin),
+            Sql.P("@BatchId",scheduleBatch),Sql.P("@Reason","Synthetic owner review"));
+        r.Check(Sql.Count("""
+            SELECT COUNT(*) FROM msg.BatchTakeover T
+            JOIN msg.Batch B ON B.BatchId=T.BatchId
+            JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId
+            WHERE T.BatchId=@Batch AND T.PriorOwnerId=@Actor
+              AND T.NewOwnerId=@Actor AND T.ApprovedBy=@Actor
+              AND B.CreatedBy=@Actor AND B.ConfirmedBy=@Actor
+              AND S.HoldForReview=0
+            """,Sql.P("@Batch",scheduleBatch),Sql.P("@Actor",f.Admin))==1
+            && Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Recipient",
+                Sql.P("@Recipient",scheduleRecipient))==0,
+            "A reasoned administrator takeover preserves original audit identity and releases only unattempted reviewed work.");
         await r.Refused("A scheduled API recipient cannot be claimed before its due time",()=>{
             Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),
                 Sql.P("@RecipientId",scheduleRecipient),Sql.P("@AttemptKey",Guid.NewGuid()),

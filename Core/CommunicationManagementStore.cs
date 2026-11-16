@@ -60,7 +60,9 @@ internal static class CommunicationManagementStore
                     FROM OPENJSON(@BatchIds) WITH(BatchId uniqueidentifier '$') I
                     JOIN msg.Batch B ON B.BatchId=I.BatchId
                     LEFT JOIN msg.Recipient R ON R.BatchId=B.BatchId
-                    WHERE (@Unfinished=0 OR B.CreatedBy=@UserId)
+                    WHERE (@Unfinished=0 OR B.CreatedBy=@UserId OR EXISTS(
+                        SELECT 1 FROM dbo.Users U JOIN dbo.Roles Role ON Role.RoleId=U.RoleId
+                        WHERE U.UserId=@UserId AND Role.RoleName=N'Administrator'))
                       AND ((B.Audience='Staff' AND @Staff=1) OR
                            (B.Audience<>'Staff' AND @Students=1 AND
                             (@Fees=1 OR B.Audience NOT IN ('OutstandingFees','FeeStudent','FeeFamily'))))

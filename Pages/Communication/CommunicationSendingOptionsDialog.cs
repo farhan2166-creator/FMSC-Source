@@ -202,13 +202,32 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             Name = "communicationSchoolCalendar", Text = "Working Days & Holidays",
             ThemeRole = "Secondary"
         };
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
-        foreach (var button in new[] { saveWindow, saveQuota, calendarButton })
+        var takeover = new ModernButton
         {
-            button.Width = AppScale.Scale(button == calendarButton ? 215 : 175);
+            Name = "communicationAdminTakeover",
+            Text = "Held Messages…", ThemeRole = "Secondary"
+        };
+        takeover.Enabled = new[] { "Communication.Configure", "Communication.Send",
+            "Communication.View", "Students.View", "Staff.View", "Fees.View" }
+            .All(CurrentUser.HasPermission);
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true };
+        foreach (var button in new[] { saveWindow, saveQuota, calendarButton, takeover })
+        {
+            button.Width = AppScale.Scale(button == calendarButton ? 200 : button == takeover ? 150 : 165);
             button.Height = AppMetrics.ButtonHeight;
             actions.Controls.Add(button);
         }
+        takeover.Click += (_, _) =>
+        {
+            if (busy || !takeover.Enabled) return;
+            using var dialog = new CommunicationTakeoverDialog();
+            dialog.ShowDialog(this);
+            if (dialog.Changed)
+            {
+                Changed = true;
+                queueFeedback.Text = "Reviewed held batch transferred to the administrator. Sending remains subject to the live safety checks.";
+            }
+        };
         content.Controls.Add(actions, 0, 5);
         content.SetColumnSpan(actions, 2);
         var workerRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true };

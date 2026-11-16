@@ -133,6 +133,13 @@ internal static partial class Program
                 && Field<ModernButton>(settings, "templatesButton").Visible
                 && !Field<ModernButton>(settings, "historyButton").Visible,
                 "A configuration-only operator can open both administration dialogs without history access");
+            CurrentUser.SignIn(7204, "Administrator fixture", "Messaging administrator", false,
+                new[] { "Communication.Configure", "Communication.Send", "Communication.View",
+                    "Students.View", "Staff.View", "Fees.View" });
+            using var takeover = new CommunicationTakeoverDialog();
+            Check(takeover.Controls.Find("communicationTakeoverQueue", true).Length == 1
+                && takeover.Controls.Find("communicationTakeoverReason", true).Length == 1,
+                "Held communication takeover has a dedicated reasoned administrator review rather than silently reassigning the batch.");
         }
         finally { CurrentUser.SignIn(previous.UserId, previous.Username, previous.RoleName, previous.MustChangePassword, previous.Item5); }
     }

@@ -108,6 +108,9 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
                 string approved = DisplayValue(first, "ApprovedByName");
                 details.Text = $"{session.Audience} · Prepared by {prepared} ({LocalWhen(first, "PreparedUtc")})"
                     + (approved.Length == 0 ? "" : $" · Approved by {approved} ({LocalWhen(first, "ApprovedUtc")})");
+                string takeover = DisplayValue(first, "TakeoverApprovedBy");
+                if (takeover.Length > 0)
+                    details.Text += $" · Reassigned by {takeover} ({LocalWhen(first, "TakeoverUtc")})";
                 if (rows.Rows[0]["ProviderCode"] is "WhatsAppBusinessManual")
                     message.Controls.OfType<Label>().Single().Text = "Saved message format";
                 ShowMessage();
@@ -272,6 +275,9 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
             if (row.Table.Columns.Contains("ResponseUtc") && row["ResponseUtc"] != DBNull.Value)
                 narrative += $" · Updated {LocalWhen(row, "ResponseUtc")}";
         }
+        string takeoverReason = DisplayValue(row, "TakeoverReason");
+        if (takeoverReason.Length > 0)
+            narrative += " · Administrator takeover reason: " + takeoverReason;
         evidence.Text = narrative;
     }
 }
