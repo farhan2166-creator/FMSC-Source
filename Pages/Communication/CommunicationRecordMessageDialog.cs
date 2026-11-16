@@ -20,7 +20,8 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         Func<int, bool, bool, Task<FeeMessageDocument>>? ReadFeeDocument = null,
         Func<FeeMessageDocument, Task<Bitmap>>? RenderImage = null,
         Action<Image>? CopyImage = null,
-        CommunicationManualHandoff.Operations? FeeHandoff = null);
+        CommunicationManualHandoff.Operations? FeeHandoff = null,
+        Func<Method, CommunicationPreview, string, bool>? AuthorizePaidSend = null);
 
     private sealed record ReviewedMessage(CommunicationTarget Target, CommunicationPreview Preview, string Body, Guid RequestId,
         FeeMessageDocument? Document);
@@ -380,12 +381,17 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
                     : option.Channel == "Sms"
                         ? "SMS messages may use multiple separately billed segments."
                         : "WhatsApp API provider charges may apply. Provider acceptance does not confirm delivery.";
-                if (ModernMessageDialog.Show(this,
-                    $"Send {reviewed.Preview.Included:N0} reviewed message(s)? {cost} "
-                      + "The recipients and message must be checked before approval.",
-                    "Confirm Paid Sending", MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning) != DialogResult.Yes)
-                    return;
+                // Production always asks for explicit approval. Synthetic UI
+                // contracts may inject a deterministic decision so no modal
+                // window can indefinitely block a headless test runner.
+                bool approved = operations.AuthorizePaidSend is { } authorize
+                    ? authorize(option, reviewed.Preview, reviewed.Body)
+                    : ModernMessageDialog.Show(this,
+                        $"Send {reviewed.Preview.Included:N0} reviewed message(s)? {cost} "
+                          + "The recipients and message must be checked before approval.",
+                        "Confirm Paid Sending", MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning) == DialogResult.Yes;
+                if (!approved) return;
             }
             if (ShareImage && reviewed.Document is { } imageDocument)
                 image = await PrepareImageAsync(imageDocument);

@@ -780,7 +780,7 @@ internal static partial class Program
             new[] { "Communication.Send", "Students.View", "Fees.View" });
         CommunicationTarget? captured = null;
         int confirms = 0, dispatches = 0, renders = 0, copies = 0, documentRevision = 0;
-        int launches = 0, reports = 0, warnings = 0;
+        int launches = 0, reports = 0, warnings = 0, paidApprovals = 0;
         bool changeAtHandoff = false;
         string handoffState = "Pending";
         const int studentId = 42;
@@ -838,7 +838,15 @@ internal static partial class Program
                     if (outcome == "ReportedSent") reports++;
                     return Task.CompletedTask;
                 },
-                _ => launches++, _ => warnings++));
+                _ => launches++, _ => warnings++),
+            (option, reviewed, body) =>
+            {
+                Check(option.Provider is not null && reviewed.Included == 1 &&
+                    !string.IsNullOrWhiteSpace(body),
+                    "Paid message approval is bound to the reviewed recipient and body.");
+                paidApprovals++;
+                return true;
+            });
 
         using (var admission = new CommunicationRecordMessageDialog(studentId, "Synthetic student", false, operations))
         {
@@ -1028,8 +1036,26 @@ internal static partial class Program
             int previousRenders = renders;
             Field<ModernButton>(sms, "action").PerformClick(); Application.DoEvents();
             Field<ModernButton>(sms, "action").PerformClick(); Application.DoEvents();
-            Check(confirms == 5 && dispatches == 2 && launches == 2 && renders == previousRenders && copies == 1,
-                "API messaging keeps its existing confirmation path without image rendering or clipboard access");
+            Check(confirms == 5 && dispatches == 2 && launches == 2 && renders == previousRenders && copies == 1
+                && paidApprovals == 1,
+                "Paid API messaging requires explicit approval before confirming, without image rendering or clipboard access");
+        }
+        using (var declined = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true,
+            operations with
+            {
+                IsReady = _ => Task.FromResult(true),
+                AuthorizePaidSend = (_, _, _) => false
+            }))
+        {
+            declined.Show(); Application.DoEvents();
+            var methods = Field<ModernComboBox>(declined, "method");
+            methods.SelectedItem = methods.Items.OfType<CommunicationRecordMessageDialog.Method>()
+                .Single(item => item.Channel == "Sms");
+            Field<ModernButton>(declined, "action").PerformClick(); Application.DoEvents();
+            Field<ModernButton>(declined, "action").PerformClick(); Application.DoEvents();
+            Check(confirms == 5 && dispatches == 2 && paidApprovals == 1
+                && declined.Visible,
+                "Declining paid-message approval creates no confirmed batch and does not dispatch.");
         }
         using (var staleText = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations))
         {
