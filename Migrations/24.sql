@@ -12,9 +12,10 @@ ALTER TABLE msg.DispatchControl ADD
   CONSTRAINT DF_MsgPreferredChannel DEFAULT('WhatsApp'),
  PreferredProviderCode varchar(40) NOT NULL
   CONSTRAINT DF_MsgPreferredProvider DEFAULT('WhatsAppBusinessManual');
-ALTER TABLE msg.DispatchControl ADD CONSTRAINT CK_MsgPreferredMethod
- CHECK((PreferredChannel='WhatsApp' AND PreferredProviderCode IN ('WhatsAppBusinessManual','MetaCloud'))
-    OR (PreferredChannel='Sms' AND PreferredProviderCode='Twilio'));
+-- Defer CHECK constraint binding until the new columns actually exist.
+EXEC(N'ALTER TABLE msg.DispatchControl ADD CONSTRAINT CK_MsgPreferredMethod
+ CHECK((PreferredChannel=''WhatsApp'' AND PreferredProviderCode IN (''WhatsAppBusinessManual'',''MetaCloud''))
+    OR (PreferredChannel=''Sms'' AND PreferredProviderCode=''Twilio''))');
 
 CREATE TABLE msg.BackgroundWorkerEnrollment (
  EnrollmentId uniqueidentifier NOT NULL CONSTRAINT PK_MsgWorkerEnrollment PRIMARY KEY,
