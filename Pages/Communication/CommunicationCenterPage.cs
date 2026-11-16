@@ -20,6 +20,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private string ComposeChannel => deliveryMethod.SelectedIndex == 2 ? "Sms" : "WhatsApp";
     private string ApiProvider => IsMeta ? "MetaCloud" : "Twilio";
     private readonly ModernComboBox templateChoice = HumanUi.Combo();
+    private readonly ModernComboBox templateLanguage = HumanUi.Combo();
+    private Panel? templateLanguageField;
     private readonly ModernTextBox templateSearch = HumanUi.TextBox(false, 100);
     private Panel? templateSearchField;
     private IReadOnlyList<CommunicationPreparedMessages.ComposeTemplate> composeTemplates = CommunicationPreparedMessages.BuiltInChoices;
@@ -126,6 +128,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         SelectedAudience = CurrentUser.HasPermission("Students.View") ? CommunicationAudience.Class : CommunicationAudience.Staff;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
+        templateLanguage.Name = "communicationTemplateLanguage";
+        templateLanguage.Items.AddRange(new object[] { "English", "Urdu" });
+        templateLanguage.SelectedIndex = 0;
         templateSearch.Name = "communicationComposeTemplateSearch";
         templateSearch.PlaceholderText = "Search relevant templates";
 
@@ -206,6 +211,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 message.Text = selected.Body;
         };
         templateSearch.TextChanged += (_, _) => RefreshTemplateChoices();
+        templateLanguage.SelectedIndexChanged += (_, _) => RefreshTemplateChoices();
         message.TextChanged += (_, _) => InvalidatePreview();
 
         ChangeAudienceFields();
@@ -354,7 +360,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         var methodField = HumanUi.Field("Send using", deliveryMethod, true);
         var templateField = HumanUi.Field("Template (optional)", templateChoice);
         templateSearchField = HumanUi.Field("Find template", templateSearch);
-        var sending = ComposeFieldRow(methodField, templateSearchField, templateField);
+        templateLanguageField = HumanUi.Field("Language", templateLanguage);
+        var sending = ComposeFieldRow(methodField, templateLanguageField, templateSearchField, templateField);
         sending.Margin = new Padding(0, AppScale.Scale(6), 0, 0);
         fields.Controls.Add(recipients, 0, 0);
         fields.Controls.Add(targetIssue, 0, 1);
@@ -388,7 +395,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 int columnWidth = width / columns;
                 audienceField.Width = campusField.Width = classField.Width = columnWidth;
                 studentField.Width = staffField.Width = Math.Min(width, columnWidth * 2);
-                methodField.Width = templateSearchField!.Width = templateField.Width = columnWidth;
+                methodField.Width = templateLanguageField!.Width = templateSearchField!.Width = templateField.Width = columnWidth;
                 fields.RowStyles[0].Height = WrappedRowsHeight(recipients, width);
                 fields.RowStyles[2].Height = WrappedRowsHeight(sending, width) + sending.Margin.Vertical;
                 targetIssue.MaximumSize = messageIssue.MaximumSize = new Size(width, 0);
@@ -519,8 +526,10 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         if (!CurrentUser.HasPermission("Communication.Send")) return;
         int actor = CurrentUser.UserId;
         var choices = await CommunicationManagementStore.ReadComposeTemplatesAsync();
+        string language = await CommunicationManagementStore.ReadDefaultTemplateLanguageAsync();
         if (IsDisposed || actor != CurrentUser.UserId) return;
         composeTemplates = choices;
+        templateLanguage.SelectedIndex = language == "ur" ? 1 : 0;
         RefreshTemplateChoices();
     }
 
@@ -537,14 +546,17 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             templateChoice.Items.Add("Browse approved templates…");
             templateChoice.SelectedIndex=0;
             if (templateSearchField is not null) templateSearchField.Visible = false;
+            if (templateLanguageField is not null) templateLanguageField.Visible = false;
             return;
         }
         var query = templateSearch.Text.Trim();
+        string language = templateLanguage.SelectedIndex == 1 ? "ur" : "en";
         foreach (var item in composeTemplates)
-            if (item.Matches(target) && (query.Length == 0
+            if (item.Language == language && item.Matches(target) && (query.Length == 0
                 || item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)))
                 templateChoice.Items.Add(item);
         if (templateSearchField is not null) templateSearchField.Visible = true;
+        if (templateLanguageField is not null) templateLanguageField.Visible = true;
         templateChoice.SelectedIndex = 0;
     }
 

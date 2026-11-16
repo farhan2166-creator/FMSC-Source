@@ -139,7 +139,35 @@ internal static class CommunicationManagementStore
         using var rows = await DatabaseHelper.QueryUserAsync("msg.ReadComposeTemplates");
         return CommunicationPreparedMessages.BuiltInChoices.Concat(rows.AsEnumerable().Select(row =>
             new CommunicationPreparedMessages.ComposeTemplate(row.Field<string>("Name") ?? "", row.Field<string>("Purpose") ?? "",
-                row.Field<string>("Body") ?? "", row.Field<string>("Channel") ?? ""))).ToArray();
+                row.Field<string>("Body") ?? "", row.Field<string>("Channel") ?? "",
+                Language: row.Field<string>("Language") ?? "en"))).ToArray();
+    }
+
+    internal static async Task<string> ReadDefaultTemplateLanguageAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Send"))
+            throw new UnauthorizedAccessException("Messaging permission is required.");
+        using var settings = await DatabaseHelper.QueryUserAsync("msg.ReadDefaultTemplateLanguage");
+        return settings.Rows.Count == 1 ? Convert.ToString(settings.Rows[0]["DefaultLanguage"]) ?? "en" : "en";
+    }
+
+    internal static Task SetDefaultTemplateLanguageAsync(string language)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication administrator permission is required.");
+        if (language is not ("en" or "ur")) throw new ArgumentException("Choose English or Urdu.");
+        return DatabaseHelper.ExecuteUserAsync("msg.SetDefaultTemplateLanguage",
+            DatabaseHelper.P("@Language",language));
+    }
+
+    internal static Task SaveUrduTemplateAsync(int templateId,string? body)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication administrator permission is required.");
+        if (templateId<=0) throw new ArgumentOutOfRangeException(nameof(templateId));
+        if (body is not null) CommunicationPreparedMessages.ValidateFormat(body);
+        return DatabaseHelper.ExecuteUserAsync("msg.SaveTemplateUrdu",
+            DatabaseHelper.Int("@TemplateId",templateId),DatabaseHelper.P("@BodyUrdu",body));
     }
 
     internal static async Task<DataTable> ReadTemplatesAsync()

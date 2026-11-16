@@ -12,7 +12,7 @@ namespace FMSC_SMS.Core;
 internal static class CommunicationPreparedMessages
 {
     internal sealed record BuiltIn(string Name, string Purpose, string Body, bool FamilyOnly = false);
-    internal sealed record ComposeTemplate(string Name, string Purpose, string Body, string? Channel = null, bool FamilyOnly = false)
+    internal sealed record ComposeTemplate(string Name, string Purpose, string Body, string? Channel = null, bool FamilyOnly = false, string Language = "en")
     {
         internal bool Matches(CommunicationTarget target) => Purpose == target.Purpose
             && (Channel is null || Channel == target.Channel)

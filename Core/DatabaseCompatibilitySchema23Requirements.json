@@ -39,6 +39,36 @@
       "schema": "msg",
       "name": "RecordHistoryExport",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "LanguageSettings",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadDefaultTemplateLanguage",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SetDefaultTemplateLanguage",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveTemplateUrdu",
+      "type": "P"
+    }
+  ],
+  "columns": [
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "BodyUrdu",
+      "type": "nvarchar",
+      "maxLength": 3200,
+      "isNullable": true
     }
   ]
 }

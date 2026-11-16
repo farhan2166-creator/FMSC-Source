@@ -13,6 +13,8 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
     private readonly ModernComboBox category = HumanUi.Combo();
     private readonly ModernTextBox preview = HumanUi.TextBox(true, 1600);
     private readonly ModernButton edit = new() { Text = CustomizeTemplateText, Enabled = false };
+    private readonly ModernButton editUrdu = new() { Text = "Urdu Version…", Enabled = false };
+    private readonly ModernButton languageSettings = new() { Text = "Default Language…", Enabled = false };
     private readonly ModernButton add = new() { Text = "New Template…", ThemeRole = "Primary", Enabled = false };
     private readonly Label feedback = new() { Dock = DockStyle.Fill, AutoEllipsis = true };
     private readonly Func<Task<DataTable>> read;
@@ -70,7 +72,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         preview.ScrollBars = ScrollBars.Vertical;
         var close = new ModernButton { Text = "Close", DialogResult = DialogResult.Cancel };
         CancelButton = close;
-        var buttons = HumanUi.DialogButtons(add, edit, close);
+        var buttons = HumanUi.DialogButtons(add, edit, editUrdu, languageSettings, close);
         buttons.Dock = DockStyle.Fill;
         layout = new TableLayoutPanel
         {
@@ -109,6 +111,12 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             if (templates.CurrentRow?.DataBoundItem is DataRowView row) await RunAsync(() => EditAsync(row.Row));
         };
         add.Click += async (_, _) => await RunAsync(() => EditAsync(null));
+        editUrdu.Click += async (_, _) =>
+        {
+            if (templates.CurrentRow?.DataBoundItem is DataRowView row && row.Row.Field<int>("TemplateId") > 0)
+                await RunAsync(() => EditUrduAsync(row.Row));
+        };
+        languageSettings.Click += async (_, _) => await RunAsync(ChangeDefaultLanguageAsync);
         Shown += async (_, _) => await RunAsync(RefreshAsync);
         FormClosing += (_, e) => { if (busy) { e.Cancel = true; DialogResult = DialogResult.None; } };
         FormClosed += (_, _) => (templates.DataSource as DataTable)?.Dispose();
@@ -119,6 +127,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         var row = (templates.CurrentRow?.DataBoundItem as DataRowView)?.Row;
         preview.Text = row?.Field<string>("Body") ?? "";
         edit.Enabled = !busy && row is not null;
+        editUrdu.Enabled = !busy && row is not null && row.Field<int>("TemplateId") > 0;
         edit.Text = row?.Field<int>("TemplateId") > 0 ? EditTemplateText : CustomizeTemplateText;
     }
 
@@ -175,6 +184,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         templates.DataSource = rows;
         old?.Dispose();
         add.Enabled = true;
+        languageSettings.Enabled = true;
         ShowSelected();
     }
 
@@ -191,6 +201,76 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             dialog.Channel, dialog.Purpose, dialog.Body, dialog.Active);
         Changed = true;
         await RefreshAsync();
+    }
+
+    private async Task EditUrduAsync(DataRow row)
+    {
+        int id = row.Field<int>("TemplateId");
+        if (id <= 0) return;
+        using var window = new ApplicationWindowForm
+        {
+            Text = "Urdu Message — " + Convert.ToString(row["Name"]),
+            StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(AppScale.Scale(610), AppScale.Scale(360)),
+            MinimumSize = new Size(AppScale.Scale(480), AppScale.Scale(300)),
+            ShowInTaskbar = false, Padding = new Padding(AppScale.Scale(14))
+        };
+        var body = HumanUi.TextBox(true, 1600);
+        body.Multiline = true;
+        body.ScrollBars = ScrollBars.Vertical;
+        body.RightToLeft = RightToLeft.Yes;
+        body.Text = row.Table.Columns.Contains("BodyUrdu") ? Convert.ToString(row["BodyUrdu"]) ?? "" : "";
+        var field = HumanUi.Field("Urdu version (leave empty to remove)", body);
+        field.Dock = DockStyle.Fill;
+        var save = new ModernButton { Text = "Save Urdu", ThemeRole = "Primary" };
+        var cancel = new ModernButton { Text = "Cancel", DialogResult = DialogResult.Cancel };
+        save.Click += (_, _) =>
+        {
+            try
+            {
+                if (body.Text.Trim().Length > 0) CommunicationPreparedMessages.ValidateFormat(body.Text);
+                window.DialogResult = DialogResult.OK;
+            }
+            catch (CommunicationValidationException ex) { ModernMessageDialog.ShowWarning(window,ex.Message); }
+        };
+        var actions = HumanUi.DialogButtons(save,cancel);
+        actions.Dock = DockStyle.Bottom;
+        window.Controls.Add(field);
+        window.Controls.Add(actions);
+        window.CancelButton = cancel;
+        if (window.ShowDialog(this) != DialogResult.OK) return;
+        await CommunicationManagementStore.SaveUrduTemplateAsync(id,
+            body.Text.Trim().Length == 0 ? null : body.Text);
+        Changed = true;
+        await RefreshAsync();
+    }
+
+    private async Task ChangeDefaultLanguageAsync()
+    {
+        string current = await CommunicationManagementStore.ReadDefaultTemplateLanguageAsync();
+        using var window = new ApplicationWindowForm
+        {
+            Text = "Default Message Language", StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(AppScale.Scale(430), AppScale.Scale(155)),
+            ShowInTaskbar = false, Padding = new Padding(AppScale.Scale(14)),
+            FormBorderStyle = FormBorderStyle.FixedDialog, MinimizeBox = false, MaximizeBox = false
+        };
+        var choice = HumanUi.Combo();
+        choice.Items.AddRange(new object[] { "English", "Urdu" });
+        choice.SelectedIndex = current == "ur" ? 1 : 0;
+        var field = HumanUi.Field("Default language for new messages", choice);
+        field.Dock = DockStyle.Top; field.Height = AppMetrics.FieldRowHeight;
+        var save = new ModernButton { Text = "Save", DialogResult = DialogResult.OK, ThemeRole = "Primary" };
+        var cancel = new ModernButton { Text = "Cancel", DialogResult = DialogResult.Cancel };
+        var actions = HumanUi.DialogButtons(save,cancel);
+        actions.Dock = DockStyle.Bottom;
+        window.Controls.Add(field);
+        window.Controls.Add(actions);
+        window.CancelButton = cancel;
+        if (window.ShowDialog(this) != DialogResult.OK) return;
+        await CommunicationManagementStore.SetDefaultTemplateLanguageAsync(
+            choice.SelectedIndex == 1 ? "ur" : "en");
+        Changed = true;
     }
 
     private async Task RunAsync(Func<Task> action)
