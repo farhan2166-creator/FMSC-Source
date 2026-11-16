@@ -83,6 +83,13 @@ internal static partial class Program
                     && Convert.ToString(matching.Rows[0].Cells["Name"].Value) == "New admission welcome",
                     "Sender template browser searches context-compatible templates without selecting a recipient or sending.");
             }
+            Check(CommunicationHistoryDialog.CanCheckProviderDelivery("Twilio","Accepted",91)
+                && CommunicationHistoryDialog.CanCheckProviderDelivery("Twilio","Unknown",91)
+                && !CommunicationHistoryDialog.CanCheckProviderDelivery("MetaCloud","Accepted",91)
+                && !CommunicationHistoryDialog.CanCheckProviderDelivery("Twilio","Delivered",91)
+                && !CommunicationHistoryDialog.CanCheckProviderDelivery("WhatsAppBusinessManual","ReportedSent",91)
+                && !CommunicationHistoryDialog.CanCheckProviderDelivery("Twilio","Accepted",null),
+                "Only an identified Twilio provider attempt can be checked without resending; manual handoffs and delivered messages cannot.");
             CheckProviderBodyDeadline();
             CheckCommunicationAsyncAndCancellation();
             CheckCommunicationSessionsAndOptions();

@@ -34,7 +34,7 @@ internal static class CommunicationHistoryStore
                 COALESCE(Approver.Username,CONVERT(nvarchar(30),B.ConfirmedBy)) ApprovedByName,
                 H.LastOpenedUtc,H.ReportedUtc,
                 COALESCE(Reporter.Username,CONVERT(nvarchar(30),H.ChangedBy)) ManualReportedByName,
-                Evidence.RequestUtc,Evidence.ResponseUtc,
+                Evidence.AttemptId,Evidence.RequestUtc,Evidence.ResponseUtc,
                 Evidence.ProviderMessageId,Evidence.FailureCode,
                 COALESCE(S.StudentName,T.StaffName,N'School record') RecipientName,
                 COALESCE(S.AdmissionNumber,T.StaffNumber) RecordNumber,RIGHT(R.PhoneE164,4) LastFour,J.RenderedBody
@@ -47,7 +47,7 @@ internal static class CommunicationHistoryStore
             LEFT JOIN dbo.Users Approver ON Approver.UserId=B.ConfirmedBy
             LEFT JOIN dbo.Users Reporter ON Reporter.UserId=H.ChangedBy
             OUTER APPLY (
-                SELECT TOP(1) X.RequestUtc,X.ResponseUtc,X.ProviderMessageId,X.FailureCode
+                SELECT TOP(1) X.AttemptId,X.RequestUtc,X.ResponseUtc,X.ProviderMessageId,X.FailureCode
                 FROM msg.Attempt X WHERE X.RecipientId=R.RecipientId
                 ORDER BY X.AttemptId DESC
             ) Evidence

@@ -13,6 +13,16 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         Dock = DockStyle.Fill, AutoEllipsis = false,
         ForeColor = AppTheme.MutedText
     };
+    private readonly ModernButton checkDelivery = new()
+    {
+        Name = "communicationCheckProviderDelivery",
+        Text = "Check Delivery Status", ThemeRole = "Secondary",
+        Enabled = false, Visible = false
+    };
+    private readonly Func<Guid,Task<DataTable>> readHistory;
+    private readonly Func<long,Task<string>> pollAttempt;
+    private readonly CommunicationSessionRow session;
+    private bool checkingDelivery;
     private readonly ModernButton sendAgain = new()
     {
         Name = "communicationSendAgain", Text = "Send Again…", ThemeRole = "Secondary",
@@ -21,8 +31,13 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
 
     internal CommunicationHistoryDraft? Draft { get; private set; }
 
-    internal CommunicationHistoryDialog(CommunicationSessionRow session, Func<Guid, Task<DataTable>>? read = null)
+    internal CommunicationHistoryDialog(CommunicationSessionRow session,
+        Func<Guid, Task<DataTable>>? read = null, Func<long,Task<string>>? poll = null)
     {
+        this.session = session;
+        readHistory = read ?? CommunicationHistoryStore.ReadAsync;
+        pollAttempt = poll ?? (attemptId =>
+            CommunicationDispatchStore.ReconcileKnownAttemptAsync(attemptId));
         Text = "Message History";
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
@@ -56,7 +71,8 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         var close = new ModernButton { Text = "Close", DialogResult = DialogResult.Cancel };
         CancelButton = close;
         sendAgain.Click += (_, _) => { if (Draft is not null) DialogResult = DialogResult.OK; };
-        var buttons = HumanUi.DialogButtons(sendAgain, close);
+        checkDelivery.Click += async (_, _) => await CheckDeliveryAsync();
+        var buttons = HumanUi.DialogButtons(checkDelivery, sendAgain, close);
         buttons.Dock = DockStyle.Fill;
         var layout = new TableLayoutPanel
         {
@@ -80,7 +96,7 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
             try
             {
                 int actor = CurrentUser.UserId;
-                var rows = await (read ?? CommunicationHistoryStore.ReadAsync)(session.BatchId);
+                var rows = await readHistory(session.BatchId);
                 if (IsDisposed || actor != CurrentUser.UserId)
                 {
                     rows.Dispose();
@@ -103,6 +119,7 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
                 if (!IsDisposed) details.Text = DbMessage.UserMessage(ex, "Could not load the saved message.");
             }
         };
+        FormClosing += (_, e) => e.Cancel |= checkingDelivery;
         FormClosed += (_, _) => (recipients.DataSource as DataTable)?.Dispose();
     }
 
@@ -144,11 +161,92 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
             .ToLocalTime().ToString("dd MMM yyyy HH:mm");
     }
 
+    internal static bool CanCheckProviderDelivery(string? provider, string? state, long? attemptId) =>
+        provider == "Twilio" && state is ("Accepted" or "Submitted" or "Unknown")
+        && attemptId is > 0;
+
+    /// <summary>Runs an authenticated provider-status GET only after a real
+    /// operator click. Never sends a new message or retries an unknown attempt.
+    /// </summary>
+    private async Task CheckDeliveryAsync()
+    {
+        if (checkingDelivery || !CurrentUser.HasPermission("Communication.View")
+            || !CurrentUser.HasPermission("Communication.Send")) return;
+        DataRow? selected = (recipients.CurrentRow?.DataBoundItem as DataRowView)?.Row;
+        if (selected is null) return;
+        long? attempt = selected.Table.Columns.Contains("AttemptId")
+            && selected["AttemptId"] != DBNull.Value ? Convert.ToInt64(selected["AttemptId"]) : null;
+        if (DisplayValue(selected,"ProviderMessageId").Length==0 ||
+            !CanCheckProviderDelivery(DisplayValue(selected,"ProviderCode"),
+                DisplayValue(selected,"Outcome"),attempt)) return;
+        int actor = CurrentUser.UserId;
+        int rowIndex = recipients.CurrentRow?.Index ?? 0;
+        checkingDelivery = true;
+        recipients.Enabled = false;
+        checkDelivery.Enabled = sendAgain.Enabled = false;
+        try
+        {
+            string status = await pollAttempt(attempt!.Value);
+            if (IsDisposed || actor != CurrentUser.UserId) return;
+            if (status == "Unknown")
+            {
+                evidence.Text = "The provider has not confirmed a new outcome. "
+                    + "This message will not be resent automatically.";
+                return;
+            }
+            DataTable rows = await readHistory(session.BatchId);
+            if (IsDisposed || actor != CurrentUser.UserId)
+            {
+                rows.Dispose();
+                return;
+            }
+            if (rows.Rows.Count == 0) { rows.Dispose(); throw new InvalidDataException("History is no longer available."); }
+            var previous = recipients.DataSource as DataTable;
+            recipients.DataSource = rows;
+            previous?.Dispose();
+            if (rowIndex < recipients.Rows.Count)
+                recipients.CurrentCell = recipients.Rows[rowIndex].Cells[0];
+            Draft = CommunicationHistoryStore.CreateDraft(rows);
+            ShowMessage();
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed) evidence.Text = DbMessage.UserMessage(ex,
+                "The provider status could not be checked. No message was sent.");
+        }
+        finally
+        {
+            checkingDelivery = false;
+            if (!IsDisposed)
+            {
+                recipients.Enabled = true;
+                sendAgain.Visible = sendAgain.Enabled = Draft is not null;
+                UpdateCheckDeliveryButton();
+            }
+        }
+    }
+
+    private void UpdateCheckDeliveryButton()
+    {
+        DataRow? selected = (recipients.CurrentRow?.DataBoundItem as DataRowView)?.Row;
+        long? attempt = selected is not null && selected.Table.Columns.Contains("AttemptId")
+            && selected["AttemptId"] != DBNull.Value ? Convert.ToInt64(selected["AttemptId"]) : null;
+        bool allowed = selected is not null &&
+            DisplayValue(selected,"ProviderMessageId").Length>0 &&
+            CurrentUser.HasPermission("Communication.Send") &&
+            CurrentUser.HasPermission("Communication.View") &&
+            CanCheckProviderDelivery(DisplayValue(selected,"ProviderCode"),
+                DisplayValue(selected,"Outcome"),attempt);
+        checkDelivery.Visible = allowed;
+        checkDelivery.Enabled = allowed && !checkingDelivery;
+    }
+
     private void ShowMessage()
     {
         DataRow? row = (recipients.CurrentRow?.DataBoundItem as DataRowView)?.Row
             ?? (recipients.DataSource as DataTable)?.AsEnumerable().FirstOrDefault();
-        if (row is null) { preview.Text = evidence.Text = ""; return; }
+        if (row is null) { preview.Text = evidence.Text = ""; UpdateCheckDeliveryButton(); return; }
+        UpdateCheckDeliveryButton();
         preview.Text = row["RenderedBody"] as string ?? (string)row["Body"];
         string provider = DisplayValue(row, "ProviderCode");
         string state = DisplayValue(row, "Outcome");
