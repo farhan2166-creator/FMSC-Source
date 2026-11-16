@@ -255,6 +255,7 @@ internal static class CommunicationApiSqlChecks
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.SchoolHoliday WHERE HolidayDate=@Date",
             Sql.P("@Date",holidayDate))==0,
             "Removing a holiday does not change school messages or any financial records.");
+        await CommunicationAutomationSqlChecks.Run(f,r);
 
     }
 }
