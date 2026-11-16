@@ -22,18 +22,34 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
     private readonly Label feedback = new() { Dock = DockStyle.Fill, AutoEllipsis = true };
     private readonly Func<Task<DataTable>> read;
     private readonly TableLayoutPanel layout;
+    private readonly TabControl settingsTabs = new() { Dock = DockStyle.Fill };
+    private readonly Label queueFeedback = new() { AutoSize = true, ForeColor = AppTheme.MutedText };
+    private readonly Label automationFeedback = new() { AutoSize = true, ForeColor = AppTheme.MutedText };
+    private readonly Label masterState = new() { AutoSize = true, ForeColor = AppTheme.Text };
+    private readonly ModernButton masterToggle = new() { Name = "communicationMasterPause", ThemeRole = "Secondary", Text = "Pause All Sending" };
+    private readonly DateTimePicker startTime = new() { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
+    private readonly DateTimePicker endTime = new() { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
+    private readonly NumericUpDown speed = new() { Minimum = 1, Maximum = 600, Value = 60 };
+    private readonly ModernComboBox quotaProvider = HumanUi.Combo();
+    private readonly NumericUpDown dailyLimit = new() { Minimum = 1, Maximum = 1000000, Value = 500 };
+    private readonly NumericUpDown importantReserve = new() { Minimum = 0, Maximum = 999999, Value = 50 };
+    private readonly ModernComboBox automationEvent = HumanUi.Combo();
+    private readonly ModernComboBox automationMode = HumanUi.Combo();
+    private DataTable? ruleData;
+    private DataTable? quotaData;
+    private bool masterPaused;
     private bool busy;
     internal bool Changed { get; private set; }
 
     internal CommunicationSendingOptionsDialog(Func<Task<DataTable>>? read = null)
     {
         this.read = read ?? CommunicationManagementStore.ReadSettingsAsync;
-        Text = "Configure Sending";
+        Text = "Communication Settings";
         StartPosition = FormStartPosition.CenterParent;
         ShowInTaskbar = false;
         MinimizeBox = MaximizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedDialog;
-        ClientSize = new Size(AppScale.Scale(660), AppScale.Scale(375));
+        ClientSize = new Size(AppScale.Scale(800), AppScale.Scale(535));
         BackColor = AppTheme.PageBackground;
         layout = new TableLayoutPanel
         {
@@ -60,12 +76,234 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         close.Width = AppScale.Scale(100);
         footer.Controls.AddRange(new Control[] { block, close });
         layout.Controls.Add(footer, 0, 4);
-        Controls.Add(layout);
+        var sendingTab = new TabPage("Sending") { BackColor = AppTheme.PageBackground };
+        sendingTab.Controls.Add(layout);
+        settingsTabs.TabPages.Add(sendingTab);
+        settingsTabs.TabPages.Add(BuildQueueTab());
+        settingsTabs.TabPages.Add(BuildAutomationTab());
+        Controls.Add(settingsTabs);
+        settingsTabs.SelectedIndexChanged += async (_, _) =>
+        {
+            if (busy) return;
+            if (settingsTabs.SelectedIndex == 1)
+                await RunAsync(RefreshQueueAsync);
+            else if (settingsTabs.SelectedIndex == 2)
+                await RunAsync(RefreshAutomationAsync);
+        };
         close.DialogResult = DialogResult.Cancel;
         CancelButton = close;
         FormClosing += (_, e) => e.Cancel |= busy;
         Shown += async (_, _) => await RunAsync(RefreshAsync);
         block.Click += async (_, _) => await RunAsync(RecordOptOutAsync);
+        FormClosed += (_, _) => { ruleData?.Dispose(); quotaData?.Dispose(); };
+    }
+
+    private static Control Labelled(string title, Control control)
+    {
+        var field = HumanUi.Field(title, control);
+        field.Dock = DockStyle.Fill;
+        return field;
+    }
+
+    private TabPage BuildQueueTab()
+    {
+        var page = new TabPage("Queue & Schedule") { BackColor = AppTheme.PageBackground };
+        var content = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 7,
+            Padding = new Padding(AppScale.Scale(15)), Margin = Padding.Empty
+        };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        for (int i = 0; i < 7; i++)
+            content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(i == 0 ? 58 : 65)));
+
+        var masterRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        masterToggle.Width = AppScale.Scale(190);
+        masterToggle.Height = AppMetrics.ButtonHeight;
+        masterRow.Controls.Add(masterToggle);
+        masterRow.Controls.Add(masterState);
+        content.Controls.Add(masterRow, 0, 0);
+        content.SetColumnSpan(masterRow, 2);
+
+        startTime.Value = DateTime.Today.AddHours(8);
+        endTime.Value = DateTime.Today.AddHours(18);
+        content.Controls.Add(Labelled("Sending starts", startTime), 0, 1);
+        content.Controls.Add(Labelled("Sending ends", endTime), 1, 1);
+        content.Controls.Add(Labelled("Maximum API sends per minute", speed), 0, 2);
+        var hoursHint = new Label { Dock = DockStyle.Fill, Text = "Sending hours use this computer's local time until the school timezone is configured.", AutoSize = false, ForeColor = AppTheme.MutedText };
+        content.Controls.Add(hoursHint, 1, 2);
+
+        quotaProvider.Items.AddRange(new object[] { "SMS · Twilio", "WhatsApp · Meta API" });
+        quotaProvider.SelectedIndex = 0;
+        content.Controls.Add(Labelled("Provider daily allowance", quotaProvider), 0, 3);
+        content.Controls.Add(Labelled("Maximum messages per day", dailyLimit), 1, 3);
+        content.Controls.Add(Labelled("Reserve for important messages", importantReserve), 0, 4);
+        var saveWindow = new ModernButton { Text = "Save Sending Hours", ThemeRole = "Secondary" };
+        var saveQuota = new ModernButton { Text = "Save Daily Limit", ThemeRole = "Primary" };
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill };
+        foreach (var button in new[] { saveWindow, saveQuota })
+        {
+            button.Width = AppScale.Scale(175);
+            button.Height = AppMetrics.ButtonHeight;
+            actions.Controls.Add(button);
+        }
+        content.Controls.Add(actions, 0, 5);
+        content.SetColumnSpan(actions, 2);
+        content.Controls.Add(queueFeedback, 0, 6);
+        content.SetColumnSpan(queueFeedback, 2);
+
+        masterToggle.Click += async (_, _) => await RunAsync(async () =>
+        {
+            bool desired = !masterPaused;
+            if (ModernMessageDialog.Show(this, desired
+                ? "Pause new API sending attempts for the whole school?"
+                : "Resume approved sending? All current consent and scheduling rules still apply.",
+                Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+            await CommunicationQueuePolicyStore.SetMasterPauseAsync(desired);
+            Changed = true;
+            await RefreshQueueAsync();
+        });
+        saveWindow.Click += async (_, _) => await RunAsync(async () =>
+        {
+            await CommunicationQueuePolicyStore.SaveSendingWindowAsync(
+                TimeOnly.FromDateTime(startTime.Value), TimeOnly.FromDateTime(endTime.Value),
+                TimeZoneInfo.Local.Id, Decimal.ToInt32(speed.Value));
+            Changed = true;
+            queueFeedback.Text = "Sending hours saved. Background processing remains opt-in.";
+        });
+        saveQuota.Click += async (_, _) => await RunAsync(async () =>
+        {
+            var (channel, provider) = quotaProvider.SelectedIndex == 0
+                ? ("Sms", "Twilio") : ("WhatsApp", "MetaCloud");
+            await CommunicationQueuePolicyStore.SaveProviderAllowanceAsync(
+                channel, provider, Decimal.ToInt32(dailyLimit.Value),
+                Decimal.ToInt32(importantReserve.Value));
+            Changed = true;
+            queueFeedback.Text = "Daily provider allowance saved.";
+        });
+        quotaProvider.SelectedIndexChanged += (_, _) => ApplySelectedQuota();
+        page.Controls.Add(content);
+        return page;
+    }
+
+    private async Task RefreshQueueAsync()
+    {
+        using var rows = await CommunicationQueuePolicyStore.ReadDispatchControlAsync();
+        if (rows.Rows.Count != 1) throw new InvalidOperationException("Sending controls are not available.");
+        DataRow row = rows.Rows[0];
+        masterPaused = row.Field<bool>("MasterPaused");
+        masterToggle.Text = masterPaused ? "Resume All Sending" : "Pause All Sending";
+        masterState.Text = masterPaused ? "  All API sending paused" : "  API sending allowed when approved";
+        var start = (TimeSpan)row["WindowStart"];
+        var end = (TimeSpan)row["WindowEnd"];
+        startTime.Value = DateTime.Today.Add(start);
+        endTime.Value = DateTime.Today.Add(end);
+        speed.Value = Convert.ToDecimal(row["MaxPerMinute"]);
+        var quotas = await CommunicationQueuePolicyStore.ReadProviderQuotasAsync();
+        var old = quotaData;
+        quotaData = quotas;
+        old?.Dispose();
+        ApplySelectedQuota();
+    }
+
+    private void ApplySelectedQuota()
+    {
+        string provider = quotaProvider.SelectedIndex == 0 ? "Twilio" : "MetaCloud";
+        DataRow? row = quotaData?.AsEnumerable().FirstOrDefault(r =>
+            string.Equals(r.Field<string>("ProviderCode"), provider, StringComparison.Ordinal));
+        dailyLimit.Value = row is null ? 500 : Convert.ToDecimal(row["DailyLimit"]);
+        importantReserve.Value = row is null ? 50 : Convert.ToDecimal(row["ReservedImportant"]);
+    }
+
+    private TabPage BuildAutomationTab()
+    {
+        var page = new TabPage("Automation") { BackColor = AppTheme.PageBackground };
+        var content = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 5,
+            Padding = new Padding(AppScale.Scale(15)), Margin = Padding.Empty
+        };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        foreach (int height in new[] { 50, 64, 64, 54, 80 })
+            content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(height)));
+        content.Controls.Add(new Label
+        {
+            Text = "Automation is optional. Every event starts Off. Select a rule to inspect or change its mode.",
+            Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText, AutoSize = false
+        }, 0, 0);
+        var rule = Labelled("School event", automationEvent);
+        var mode = Labelled("Automation mode", automationMode);
+        automationMode.Items.AddRange(new object[] { "Off", "Prepare for Review", "Send Automatically" });
+        automationMode.SelectedIndex = 0;
+        content.Controls.Add(rule, 0, 1);
+        content.Controls.Add(mode, 0, 2);
+        var save = new ModernButton { Text = "Save Automation Mode", ThemeRole = "Primary", Width = AppScale.Scale(205) };
+        content.Controls.Add(save, 0, 3);
+        content.Controls.Add(automationFeedback, 0, 4);
+        automationEvent.SelectedIndexChanged += (_, _) => ApplySelectedRule();
+        save.Click += async (_, _) => await RunAsync(async () =>
+        {
+            if (automationEvent.SelectedItem is not AutomationChoice selected)
+                throw new InvalidOperationException("Choose an automation event.");
+            string code = automationMode.SelectedIndex switch
+            {
+                1 => "Review", 2 => "Automatic", _ => "Off"
+            };
+            await CommunicationQueuePolicyStore.SaveAutomationModeAsync(selected.Code, code);
+            Changed = true;
+            await RefreshAutomationAsync();
+            automationFeedback.Text = "Automation preference saved.";
+        });
+        page.Controls.Add(content);
+        return page;
+    }
+
+    private sealed record AutomationChoice(string Code, string Caption)
+    {
+        public override string ToString() => Caption;
+    }
+
+    private async Task RefreshAutomationAsync()
+    {
+        var rows = await CommunicationQueuePolicyStore.ReadAutomationRulesAsync();
+        var old = ruleData;
+        ruleData = rows;
+        old?.Dispose();
+        string? selected = (automationEvent.SelectedItem as AutomationChoice)?.Code;
+        automationEvent.Items.Clear();
+        foreach (DataRow row in rows.Rows)
+        {
+            string code = Convert.ToString(row["EventCode"]) ?? "";
+            string caption = code switch
+            {
+                "Admission" => "Student admitted",
+                "PaymentReceived" => "Fee payment received",
+                "OutstandingFees" => "Outstanding fee reminders",
+                "UpcomingDue" => "Upcoming fee due date",
+                "OverdueFollowUp" => "Overdue fee follow-up",
+                "Announcement" => "School announcements",
+                "ExaminationResult" => "Examinations and results",
+                "Birthday" => "Birthdays and greetings",
+                _ => code
+            };
+            automationEvent.Items.Add(new AutomationChoice(code, caption));
+        }
+        automationEvent.SelectedItem = automationEvent.Items.Cast<AutomationChoice>()
+            .FirstOrDefault(item => item.Code == selected) ?? automationEvent.Items.Cast<AutomationChoice>().FirstOrDefault();
+        ApplySelectedRule();
+    }
+
+    private void ApplySelectedRule()
+    {
+        if (automationEvent.SelectedItem is not AutomationChoice selected) return;
+        var row = ruleData?.AsEnumerable().FirstOrDefault(r =>
+            string.Equals(r.Field<string>("EventCode"), selected.Code, StringComparison.Ordinal));
+        automationMode.SelectedIndex = Convert.ToString(row?["Mode"]) switch
+        {
+            "Review" => 1, "Automatic" => 2, _ => 0
+        };
     }
 
     private Control BuildMethod(Method method)
@@ -215,14 +453,20 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
     {
         if (busy || !CurrentUser.HasPermission("Communication.Configure")) return;
         busy = true;
-        layout.Enabled = false;
+        settingsTabs.Enabled = false;
         feedback.Text = "";
+        queueFeedback.Text = "";
+        automationFeedback.Text = "";
         try { await action(); }
-        catch (Exception ex) { if (!IsDisposed) feedback.Text = DbMessage.UserMessage(ex); }
+        catch (Exception ex)
+        {
+            if (!IsDisposed)
+                feedback.Text = queueFeedback.Text = automationFeedback.Text = DbMessage.UserMessage(ex);
+        }
         finally
         {
             busy = false;
-            if (!IsDisposed) layout.Enabled = true;
+            if (!IsDisposed) settingsTabs.Enabled = true;
         }
     }
 }
