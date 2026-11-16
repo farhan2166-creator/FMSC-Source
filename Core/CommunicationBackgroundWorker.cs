@@ -95,6 +95,7 @@ internal static class CommunicationBackgroundWorker
             CommunicationBackgroundEnrollment.JournalObserved(databaseWatermark);
 
             var started=DateTime.UtcNow;
+            bool computerAuthorizationChecked=false;
             // Bounded processor invocation: other logon-bound task invocations
             // cannot overtake this one while its lease is healthy.
             while(DateTime.UtcNow-started<TimeSpan.FromSeconds(45))
@@ -127,6 +128,23 @@ internal static class CommunicationBackgroundWorker
                     await DatabaseHelper.ExecuteUserAsync("msg.HoldScheduledBatch",
                         DatabaseHelper.P("@BatchId",batchId));
                     continue;
+                }
+
+                if(!computerAuthorizationChecked)
+                {
+                    // A DPAPI enrollment alone is not evidence that this
+                    // computer's existing read-only GitHub authorization is
+                    // still approved. Fail closed on revocation or offline
+                    // status, before reserving any chargeable SQL attempt.
+                    var authorization=await Updates.UpdateGitReader.CheckAsync(token);
+                    if(!authorization.Authorized)
+                    {
+                        AppExceptionHandler.LogNonFatal(
+                            new UnauthorizedAccessException("Scheduled sending requires current computer approval."),
+                            "Communication background worker paused: authorization not verifiable");
+                        return 22;
+                    }
+                    computerAuthorizationChecked=true;
                 }
 
                 // The SQL attempt moves to Unknown before the external POST.
