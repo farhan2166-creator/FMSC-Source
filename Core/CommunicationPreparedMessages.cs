@@ -344,7 +344,6 @@ internal static class CommunicationPreparedMessages
             WHERE H.RecipientId=@RecipientId
               AND (H.State='Opened' OR (@PreviewBatchId IS NOT NULL AND H.State='Pending'))
               AND R.State='Pending'
-              AND (@Audience NOT IN ('FeeStudent','FeeFamily') OR F.Outstanding>0)
               AND NOT EXISTS (
                   SELECT 1 FROM msg.Suppression O
                   WHERE O.Channel='WhatsApp' AND O.PhoneE164=R.PhoneE164)
