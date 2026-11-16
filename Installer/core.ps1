@@ -406,6 +406,10 @@ function Start-FmscAfterInstallation {
     if ($choice -match '^[Yy]$') { Start-Process -FilePath $Application }
 }
 function Release-FmscInstallerLock {
+    if ($script:CommunicationWorkerLockHeld) {
+        $script:CommunicationWorkerMutex.ReleaseMutex()
+        $script:CommunicationWorkerLockHeld = $false
+    }
     if ($script:InstallerLockHeld) {
         $script:InstallerMutex.ReleaseMutex()
         $script:InstallerLockHeld = $false
@@ -1598,6 +1602,17 @@ try {
     try { $script:InstallerLockHeld = $script:InstallerMutex.WaitOne(0) }
     catch [Threading.AbandonedMutexException] { $script:InstallerLockHeld = $true }
     if (-not $script:InstallerLockHeld) { throw 'Another FMSC installer is active. No update was installed.' }
+    # Block new unattended provider requests and wait for an in-flight request
+    # to finish before staging, migrating or activating the application.
+    # A worker tests the installer lock non-blockingly before dispatching,
+    # so this ordering cannot deadlock with the worker.
+    $script:CommunicationWorkerMutex = New-Object Threading.Mutex($false, 'Global\FMSCCommunicationWorker')
+    $script:CommunicationWorkerLockHeld = $false
+    try { $script:CommunicationWorkerLockHeld = $script:CommunicationWorkerMutex.WaitOne(120000) }
+    catch [Threading.AbandonedMutexException] { $script:CommunicationWorkerLockHeld = $true }
+    if (-not $script:CommunicationWorkerLockHeld) {
+        throw 'An FMSC communication send is still active. Update or installation was refused.'
+    }
     if ($ResumeUpdate -and (Get-Process -Name 'FMSC_SMS' -ErrorAction SilentlyContinue)) {
         throw 'Close all FMSC windows before recovering the update.'
     }
@@ -2307,6 +2322,7 @@ catch {
 }
 finally {
     if ($script:UpdateWindow) { $script:UpdateWindow.Dispose() }
-    if ($script:InstallerLockHeld) { $script:InstallerMutex.ReleaseMutex() }
+    Release-FmscInstallerLock
+    if ($script:CommunicationWorkerMutex) { $script:CommunicationWorkerMutex.Dispose() }
     if ($script:InstallerMutex) { $script:InstallerMutex.Dispose() }
 }
