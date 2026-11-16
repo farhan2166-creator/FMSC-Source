@@ -370,7 +370,7 @@ BEGIN
            @CurrentPhone PhoneE164,@Channel Channel,@ProviderCode ProviderCode,
            @Body Body,CONVERT(varchar(32),NULL) ExclusionCode;
     COMMIT TRANSACTION;
-END')
+END');
 
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'23',SYSDATETIME(),SUSER_SNAME(),
