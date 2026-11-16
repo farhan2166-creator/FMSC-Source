@@ -690,6 +690,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
 
     private void ClearReviewedDraft()
     {
+        pendingAutomationSuggestion=null;
         InvalidatePreview();
         metaSelection = null;
         message.Clear();
@@ -783,6 +784,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             if(IsDisposed || actor!=CurrentUser.UserId)return;
             if(request!=manualRequestId || target!=CurrentTarget() || body!=message.Text)
                 throw new CommunicationValidationException("The batch was saved, but the current review changed. Open it in Queue; nothing was sent.");
+            await MarkAutomationSuggestionPreparedAsync(target,saved.BatchId);
             using(var dialog=new CommunicationApiDispatchDialog(saved.BatchId,startConfirmed:!saved.AlreadyConfirmed))dialog.ShowDialog(FindForm());
             if (!IsDisposed)
             {
@@ -823,6 +825,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 Warn("The reviewed batch was saved, but the current message changed. Review that batch in Queue; no chat was opened.");
                 return;
             }
+            await MarkAutomationSuggestionPreparedAsync(target,saved.BatchId);
             // The operator has reviewed and confirmed this batch. Open the first
             // chat now rather than requiring another redundant click. No message
             // is sent by FMSC; every WhatsApp send remains operator-controlled.
