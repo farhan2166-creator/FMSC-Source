@@ -216,6 +216,22 @@ internal static class CommunicationApiSqlChecks
         Sql.Proc("msg.SetUnattendedSending",Sql.P("@UserId",f.Admin),Sql.P("@Enabled",false));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.DispatchControl WHERE UnattendedEnabled=0")==1,
             "Unattended sending can be disabled without any messages being created.");
+        var startingMethod=Sql.Proc("msg.ReadPreferredMethod",Sql.P("@UserId",f.Admin));
+        r.Check(startingMethod.Rows.Count==1 &&
+            Convert.ToString(startingMethod.Rows[0]["PreferredProviderCode"])=="WhatsAppBusinessManual",
+            "School preferred method starts as the free manual WhatsApp handoff.");
+        Sql.Proc("msg.SavePreferredMethod",Sql.P("@UserId",f.Admin),
+            Sql.P("@Channel","Sms"),Sql.P("@ProviderCode","Twilio"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.DispatchControl WHERE PreferredChannel='Sms' AND PreferredProviderCode='Twilio'")==1,
+            "Administrator can choose SMS as the preferred new-message channel.");
+        await r.Refused("Unsupported or cross-channel provider default is rejected",()=>{
+            Sql.Proc("msg.SavePreferredMethod",Sql.P("@UserId",f.Admin),
+                Sql.P("@Channel","Sms"),Sql.P("@ProviderCode","MetaCloud"));
+            return Task.CompletedTask;
+        },51276);
+        Sql.Proc("msg.SavePreferredMethod",Sql.P("@UserId",f.Admin),
+            Sql.P("@Channel","WhatsApp"),Sql.P("@ProviderCode","WhatsAppBusinessManual"));
+
         var weekdays=Sql.Proc("msg.ReadSchoolWeekdays",Sql.P("@UserId",f.Admin));
         r.Check(weekdays.Rows.Count==7 &&
             weekdays.Rows.Cast<DataRow>().Count(row=>Convert.ToBoolean(row["Enabled"]))>=1,
