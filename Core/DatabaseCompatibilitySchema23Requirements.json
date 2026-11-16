@@ -164,6 +164,16 @@
       "schema": "msg",
       "name": "ExcludeChangedPending",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadPreferredMethod",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SavePreferredMethod",
+      "type": "P"
     }
   ],
   "columns": [

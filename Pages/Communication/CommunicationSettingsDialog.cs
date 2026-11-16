@@ -12,6 +12,8 @@ internal sealed class CommunicationSettingsDialog : ApplicationWindowForm
 {
     private readonly TabControl tabs = new() { Dock = DockStyle.Fill };
     private readonly ModernButton manageProviders = new() { Text = "Manage Sending Methods…", ThemeRole = "Secondary" };
+    private readonly ModernComboBox preferred = HumanUi.Combo();
+    private readonly ModernButton savePreferred = new() { Text = "Save Preferred Method", ThemeRole = "Primary" };
     private readonly ModernButton savePolicy = new() { Text = "Save Sending Rules", ThemeRole = "Primary" };
     private readonly ModernButton enableWorker = new() { Text = "Enable Background Sending", ThemeRole = "Secondary" };
     private readonly ModernButton disableWorker = new() { Text = "Disable Background Sending", ThemeRole = "Secondary" };
@@ -74,6 +76,12 @@ internal sealed class CommunicationSettingsDialog : ApplicationWindowForm
         CancelButton = close;
         FormClosing += (_, e) => e.Cancel |= busy;
         Shown += async (_, _) => await PerformAsync(LoadAsync);
+        savePreferred.Click += async (_, _) => await PerformAsync(async () =>
+        {
+            string method = preferred.SelectedIndex switch { 1 => "MetaCloud", 2 => "Twilio", _ => "ManualWhatsApp" };
+            await CommunicationManagementStore.SavePreferredMethodAsync(method);
+            changed = true; feedback.Text = "Preferred sending method saved.";
+        });
         manageProviders.Click += (_, _) =>
         {
             if (busy) return;
@@ -120,6 +128,13 @@ internal sealed class CommunicationSettingsDialog : ApplicationWindowForm
             Margin = new Padding(0, 0, 0, AppScale.Scale(18))
         });
         manageProviders.Width = AppScale.Scale(245);
+        preferred.Items.AddRange(new object[] { "WhatsApp Business (free manual)", "WhatsApp API", "SMS API" });
+        preferred.SelectedIndex = 0;
+        preferred.Width = AppScale.Scale(300);
+        panel.Controls.Add(Heading("Preferred sending method"));
+        panel.Controls.Add(preferred);
+        savePreferred.Width = AppScale.Scale(210);
+        panel.Controls.Add(savePreferred);
         panel.Controls.Add(manageProviders);
         page.Controls.Add(panel);
     }
@@ -210,7 +225,9 @@ internal sealed class CommunicationSettingsDialog : ApplicationWindowForm
     {
         using var policy = await CommunicationManagementStore.ReadDispatchSettingsAsync();
         using var events = await CommunicationManagementStore.ReadAutomationRulesAsync();
+        string preferredMethod = await CommunicationManagementStore.ReadPreferredMethodAsync();
         if (IsDisposed || policy.Rows.Count != 1) return;
+        preferred.SelectedIndex = preferredMethod switch { "MetaCloud" => 1, "Twilio" => 2, _ => 0 };
         DataRow row = policy.Rows[0];
         from.Value = DateTime.Today.Add((TimeSpan)row["SendFrom"]);
         until.Value = DateTime.Today.Add((TimeSpan)row["SendUntil"]);

@@ -182,6 +182,7 @@ CREATE TABLE msg.DispatchSettings(
  MaximumSmsDaily int NOT NULL CONSTRAINT DF_MsgDispatchSmsDaily DEFAULT(0),
  MaximumWhatsAppDaily int NOT NULL CONSTRAINT DF_MsgDispatchWhatsAppDaily DEFAULT(0),
  MaximumRoutineFamilyDaily tinyint NOT NULL CONSTRAINT DF_MsgDispatchFamilyDaily DEFAULT(3),
+ PreferredMethod varchar(20) NOT NULL CONSTRAINT DF_MsgDispatchPreferred DEFAULT('ManualWhatsApp'),
  PriorityReservePercent tinyint NOT NULL CONSTRAINT DF_MsgDispatchReserve DEFAULT(10),
  UpdatedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgDispatchUpdated DEFAULT(SYSUTCDATETIME()),
  UpdatedBy int NULL,
@@ -192,7 +193,8 @@ CREATE TABLE msg.DispatchSettings(
  CONSTRAINT CK_MsgDispatchSmsDaily CHECK(MaximumSmsDaily BETWEEN 0 AND 100000),
  CONSTRAINT CK_MsgDispatchWhatsAppDaily CHECK(MaximumWhatsAppDaily BETWEEN 0 AND 100000),
  CONSTRAINT CK_MsgDispatchFamilyDaily CHECK(MaximumRoutineFamilyDaily BETWEEN 1 AND 20),
- CONSTRAINT CK_MsgDispatchReserve CHECK(PriorityReservePercent BETWEEN 0 AND 50)
+ CONSTRAINT CK_MsgDispatchReserve CHECK(PriorityReservePercent BETWEEN 0 AND 50),
+ CONSTRAINT CK_MsgDispatchPreferred CHECK(PreferredMethod IN ('ManualWhatsApp','MetaCloud','Twilio'))
 );
 INSERT msg.DispatchSettings(Id) VALUES(1);
 CREATE TABLE msg.AutomationRule(
@@ -580,6 +582,27 @@ BEGIN
  WHERE R.RecipientId=@RecipientId AND R.State=''Pending'' AND B.CreatedBy=@UserId
   AND NOT EXISTS(SELECT 1 FROM msg.Attempt WHERE RecipientId=@RecipientId);
 END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadPreferredMethod @UserId int
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ SELECT PreferredMethod FROM msg.DispatchSettings WHERE Id=1;
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SavePreferredMethod @UserId int,@Method varchar(20)
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @Method IS NULL OR @Method NOT IN (''ManualWhatsApp'',''MetaCloud'',''Twilio'')
+  THROW 51292,''Choose a valid sending method.'',1;
+ UPDATE msg.DispatchSettings SET PreferredMethod=@Method,UpdatedUtc=SYSUTCDATETIME(),UpdatedBy=@UserId
+ WHERE Id=1;
+END');
+
 
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'23',SYSDATETIME(),SUSER_SNAME(),N'Administrator API master pause and action-focused queue projection');

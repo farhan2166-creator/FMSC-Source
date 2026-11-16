@@ -54,6 +54,24 @@ internal static class CommunicationManagementStore
             DatabaseHelper.P("@ExpiresUtc", expiresUtc));
     }
 
+    internal static async Task<string> ReadPreferredMethodAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Send"))
+            throw new UnauthorizedAccessException("Messaging permission is required.");
+        using var settings = await DatabaseHelper.QueryUserAsync("msg.ReadPreferredMethod");
+        return settings.Rows.Count == 1 ? Convert.ToString(settings.Rows[0]["PreferredMethod"]) ?? "ManualWhatsApp"
+            : "ManualWhatsApp";
+    }
+
+    internal static Task SavePreferredMethodAsync(string method)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication administrator permission is required.");
+        if (method is not ("ManualWhatsApp" or "MetaCloud" or "Twilio"))
+            throw new ArgumentException("Choose a supported sending method.");
+        return DatabaseHelper.ExecuteUserAsync("msg.SavePreferredMethod",DatabaseHelper.P("@Method",method));
+    }
+
     internal static Task<DataTable> ReadDispatchSettingsAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Configure"))

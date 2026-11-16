@@ -620,12 +620,23 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     {
         if (!CurrentUser.HasPermission("Communication.Send") || methodChanged) return;
         int actor = CurrentUser.UserId;
-        var readiness = await Task.WhenAll(
+        var readinessTask = Task.WhenAll(
             operations.ReadManualMode(),
             CommunicationApiBatchStore.IsReadyAsync("WhatsApp", "MetaCloud"),
             CommunicationApiBatchStore.IsReadyAsync("Sms", "Twilio"));
+        var preferredTask = CommunicationManagementStore.ReadPreferredMethodAsync();
+        await Task.WhenAll(readinessTask, preferredTask);
+        var readiness = readinessTask.Result;
+        string preferred = preferredTask.Result;
         if (IsDisposed || actor != CurrentUser.UserId || methodChanged || step == 1) return;
         // Choosing Meta replaces the text with an approved template. Preserve a draft already being written.
+        int preferredIndex = preferred switch { "MetaCloud" => 1, "Twilio" => 2, _ => 0 };
+        if (preferredIndex >= 0 && preferredIndex < readiness.Length
+            && readiness[preferredIndex] && (preferredIndex != 1 || message.Text.Length == 0))
+        {
+            deliveryMethod.SelectedIndex = preferredIndex;
+            return;
+        }
         int ready = Array.IndexOf(readiness, true);
         if (readiness.Count(value => value) == 1 && (ready != 1 || message.Text.Length == 0))
             deliveryMethod.SelectedIndex = ready;
