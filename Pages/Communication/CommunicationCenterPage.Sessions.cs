@@ -5,6 +5,8 @@ namespace FMSC_SMS.Pages.Communication;
 
 public sealed partial class CommunicationCenterPage
 {
+    private readonly ModernComboBox queueView = HumanUi.Combo();
+
     private HumanCard SessionsCard(DataGridView grid, bool unfinished)
     {
         var card = HumanUi.Card(unfinished ? "Queue" : "History");
@@ -31,6 +33,22 @@ public sealed partial class CommunicationCenterPage
             });
         }
         grid.Columns["CreatedUtc"]!.DefaultCellStyle.Format = "dd MMM yyyy  HH:mm";
+        if (unfinished)
+        {
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "QueueStatus", DataPropertyName = "QueueStatus",
+                HeaderText = "Queue status", MinimumWidth = AppScale.Scale(145),
+                FillWeight = 110, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill
+            });
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "DueLocal", DataPropertyName = "DueLocal",
+                HeaderText = "Scheduled for", MinimumWidth = AppScale.Scale(135),
+                FillWeight = 95, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill
+            });
+            grid.Columns["DueLocal"]!.DefaultCellStyle.Format = "dd MMM yyyy HH:mm";
+        }
         var search = HumanUi.TextBox(false, 100);
         search.Name = unfinished ? "communicationUnfinishedSearch" : "communicationHistorySearch";
         search.AccessibleName = search.PlaceholderText = unfinished ? "Search queued batches" : "Search history";
@@ -56,12 +74,22 @@ public sealed partial class CommunicationCenterPage
         var toolbar = new TableLayoutPanel
         {
             Dock = DockStyle.Top, Height = AppMetrics.ButtonHeight + AppScale.Scale(10),
-            ColumnCount = 2, RowCount = 1, Margin = Padding.Empty
+            ColumnCount = unfinished ? 3 : 2, RowCount = 1, Margin = Padding.Empty
         };
+        if (unfinished)
+        {
+            queueView.Name = "communicationQueueView";
+            queueView.Items.AddRange(new object[] { "Needs Attention", "Upcoming", "All Active" });
+            queueView.SelectedIndex = 2;
+            queueView.Dock = DockStyle.Fill;
+            toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(180)));
+            toolbar.Controls.Add(queueView, 0, 0);
+            queueView.SelectedIndexChanged += (_, _) => FilterSessions(grid, search.Text, true);
+        }
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(166)));
-        toolbar.Controls.Add(search, 0, 0);
-        toolbar.Controls.Add(open, 1, 0);
+        toolbar.Controls.Add(search, unfinished ? 1 : 0, 0);
+        toolbar.Controls.Add(open, unfinished ? 2 : 1, 0);
         card.Content.Controls.Add(grid);
         card.Content.Controls.Add(toolbar);
         return card;
@@ -97,6 +125,13 @@ public sealed partial class CommunicationCenterPage
         table.Columns.Add("MethodText", typeof(string));
         table.Columns.Add("AudienceText", typeof(string));
         table.Columns.Add("StateText", typeof(string));
+        if (unfinished)
+        {
+            if (!table.Columns.Contains("QueueStatus"))
+                table.Columns.Add(new DataColumn("QueueStatus", typeof(string))
+                    { DefaultValue = "All Active" });
+            table.Columns.Add("DueLocal", typeof(DateTime));
+        }
         foreach (DataRow row in table.Rows)
         {
             row["MethodText"] = Convert.ToString(row["Method"]) switch
@@ -114,7 +149,13 @@ public sealed partial class CommunicationCenterPage
                 _ => Enum.TryParse(code, out CommunicationAudience scope)
                     ? AudienceOptions.FirstOrDefault(option => option.Scope == scope)?.Label ?? code : code
             };
-            if (unfinished) continue;
+            if (unfinished)
+            {
+                if (table.Columns.Contains("DueUtc") && row["DueUtc"] != DBNull.Value)
+                    row["DueLocal"] = DateTime.SpecifyKind(
+                        Convert.ToDateTime(row["DueUtc"]), DateTimeKind.Utc).ToLocalTime();
+                continue;
+            }
             row["StateText"] = Convert.ToString(row["Method"]) == "WhatsApp Business (manual)"
                 ? $"{row["ManualReported"]} reported sent · {row["ManualOpened"]} opened · {row["ManualSkipped"]} skipped / excluded"
                 : $"{row["Accepted"]} accepted · {row["Delivered"]} delivered · {row["Failed"]} failed · {row["Unknown"]} unknown";
@@ -124,25 +165,33 @@ public sealed partial class CommunicationCenterPage
         grid.DataSource = table;
         previous?.Dispose();
         if (!unfinished) return;
+        var statuses = table.AsEnumerable().Select(row => row.Field<string>("QueueStatus")).ToArray();
+        queueView.SelectedIndex = statuses.Contains("Needs Attention", StringComparer.Ordinal)
+            ? 0 : statuses.Contains("Upcoming", StringComparer.Ordinal) ? 1 : 2;
         unfinishedButton.Text = table.Rows.Count == 0 ? "Queue" : $"Queue ({table.Rows.Count:N0})";
         AppMetrics.FitButtonWidth(unfinishedButton, minWidth: AppScale.Scale(140));
     }
 
-    private static void FilterSessions(DataGridView grid, string search, bool unfinished)
+    private void FilterSessions(DataGridView grid, string search, bool unfinished)
     {
         if (grid.DataSource is not DataTable table) return;
         string query = search.Trim();
         grid.Tag = table.Rows.Count > 0 && query.Length > 0 ? "No sessions match your search."
             : unfinished ? "No unfinished batches require attention." : "No message sessions yet.";
-        if (query.Length == 0) table.DefaultView.RowFilter = "";
+        string statusClause = unfinished && queueView.SelectedIndex is 0 or 1
+            ? "QueueStatus = '" + (queueView.SelectedIndex == 0 ? "Needs Attention" : "Upcoming") + "'"
+            : "";
+        if (query.Length == 0) table.DefaultView.RowFilter = statusClause;
         else
         {
             if (!table.Columns.Contains("SearchMatch")) table.Columns.Add("SearchMatch", typeof(bool));
-            string[] columns = { "RecipientText", "AudienceText", "MethodText", "OperatorName", "StateText", "CreatedUtc" };
+            string[] columns = { "RecipientText", "AudienceText", "MethodText", "OperatorName",
+                "StateText", "CreatedUtc", "QueueStatus", "DueLocal" };
             foreach (DataRow row in table.Rows)
                 row["SearchMatch"] = columns.Where(table.Columns.Contains).Any(name =>
                     Convert.ToString(row[name])?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true);
-            table.DefaultView.RowFilter = "SearchMatch = true";
+            table.DefaultView.RowFilter = statusClause.Length == 0 ? "SearchMatch = true"
+                : "SearchMatch = true AND " + statusClause;
         }
         grid.Invalidate();
     }
