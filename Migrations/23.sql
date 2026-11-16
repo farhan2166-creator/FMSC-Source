@@ -210,15 +210,15 @@ INSERT msg.AutomationRule(EventCode) VALUES
  ('OverdueFee'),('SchoolAnnouncement'),('ExaminationsResults'),('BirthdayGreeting');
 
 CREATE TABLE msg.BatchSchedule(
- BatchId uniqueidentifier NOT NULL CONSTRAINT PK_MsgBatchSchedule PRIMARY KEY
-  CONSTRAINT FK_MsgBatchScheduleBatch REFERENCES msg.Batch(BatchId),
+ BatchId uniqueidentifier NOT NULL CONSTRAINT PK_MsgBatchSchedule PRIMARY KEY,
  SendAtUtc datetime2(3) NOT NULL,
  ExpiresUtc datetime2(3) NOT NULL,
  State varchar(10) NOT NULL CONSTRAINT DF_MsgBatchScheduleState DEFAULT('Ready'),
  CreatedBy int NOT NULL,
  UpdatedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgBatchScheduleModified DEFAULT(SYSUTCDATETIME()),
  CONSTRAINT CK_MsgBatchScheduleRange CHECK(SendAtUtc<ExpiresUtc),
- CONSTRAINT CK_MsgBatchScheduleState CHECK(State IN ('Ready','Paused','Cancelled'))
+ CONSTRAINT CK_MsgBatchScheduleState CHECK(State IN ('Ready','Paused','Cancelled')),
+ CONSTRAINT FK_MsgBatchScheduleBatch FOREIGN KEY(BatchId) REFERENCES msg.Batch(BatchId)
 );
 CREATE INDEX IX_MsgBatchScheduleUpcoming ON msg.BatchSchedule(State,SendAtUtc) INCLUDE(ExpiresUtc);
 
