@@ -268,6 +268,33 @@ BEGIN
               OR (S.ExpiresUtc IS NOT NULL AND S.ExpiresUtc<=SYSUTCDATETIME()))
     )
         THROW 51241,''This batch is scheduled, expired or awaiting review.'',1;
+
+    -- Quota rows serialize every reservation through the same provider.
+    -- A reserved attempt consumes capacity even if its result later becomes
+    -- Unknown: never reuse that allowance to create a duplicate request.
+    DECLARE @Limit int,@Reserve int,@MinuteLimit int,@Priority varchar(10),
+            @NowUtc datetime2(3)=SYSUTCDATETIME();
+    SELECT @Limit=DailyLimit,@Reserve=ReservedImportant
+      FROM msg.ProviderQuota WITH(UPDLOCK,HOLDLOCK)
+      WHERE ProviderCode=@ExpectedProviderCode;
+    IF @Limit IS NULL
+        THROW 51248,''Configure the API provider daily limit before sending.'',1;
+    SELECT @MinuteLimit=MaxPerMinute FROM msg.DispatchControl WITH(HOLDLOCK) WHERE ControlId=1;
+    SELECT @Priority=COALESCE(S.Priority,''Normal'')
+      FROM msg.Recipient R JOIN msg.Batch B ON B.BatchId=R.BatchId
+      LEFT JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId
+      WHERE R.RecipientId=@RecipientId;
+    DECLARE @TodayUtc datetime2(3)=CONVERT(datetime2(3),CONVERT(date,@NowUtc));
+    DECLARE @Used bigint=(
+      SELECT COUNT_BIG(*) FROM msg.Attempt T WITH(HOLDLOCK)
+      WHERE T.ProviderCode=@ExpectedProviderCode AND
+       T.RequestUtc>=@TodayUtc AND T.RequestUtc<DATEADD(day,1,@TodayUtc));
+    IF @Used>=@Limit OR (@Priority<>''High'' AND @Used>=@Limit-@Reserve)
+        THROW 51249,''The provider daily allowance is exhausted or reserved for priority messages.'',1;
+    IF (SELECT COUNT_BIG(*) FROM msg.Attempt T WITH(HOLDLOCK)
+        WHERE T.ProviderCode=@ExpectedProviderCode AND
+          T.RequestUtc>DATEADD(minute,-1,@NowUtc)) >= @MinuteLimit
+        THROW 51250,''Provider sending speed limit reached. Retry a pending recipient later.'',1;
     DECLARE @BatchId uniqueidentifier,@Kind varchar(8),@AdmissionId int,@StaffId int,
         @SnapshotPhone varchar(16),@RecipientState varchar(12),@BatchState varchar(14),
         @Channel varchar(10),@Purpose varchar(20),@Body nvarchar(1600),
