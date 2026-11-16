@@ -12,6 +12,53 @@ internal static class CommunicationBackgroundWorker
 {
     internal static async Task<int> RunScheduledAsync(CancellationToken token=default)
     {
+        // Both the complete installer and updater first take the activation
+        // mutex, then wait for this worker mutex to finish its current attempt.
+        // No installer can activate files while an API POST is in flight.
+        using var workerMutex=new Mutex(false,@"Global\FMSCCommunicationWorker");
+        bool owns=false;
+        try { owns=workerMutex.WaitOne(0); }
+        catch(AbandonedMutexException) { owns=true; }
+        if(!owns) return 0;
+        try
+        {
+            if(!IsUpdaterIdle()) return 0;
+            return await RunAuthorizedAsync(token);
+        }
+        finally { workerMutex.ReleaseMutex(); }
+    }
+
+    private static bool IsUpdaterIdle()
+    {
+        try
+        {
+            if(Mutex.TryOpenExisting(@"Global\FMSCInstallerActivation",out var activation))
+            {
+                using(activation)
+                {
+                    bool acquired;
+                    try { acquired=activation.WaitOne(0); }
+                    catch(AbandonedMutexException) { acquired=true; }
+                    if(!acquired)return false;
+                    activation.ReleaseMutex();
+                }
+            }
+            string root=Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "FMSC_Updater","recovery.json");
+            if(!File.Exists(root))return true;
+            byte[] data=File.ReadAllBytes(root);
+            return data.Length<=32768 && !Updates.UpdateStartupGuard.RequiresRecovery(data);
+        }
+        catch(Exception ex)
+        {
+            AppExceptionHandler.LogNonFatal(ex,"Communication background processor deferred during update or recovery");
+            return false;
+        }
+    }
+
+    private static async Task<int> RunAuthorizedAsync(CancellationToken token)
+    {
         if (!CommunicationBackgroundEnrollment.HasLocalEnrollment) return 0;
         Guid leaseNonce=Guid.NewGuid();
         CommunicationBackgroundEnrollment.Enrollment? enrollment=null;
