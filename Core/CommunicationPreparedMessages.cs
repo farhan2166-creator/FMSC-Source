@@ -11,7 +11,7 @@ namespace FMSC_SMS.Core;
 /// </summary>
 internal static class CommunicationPreparedMessages
 {
-    internal sealed record BuiltIn(string Name, string Purpose, string Body, bool FamilyOnly = false);
+    internal sealed record BuiltIn(string Name, string Purpose, string Body, bool FamilyOnly = false, string? Channel = null);
     internal sealed record ComposeTemplate(string Name, string Purpose, string Body, string? Channel = null, bool FamilyOnly = false)
     {
         internal bool Matches(CommunicationTarget target) => Purpose == target.Purpose
@@ -92,11 +92,29 @@ internal static class CommunicationPreparedMessages
         new BuiltIn("Family records update", "Individual",
             "Dear parent/guardian, please let the school office know if the contact or emergency details for any of your children have changed.", FamilyOnly: true),
         new BuiltIn("Family meeting request", "Individual",
-            "Dear parent/guardian, the school would like to arrange a meeting about your children's school records. Please contact the office to agree on a convenient time.", FamilyOnly: true)
+            "Dear parent/guardian, the school would like to arrange a meeting about your children's school records. Please contact the office to agree on a convenient time.", FamilyOnly: true),
+        // Curated Urdu drafts: explicitly chosen and reviewed by the operator.
+        // Limit to free manual WhatsApp; billed Unicode SMS needs separate
+        // segment/cost disclosure, and Meta needs an approved provider template.
+        new BuiltIn("Outstanding fee reminder (Urdu)", "FeeReminder",
+            "محترم والدین/سرپرست، [StudentName] (داخلہ نمبر [AdmissionNumber]) کی بقایا فیس PKR [OutstandingAmount] ہے۔ اگر ادائیگی ہو چکی ہے تو براہ کرم اسکول دفتر سے رابطہ کریں۔", Channel: "WhatsApp"),
+        new BuiltIn("New admission welcome (Urdu)", "Individual",
+            "محترم والدین/سرپرست، [StudentName] (داخلہ نمبر [AdmissionNumber]) کا اسکول میں داخلہ [AdmissionDate] کو ہوا۔ آپ کو خوش آمدید کہتے ہیں۔", Channel: "WhatsApp"),
+        new BuiltIn("Payment received acknowledgement (Urdu)", "Individual",
+            "محترم والدین/سرپرست، [StudentName] کی فیس کی ادائیگی درج ہو گئی ہے۔ سرکاری تفصیل کے لیے جاری کردہ رسید ملاحظہ کریں۔", Channel: "WhatsApp"),
+        new BuiltIn("Student birthday greeting (Urdu)", "Individual",
+            "محترم والدین/سرپرست، [StudentName] کو سالگرہ کی بہت مبارک ہو۔ اسکول کی طرف سے نیک تمنائیں۔", Channel: "WhatsApp"),
+        new BuiltIn("Examination information (Urdu)", "Announcement",
+            "محترم والدین/سرپرست، اسکول کی جانب سے امتحانات کے متعلق اہم اطلاع ہے۔ تصدیق شدہ شیڈول اور ہدایات کے لیے دفتر سے رابطہ کریں۔", Channel: "WhatsApp"),
+        new BuiltIn("School announcement (Urdu)", "Announcement",
+            "محترم والدین/سرپرست، اسکول کی جانب سے ایک اہم اعلان ہے۔ مزید تفصیل کے لیے اسکول دفتر سے رابطہ کریں۔", Channel: "WhatsApp"),
+        new BuiltIn("Parent-teacher meeting request (Urdu)", "Individual",
+            "محترم والدین/سرپرست، [StudentName] کے متعلق والدین اور استاد کی ملاقات طے کرنے کے لیے براہ کرم اسکول دفتر سے رابطہ کریں۔", Channel: "WhatsApp")
     };
 
     internal static IReadOnlyList<ComposeTemplate> BuiltInChoices { get; } = BuiltIns
-        .Select(item => new ComposeTemplate(item.Name, item.Purpose, item.Body, FamilyOnly: item.FamilyOnly)).ToArray();
+        .Select(item => new ComposeTemplate(item.Name, item.Purpose, item.Body,
+            Channel: item.Channel, FamilyOnly: item.FamilyOnly)).ToArray();
 
     // These are deliberately limited, readable placeholders. No SQL, scripting,
     // formula expressions, or arbitrary data paths can be supplied by a template.
