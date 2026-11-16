@@ -37,18 +37,27 @@ BEGIN
  SET NOCOUNT ON;
  EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
  SELECT B.BatchId,B.Channel,B.Audience,B.CreatedUtc,COUNT_BIG(*) InProgress,
-   SUM(CONVERT(bigint,CASE WHEN A.BatchId IS NOT NULL AND R.State IN (''Unknown'',''Failed'') THEN 1 ELSE 0 END)) NeedsAttention,
-   SUM(CONVERT(bigint,CASE WHEN (M.BatchId IS NOT NULL AND H.State IN (''Pending'',''Opened''))
-       OR (A.BatchId IS NOT NULL AND R.State=''Pending'') THEN 1 ELSE 0 END)) Upcoming,
+   SUM(CONVERT(bigint,CASE WHEN S.State=''Paused'' OR (S.State=''Ready'' AND S.ExpiresUtc<=SYSUTCDATETIME())
+       OR (A.BatchId IS NOT NULL AND R.State IN (''Unknown'',''Failed'')) THEN 1 ELSE 0 END)) NeedsAttention,
+   SUM(CONVERT(bigint,CASE WHEN (S.BatchId IS NULL OR (S.State=''Ready'' AND S.ExpiresUtc>SYSUTCDATETIME()))
+      AND ((M.BatchId IS NOT NULL AND H.State IN (''Pending'',''Opened''))
+       OR (A.BatchId IS NOT NULL AND R.State=''Pending'')) THEN 1 ELSE 0 END)) Upcoming,
    CONVERT(varchar(40),CASE WHEN M.BatchId IS NOT NULL THEN ''WhatsApp Business (manual)'' ELSE A.ProviderCode END) Method,
    CONCAT(COUNT_BIG(*),N'' intended recipient(s)'') RecipientText,
-   MAX(S.SendAtUtc) ScheduledUtc
+   MAX(S.SendAtUtc) ScheduledUtc,
+   MAX(CONVERT(varchar(10),S.State)) ScheduleState,
+   MAX(S.HoldReason) ScheduleIssue,
+   CONVERT(varchar(16),CASE WHEN SUM(CONVERT(int,CASE WHEN S.State=''Paused'' OR (S.State=''Ready'' AND S.ExpiresUtc<=SYSUTCDATETIME())
+         THEN 1 ELSE 0 END))>0 THEN ''Needs Attention''
+      WHEN MAX(S.SendAtUtc)>SYSUTCDATETIME() THEN ''Scheduled''
+      WHEN MAX(S.SendAtUtc) IS NOT NULL THEN ''Due''
+      ELSE ''Ready'' END) QueueState
  FROM msg.Batch B JOIN msg.Recipient R ON R.BatchId=B.BatchId
  LEFT JOIN msg.ManualBatch M ON M.BatchId=B.BatchId
  LEFT JOIN msg.ManualHandoff H ON H.RecipientId=R.RecipientId
  LEFT JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
  LEFT JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId
- WHERE B.CreatedBy=@UserId AND
+ WHERE B.CreatedBy=@UserId AND (S.BatchId IS NULL OR S.State<>''Cancelled'') AND
   ((M.BatchId IS NOT NULL AND H.State IN (''Pending'',''Opened''))
    OR (A.BatchId IS NOT NULL AND R.State IN (''Pending'',''Unknown'',''Accepted'',''Submitted'',''Failed'')))
  GROUP BY B.BatchId,B.Channel,B.Audience,B.CreatedUtc,M.BatchId,A.ProviderCode

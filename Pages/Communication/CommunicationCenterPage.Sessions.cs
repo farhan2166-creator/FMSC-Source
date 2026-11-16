@@ -27,7 +27,7 @@ public sealed partial class CommunicationCenterPage
             ("NeedsAttention", "Attention", 95, 80)
         })
         {
-            if (unfinished && field is ("OperatorName" or "StateText")) continue;
+            if (unfinished && field == "OperatorName") continue;
             if (!unfinished && field == "NeedsAttention") continue;
             grid.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -152,7 +152,15 @@ public sealed partial class CommunicationCenterPage
                 _ => Enum.TryParse(code, out CommunicationAudience scope)
                     ? AudienceOptions.FirstOrDefault(option => option.Scope == scope)?.Label ?? code : code
             };
-            if (unfinished) continue;
+            if (unfinished)
+            {
+                row["StateText"] = Convert.ToString(row["ScheduleState"]) == "Paused"
+                    ? "Needs review"
+                    : row.Table.Columns.Contains("ScheduledUtc") && !row.IsNull("ScheduledUtc")
+                        ? "Scheduled " + Convert.ToDateTime(row["ScheduledUtc"]).ToLocalTime().ToString("dd MMM HH:mm")
+                        : "Ready";
+                continue;
+            }
             row["StateText"] = Convert.ToString(row["Method"]) == "WhatsApp Business (manual)"
                 ? $"{row["ManualReported"]} reported sent · {row["ManualOpened"]} opened · {row["ManualSkipped"]} skipped / excluded"
                 : $"{row["Accepted"]} accepted · {row["Delivered"]} delivered · {row["Failed"]} failed · {row["Unknown"]} unknown";
