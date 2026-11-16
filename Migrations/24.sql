@@ -108,7 +108,10 @@ BEGIN
  BEGIN CATCH
   THROW 51262,''Database restore history could not be verified. Unattended sending is blocked.'',1;
  END CATCH;
- IF @LastRestore IS NOT NULL AND @LastRestore>@Created
+ -- restorehistory.restore_date is SQL-server local time; enrollment is UTC.
+ -- Compare on the same UTC time basis before authorizing unattended sends.
+ IF @LastRestore IS NOT NULL AND
+    DATEADD(minute,DATEDIFF(minute,GETDATE(),GETUTCDATE()),@LastRestore)>@Created
   THROW 51262,''This school database was restored after worker enrollment. Reauthorize sending after review.'',1;
  SELECT CONVERT(bit,1) Authorized,
   ISNULL((SELECT MAX(AttemptId) FROM msg.Attempt),CONVERT(bigint,0)) MaxAttemptId;
