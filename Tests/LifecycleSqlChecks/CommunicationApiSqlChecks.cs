@@ -49,6 +49,12 @@ internal static class CommunicationApiSqlChecks
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.DispatchControl WHERE ControlId=1 AND MasterPaused=0 AND UnattendedEnabled=0")==1 &&
             Sql.Count("SELECT COUNT(*) FROM msg.AutomationRule WHERE Mode='Off'")==8,
             "New communication automation and background processing start disabled.");
+        await r.Refused("Unimplemented automatic event sources cannot be activated by saving a mode",()=>{
+            Sql.Proc("msg.SaveAutomationMode",Sql.P("@UserId",f.Admin),
+                Sql.P("@EventCode","Admission"),Sql.P("@Mode","Automatic"),
+                Sql.P("@CampusId",0),Sql.P("@ClassId",0));
+            return Task.CompletedTask;
+        },51247);
         var scheduled=Confirm(Guid.NewGuid(),new string('S',64));
         Guid scheduleBatch=(Guid)scheduled.Rows[0]["BatchId"];
         long scheduleRecipient=Convert.ToInt64(Sql.Scalar(
