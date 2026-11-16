@@ -42,6 +42,18 @@ internal static class CommunicationManagementStore
         DatabaseHelper.ExecuteUserAsync("msg.ExcludeChangedPending", DatabaseHelper.P("@RecipientId",recipientId),
             DatabaseHelper.P("@ExclusionCode",reason));
 
+    internal static Task SaveBatchScheduleAsync(Guid batchId, DateTime sendAtUtc, DateTime expiresUtc)
+    {
+        if (!CurrentUser.HasPermission("Communication.Send"))
+            throw new UnauthorizedAccessException("School message sending is not authorized.");
+        if (batchId == Guid.Empty || sendAtUtc >= expiresUtc || expiresUtc <= DateTime.UtcNow)
+            throw new ArgumentException("Choose a valid future schedule and expiry.");
+        return DatabaseHelper.ExecuteUserAsync("msg.SaveBatchSchedule",
+            DatabaseHelper.P("@BatchId", batchId),
+            DatabaseHelper.P("@SendAtUtc", sendAtUtc),
+            DatabaseHelper.P("@ExpiresUtc", expiresUtc));
+    }
+
     internal static Task<DataTable> ReadDispatchSettingsAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Configure"))

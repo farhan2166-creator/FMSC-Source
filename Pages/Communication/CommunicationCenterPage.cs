@@ -51,6 +51,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private readonly Panel campusField, classField, studentField, staffField;
     private readonly ModernButton next = PageButton("communicationReviewMessage", "Review Message", 165, "Primary");
     private readonly ModernButton confirm = PageButton("communicationConfirmMessage", "Open in WhatsApp", 230, "Primary");
+    private readonly ModernButton schedule = PageButton("communicationScheduleMessage", "Schedule…", 135);
     private readonly ModernButton historyButton, unfinishedButton, newMessageButton, templatesButton, configureButton;
     // Compose and review share one workspace. Nothing is sent until the reviewed
     // snapshot is confirmed, just as in the former full-screen review step.
@@ -159,6 +160,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         };
         confirm.Click += async (_, _) => await RunBusyAsync(
             "Confirming the reviewed message…", StartReviewedMessageAsync, this);
+        schedule.Click += async (_, _) => await RunBusyAsync(
+            "Scheduling the reviewed message…", ScheduleReviewedMessageAsync, this);
         newMessageButton = PageButton("communicationNewMessage", "New Message", 140, "TabInactive");
         unfinishedButton = PageButton("communicationUnfinished", "Queue", 140, "TabInactive");
         historyButton = PageButton("communicationHistory", "History", 120, "TabInactive");
@@ -476,7 +479,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         };
         previewGrid.VisibleChanged += (_, _) => details.RowStyles[2].Height = previewGrid.Visible ? 55 : 0;
         card.Content.Controls.Add(details);
-        card.Content.Controls.Add(ActionFooter(confirm));
+        var actions = ActionFooter(confirm);
+        actions.Controls.Add(schedule);
+        card.Content.Controls.Add(actions);
         return card;
     }
 
@@ -723,6 +728,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
         next.Visible = compose && step == 0;
         confirm.Visible = compose && step == 1;
+        schedule.Visible = compose && step == 1;
+        schedule.Enabled = compose && step == 1 && manualModeAvailable && preview is { Included: > 0 };
         confirm.Text = IsManual ? (preview?.Included == 1 ? "Open in WhatsApp" : "Start WhatsApp Chats") : "Confirm & Send";
         if (step == 0) UpdateLiveDraftPreview();
         confirm.Enabled = step == 1 && manualModeAvailable && preview is { Included: > 0 }
@@ -758,6 +765,39 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         }
         catch(CommunicationValidationException ex){if(!IsDisposed)Warn(ex.Message);}
         catch(Exception){if(!IsDisposed)Warn("Meta templates could not be read. Check the protected profile and account permissions in Configure Sending.");}
+    }
+
+    private async Task ScheduleReviewedMessageAsync()
+    {
+        try
+        {
+            var target = previewTarget;
+            var reviewed = preview;
+            string? body = previewMessage;
+            if (!manualModeAvailable || target is null || reviewed is null || reviewed.Included <= 0
+                || target != CurrentTarget() || body != message.Text || manualRequestId == Guid.Empty)
+                throw new CommunicationValidationException("Review recipients and message before scheduling.");
+            using var picker = new CommunicationScheduleDialog();
+            if (picker.ShowDialog(FindForm()) != DialogResult.OK) return;
+            if (!Confirm($"Schedule {reviewed.Included:N0} reviewed message(s) for {picker.SendAtLocal:dd MMM yyyy, HH:mm}? Provider charges may apply if using an API.",
+                    "Confirm Schedule", false)) return;
+            int actor = CurrentUser.UserId;
+            Guid request = manualRequestId;
+            var confirmed = IsManual
+                ? await operations.ConfirmBatch(target, reviewed, body, request)
+                : await CommunicationApiBatchStore.ConfirmAsync(
+                    target, reviewed, body, request, ApiProvider, metaSelection);
+            if (IsDisposed || actor != CurrentUser.UserId || target != CurrentTarget()
+                || request != manualRequestId || body != message.Text)
+                throw new CommunicationValidationException("The batch was saved but the review changed. Open Queue to inspect it.");
+            await CommunicationManagementStore.SaveBatchScheduleAsync(confirmed.BatchId,
+                picker.SendAtLocal.ToUniversalTime(), picker.ExpiresLocal.ToUniversalTime());
+            if (IsDisposed) return;
+            ClearReviewedDraft();
+            await ShowSessionsAsync(unfinished: true);
+        }
+        catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
 
     private async Task StartReviewedMessageAsync()
