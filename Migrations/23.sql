@@ -194,7 +194,9 @@ BEGIN
  JOIN msg.Batch B ON B.BatchId=S.BatchId
  JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
  JOIN msg.Recipient R ON R.BatchId=B.BatchId
- WHERE B.CreatedBy=@UserId
+ WHERE (B.CreatedBy=@UserId OR EXISTS(
+   SELECT 1 FROM dbo.Users U JOIN dbo.Roles AccessRole ON AccessRole.RoleId=U.RoleId
+   WHERE U.UserId=@UserId AND AccessRole.RoleName=N'Administrator'))
  GROUP BY B.BatchId,B.Audience,B.Channel,B.Purpose,B.CreatedUtc,B.CreatedBy,
   A.ProviderCode,S.DueUtc,S.ExpiresUtc,S.Priority,S.HoldForReview
  ORDER BY S.DueUtc,B.BatchId;
@@ -443,7 +445,9 @@ BEGIN
  LEFT JOIN msg.ManualHandoff H ON H.RecipientId=R.RecipientId
  LEFT JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
  LEFT JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId
- WHERE B.CreatedBy=@UserId AND
+ WHERE (B.CreatedBy=@UserId OR EXISTS(
+   SELECT 1 FROM dbo.Users U JOIN dbo.Roles AccessRole ON AccessRole.RoleId=U.RoleId
+   WHERE U.UserId=@UserId AND AccessRole.RoleName=N'Administrator')) AND
    ((M.BatchId IS NOT NULL AND H.State IN (''Pending'',''Opened''))
    OR (A.BatchId IS NOT NULL AND
      (R.State IN (''Pending'',''Unknown'',''Submitted'',''Failed'')
