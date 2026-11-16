@@ -24,13 +24,15 @@ function TaskFixture([string]$name,[string]$path,[string]$arguments){
         Actions=@([pscustomobject]@{Type=0;Path=$path;Arguments=$arguments})}}
 }
 $owned='FMSC Cloud Backup S-1-5-21-1-2-3-1001'
+$communication='FMSC Communication Queue S-1-5-21-1-2-3-1001'
 $script:tasks=@(
     (TaskFixture $owned (Join-Path $AppDirectory 'FMSC_SMS.exe') '--cloud-backup-scheduled'),
+    (TaskFixture $communication (Join-Path $AppDirectory 'FMSC_SMS.exe') '--communication-queue-worker'),
     (TaskFixture 'Other school backup' (Join-Path $AppDirectory 'FMSC_SMS.exe') '--cloud-backup-scheduled'),
     (TaskFixture 'FMSC Cloud Backup unrelated' (Join-Path $AppDirectory 'FMSC_SMS.exe') '--cloud-backup-scheduled')
 )
 Remove-FmscCloudBackupTasks
-if($script:deleted.Count -ne 1 -or $script:deleted[0] -ne $owned){throw 'Owned task cleanup removed an unrelated task or missed its own task.'}
+if($script:deleted.Count -ne 2 -or -not $script:deleted.Contains($owned) -or -not $script:deleted.Contains($communication)){throw 'Owned task cleanup removed an unrelated task or missed its own tasks.'}
 $script:tasks=@();Remove-FmscCloudBackupTasks
 foreach($case in @(
     @((Join-Path $AppDirectory 'Other.exe'),'--cloud-backup-scheduled'),
@@ -41,4 +43,9 @@ foreach($case in @(
     try{Remove-FmscCloudBackupTasks}catch{$refused=$_.Exception.Message -like '*unexpected action*'}
     if(-not $refused -or $script:deleted.Count -ne $before){throw 'Unexpected task action was not preserved for review.'}
 }
-Write-Output 'PASS: uninstall removes only exact FMSC cloud backup tasks, handles missing tasks and refuses unexpected actions.'
+$before=$script:deleted.Count
+$script:tasks=@((TaskFixture $communication (Join-Path $AppDirectory 'FMSC_SMS.exe') '--other-operation'))
+$refused=$false
+try{Remove-FmscCloudBackupTasks}catch{$refused=$_.Exception.Message -like '*unexpected action*'}
+if(-not $refused -or $script:deleted.Count -ne $before){throw 'Unexpected communication task action was not preserved for review.'}
+Write-Output 'PASS: uninstall removes only exact FMSC background tasks and refuses substituted executable actions.'
