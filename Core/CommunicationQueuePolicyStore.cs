@@ -87,6 +87,24 @@ internal static class CommunicationQueuePolicyStore
             DatabaseHelper.Int("@ClassId", classId));
     }
 
+    internal static Task<DataTable> ReadPreferredMethodAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Send"))
+            throw new UnauthorizedAccessException("Communication.Send is required.");
+        return DatabaseHelper.QueryUserAsync("msg.ReadPreferredMethod");
+    }
+
+    internal static Task SavePreferredMethodAsync(string channel, string provider)
+    {
+        RequireAdministrator();
+        if (!((channel=="WhatsApp" && provider is "WhatsAppBusinessManual" or "MetaCloud") ||
+            (channel=="Sms" && provider=="Twilio")))
+            throw new ArgumentException("Choose a supported preferred sending method.");
+        return DatabaseHelper.ExecuteUserAsync("msg.SavePreferredMethod",
+            DatabaseHelper.P("@Channel",channel),
+            DatabaseHelper.P("@ProviderCode",provider));
+    }
+
     internal static Task<DataTable> ReadSchoolWeekdaysAsync()
     {
         RequireAdministrator();
