@@ -216,5 +216,29 @@ internal static class CommunicationApiSqlChecks
         Sql.Proc("msg.SetUnattendedSending",Sql.P("@UserId",f.Admin),Sql.P("@Enabled",false));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.DispatchControl WHERE UnattendedEnabled=0")==1,
             "Unattended sending can be disabled without any messages being created.");
+        var weekdays=Sql.Proc("msg.ReadSchoolWeekdays",Sql.P("@UserId",f.Admin));
+        r.Check(weekdays.Rows.Count==7 &&
+            weekdays.Rows.Cast<DataRow>().Count(row=>Convert.ToBoolean(row["Enabled"]))>=1,
+            "The sending calendar defines seven weekdays and at least one working day.");
+        Sql.Proc("msg.SetSchoolWeekday",Sql.P("@UserId",f.Admin),
+            Sql.P("@IsoWeekday",7),Sql.P("@Enabled",true));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.NonWorkingWeekday WHERE IsoWeekday=7 AND Enabled=1")==1,
+            "Administrator can make Sunday a school sending day.");
+        Sql.Proc("msg.SetSchoolWeekday",Sql.P("@UserId",f.Admin),
+            Sql.P("@IsoWeekday",7),Sql.P("@Enabled",false));
+        var holidayDate=new DateTime(2027,2,15);
+        Sql.Proc("msg.SetSchoolHoliday",Sql.P("@UserId",f.Admin),
+            Sql.P("@HolidayDate",holidayDate),Sql.P("@Description","Synthetic school closure"),
+            Sql.P("@Remove",false));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.SchoolHoliday WHERE HolidayDate=@Date",
+            Sql.P("@Date",holidayDate))==1,
+            "School holiday date is stored for independent worker and SQL-claim checks.");
+        Sql.Proc("msg.SetSchoolHoliday",Sql.P("@UserId",f.Admin),
+            Sql.P("@HolidayDate",holidayDate),Sql.P("@Description",DBNull.Value),
+            Sql.P("@Remove",true));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.SchoolHoliday WHERE HolidayDate=@Date",
+            Sql.P("@Date",holidayDate))==0,
+            "Removing a holiday does not change school messages or any financial records.");
+
     }
 }
