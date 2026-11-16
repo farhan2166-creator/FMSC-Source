@@ -106,12 +106,20 @@ internal static class CommunicationBackgroundWorker
             // otherwise authorized, already reviewed API batch from sending.
             try
             {
-                using var suggestions = await DatabaseHelper.QuerySqlAsync(
-                    "EXEC msg.ScanAutomationCandidates @UserId;",
-                    token, DatabaseHelper.Int("@UserId",enrollment.UserId));
-                using var feeSuggestions = await DatabaseHelper.QuerySqlAsync(
-                    "EXEC msg.ScanFeeReviewCandidates @UserId;",
-                    token, DatabaseHelper.Int("@UserId",enrollment.UserId));
+                using var slot=await DatabaseHelper.QuerySqlAsync(
+                    "EXEC msg.ClaimAutomationReviewScan @UserId;",
+                    token,DatabaseHelper.Int("@UserId",enrollment.UserId));
+                if(slot.Rows.Count!=1)
+                    throw new InvalidDataException("School event scan schedule is unavailable.");
+                if(Convert.ToBoolean(slot.Rows[0]["ShouldScan"]))
+                {
+                    using var suggestions = await DatabaseHelper.QuerySqlAsync(
+                        "EXEC msg.ScanAutomationCandidates @UserId;",
+                        token, DatabaseHelper.Int("@UserId",enrollment.UserId));
+                    using var feeSuggestions = await DatabaseHelper.QuerySqlAsync(
+                        "EXEC msg.ScanFeeReviewCandidates @UserId;",
+                        token, DatabaseHelper.Int("@UserId",enrollment.UserId));
+                }
             }
             catch(SqlException ex) when(ex.Number==50003)
             {
