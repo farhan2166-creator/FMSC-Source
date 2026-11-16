@@ -207,11 +207,33 @@ AS BEGIN
  EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
  EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
  BEGIN TRANSACTION;
- DECLARE @StudentId int;
- SELECT @StudentId=AdmissionId FROM msg.AutomationCandidate WITH(UPDLOCK,HOLDLOCK)
+ DECLARE @StudentId int,@EventCode varchar(32),@SourceRecordId bigint;
+ SELECT @StudentId=AdmissionId,@EventCode=EventCode,@SourceRecordId=SourceRecordId
+ FROM msg.AutomationCandidate WITH(UPDLOCK,HOLDLOCK)
  WHERE CandidateId=@CandidateId AND State=''Pending'';
  IF @StudentId IS NULL
     THROW 51283,''This suggested event is already resolved.'',1;
+ DECLARE @Today date=CONVERT(date,
+  (SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE
+  (SELECT TimeZoneId FROM msg.DispatchControl WHERE ControlId=1));
+ IF NOT EXISTS(SELECT 1 FROM dbo.Students S
+   JOIN msg.AutomationRule R ON R.EventCode=@EventCode AND R.Mode=''Review''
+   OUTER APPLY msg.RecordGuardian(S.AdmissionId) Guardian
+   LEFT JOIN dbo.FamilyMembers Family ON Family.AdmissionId=S.AdmissionId
+   WHERE S.AdmissionId=@StudentId AND S.Status=N''Active''
+      AND Guardian.HasConsent=1 AND Guardian.PhoneE164 IS NOT NULL
+      AND NOT EXISTS(SELECT 1 FROM msg.AutomationException X
+         WHERE X.FamilyId=Family.FamilyId AND X.EventCode=@EventCode
+         AND X.RevokedUtc IS NULL AND (X.UntilUtc IS NULL OR X.UntilUtc>SYSUTCDATETIME()))
+      AND (@EventCode<>''Birthday'' OR
+          (MONTH(S.DateOfBirth)=MONTH(@Today) AND DAY(S.DateOfBirth)=DAY(@Today)))
+      AND (@EventCode<>''PaymentReceived'' OR EXISTS(
+           SELECT 1 FROM dbo.FeePayments P
+           WHERE P.FeePaymentId=@SourceRecordId AND P.AdmissionId=@StudentId
+             AND P.Status=N''Completed'' AND P.RelatedFeePaymentId IS NULL
+             AND NOT EXISTS(SELECT 1 FROM dbo.FeePayments Changed
+                WHERE Changed.RelatedFeePaymentId=P.FeePaymentId))))
+    THROW 51285,''This event is no longer eligible for review. Refresh the suggestions.'',1;
  IF NOT EXISTS(SELECT 1 FROM msg.Batch B
   JOIN msg.Recipient Recipient ON Recipient.BatchId=B.BatchId
   WHERE B.BatchId=@BatchId AND B.CreatedBy=@UserId AND B.ConfirmedBy=@UserId
