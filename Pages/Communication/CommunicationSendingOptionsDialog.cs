@@ -265,7 +265,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(height)));
         content.Controls.Add(new Label
         {
-            Text = "Automation is optional. Every event starts Off. Select a rule to inspect or change its mode.",
+            Text = "Automation rules are Off. Activation is blocked in this development build until event capture, review and deduplication pass acceptance.",
             Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText, AutoSize = false
         }, 0, 0);
         var rule = Labelled("School event", automationEvent);
@@ -282,11 +282,12 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         {
             if (automationEvent.SelectedItem is not AutomationChoice selected)
                 throw new InvalidOperationException("Choose an automation event.");
-            string code = automationMode.SelectedIndex switch
+            if (automationMode.SelectedIndex != 0)
             {
-                1 => "Review", 2 => "Automatic", _ => "Off"
-            };
-            await CommunicationQueuePolicyStore.SaveAutomationModeAsync(selected.Code, code);
+                automationFeedback.Text = "Automatic event generation is not active in this development build. Existing rules remain Off.";
+                return;
+            }
+            await CommunicationQueuePolicyStore.SaveAutomationModeAsync(selected.Code, "Off");
             Changed = true;
             await RefreshAutomationAsync();
             automationFeedback.Text = "Automation preference saved.";
