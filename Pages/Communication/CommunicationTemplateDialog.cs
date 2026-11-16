@@ -7,7 +7,7 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
 {
     private readonly ModernTextBox name = HumanUi.TextBox(false,100);
     private readonly ModernTextBox body = HumanUi.TextBox(true,1600);
-    private readonly ModernComboBox channel=HumanUi.Combo(),purpose=HumanUi.Combo();
+    private readonly ModernComboBox channel=HumanUi.Combo(),purpose=HumanUi.Combo(),language=HumanUi.Combo();
     private readonly CheckBox active=new() { Text="Active",Checked=true,AutoSize=true };
 
     internal string TemplateName => name.Text.Trim();
@@ -20,6 +20,7 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
     }
     internal string Purpose => (purpose.SelectedItem as PurposeChoice)?.Code ?? "Announcement";
     internal bool Active => active.Checked;
+    internal string LanguageCode => language.SelectedIndex == 1 ? "ur" : "en";
 
     internal static string PurposeLabel(string code) => code switch
     {
@@ -30,7 +31,7 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
     };
 
     internal CommunicationTemplateDialog(string nameValue="",string channelValue="Sms",
-        string purposeValue="Announcement",string bodyValue="",bool isActive=true)
+        string purposeValue="Announcement",string bodyValue="",bool isActive=true,string languageValue="en")
     {
         Text=string.IsNullOrEmpty(nameValue)?"New school message template":"Edit school message template";
         StartPosition=FormStartPosition.CenterParent;
@@ -43,6 +44,9 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
             new ChannelChoice("Sms", "SMS"),
             new ChannelChoice("WhatsApp", "WhatsApp Business (manual)"),
             new ChannelChoice("Email", "Email (unavailable)") });
+        language.Name = "communicationTemplateLanguage";
+        language.Items.AddRange(new object[] { "English", "اردو / Urdu" });
+        language.SelectedIndex = languageValue == "ur" ? 1 : 0;
         purpose.Items.AddRange(new[] { "Announcement", "FeeReminder", "Individual", "Staff" }
             .Select(code => new PurposeChoice(code)).ToArray());
         name.Text=nameValue;body.Text=bodyValue;active.Checked=isActive;
@@ -117,19 +121,20 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
         active.Margin = new Padding(AppScale.Scale(12), AppScale.Scale(10), 0, 0);
         options.Controls.Add(insert);
         options.Controls.Add(active);
-        var layout=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=1,RowCount=6,
+        var layout=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=1,RowCount=7,
             Padding=new Padding(16) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-        for(int i=0;i<3;i++)layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppMetrics.FieldRowHeight));
+        for(int i=0;i<4;i++)layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppMetrics.FieldRowHeight));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppMetrics.ButtonHeight + AppScale.Scale(8)));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(57)));
         layout.Controls.Add(HumanUi.Field("Template name",name,true),0,0);
         layout.Controls.Add(HumanUi.Field("Channel",channel,true),0,1);
-        layout.Controls.Add(HumanUi.Field("Purpose",purpose,true),0,2);
-        layout.Controls.Add(HumanUi.Field("Message",body,true),0,3);
-        layout.Controls.Add(options,0,4);
-        layout.Controls.Add(HumanUi.DialogButtons(save,cancel),0,5);
+        layout.Controls.Add(HumanUi.Field("Language",language,true),0,2);
+        layout.Controls.Add(HumanUi.Field("Purpose",purpose,true),0,3);
+        layout.Controls.Add(HumanUi.Field("Message",body,true),0,4);
+        layout.Controls.Add(options,0,5);
+        layout.Controls.Add(HumanUi.DialogButtons(save,cancel),0,6);
         Controls.Add(layout);
         AcceptButton=save;CancelButton=cancel;
     }

@@ -20,6 +20,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private string ComposeChannel => deliveryMethod.SelectedIndex == 2 ? "Sms" : "WhatsApp";
     private string ApiProvider => IsMeta ? "MetaCloud" : "Twilio";
     private readonly ModernComboBox templateChoice = HumanUi.Combo();
+    private readonly ModernComboBox languageChoice = HumanUi.Combo();
+    private bool languageChanged;
+    private string CurrentLanguage => languageChoice.SelectedIndex == 1 ? "ur" : "en";
     private IReadOnlyList<CommunicationPreparedMessages.ComposeTemplate> composeTemplates = CommunicationPreparedMessages.BuiltInChoices;
     private readonly ModernTextBox message = HumanUi.TextBox(true, 1600);
     private readonly CheckBox showExcluded = new()
@@ -132,6 +135,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         audience.Items.AddRange(AudienceOptions.Where(option => CurrentUser.HasPermission(option.Permission)
             && ((option.Scope is not (CommunicationAudience.OutstandingFees or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily)) || CurrentUser.HasPermission("Fees.View"))).ToArray());
         SelectedAudience = CurrentUser.HasPermission("Students.View") ? CommunicationAudience.Class : CommunicationAudience.Staff;
+        languageChoice.Name = "communicationComposeLanguage";
+        languageChoice.Items.AddRange(new object[] { "English", "اردو / Urdu" });
+        languageChoice.SelectedIndex = 0;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
 
@@ -178,6 +184,14 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         UseToolbar();
         SetContent(BuildWorkspace());
         deliveryMethod.SelectionChangeCommitted += (_, _) => methodChanged = true;
+        languageChoice.SelectionChangeCommitted += (_, _) => languageChanged = true;
+        languageChoice.SelectedIndexChanged += (_, _) =>
+        {
+            // Switching languages never silently translates or overwrites
+            // existing message text; a template must be chosen explicitly.
+            RefreshTemplateChoices();
+            InvalidatePreview();
+        };
         deliveryMethod.SelectedIndexChanged += (_, _) =>
         {
             if (metaSelection is not null || IsMeta) message.Clear();
@@ -242,6 +256,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 if (CurrentUser.HasPermission("Students.View")) Defer(BindLookupsAsync);
                 Defer(LoadComposeTemplatesAsync);
                 Defer(SelectReadyMethodAsync);
+                Defer(SelectSchoolLanguageAsync);
             }
             if (landing is HistoryStep or UnfinishedStep)
                 Defer(() => step == landing ? NavigateSessionsAsync(landing == UnfinishedStep) : Task.CompletedTask);
@@ -373,7 +388,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         var recipients = ComposeFieldRow(audienceField, campusField, classField, studentField, staffField);
         var methodField = HumanUi.Field("Send using", deliveryMethod, true);
         var templateField = HumanUi.Field("Template (optional)", templateChoice);
-        var sending = ComposeFieldRow(methodField, templateField);
+        var languageField = HumanUi.Field("Language", languageChoice);
+        var sending = ComposeFieldRow(methodField, languageField, templateField);
         sending.Margin = new Padding(0, AppScale.Scale(6), 0, 0);
         fields.Controls.Add(recipients, 0, 0);
         fields.Controls.Add(targetIssue, 0, 1);
@@ -412,7 +428,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 int columnWidth = width / columns;
                 audienceField.Width = campusField.Width = classField.Width = columnWidth;
                 studentField.Width = staffField.Width = Math.Min(width, columnWidth * 2);
-                methodField.Width = templateField.Width = columnWidth;
+                methodField.Width = languageField.Width = templateField.Width = columnWidth;
                 fields.RowStyles[0].Height = WrappedRowsHeight(recipients, width);
                 fields.RowStyles[2].Height = WrappedRowsHeight(sending, width) + sending.Margin.Vertical;
                 targetIssue.MaximumSize = messageIssue.MaximumSize = new Size(width, 0);
@@ -535,6 +551,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         if (!dialog.Changed) return;
         InvalidatePreview();
         Defer(SelectReadyMethodAsync);
+        if (!languageChanged) Defer(SelectSchoolLanguageAsync);
     }
     private async Task LoadComposeTemplatesAsync()
     {
@@ -562,7 +579,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         }
         templateChoice.Items.Add("Search matching templates…");
         foreach (var item in composeTemplates)
-            if (item.Matches(target))
+            if (item.Matches(target) && item.LanguageCode == CurrentLanguage)
                 templateChoice.Items.Add(item);
         templateChoice.SelectedIndex = 0;
     }
@@ -572,7 +589,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         if (IsBusy || IsMeta || !CurrentUser.HasPermission("Communication.Send")) return;
         int actor = CurrentUser.UserId;
         CommunicationTarget target = CurrentTarget();
-        var compatible = composeTemplates.Where(item => item.Matches(target)).ToArray();
+        var compatible = composeTemplates.Where(item =>
+            item.Matches(target) && item.LanguageCode == CurrentLanguage).ToArray();
         using var dialog = new CommunicationComposerTemplateBrowser(compatible);
         if (dialog.ShowDialog(FindForm()) != DialogResult.OK ||
             dialog.SelectedTemplate is not { } selected) return;
@@ -634,6 +652,17 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     {
         if (lookup.DataSource is DataTable table && table.Rows.Count > 0)
             table.Rows[0][lookup.DisplayMember] = prompt;
+    }
+
+    private async Task SelectSchoolLanguageAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Send") || languageChanged) return;
+        int actor = CurrentUser.UserId;
+        using DataTable language = await CommunicationManagementStore.ReadMessageLanguageAsync();
+        if (IsDisposed || actor != CurrentUser.UserId || languageChanged
+            || step == 1 || language.Rows.Count != 1) return;
+        string code = Convert.ToString(language.Rows[0]["DefaultMessageLanguage"]) ?? "en";
+        languageChoice.SelectedIndex = code == "ur" ? 1 : 0;
     }
 
     private async Task SelectReadyMethodAsync()

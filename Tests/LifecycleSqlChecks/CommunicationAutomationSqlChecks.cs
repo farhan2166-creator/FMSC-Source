@@ -6,6 +6,47 @@ internal static class CommunicationAutomationSqlChecks
 {
     internal static async Task Run(Fixture f,Report r)
     {
+        // A language change is an explicit administrator preference, never
+        // an unreviewed translation, batch, or provider attempt.
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.DispatchControl WHERE ControlId=1 AND DefaultMessageLanguage='en'")==1,
+            "A new school starts with English as the default message language.");
+        await r.Refused("Non-administrators cannot change the school message language",()=>{
+            Sql.Proc("msg.SaveMessageLanguage",Sql.P("@UserId",f.Restricted),
+                Sql.P("@LanguageCode","ur"));
+            return Task.CompletedTask;
+        },50003);
+        await r.Refused("Unsupported languages cannot be configured",()=>{
+            Sql.Proc("msg.SaveMessageLanguage",Sql.P("@UserId",f.Admin),
+                Sql.P("@LanguageCode","xx"));
+            return Task.CompletedTask;
+        },51298);
+        int attemptsBeforeLanguage=Sql.Count("SELECT COUNT(*) FROM msg.Attempt");
+        Sql.Proc("msg.SaveMessageLanguage",Sql.P("@UserId",f.Admin),
+            Sql.P("@LanguageCode","ur"));
+        using(var language=Sql.Proc("msg.ReadMessageLanguage",Sql.P("@UserId",f.Admin)))
+            r.Check(language.Rows.Count==1 &&
+                Convert.ToString(language.Rows[0]["DefaultMessageLanguage"])=="ur",
+                "Admin-selected Urdu is persisted and returned without modifying the school records.");
+        string syntheticName="Synthetic bilingual message preference test";
+        Sql.Proc("msg.SaveTemplate",Sql.P("@UserId",f.Admin),
+            Sql.P("@TemplateId",0),Sql.P("@Name",syntheticName),
+            Sql.P("@Channel","WhatsApp"),Sql.P("@Purpose","Announcement"),
+            Sql.P("@Body", "Synthetic English notice."),Sql.P("@Active",true),
+            Sql.P("@LanguageCode","en"));
+        Sql.Proc("msg.SaveTemplate",Sql.P("@UserId",f.Admin),
+            Sql.P("@TemplateId",0),Sql.P("@Name",syntheticName),
+            Sql.P("@Channel","WhatsApp"),Sql.P("@Purpose","Announcement"),
+            Sql.P("@Body", "مصنوعی اردو اطلاع۔"),Sql.P("@Active",true),
+            Sql.P("@LanguageCode","ur"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Template WHERE Name=@Name AND Channel='WhatsApp' AND LanguageCode IN ('en','ur')",
+            Sql.P("@Name",syntheticName))==2,
+            "English and Urdu versions of one approved template coexist without translation.");
+        Sql.Query("DELETE FROM msg.Template WHERE Name=@Name",Sql.P("@Name",syntheticName));
+        Sql.Proc("msg.SaveMessageLanguage",Sql.P("@UserId",f.Admin),
+            Sql.P("@LanguageCode","en"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt")==attemptsBeforeLanguage,
+            "Changing school language and editing templates cannot send any message.");
+
         int beforeAttempts=Sql.Count("SELECT COUNT(*) FROM msg.Attempt");
         int beforeBatches=Sql.Count("SELECT COUNT(*) FROM msg.Batch");
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.AutomationCandidate")==0 &&

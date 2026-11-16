@@ -24,6 +24,83 @@ ALTER TABLE msg.DispatchControl ADD
 EXEC(N'ALTER TABLE msg.DispatchControl ADD CONSTRAINT CK_MsgRoutineFamilyDailyLimit
  CHECK(RoutineFamilyDailyLimit BETWEEN 1 AND 20)');
 
+-- Language preferences are school-level settings. Existing templates remain
+-- English; adding Urdu variants never translates or changes saved content.
+ALTER TABLE msg.DispatchControl ADD DefaultMessageLanguage varchar(2) NOT NULL
+ CONSTRAINT DF_MsgDefaultMessageLanguage DEFAULT('en');
+ALTER TABLE msg.Template ADD LanguageCode varchar(2) NOT NULL
+ CONSTRAINT DF_MsgTemplateLanguageCode DEFAULT('en');
+EXEC(N'ALTER TABLE msg.DispatchControl ADD CONSTRAINT CK_MsgDefaultMessageLanguage
+ CHECK(DefaultMessageLanguage IN (''en'',''ur''))');
+EXEC(N'ALTER TABLE msg.Template ADD CONSTRAINT CK_MsgTemplateLanguageCode
+ CHECK(LanguageCode IN (''en'',''ur''))');
+ALTER TABLE msg.Template DROP CONSTRAINT UQ_MsgTemplateName;
+EXEC(N'ALTER TABLE msg.Template ADD CONSTRAINT UQ_MsgTemplateNameLanguage
+ UNIQUE(Name,Channel,LanguageCode)');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadMessageLanguage @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequireAnyPermission @UserId,N''Communication.Send'',N''Communication.Configure'';
+ SELECT DefaultMessageLanguage FROM msg.DispatchControl WHERE ControlId=1;
+END');
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveMessageLanguage
+ @UserId int,@LanguageCode varchar(2)
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @LanguageCode NOT IN (''en'',''ur'')
+    THROW 51298,''Select English or Urdu.'',1;
+ UPDATE msg.DispatchControl
+ SET DefaultMessageLanguage=@LanguageCode,UpdatedBy=@UserId,
+     UpdatedUtc=SYSUTCDATETIME() WHERE ControlId=1;
+ IF @@ROWCOUNT<>1 THROW 51298,''School communication settings are missing.'',1;
+END');
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadComposeTemplates @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ SELECT TemplateId,Name,Channel,Purpose,Body,LanguageCode
+ FROM msg.Template WHERE Active=1 ORDER BY Name,Channel,LanguageCode;
+END');
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadTemplates @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ SELECT TemplateId,Name,Channel,Purpose,Body,Active,UpdatedBy,UpdatedUtc,LanguageCode
+ FROM msg.Template ORDER BY Name,Channel,LanguageCode;
+END');
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveTemplate
+ @UserId int,@TemplateId int=0,@Name nvarchar(100),
+ @Channel varchar(10),@Purpose varchar(20),@Body nvarchar(1600),
+ @Active bit=1,@LanguageCode varchar(2)=''en''
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @TemplateId<0 OR LEN(LTRIM(RTRIM(ISNULL(@Name,N''''))))=0 OR LEN(@Name)>100
+   OR @Channel NOT IN (''Sms'',''WhatsApp'',''Email'')
+   OR @Purpose NOT IN (''Announcement'',''FeeReminder'',''Individual'',''Staff'')
+   OR @LanguageCode NOT IN (''en'',''ur'')
+   OR LEN(LTRIM(RTRIM(ISNULL(@Body,N''''))))=0 OR LEN(@Body)>1600
+   OR @Body LIKE N''%{{%'' OR @Body LIKE N''%}}%''
+   THROW 51089,''Choose a valid school template, language and body.'',1;
+ IF @TemplateId=0
+ BEGIN
+   INSERT msg.Template(Name,Channel,Purpose,Body,Active,UpdatedBy,LanguageCode)
+   VALUES(@Name,@Channel,@Purpose,@Body,@Active,@UserId,@LanguageCode);
+   SELECT CONVERT(int,SCOPE_IDENTITY()) TemplateId;
+ END
+ ELSE
+ BEGIN
+   UPDATE msg.Template SET Name=@Name,Channel=@Channel,Purpose=@Purpose,
+     Body=@Body,Active=@Active,LanguageCode=@LanguageCode,UpdatedBy=@UserId,
+     UpdatedUtc=SYSUTCDATETIME()
+   WHERE TemplateId=@TemplateId;
+   IF @@ROWCOUNT<>1 THROW 51089,''The template no longer exists.'',1;
+   SELECT @TemplateId TemplateId;
+ END;
+END');
+
 EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveFeeReminderPolicy
  @UserId int,@EventCode varchar(32),@GapDays int,@PerMonth int,@PerDay int
 AS BEGIN

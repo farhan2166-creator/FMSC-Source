@@ -37,6 +37,7 @@ internal static class ReplacementTemplateGuard
                     OR TimeZoneId<>N'Pakistan Standard Time'
                     OR MaxPerMinute<>60 OR PreferredChannel<>'WhatsApp'
                     OR PreferredProviderCode<>'WhatsAppBusinessManual'
+                    OR DefaultMessageLanguage<>'en'
                     OR UpdatedBy IS NOT NULL OR RoutineFamilyDailyLimit<>3)
                 OR (SELECT COUNT(*) FROM msg.AutomationRule)<>8
                 OR EXISTS (SELECT 1 FROM msg.AutomationRule

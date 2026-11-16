@@ -60,6 +60,26 @@ internal static partial class Program
             Check(Uri.UnescapeDataString(link.Query).Contains(rendered) && link.Host == "wa.me", "Unicode, quotes, ampersands and newlines survive official WhatsApp handoff encoding");
             using (var template = new CommunicationTemplateDialog("Saved email template", "Email", "Announcement", "School notice"))
                 Check(template.Channel == "Email", "Editing a saved email template preserves its channel rather than silently converting it to SMS");
+            using (var urduTemplate = new CommunicationTemplateDialog(
+                "Bilingual school notice", "WhatsApp", "Announcement",
+                "محترم والدین", true, "ur"))
+                Check(urduTemplate.LanguageCode == "ur" && urduTemplate.Channel == "WhatsApp",
+                    "Saved Urdu templates preserve both language and sending channel independently.");
+            Check(CommunicationPreparedMessages.BuiltInChoices.Any(item =>
+                    item.LanguageCode == "ur" && item.Channel == "WhatsApp")
+                && CommunicationPreparedMessages.BuiltInChoices.Any(item =>
+                    item.LanguageCode == "en" && item.Name == "New admission welcome"),
+                "English and Urdu prepared messages are separate curated versions.");
+            using (var languageComposer = new CommunicationCenterPage(false))
+            {
+                var languageInput = Field<ModernComboBox>(languageComposer, "languageChoice");
+                var draft = Field<ModernTextBox>(languageComposer, "message");
+                draft.Text = "Original approved English draft";
+                languageInput.SelectedIndex = 1;
+                Check(draft.Text == "Original approved English draft",
+                    "Changing the compose language never translates or overwrites an existing draft.");
+            }
+
             Check(CommunicationHistoryDialog.OutcomeExplanation("MetaCloud", "Accepted")
                     .Contains("not yet confirmed", StringComparison.OrdinalIgnoreCase)
                 && CommunicationHistoryDialog.OutcomeExplanation("Twilio", "Delivered")
@@ -104,6 +124,9 @@ internal static partial class Program
                 && !Field<ModernButton>(reader, "unfinishedButton").Visible,
                 "History-only access does not expose a composing/sending action");
             CurrentUser.SignIn(7203, "Settings fixture", "Messaging configuration", false, new[] { "Communication.Configure" });
+            using var languageSettings = new CommunicationLanguageSettingsDialog();
+            Check(languageSettings.Controls.Find("communicationDefaultMessageLanguage", true).Length==1,
+                "A configuration-only administrator can edit the school language preference.");
             using var settings = new CommunicationCenterPage(false);
             Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission)
                 && Field<ModernButton>(settings, "configureButton").Visible

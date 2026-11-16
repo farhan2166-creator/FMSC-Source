@@ -52,8 +52,8 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         templates.AutoGenerateColumns = false;
         foreach (var (field, title, weight) in new[]
         {
-            ("Name", "Template", 210), ("Channel", "Channel", 75),
-            ("Purpose", "Purpose", 105), ("Active", "Active", 55)
+            ("Name", "Template", 185), ("Channel", "Channel", 75),
+            ("LanguageCode", "Language", 70), ("Purpose", "Purpose", 100), ("Active", "Active", 55)
         })
             templates.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -65,6 +65,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             string column = templates.Columns[e.ColumnIndex].Name;
             if (column == "Active" && e.Value is bool active) e.Value = active ? "Yes" : "No";
             else if (column == "Purpose" && e.Value is string purpose) e.Value = CommunicationTemplateDialog.PurposeLabel(purpose);
+            else if (column == "LanguageCode" && e.Value is string language) e.Value = language == "ur" ? "Urdu" : "English";
             else if (column == "Channel" && templates.Rows[e.RowIndex].DataBoundItem is DataRowView row)
                 e.Value = ChannelLabel(row.Row);
             else return;
@@ -165,6 +166,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
                 row.Field<string>("DisplayCategory") != selectedCategory)
                 return false;
             string searchableText = string.Join(" ", row.Field<string>("Name"), ChannelLabel(row),
+                row.Field<string>("LanguageCode") == "ur" ? "Urdu" : "English",
                 CommunicationTemplateDialog.PurposeLabel(row.Field<string>("Purpose") ?? ""), row.Field<string>("Body"));
             return terms.All(term => searchableText.Contains(term, StringComparison.CurrentCultureIgnoreCase));
         }).Select(row => row.Field<int>("TemplateId").ToString(CultureInfo.InvariantCulture)).ToArray();
@@ -176,12 +178,17 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
     private async Task RefreshAsync()
     {
         var rows = await read();
+        // Synthetic UI contracts may use an older in-memory fixture; the
+        // production SQL column is always present after schema-26 migration.
+        if (!rows.Columns.Contains("LanguageCode"))
+            rows.Columns.Add(new DataColumn("LanguageCode", typeof(string)) { DefaultValue = "en" });
         foreach (var (item, index) in CommunicationPreparedMessages.BuiltIns.Select((item, index) => (item, index)))
         {
             var row = rows.NewRow();
             row["TemplateId"] = -index - 1;
             row["Name"] = item.Name + " (built-in)";
             row["Channel"] = item.Channel ?? "All";
+            row["LanguageCode"] = item.LanguageCode;
             row["Purpose"] = item.Purpose;
             row["Body"] = item.Body;
             row["Active"] = true;
@@ -209,10 +216,11 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             id < 0 ? "Custom " + name.Replace(" (built-in)", "") : name,
             (id < 0 && row?.Field<string>("Channel") == "All" ? "WhatsApp" : row?.Field<string>("Channel")) ?? "WhatsApp",
             row?.Field<string>("Purpose") ?? "Announcement",
-            row?.Field<string>("Body") ?? "", row?.Field<bool>("Active") ?? true);
+            row?.Field<string>("Body") ?? "", row?.Field<bool>("Active") ?? true,
+            row?.Field<string>("LanguageCode") ?? "en");
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         await CommunicationManagementStore.SaveTemplateAsync(Math.Max(0, id), dialog.TemplateName,
-            dialog.Channel, dialog.Purpose, dialog.Body, dialog.Active);
+            dialog.Channel, dialog.Purpose, dialog.Body, dialog.Active, dialog.LanguageCode);
         Changed = true;
         await RefreshAsync();
     }

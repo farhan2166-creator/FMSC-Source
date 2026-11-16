@@ -49,6 +49,16 @@
       "schema": "msg",
       "name": "SaveFeeReminderPolicy",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadMessageLanguage",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveMessageLanguage",
+      "type": "P"
     }
   ],
   "checkConstraints": [
@@ -66,6 +76,50 @@
       "schema": "msg",
       "objectName": "DispatchControl",
       "name": "CK_MsgRoutineFamilyDailyLimit"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "CK_MsgTemplateLanguageCode"
+    },
+    {
+      "schema": "msg",
+      "objectName": "DispatchControl",
+      "name": "CK_MsgDefaultMessageLanguage"
+    }
+  ],
+  "columns": [
+    {
+      "schema": "msg",
+      "objectName": "DispatchControl",
+      "name": "DefaultMessageLanguage",
+      "type": "varchar",
+      "maxLength": 2,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "LanguageCode",
+      "type": "varchar",
+      "maxLength": 2,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    }
+  ],
+  "uniqueIndexes": [
+    {
+      "schema": "msg",
+      "objectName": "Template",
+      "name": "UQ_MsgTemplateNameLanguage",
+      "keys": "Name,Channel,LanguageCode"
     }
   ]
 }

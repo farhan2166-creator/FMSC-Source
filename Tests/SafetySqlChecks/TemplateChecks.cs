@@ -34,6 +34,7 @@ internal static class TemplateChecks
         Refused("UPDATE msg.AutomationRule SET BaselineAdmissionId=1 WHERE EventCode='Admission';");
         Refused("UPDATE msg.AutomationRule SET BaselinePaymentId=1 WHERE EventCode='PaymentReceived';");
         Refused("UPDATE msg.DispatchControl SET RoutineFamilyDailyLimit=4 WHERE ControlId=1;");
+        Refused("UPDATE msg.DispatchControl SET DefaultMessageLanguage='ur' WHERE ControlId=1;");
         Refused("UPDATE msg.AutomationRule SET FeeReminderGapDays=8 WHERE EventCode='OutstandingFees';");
         Refused("UPDATE msg.AutomationRule SET FeeRemindersPerMonth=3 WHERE EventCode='OutstandingFees';");
         Refused("UPDATE msg.AutomationScanControl SET LastScanClaimUtc='20261116' WHERE ControlId=1;");

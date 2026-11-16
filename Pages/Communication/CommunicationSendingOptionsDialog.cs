@@ -19,6 +19,11 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
     private readonly List<MethodRow> methods = new();
     private readonly ModernButton close = new() { Text = "Close" };
     private readonly ModernButton block = new() { Text = "Block a Number…", Enabled = false };
+    private readonly ModernButton messageLanguage = new()
+    {
+        Name = "communicationLanguageSettings", Text = "Default Language…",
+        ThemeRole = "Secondary"
+    };
     private readonly Label feedback = new() { Dock = DockStyle.Fill, AutoEllipsis = true };
     private readonly Func<Task<DataTable>> read;
     private readonly bool useLivePreferences;
@@ -101,7 +106,10 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         block.Width = AppScale.Scale(175);
         close.Dock = DockStyle.Right;
         close.Width = AppScale.Scale(100);
-        footer.Controls.AddRange(new Control[] { block, close });
+        messageLanguage.Dock = DockStyle.Left;
+        messageLanguage.Width = AppScale.Scale(180);
+        messageLanguage.Enabled = useLivePreferences;
+        footer.Controls.AddRange(new Control[] { block, messageLanguage, close });
         layout.Controls.Add(footer, 0, 5);
         var sendingTab = new TabPage("Sending") { BackColor = AppTheme.PageBackground };
         sendingTab.Controls.Add(layout);
@@ -122,6 +130,13 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         FormClosing += (_, e) => e.Cancel |= busy;
         Shown += async (_, _) => await RunAsync(RefreshAsync);
         block.Click += async (_, _) => await RunAsync(RecordOptOutAsync);
+        messageLanguage.Click += (_, _) =>
+        {
+            if (busy || !CurrentUser.HasPermission("Communication.Configure")) return;
+            using var dialog = new CommunicationLanguageSettingsDialog();
+            dialog.ShowDialog(this);
+            if (dialog.Changed) Changed = true;
+        };
         savePreferred.Click += async (_, _) => await RunAsync(async () =>
         {
             var choice = preferredMethod.SelectedIndex switch

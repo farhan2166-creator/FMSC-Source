@@ -135,7 +135,26 @@ internal static class CommunicationManagementStore
         using var rows = await DatabaseHelper.QueryUserAsync("msg.ReadComposeTemplates");
         return CommunicationPreparedMessages.BuiltInChoices.Concat(rows.AsEnumerable().Select(row =>
             new CommunicationPreparedMessages.ComposeTemplate(row.Field<string>("Name") ?? "", row.Field<string>("Purpose") ?? "",
-                row.Field<string>("Body") ?? "", row.Field<string>("Channel") ?? ""))).ToArray();
+                row.Field<string>("Body") ?? "", row.Field<string>("Channel") ?? "",
+                LanguageCode: row.Field<string>("LanguageCode") ?? "en"))).ToArray();
+    }
+
+    internal static Task<DataTable> ReadMessageLanguageAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Send")
+            && !CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication permission is required.");
+        return DatabaseHelper.QueryUserAsync("msg.ReadMessageLanguage");
+    }
+
+    internal static Task SaveMessageLanguageAsync(string languageCode)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Only a communication administrator may set the default language.");
+        if (languageCode is not ("en" or "ur"))
+            throw new ArgumentException("Choose English or Urdu.", nameof(languageCode));
+        return DatabaseHelper.ExecuteUserAsync("msg.SaveMessageLanguage",
+            DatabaseHelper.P("@LanguageCode", languageCode));
     }
 
     internal static async Task<DataTable> ReadTemplatesAsync()
@@ -222,7 +241,7 @@ internal static class CommunicationManagementStore
     }
 
     internal static async Task SaveTemplateAsync(
-        int templateId, string name, string channel, string purpose, string body, bool active)
+        int templateId, string name, string channel, string purpose, string body, bool active, string languageCode = "en")
     {
         if (!CurrentUser.HasPermission("Communication.Configure"))
             throw new UnauthorizedAccessException("Communication Settings permission is required.");
@@ -235,6 +254,7 @@ internal static class CommunicationManagementStore
             DatabaseHelper.P("@Channel", channel),
             DatabaseHelper.P("@Purpose", purpose),
             DatabaseHelper.P("@Body", body),
-            DatabaseHelper.Bit("@Active", active));
+            DatabaseHelper.Bit("@Active", active),
+            DatabaseHelper.P("@LanguageCode", languageCode));
     }
 }
