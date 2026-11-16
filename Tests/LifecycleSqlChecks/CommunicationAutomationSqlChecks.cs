@@ -41,7 +41,17 @@ internal static class CommunicationAutomationSqlChecks
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Template WHERE Name IN (@Name,@Name+N' (Urdu)') AND Channel='WhatsApp' AND LanguageCode IN ('en','ur')",
             Sql.P("@Name",syntheticName))==2,
             "English and Urdu versions of one approved template coexist without translation.");
-        Sql.Query("DELETE FROM msg.Template WHERE Name IN (@Name,@Name+N' (Urdu)')",Sql.P("@Name",syntheticName));
+        // Only in the disposable CI school: dispose of both synthetic templates
+        // and their synthetic revision history together. Production revisions
+        // retain their FK and cannot be erased by normal template operations.
+        Sql.Query("""
+            BEGIN TRANSACTION;
+            DELETE R FROM msg.TemplateRevision R
+              JOIN msg.Template T ON T.TemplateId=R.TemplateId
+              WHERE T.Name IN (@Name,@Name+N' (Urdu)');
+            DELETE FROM msg.Template WHERE Name IN (@Name,@Name+N' (Urdu)');
+            COMMIT TRANSACTION;
+            """,Sql.P("@Name",syntheticName));
         Sql.Proc("msg.SaveMessageLanguage",Sql.P("@UserId",f.Admin),
             Sql.P("@LanguageCode","en"));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt")==attemptsBeforeLanguage,
