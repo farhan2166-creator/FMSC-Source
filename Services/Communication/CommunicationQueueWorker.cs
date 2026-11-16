@@ -78,9 +78,13 @@ internal static class CommunicationQueueWorker
                 }
                 catch (CommunicationValidationException error)
                 {
-                    AppExceptionHandler.LogNonFatal(error, "Scheduled recipient changed after review");
-                    await CommunicationManagementStore.ExcludeChangedPendingAsync(
-                        recipientId, "ChangedSinceReview");
+                    // Changes in contact, consent, provider account or message
+                    // must never silently discard an approved batch. Pause the
+                    // complete schedule for an authorized human review.
+                    AppExceptionHandler.LogNonFatal(error, "Scheduled batch requires review");
+                    await CommunicationManagementStore.PauseScheduledBatchAsync(
+                        (Guid)item["BatchId"], "Recipient, provider or reviewed message changed");
+                    break;
                 }
             }
             return 0;

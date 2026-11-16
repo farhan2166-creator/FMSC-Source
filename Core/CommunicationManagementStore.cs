@@ -28,6 +28,16 @@ internal static class CommunicationManagementStore
     internal static Task<DataTable> ReadMyUnfinishedBatchesAsync() =>
         ReadSessionsAsync(unfinished: true);
 
+    internal static Task PauseScheduledBatchAsync(Guid batchId,string reason)
+    {
+        if (!CurrentUser.HasPermission("Communication.Send"))
+            throw new UnauthorizedAccessException("Communication.Send is required.");
+        if (batchId==Guid.Empty || string.IsNullOrWhiteSpace(reason))
+            throw new ArgumentException("Choose a valid scheduled batch and reason.");
+        return DatabaseHelper.ExecuteUserAsync("msg.PauseScheduledBatch",
+            DatabaseHelper.P("@BatchId",batchId),DatabaseHelper.P("@Reason",reason));
+    }
+
     internal static Task<DataTable> ReadWorkerIdentityAsync(Guid workerId, byte[] secret, byte[] windows, byte[] device) =>
         DatabaseHelper.QuerySqlAsync("EXEC msg.ReadWorkerIdentity @WorkerId,@Token,@WindowsProof,@DeviceProof",
             DatabaseHelper.P("@WorkerId",workerId), DatabaseHelper.P("@Token",secret),

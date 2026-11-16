@@ -219,6 +219,7 @@ CREATE TABLE msg.BatchSchedule(
  SendAtUtc datetime2(3) NOT NULL,
  ExpiresUtc datetime2(3) NOT NULL,
  State varchar(10) NOT NULL CONSTRAINT DF_MsgBatchScheduleState DEFAULT('Ready'),
+ HoldReason nvarchar(200) NULL,
  CreatedBy int NOT NULL,
  UpdatedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgBatchScheduleModified DEFAULT(SYSUTCDATETIME()),
  CONSTRAINT CK_MsgBatchScheduleRange CHECK(SendAtUtc<ExpiresUtc),
@@ -601,6 +602,19 @@ BEGIN
   THROW 51292,''Choose a valid sending method.'',1;
  UPDATE msg.DispatchSettings SET PreferredMethod=@Method,UpdatedUtc=SYSUTCDATETIME(),UpdatedBy=@UserId
  WHERE Id=1;
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.PauseScheduledBatch @UserId int,@BatchId uniqueidentifier,@Reason nvarchar(200)
+AS
+BEGIN
+ SET NOCOUNT ON;SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ IF @Reason IS NULL OR LEN(LTRIM(RTRIM(@Reason)))=0 OR LEN(@Reason)>200
+  THROW 51295,''An actionable pause reason is required.'',1;
+ UPDATE S SET State=''Paused'',HoldReason=@Reason,UpdatedUtc=SYSUTCDATETIME()
+ FROM msg.BatchSchedule S JOIN msg.Batch B ON B.BatchId=S.BatchId
+ WHERE S.BatchId=@BatchId AND B.CreatedBy=@UserId AND S.State=''Ready'';
 END');
 
 
