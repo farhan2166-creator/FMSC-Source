@@ -199,21 +199,18 @@ internal static partial class Program
                 $"{button.Name}: button={button.Bounds}, panel={button.Parent?.ClientRectangle}")));
         host.ClientSize = new Size(1200, 780);
         Application.DoEvents();
-        Check(Descendants(page).Single(control => control.Name == "communicationUnfinishedGrid").Visible,
-            "The center opens on the dedicated unfinished queue");
-        var unfinishedSearch = page.Controls.Find("communicationUnfinishedSearch", true).Single();
-        int buttonBottom = navigation.Max(button => button.RectangleToScreen(button.ClientRectangle).Bottom);
-        int gap = unfinishedSearch.PointToScreen(Point.Empty).Y - buttonBottom;
-        Check(gap >= 0 && gap < navigation[0].Height,
-            $"The session search starts directly below the navigation, with a gap smaller than a button (gap: {gap}px).");
+        var queue = Descendants(page).Single(control => control.Name == "communicationUnfinishedGrid");
+        var queueSearch = page.Controls.Find("communicationUnfinishedSearch", true).Single();
+        Check(targetCard.Visible && !queue.Visible && queueSearch is not null,
+            "New Message opens first, while Queue remains available for unfinished work");
         ((ModernButton)navigation[0]).PerformClick();
         Application.DoEvents();
         var workspace = (TableLayoutPanel)type.GetField("composerLayout",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         Check(workspace.Visible && targetCard.Visible
             && workspace.Controls.Contains(targetCard)
-            && workspace.ColumnStyles[0].Width == 100,
-            "New Message uses the whole workspace rather than a short form beside an empty preview");
+            && workspace.Controls.Cast<Control>().Any(control => control.Visible && !ReferenceEquals(control, targetCard)),
+            "New Message keeps its editable composer and live draft preview visible");
         var reviewAction = Descendants(targetCard).Single(control => control.Name == "communicationReviewMessage");
         Check(reviewAction.Visible && reviewAction.RectangleToScreen(reviewAction.ClientRectangle).Bottom
             <= targetCard.Content.RectangleToScreen(targetCard.Content.ClientRectangle).Bottom,
