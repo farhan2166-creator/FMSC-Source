@@ -5,6 +5,7 @@ namespace FMSC_SMS.Pages.Students.Admissions;
 public sealed partial class StudentAdmissionPage
 {
     private readonly List<Button> siblingSyncButtons = new();
+    private bool readingSiblingSync;
 
     private void ConfigureSiblingSync()
     {
@@ -15,6 +16,8 @@ public sealed partial class StudentAdmissionPage
         Add(altContact, AdmissionSiblingSyncData.AlternatePhone);
         Add(fatherName, AdmissionSiblingSyncData.FatherName);
         Add(prevSchool, AdmissionSiblingSyncData.PreviousSchool);
+        Add(fatherOccupation, AdmissionSiblingSyncData.FatherOccupation);
+        Add(casteTribe, AdmissionSiblingSyncData.CasteTribe);
         void Add(ModernTextBox input, AdmissionSiblingSyncData.Field field)
         {
             input.Name = "admission" + field.Column;
@@ -36,27 +39,45 @@ public sealed partial class StudentAdmissionPage
         }
     }
 
-    private async Task SyncSiblingFieldAsync(ModernTextBox input, AdmissionSiblingSyncData.Field field)
+    internal async Task SyncSiblingFieldAsync(ModernTextBox input, AdmissionSiblingSyncData.Field field,
+        Func<int, AdmissionSiblingSyncData.Field, string, Task<AdmissionSiblingSyncData.Preview?>>? read = null)
     {
-        if (IsBusy || currentAdmissionId <= 0 || unconfirmedAdmission is not null || IsCancelledRegistration
+        if (readingSiblingSync || IsBusy || currentAdmissionId <= 0 || unconfirmedAdmission is not null || IsCancelledRegistration
             || !AdmissionSiblingSyncData.CanUse) return;
         int anchor = currentAdmissionId, version = admissionLoadVersion;
-        saveBusy = true;
-        UpdateStudentWorkspace();
+        string value = input.Text;
+        bool ownsSaveBusy = false;
+        readingSiblingSync = true;
         try
         {
+            // Keep the form untouched during this read: most clicks may have
+            // nothing to sync. A full busy/disable cycle causes a visible blink.
+            var preview = await (read ?? AdmissionSiblingSyncData.ReadAsync)(anchor, field, value);
+            if (IsDisposed || currentAdmissionId != anchor || admissionLoadVersion != version
+                || input.Text != value || IsBusy || preview is null) return;
+            ownsSaveBusy = true;
+            saveBusy = true;
+            UpdateStudentWorkspace();
             using var submitted = HoldSubmittedInputs();
-            var preview = await AdmissionSiblingSyncData.ReadAsync(anchor, field, input.Text);
-            if (IsDisposed || currentAdmissionId != anchor || admissionLoadVersion != version) return;
-            if (preview is null) return;
             using var dialog = new AdmissionSiblingSyncDialog(preview);
             if (dialog.ShowDialog(FindForm()) != DialogResult.OK) return;
             if (IsDisposed || currentAdmissionId != anchor || admissionLoadVersion != version) return;
             AcceptSyncedField(input, preview.NewValue);
             SetStatus($"{field.Label} synced. {dialog.Changed} record(s) updated.", PageStatusKind.Success);
         }
-        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
-        finally { saveBusy = false; if (!IsDisposed) UpdateStudentWorkspace(); }
+        catch (Exception ex)
+        {
+            if (!IsDisposed && currentAdmissionId == anchor && admissionLoadVersion == version) Fail(ex);
+        }
+        finally
+        {
+            readingSiblingSync = false;
+            if (ownsSaveBusy)
+            {
+                saveBusy = false;
+                if (!IsDisposed) UpdateStudentWorkspace();
+            }
+        }
     }
 
     private void AcceptSyncedField(ModernTextBox input, string value)

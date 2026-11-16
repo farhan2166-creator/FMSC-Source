@@ -88,9 +88,10 @@ internal static partial class Program
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
             T Get<T>(string name) => (T)type.GetField(name, flags)!.GetValue(page)!;
             void Call(string name, params object[] args) => type.GetMethod(name, flags)!.Invoke(page, args);
-            var editors = new[] { "address", "contact", "altContact", "fatherName", "prevSchool" }.Select(Get<ModernTextBox>).ToArray();
+            var editors = new[] { "address", "contact", "altContact", "fatherName", "prevSchool", "fatherOccupation", "casteTribe" }
+                .Select(Get<ModernTextBox>).ToArray();
             Check(editors.All(editor => editor.Controls.OfType<Button>().Count() == 1),
-                "Each of the five fields owns a separate inline sync icon");
+                "Each shared field owns a separate inline sync icon");
             Call("UpdateSiblingSyncActions");
             Check(editors.All(editor => !editor.Controls.OfType<Button>().Single().Enabled),
                 "Unsaved admissions cannot update sibling records");
@@ -106,11 +107,45 @@ internal static partial class Program
                 "Saving the shared field preserves unrelated draft edits and their unsaved guard");
             Get<ModernTextBox>("name").Text = "";
             Check(!page.HasUnsavedChanges, "The committed source field alone is marked saved without recapturing other draft values");
+            int enabledChanges = 0, reads = 0;
+            page.EnabledChanged += (_, _) => enabledChanges++;
+            var pending = new TaskCompletionSource<AdmissionSiblingSyncData.Preview?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task<AdmissionSiblingSyncData.Preview?> Read(int anchor, AdmissionSiblingSyncData.Field field, string value)
+            {
+                reads++;
+                Check(anchor == 41 && field == AdmissionSiblingSyncData.Address && value == editors[0].Text,
+                    "A click checks the current student's exact field value");
+                return pending.Task;
+            }
+            var quietClick = page.SyncSiblingFieldAsync(editors[0], AdmissionSiblingSyncData.Address, Read);
+            var repeatedClick = page.SyncSiblingFieldAsync(editors[0], AdmissionSiblingSyncData.Address, Read);
+            Check(page.Enabled && editors.All(editor => editor.Enabled) && !page.IsBusy && enabledChanges == 0
+                && reads == 1 && repeatedClick.IsCompleted,
+                "Checking for differences leaves the form enabled and ignores repeat clicks without a busy-state blink");
+            pending.SetResult(null);
+            PumpUntil(() => quietClick.IsCompleted, "Quiet sibling check completes");
+            quietClick.GetAwaiter().GetResult();
+            Check(page.Enabled && enabledChanges == 0 && !page.IsBusy && !page.HasUnsavedChanges,
+                "A no-op click completes without disabling, refreshing or dirtying the form");
+
+            var duringSave = new TaskCompletionSource<AdmissionSiblingSyncData.Preview?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var racingClick = page.SyncSiblingFieldAsync(editors[0], AdmissionSiblingSyncData.Address, (_, _, _) => duringSave.Task);
+            type.GetField("saveBusy", flags)!.SetValue(page, true);
+            duringSave.SetResult(null);
+            PumpUntil(() => racingClick.IsCompleted, "A read overlapping normal Save completes");
+            racingClick.GetAwaiter().GetResult();
+            Check(Get<bool>("saveBusy") && enabledChanges == 0,
+                "A quiet sibling read never clears another operation's Save guard");
+            type.GetField("saveBusy", flags)!.SetValue(page, false);
+
             bool invalidPhone = false;
             try { AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.PrimaryPhone, "not a phone"); }
             catch (InvalidOperationException) { invalidPhone = true; }
             Check(invalidPhone && AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.FatherName, "ali khan") == "Ali Khan",
                 "Sync retains the admission phone validation and name formatting rules");
+            Check(AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.FatherOccupation, "math teacher") == "Math Teacher"
+                && AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.CasteTribe, "abbasi") == "Abbasi",
+                "Father occupation and caste use their existing admission text rules");
             CurrentUser.SignIn(7202, "Synthetic viewer", "Fixture", false, new[] { "Students.View" });
             Call("UpdateSiblingSyncActions");
             Check(!AdmissionSiblingSyncData.CanUse, "Student viewers do not gain shared-record editing permission");

@@ -6,7 +6,8 @@ internal static class SiblingFieldSyncSql
 {
     private static string Column(string field) => field switch
     {
-        "Address" or "ContactNumber" or "AlternateContactNumber" or "FatherName" or "PreviousSchool" => field,
+        "Address" or "ContactNumber" or "AlternateContactNumber" or "FatherName" or "PreviousSchool"
+            or "FatherOccupation" or "CasteTribe" => field,
         _ => throw new ArgumentException("Unsupported sibling field.", nameof(field))
     };
 
