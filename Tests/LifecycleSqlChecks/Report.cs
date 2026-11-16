@@ -30,8 +30,17 @@ internal sealed class Report
                 " in " + (Convert.ToString(sqlError.Data["FMSC_TestOperation"]) ??
                     (string.IsNullOrWhiteSpace(sqlError.Procedure) ? "SQL" : sqlError.Procedure)) +
                 " at SQL line " + sqlError.LineNumber;
+            // Only the test-owned, data-free disposable catalog reaches this harness.
+            // Surface the violating SQL constraint for precise diagnosis while
+            // withholding command parameters, student records and credentials.
+            string constraint = sqlError is null ? "" :
+                System.Text.RegularExpressions.Regex.Match(sqlError.Message,
+                    @"(?:constraint|index) ['""‘](?<name>[A-Za-z0-9_]+)['""’]",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                    .Groups["name"].Value;
             string assertion = ex is AssertionFailure ? ex.Message : "Unexpected " +
-                ex.GetType().Name + (code.HasValue ? " (SQL " + code + context + ")" : "");
+                ex.GetType().Name + (code.HasValue ? " (SQL " + code + context +
+                (constraint.Length>0 ? ", constraint " + constraint : "") + ")" : "");
             Scenarios.Add(new(name, "FAIL", Assertions - before, watch.Elapsed.TotalSeconds, assertion,
                 name.StartsWith("Fixture", StringComparison.Ordinal) ? "Missing synthetic fixture dependency or provisioning issue" :
                 ex is AssertionFailure ? "Persisted-state assertion failure; investigate expectation versus production behavior" : "Unexpected production operation/constraint error", code));
