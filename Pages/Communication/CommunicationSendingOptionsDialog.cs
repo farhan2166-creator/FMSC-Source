@@ -315,7 +315,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(height)));
         content.Controls.Add(new Label
         {
-            Text = "Admission, payment and birthday events can prepare suggestions for staff review. All events start Off; automatic sending remains disabled.",
+            Text = "Review-only suggestions support admission, payments, birthdays and fee notices. All events start Off; automatic dispatch remains disabled.",
             Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText, AutoSize = false
         }, 0, 0);
         var rule = Labelled("School event", automationEvent);
@@ -353,9 +353,10 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
                 throw new InvalidOperationException("Choose an automation event.");
             bool review=automationMode.SelectedIndex==1;
             if(automationMode.SelectedIndex==2 ||
-               (review && selected.Code is not ("Admission" or "PaymentReceived" or "Birthday")))
+               (review && selected.Code is not ("Admission" or "PaymentReceived" or "Birthday"
+                    or "OutstandingFees" or "UpcomingDue" or "OverdueFollowUp")))
             {
-                automationFeedback.Text="Only admission, payment and birthday suggestions are currently available for review. Automatic sending stays disabled.";
+                automationFeedback.Text="Review is available for admissions, payments, birthdays and three fee-reminder events. Automatic sending remains disabled.";
                 return;
             }
             await CommunicationQueuePolicyStore.SaveAutomationModeAsync(
