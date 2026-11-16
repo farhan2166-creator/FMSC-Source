@@ -98,7 +98,7 @@ public sealed partial class CommunicationCenterPage
         toolbar.Controls.Add(open, unfinished ? 2 : 1, 0);
         if (allowExport)
         {
-            var export = PageButton("communicationExportHistory", "Export CSV", 140, "Secondary");
+            var export = PageButton("communicationExportHistory", "Export…", 140, "Secondary");
             export.Dock = DockStyle.Fill;
             export.Click += async (_, _) => await ExportHistoryAsync();
             toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(150)));
@@ -128,28 +128,65 @@ public sealed partial class CommunicationCenterPage
             || !CurrentUser.HasPermission("Communication.Configure")
             || historyGrid.DataSource is not DataTable table) return;
         int actor = CurrentUser.UserId;
+        using DataTable exportRows = HistoryExportRows(table.DefaultView);
         string csv = FormatHistoryCsv(table.DefaultView);
-        if (table.DefaultView.Count == 0) { Warn("No matching history entries to export."); return; }
-        if (!Confirm($"Export {table.DefaultView.Count:N0} displayed history entries to a CSV file? "
+        if (exportRows.Rows.Count == 0) { Warn("No matching history entries to export."); return; }
+        if (!Confirm($"Export {exportRows.Rows.Count:N0} displayed history entries as a PDF or CSV? "
             + "This contains school record names. Save it in a protected location.",
             "Export Communication History", false)) return;
         using var save = new SaveFileDialog
         {
             Title = "Export communication history",
-            Filter = "CSV UTF-8 (*.csv)|*.csv",
-            DefaultExt = "csv",
+            Filter = "PDF document (*.pdf)|*.pdf|CSV UTF-8 (*.csv)|*.csv",
+            FilterIndex = 1,
+            DefaultExt = "pdf",
             AddExtension = true,
-            FileName = $"FMSC-Communication-History-{DateTime.Now:yyyyMMdd}.csv"
+            FileName = $"FMSC-Communication-History-{DateTime.Now:yyyyMMdd}.pdf"
         };
         if (save.ShowDialog(FindForm()) != DialogResult.OK || actor != CurrentUser.UserId
             || !CurrentUser.HasPermission("Communication.Configure")
             || !CurrentUser.HasPermission("Communication.View")) return;
         try
         {
-            await File.WriteAllTextAsync(save.FileName, csv, new UTF8Encoding(true));
-            if (!IsDisposed) SetStatus("Displayed history exported to CSV.");
+            if (save.FilterIndex == 1)
+            {
+                PdfTableExporter.Export(save.FileName, "FMSC Communication History",
+                    "Filtered communication history; delivery and manual reports are distinguished",
+                    exportRows, Accent);
+            }
+            else
+            {
+                await File.WriteAllTextAsync(save.FileName,
+                    csv, new UTF8Encoding(true));
+            }
+            if (!IsDisposed) SetStatus("Displayed communication history exported.");
         }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+    }
+
+    /// <summary>
+    /// A strict summary-only projection for printing. No recipient search keys,
+    /// contact numbers, message bodies, provider credentials or audit secrets.
+    /// </summary>
+    private static DataTable HistoryExportRows(DataView rows)
+    {
+        var export = new DataTable("History");
+        foreach (var name in new[] { "Created UTC", "Method", "Recipient",
+            "Audience", "Started by", "Outcome" })
+            export.Columns.Add(name, typeof(string));
+        foreach (DataRowView row in rows)
+        {
+            string created = row["CreatedUtc"] is DateTime date
+                ? date.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " UTC"
+                : Convert.ToString(row["CreatedUtc"], CultureInfo.InvariantCulture) ?? "";
+            export.Rows.Add(created,
+                Convert.ToString(row["MethodText"]) ?? "",
+                Convert.ToString(row["RecipientText"]) ?? "",
+                Convert.ToString(row["AudienceText"]) ?? "",
+                Convert.ToString(row["OperatorName"]) ?? "",
+                Convert.ToString(row["StateText"]) ?? "");
+        }
+        return export;
     }
 
     // Quoted cells, Unicode output and leading-formula protection are mandatory:

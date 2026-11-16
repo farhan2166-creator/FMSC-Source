@@ -302,6 +302,31 @@ internal static partial class Program
             && !historyCsv.Contains("https://wa.me", StringComparison.Ordinal),
             "Filtered history CSV quotes content, neutralizes formulas and excludes nonmatching recipients.");
 
+        var historyExportRows = type.GetMethod("HistoryExportRows",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        using (var pdfSafeRows = (DataTable)historyExportRows.Invoke(null,
+            new object[] { historyFixture.DefaultView })!)
+        {
+            Check(pdfSafeRows.Rows.Count == 1 && pdfSafeRows.Columns.Count == 6
+                && !pdfSafeRows.Columns.Contains("RecipientSearchText")
+                && !pdfSafeRows.Columns.Contains("Body")
+                && !pdfSafeRows.Columns.Contains("PhoneE164")
+                && !Convert.ToString(pdfSafeRows.Rows[0]["Recipient"])!.Contains("Bilal", StringComparison.Ordinal),
+                "Filtered PDF history projects only authorized summary columns, never unfiltered search or contact data.");
+            string pdfFile = Path.Combine(Path.GetTempPath(),
+                "FMSC-History-Contract-" + Guid.NewGuid().ToString("N") + ".pdf");
+            try
+            {
+                PdfTableExporter.Export(pdfFile, "Synthetic FMSC communication history",
+                    "Filtered fixture; not a live school record", pdfSafeRows, Color.DarkBlue);
+                using var rendered = PdfSharp.Pdf.IO.PdfReader.Open(pdfFile,
+                    PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import);
+                Check(rendered.PageCount >= 1,
+                    "Filtered communication history can be written as a valid PDF without source data.");
+            }
+            finally { if (File.Exists(pdfFile)) File.Delete(pdfFile); }
+        }
+
         // The production formatter is internal: exercise it through reflection
         // without weakening accessibility or exposing student data to tests.
         var prepared = assembly.GetType("FMSC_SMS.Core.CommunicationPreparedMessages")!;
