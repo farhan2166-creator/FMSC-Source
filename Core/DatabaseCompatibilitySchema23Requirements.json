@@ -1,0 +1,34 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "SendControl",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "SendControlHistory",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadQueue",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadSendControl",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SetSendPaused",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_Attempt_GlobalPause",
+      "type": "TR"
+    }
+  ]
+}

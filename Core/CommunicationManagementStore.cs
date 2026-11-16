@@ -28,6 +28,20 @@ internal static class CommunicationManagementStore
     internal static Task<DataTable> ReadMyUnfinishedBatchesAsync() =>
         ReadSessionsAsync(unfinished: true);
 
+    internal static Task<DataTable> ReadSendControlAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication administrator permission is required.");
+        return DatabaseHelper.QueryUserAsync("msg.ReadSendControl");
+    }
+
+    internal static Task SetSendPausedAsync(bool paused)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Communication administrator permission is required.");
+        return DatabaseHelper.ExecuteUserAsync("msg.SetSendPaused", DatabaseHelper.Bit("@Paused", paused));
+    }
+
     private static async Task<DataTable> ReadSessionsAsync(bool unfinished, int limit = 100)
     {
         int actor = CurrentUser.UserId;
@@ -35,7 +49,7 @@ internal static class CommunicationManagementStore
         bool fees = students && CurrentUser.HasPermission("Fees.View");
         bool staff = CurrentUser.HasPermission("Staff.View");
         DataTable sessions = await (unfinished
-            ? DatabaseHelper.QueryUserAsync("msg.ReadMyUnfinishedBatches")
+            ? DatabaseHelper.QueryUserAsync("msg.ReadQueue")
             : DatabaseHelper.QueryUserAsync("msg.ReadHistory", DatabaseHelper.Int("@Limit", limit)));
         try
         {

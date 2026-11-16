@@ -5,9 +5,13 @@ namespace FMSC_SMS.Pages.Communication;
 
 public sealed partial class CommunicationCenterPage
 {
+    private readonly ModernComboBox queueView = HumanUi.Combo();
+    private ModernButton? masterPauseButton;
+    private bool sendingPaused;
+
     private HumanCard SessionsCard(DataGridView grid, bool unfinished)
     {
-        var card = HumanUi.Card(unfinished ? "Unfinished" : "History");
+        var card = HumanUi.Card(unfinished ? "Queue" : "History");
         card.Header.Visible = false;
         grid.Name = unfinished ? "communicationUnfinishedGrid" : "communicationHistoryGrid";
         grid.AutoGenerateColumns = false;
@@ -19,10 +23,12 @@ public sealed partial class CommunicationCenterPage
             ("AudienceText", "Audience", 105, 100),
             ("OperatorName", "Started by", 90, 80),
             ("StateText", "Outcome", 215, 220),
-            ("InProgress", "Needs attention", 115, 90)
+            ("InProgress", "Remaining", 100, 90),
+            ("NeedsAttention", "Attention", 95, 80)
         })
         {
             if (unfinished && field is ("OperatorName" or "StateText")) continue;
+            if (!unfinished && field == "NeedsAttention") continue;
             grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = field, DataPropertyName = field, HeaderText = caption,
@@ -33,10 +39,10 @@ public sealed partial class CommunicationCenterPage
         grid.Columns["CreatedUtc"]!.DefaultCellStyle.Format = "dd MMM yyyy  HH:mm";
         var search = HumanUi.TextBox(false, 100);
         search.Name = unfinished ? "communicationUnfinishedSearch" : "communicationHistorySearch";
-        search.AccessibleName = search.PlaceholderText = unfinished ? "Search unfinished sessions" : "Search history";
+        search.AccessibleName = search.PlaceholderText = unfinished ? "Search queued messages" : "Search history";
         search.Dock = DockStyle.Fill;
         var open = PageButton(unfinished ? "communicationResumeSession" : "communicationViewHistory",
-            unfinished ? "Resume Session" : "View Message", 155, unfinished ? "Primary" : "Secondary");
+            unfinished ? "Open Batch" : "View Message", 155, unfinished ? "Primary" : "Secondary");
         open.Dock = DockStyle.Fill;
         open.Enabled = false;
         grid.CurrentCellChanged += (_, _) => open.Enabled = grid.CurrentRow?.DataBoundItem is DataRowView;
@@ -51,17 +57,38 @@ public sealed partial class CommunicationCenterPage
             e.Handled = e.SuppressKeyPress = true;
             await OpenSessionAsync(grid.CurrentRow, unfinished);
         };
-        search.TextChanged += (_, _) => FilterSessions(grid, search.Text, unfinished);
-        grid.DataSourceChanged += (_, _) => FilterSessions(grid, search.Text, unfinished);
+        if (unfinished)
+        {
+            queueView.Name = "communicationQueueView";
+            queueView.Items.AddRange(new object[] { "Needs Attention", "Upcoming", "All Active" });
+            queueView.SelectedIndex = 2;
+            queueView.AccessibleName = "Queue view";
+            queueView.SelectedIndexChanged += (_, _) =>
+                FilterSessions(grid, search.Text, true, queueView.Text);
+        }
+        search.TextChanged += (_, _) => FilterSessions(grid, search.Text, unfinished, queueView.Text);
+        grid.DataSourceChanged += (_, _) => FilterSessions(grid, search.Text, unfinished, queueView.Text);
+        bool showPause = unfinished && CurrentUser.HasPermission("Communication.Configure");
         var toolbar = new TableLayoutPanel
         {
             Dock = DockStyle.Top, Height = AppMetrics.ButtonHeight + AppScale.Scale(10),
-            ColumnCount = 2, RowCount = 1, Margin = Padding.Empty
+            ColumnCount = showPause ? 4 : unfinished ? 3 : 2, RowCount = 1, Margin = Padding.Empty
         };
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        if (unfinished) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(165)));
+        if (showPause) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(185)));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(166)));
         toolbar.Controls.Add(search, 0, 0);
-        toolbar.Controls.Add(open, 1, 0);
+        if (unfinished) toolbar.Controls.Add(queueView, 1, 0);
+        if (showPause)
+        {
+            masterPauseButton = PageButton("communicationPauseAll", "Pause All Sending", 175);
+            masterPauseButton.Dock = DockStyle.Fill;
+            masterPauseButton.Enabled = false;
+            toolbar.Controls.Add(masterPauseButton, 2, 0);
+            masterPauseButton.Click += async (_, _) => await ToggleMasterPauseAsync();
+        }
+        toolbar.Controls.Add(open, toolbar.ColumnCount - 1, 0);
         card.Content.Controls.Add(grid);
         card.Content.Controls.Add(toolbar);
         return card;
@@ -87,6 +114,8 @@ public sealed partial class CommunicationCenterPage
                 return;
             }
             BindSessions(table, unfinished);
+            if (unfinished && masterPauseButton is not null && operations.ReadSessions is null)
+                await RefreshSendControlAsync();
             SetStatus("");
         }
         catch (Exception ex) { if (!IsDisposed) Fail(ex); }
@@ -124,26 +153,37 @@ public sealed partial class CommunicationCenterPage
         grid.DataSource = table;
         previous?.Dispose();
         if (!unfinished) return;
-        unfinishedButton.Text = table.Rows.Count == 0 ? "Unfinished" : $"Unfinished ({table.Rows.Count:N0})";
+        bool attention = table.Columns.Contains("NeedsAttention") &&
+            table.AsEnumerable().Any(row => Convert.ToInt64(row["NeedsAttention"]) > 0);
+        bool upcoming = table.Columns.Contains("Upcoming") &&
+            table.AsEnumerable().Any(row => Convert.ToInt64(row["Upcoming"]) > 0);
+        queueView.SelectedItem = attention ? "Needs Attention" : upcoming ? "Upcoming" : "All Active";
+        unfinishedButton.Text = table.Rows.Count == 0 ? "Queue" : $"Queue ({table.Rows.Count:N0})";
         AppMetrics.FitButtonWidth(unfinishedButton, minWidth: AppScale.Scale(140));
     }
 
-    private static void FilterSessions(DataGridView grid, string search, bool unfinished)
+    private static void FilterSessions(DataGridView grid, string search, bool unfinished, string view)
     {
         if (grid.DataSource is not DataTable table) return;
         string query = search.Trim();
-        grid.Tag = table.Rows.Count > 0 && query.Length > 0 ? "No sessions match your search."
-            : unfinished ? "You have no unfinished sessions." : "No message sessions yet.";
-        if (query.Length == 0) table.DefaultView.RowFilter = "";
-        else
+        grid.Tag = query.Length > 0 ? "No messages match your search."
+            : unfinished ? "No queued messages in this view." : "No message history yet.";
+        var filters = new List<string>();
+        if (unfinished && table.Columns.Contains("NeedsAttention"))
+        {
+            if (view == "Needs Attention") filters.Add("NeedsAttention > 0");
+            else if (view == "Upcoming") filters.Add("Upcoming > 0 AND NeedsAttention = 0");
+        }
+        if (query.Length > 0)
         {
             if (!table.Columns.Contains("SearchMatch")) table.Columns.Add("SearchMatch", typeof(bool));
             string[] columns = { "RecipientText", "AudienceText", "MethodText", "OperatorName", "StateText", "CreatedUtc" };
             foreach (DataRow row in table.Rows)
                 row["SearchMatch"] = columns.Where(table.Columns.Contains).Any(name =>
                     Convert.ToString(row[name])?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true);
-            table.DefaultView.RowFilter = "SearchMatch = true";
+            filters.Add("SearchMatch = true");
         }
+        table.DefaultView.RowFilter = string.Join(" AND ", filters);
         grid.Invalidate();
     }
 
@@ -209,6 +249,38 @@ public sealed partial class CommunicationCenterPage
         metaSelection = draft.MetaTemplate;
         message.Text = IsMeta && metaSelection is null ? "" : draft.Body;
         SetStep(0);
+    }
+
+    private async Task RefreshSendControlAsync()
+    {
+        if (masterPauseButton is null || !CurrentUser.HasPermission("Communication.Configure")) return;
+        using var settings = await CommunicationManagementStore.ReadSendControlAsync();
+        if (IsDisposed || settings.Rows.Count != 1) return;
+        sendingPaused = Convert.ToBoolean(settings.Rows[0]["Paused"]);
+        masterPauseButton.Text = sendingPaused ? "Resume Sending" : "Pause All Sending";
+        masterPauseButton.ThemeRole = sendingPaused ? "Primary" : "Secondary";
+        masterPauseButton.Enabled = true;
+    }
+
+    private async Task ToggleMasterPauseAsync()
+    {
+        if (IsBusy || masterPauseButton is null || !CurrentUser.HasPermission("Communication.Configure")) return;
+        bool nextPaused = !sendingPaused;
+        string question = nextPaused
+            ? "Pause new SMS and WhatsApp API submissions across this school? Existing in-flight requests cannot be recalled."
+            : "Resume API sending for this school? Pending messages still require their normal reviews and authorization.";
+        if (!Confirm(question, nextPaused ? "Pause Sending" : "Resume Sending", false)) return;
+        try
+        {
+            masterPauseButton.Enabled = false;
+            await CommunicationManagementStore.SetSendPausedAsync(nextPaused);
+            await RefreshSendControlAsync();
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+        finally
+        {
+            if (!IsDisposed && masterPauseButton is not null) masterPauseButton.Enabled = true;
+        }
     }
 
     private static bool AvailableIn(LookupBox lookup, int id) => id == 0
