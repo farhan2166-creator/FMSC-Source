@@ -6,6 +6,8 @@ namespace FMSC_SMS.Pages.Communication;
 public sealed partial class CommunicationCenterPage
 {
     private readonly ModernComboBox queueView = HumanUi.Combo();
+    private readonly ModernButton eventSuggestionsButton =
+        PageButton("communicationEventSuggestions","Event Suggestions",168);
 
     private HumanCard SessionsCard(DataGridView grid, bool unfinished)
     {
@@ -74,7 +76,7 @@ public sealed partial class CommunicationCenterPage
         var toolbar = new TableLayoutPanel
         {
             Dock = DockStyle.Top, Height = AppMetrics.ButtonHeight + AppScale.Scale(10),
-            ColumnCount = unfinished ? 3 : 2, RowCount = 1, Margin = Padding.Empty
+            ColumnCount = unfinished ? 4 : 2, RowCount = 1, Margin = Padding.Empty
         };
         if (unfinished)
         {
@@ -90,6 +92,15 @@ public sealed partial class CommunicationCenterPage
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(166)));
         toolbar.Controls.Add(search, unfinished ? 1 : 0, 0);
         toolbar.Controls.Add(open, unfinished ? 2 : 1, 0);
+        if(unfinished)
+        {
+            eventSuggestionsButton.Visible=CurrentUser.HasPermission("Communication.Configure")
+                && CurrentUser.HasPermission("Fees.View");
+            eventSuggestionsButton.Dock=DockStyle.Fill;
+            toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,AppScale.Scale(190)));
+            toolbar.Controls.Add(eventSuggestionsButton,3,0);
+            eventSuggestionsButton.Click+=(_,_)=>OpenAutomationInbox();
+        }
         card.Content.Controls.Add(grid);
         card.Content.Controls.Add(toolbar);
         return card;
