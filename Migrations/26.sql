@@ -249,6 +249,31 @@ AS BEGIN
  COMMIT;
 END');
 
+CREATE TABLE msg.AutomationScanControl (
+ ControlId tinyint NOT NULL CONSTRAINT PK_MsgAutomationScanControl PRIMARY KEY,
+ LastScanClaimUtc datetime2(3) NOT NULL,
+ CONSTRAINT CK_MsgAutomationScanControlId CHECK(ControlId=1)
+);
+INSERT msg.AutomationScanControl(ControlId,LastScanClaimUtc)
+ VALUES(1,CONVERT(datetime2(3),'20000101'));
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ClaimAutomationReviewScan @UserId int
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ EXEC dbo.RequirePermission @UserId,N''Students.View'';
+ EXEC dbo.RequirePermission @UserId,N''Fees.View'';
+ IF NOT EXISTS(SELECT 1 FROM msg.AutomationRule WHERE Mode=''Review'')
+ BEGIN
+   SELECT CONVERT(bit,0) ShouldScan;
+   RETURN;
+ END;
+ UPDATE msg.AutomationScanControl WITH(UPDLOCK,HOLDLOCK)
+ SET LastScanClaimUtc=SYSUTCDATETIME()
+ WHERE ControlId=1 AND LastScanClaimUtc<=DATEADD(minute,-30,SYSUTCDATETIME());
+ SELECT CONVERT(bit,CASE WHEN @@ROWCOUNT=1 THEN 1 ELSE 0 END) ShouldScan;
+END');
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'26',SYSDATETIME(),SUSER_SNAME(),
  N'Review-only fee event suggestions with family grouping, current charges and due-date eligibility');
