@@ -1,0 +1,86 @@
+using System.Data;
+
+namespace FMSC_SMS.Core;
+
+/// <summary>
+/// A review-only source-event ledger. It never creates a communication batch,
+/// dispatch attempt or provider call; the existing composer must re-resolve
+/// authoritative guardian eligibility and explicit operator confirmation.
+/// </summary>
+internal static class CommunicationAutomationInboxStore
+{
+    internal sealed record Suggestion(
+        long CandidateId,string EventCode,long SourceRecordId,
+        int AdmissionId,string StudentName,string? AdmissionNumber,DateTime CreatedUtc);
+
+    private static void RequireReviewPermission()
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure") ||
+            !CurrentUser.HasPermission("Communication.Send") ||
+            !CurrentUser.HasPermission("Students.View") ||
+            !CurrentUser.HasPermission("Fees.View"))
+            throw new UnauthorizedAccessException(
+                "School communication administrator, student and fee access are required.");
+    }
+
+    internal static async Task<IReadOnlyList<Suggestion>> RefreshAsync()
+    {
+        RequireReviewPermission();
+        int actor=CurrentUser.UserId;
+        // No messages, approvals or provider requests are created by a scan.
+        using(var generated=await DatabaseHelper.QueryUserAsync("msg.ScanAutomationCandidates"))
+        {
+            if(generated.Rows.Count!=1)
+                throw new InvalidOperationException("School event suggestions could not be refreshed.");
+        }
+        using var table=await DatabaseHelper.QueryUserAsync("msg.ReadAutomationCandidates");
+        if(actor!=CurrentUser.UserId || !CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("School communication administrator changed.");
+        return table.AsEnumerable().Select(row=>new Suggestion(
+            Convert.ToInt64(row["CandidateId"]),
+            Convert.ToString(row["EventCode"])??"",
+            Convert.ToInt64(row["SourceRecordId"]),
+            Convert.ToInt32(row["AdmissionId"]),
+            Convert.ToString(row["StudentName"])??"",
+            row.IsNull("AdmissionNumber") ? null : Convert.ToString(row["AdmissionNumber"]),
+            Convert.ToDateTime(row["CreatedUtc"]))).ToArray();
+    }
+
+    internal static Task DismissAsync(long candidateId)
+    {
+        RequireReviewPermission();
+        if(candidateId<=0) throw new ArgumentOutOfRangeException(nameof(candidateId));
+        return DatabaseHelper.ExecuteUserAsync("msg.DismissAutomationCandidate",
+            DatabaseHelper.P("@CandidateId",candidateId));
+    }
+
+    internal static Task MarkPreparedAsync(long candidateId,Guid batchId)
+    {
+        RequireReviewPermission();
+        if(candidateId<=0 || batchId==Guid.Empty)
+            throw new ArgumentException("A reviewed suggestion and confirmed batch are required.");
+        return DatabaseHelper.ExecuteUserAsync("msg.MarkAutomationCandidatePrepared",
+            DatabaseHelper.P("@CandidateId",candidateId),
+            DatabaseHelper.P("@BatchId",batchId));
+    }
+
+    internal static string SuggestedBody(string eventCode) => eventCode switch
+    {
+        "Admission" => CommunicationPreparedMessages.BuiltIns
+            .Single(t=>t.Name=="New admission welcome").Body,
+        "PaymentReceived" => CommunicationPreparedMessages.BuiltIns
+            .Single(t=>t.Name=="Payment received acknowledgement").Body,
+        "Birthday" => CommunicationPreparedMessages.BuiltIns
+            .Single(t=>t.Name=="Student birthday greeting").Body,
+        _ => throw new ArgumentOutOfRangeException(nameof(eventCode),
+            "This event does not have an approved school message suggestion.")
+    };
+
+    internal static string EventLabel(string code) => code switch
+    {
+        "Admission" => "New admission",
+        "PaymentReceived" => "Payment received",
+        "Birthday" => "Birthday greeting",
+        _ => code
+    };
+}
