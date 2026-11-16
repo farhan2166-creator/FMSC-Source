@@ -43,6 +43,7 @@ public sealed partial class CommunicationCenterPage
             // authoritative and rejects any premature API claim.
             await CommunicationQueuePolicyStore.ScheduleReviewedBatchAsync(
                 saved.BatchId, dialog.Due, dialog.Expires, dialog.Priority);
+            await MarkAutomationSuggestionPreparedAsync(target,saved.BatchId);
             if (!IsDisposed && actor == CurrentUser.UserId)
             {
                 ClearReviewedDraft();
