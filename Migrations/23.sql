@@ -454,6 +454,35 @@ BEGIN
  ORDER BY B.CreatedUtc DESC,B.BatchId;
 END');
 
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadApiBatch @UserId int,@BatchId uniqueidentifier
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ DECLARE @Audience varchar(20),@Owner int;
+ SELECT @Audience=Audience,@Owner=CreatedBy FROM msg.Batch WHERE BatchId=@BatchId;
+ IF @Audience IS NULL THROW 51132,''The communication batch does not exist.'',1;
+ IF @Owner<>@UserId EXEC dbo.RequirePermission @UserId,N''Communication.View'';
+ IF @Audience=''Staff'' EXEC dbo.RequirePermission @UserId,N''Staff.View'';
+ ELSE EXEC dbo.RequirePermission @UserId,N''Students.View'';
+ IF @Audience IN (''OutstandingFees'',''FeeStudent'',''FeeFamily'') EXEC dbo.RequirePermission @UserId,N''Fees.View'';
+ SELECT B.BatchId,B.Channel,B.Body,B.Audience,B.CampusId,B.ClassId,B.StudentId,B.StaffId,
+ A.ProviderCode,A.ProfileHash,A.ReviewJson,A.TemplateJson,
+ Schedule.DueUtc,Schedule.ExpiresUtc,Schedule.Priority,Schedule.HoldForReview,
+ R.RecipientId,R.RecipientKind,COALESCE(R.AdmissionId,R.StaffId) RecordId,R.PhoneE164,R.State,J.Text RenderedBody,
+ COALESCE(S.StudentName,T.StaffName,N''School record'') RecipientName,
+ LastAttempt.AttemptId,LastAttempt.ProviderMessageId,LastAttempt.FailureCode
+ FROM msg.ApiBatch A JOIN msg.Batch B ON B.BatchId=A.BatchId
+ LEFT JOIN msg.BatchSchedule Schedule ON Schedule.BatchId=B.BatchId
+ JOIN msg.Recipient R ON R.BatchId=B.BatchId
+ CROSS APPLY OPENJSON(A.ReviewJson) WITH(Kind varchar(8),RecordId int,Phone varchar(16),Text nvarchar(1600)) J
+ LEFT JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
+ LEFT JOIN dbo.Staff T ON T.StaffId=R.StaffId
+ OUTER APPLY(SELECT TOP(1) AttemptId,ProviderMessageId,FailureCode FROM msg.Attempt X
+  WHERE X.RecipientId=R.RecipientId ORDER BY X.AttemptNumber DESC) LastAttempt
+ WHERE B.BatchId=@BatchId AND J.Kind=R.RecipientKind AND J.RecordId=COALESCE(R.AdmissionId,R.StaffId) AND J.Phone=R.PhoneE164 ORDER BY R.RecipientId;
+END');
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'23',SYSDATETIME(),SUSER_SNAME(),
  N'Communication schedule, automation configuration, master pause and claim gating');
