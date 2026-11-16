@@ -56,6 +56,16 @@ internal static class Program
                 .RunScheduledAsync().GetAwaiter().GetResult();
             return;
         }
+        if (args.SequenceEqual(new[] { "--communication-queue-worker" }))
+        {
+            // Must run before any login UI or application single-instance lock.
+            // Only a verified DPAPI Windows enrollment plus active SQL lease
+            // can authorize a provider request; arguments carry no secrets.
+            AppExceptionHandler.Register();
+            Environment.ExitCode = CommunicationBackgroundWorker
+                .RunScheduledAsync().GetAwaiter().GetResult();
+            return;
+        }
 #endif
         ApplicationConfiguration.Initialize();
         // Headless installation verification and scheduled backups above remain independent.
