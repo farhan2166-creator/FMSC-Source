@@ -50,6 +50,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private readonly Panel campusField, classField, studentField, staffField;
     private readonly ModernButton next = PageButton("communicationReviewMessage", "Review Message", 165, "Primary");
     private readonly ModernButton confirm = PageButton("communicationConfirmMessage", "Open in WhatsApp", 230, "Primary");
+    private readonly ModernButton schedule = PageButton("communicationScheduleMessage", "Schedule…", 145);
     private readonly ModernButton historyButton, unfinishedButton, newMessageButton, templatesButton, configureButton;
     // Compose and review share one workspace. Nothing is sent until the reviewed
     // snapshot is confirmed, just as in the former full-screen review step.
@@ -158,6 +159,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         };
         confirm.Click += async (_, _) => await RunBusyAsync(
             "Confirming the reviewed message…", StartReviewedMessageAsync, this);
+        schedule.Click += async (_, _) => await RunBusyAsync(
+            "Scheduling the reviewed message…", ScheduleReviewedMessageAsync, this);
         newMessageButton = PageButton("communicationNewMessage", "New Message", 140, "TabInactive");
         unfinishedButton = PageButton("communicationUnfinished", "Queue", 140, "TabInactive");
         historyButton = PageButton("communicationHistory", "History", 120, "TabInactive");
@@ -480,7 +483,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         };
         previewGrid.VisibleChanged += (_, _) => details.RowStyles[2].Height = previewGrid.Visible ? 55 : 0;
         card.Content.Controls.Add(details);
-        card.Content.Controls.Add(ActionFooter(confirm));
+        card.Content.Controls.Add(ActionFooter(confirm, schedule));
         return card;
     }
 
@@ -496,14 +499,14 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         Width = AppScale.Scale(width), Height = AppMetrics.ButtonHeight
     };
 
-    private static FlowLayoutPanel ActionFooter(ModernButton button)
+    private static FlowLayoutPanel ActionFooter(params ModernButton[] buttons)
     {
         var footer = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom, Height = AppMetrics.ButtonHeight + AppScale.Scale(10),
             FlowDirection = FlowDirection.RightToLeft, WrapContents = false
         };
-        footer.Controls.Add(button);
+        footer.Controls.AddRange(buttons);
         return footer;
     }
 
@@ -704,6 +707,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
         next.Visible = compose && step == 0;
         confirm.Visible = compose && step == 1;
+        schedule.Visible = compose && step == 1 && !IsManual;
+        schedule.Enabled = schedule.Visible && manualModeAvailable && preview is { Included: > 0 };
         confirm.Text = IsManual ? (preview?.Included == 1 ? "Open in WhatsApp" : "Start WhatsApp Chats") : "Confirm & Send";
         confirm.Enabled = step == 1 && manualModeAvailable && preview is { Included: > 0 }
             && CurrentUser.HasPermission("Communication.Send");
