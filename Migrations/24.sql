@@ -189,7 +189,7 @@ BEGIN
  DECLARE @Day tinyint=CONVERT(tinyint,((DATEDIFF(day,''19000101'',@SchoolDate)%7)+7)%7+1);
  IF EXISTS(SELECT 1 FROM msg.NonWorkingWeekday WHERE IsoWeekday=@Day AND Enabled=0) RETURN;
  IF EXISTS(SELECT 1 FROM msg.SchoolHoliday WHERE HolidayDate=@SchoolDate) RETURN;
- SELECT TOP(1) R.RecipientId,B.BatchId,B.Channel,B.CreatedBy,S.Priority
+ SELECT TOP(1) R.RecipientId,B.BatchId,B.Channel,B.Audience,B.CreatedBy,S.Priority
  FROM msg.BatchSchedule S
  JOIN msg.Batch B ON B.BatchId=S.BatchId
  JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
