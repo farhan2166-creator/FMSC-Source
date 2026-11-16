@@ -1,0 +1,34 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "AutomationCandidate",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveAutomationMode",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ScanAutomationCandidates",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadAutomationCandidates",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "DismissAutomationCandidate",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "MarkAutomationCandidatePrepared",
+      "type": "P"
+    }
+  ]
+}
