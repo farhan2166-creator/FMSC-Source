@@ -735,6 +735,11 @@ internal static partial class Program
 
     private static void CheckOptionalCommunicationEntries()
     {
+        // Report messaging requires the source report grant in addition to
+        // student, fee and communication permissions. Keep the synthetic
+        // happy-path actor authorized rather than weakening the real gate.
+        CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
+            new[] { "Communication.Send", "Students.View", "Fees.View", "Reports.View" });
         int opens = 0;
         CommunicationTarget? captured = null;
         bool fromFees = false;
@@ -758,6 +763,10 @@ internal static partial class Program
             "Optional Collection messaging scopes current fees to the main student and never reloads or clears the payment draft");
         Check(OutstandingAgingReportPage.CanComposeReportFeeMessage,
             "A fee-report sender may open a student-scoped optional message without changing the report.");
+        CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
+            new[] { "Communication.Send", "Students.View", "Fees.View" });
+        Check(!OutstandingAgingReportPage.CanComposeReportFeeMessage,
+            "Report messaging also requires report access, even when Fee Collection messaging is permitted.");
         CurrentUser.SignIn(7204, "Viewer", "Read-only fixture", false, new[] { "Students.View", "Fees.View" });
         admission.OpenStudentMessage(Cancel); fees.OpenStudentMessage(Cancel);
         Check(opens == 2 && !CommunicationAccess.CanOpen(CurrentUser.HasPermission)
