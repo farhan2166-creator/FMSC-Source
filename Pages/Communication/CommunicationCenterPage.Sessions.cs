@@ -1,4 +1,6 @@
 using System.Data;
+using System.Globalization;
+using System.Text;
 using FMSC_SMS.Core;
 
 namespace FMSC_SMS.Pages.Communication;
@@ -73,10 +75,12 @@ public sealed partial class CommunicationCenterPage
         };
         search.TextChanged += (_, _) => FilterSessions(grid, search.Text, unfinished);
         grid.DataSourceChanged += (_, _) => FilterSessions(grid, search.Text, unfinished);
+        bool allowExport = !unfinished && CurrentUser.HasPermission("Communication.View")
+            && CurrentUser.HasPermission("Communication.Configure");
         var toolbar = new TableLayoutPanel
         {
             Dock = DockStyle.Top, Height = AppMetrics.ButtonHeight + AppScale.Scale(10),
-            ColumnCount = unfinished ? 4 : 2, RowCount = 1, Margin = Padding.Empty
+            ColumnCount = unfinished ? 4 : allowExport ? 3 : 2, RowCount = 1, Margin = Padding.Empty
         };
         if (unfinished)
         {
@@ -92,6 +96,14 @@ public sealed partial class CommunicationCenterPage
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(166)));
         toolbar.Controls.Add(search, unfinished ? 1 : 0, 0);
         toolbar.Controls.Add(open, unfinished ? 2 : 1, 0);
+        if (allowExport)
+        {
+            var export = PageButton("communicationExportHistory", "Export CSV", 140, "Secondary");
+            export.Dock = DockStyle.Fill;
+            export.Click += async (_, _) => await ExportHistoryAsync();
+            toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(150)));
+            toolbar.Controls.Add(export, 2, 0);
+        }
         if(unfinished)
         {
             eventSuggestionsButton.Visible=CurrentUser.HasPermission("Communication.Configure")
@@ -104,6 +116,71 @@ public sealed partial class CommunicationCenterPage
         card.Content.Controls.Add(grid);
         card.Content.Controls.Add(toolbar);
         return card;
+    }
+
+    /// <summary>
+    /// Exports only the currently filtered, permission-scoped summary rows.
+    /// Never exports saved full telephone numbers, message bodies or credentials.
+    /// </summary>
+    private async Task ExportHistoryAsync()
+    {
+        if (IsBusy || !CurrentUser.HasPermission("Communication.View")
+            || !CurrentUser.HasPermission("Communication.Configure")
+            || historyGrid.DataSource is not DataTable table) return;
+        int actor = CurrentUser.UserId;
+        string csv = FormatHistoryCsv(table.DefaultView);
+        if (table.DefaultView.Count == 0) { Warn("No matching history entries to export."); return; }
+        if (!Confirm($"Export {table.DefaultView.Count:N0} displayed history entries to a CSV file? "
+            + "This contains school record names. Save it in a protected location.",
+            "Export Communication History", false)) return;
+        using var save = new SaveFileDialog
+        {
+            Title = "Export communication history",
+            Filter = "CSV UTF-8 (*.csv)|*.csv",
+            DefaultExt = "csv",
+            AddExtension = true,
+            FileName = $"FMSC-Communication-History-{DateTime.Now:yyyyMMdd}.csv"
+        };
+        if (save.ShowDialog(FindForm()) != DialogResult.OK || actor != CurrentUser.UserId
+            || !CurrentUser.HasPermission("Communication.Configure")
+            || !CurrentUser.HasPermission("Communication.View")) return;
+        try
+        {
+            await File.WriteAllTextAsync(save.FileName, csv, new UTF8Encoding(true));
+            if (!IsDisposed) SetStatus("Displayed history exported to CSV.");
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
+    }
+
+    // Quoted cells, Unicode output and leading-formula protection are mandatory:
+    // school record names come from users and must never execute in a spreadsheet.
+    private static string FormatHistoryCsv(DataView rows)
+    {
+        static string Cell(string value)
+        {
+            value = value.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
+            string trimmed = value.TrimStart();
+            if (trimmed.Length > 0 && "=+-@".Contains(trimmed[0]))
+                value = "'" + value;
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+        var csv = new StringBuilder();
+        csv.AppendLine("Created UTC,Method,Recipient,Audience,Started by,Outcome");
+        foreach (DataRowView row in rows)
+        {
+            string created = row["CreatedUtc"] is DateTime date
+                ? date.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " UTC"
+                : Convert.ToString(row["CreatedUtc"], CultureInfo.InvariantCulture) ?? "";
+            csv.AppendLine(string.Join(",", new[]
+            {
+                created, Convert.ToString(row["MethodText"]) ?? "",
+                Convert.ToString(row["RecipientText"]) ?? "",
+                Convert.ToString(row["AudienceText"]) ?? "",
+                Convert.ToString(row["OperatorName"]) ?? "",
+                Convert.ToString(row["StateText"]) ?? ""
+            }.Select(Cell)));
+        }
+        return csv.ToString();
     }
 
     private Task NavigateSessionsAsync(bool unfinished) =>
@@ -196,11 +273,12 @@ public sealed partial class CommunicationCenterPage
         else
         {
             if (!table.Columns.Contains("SearchMatch")) table.Columns.Add("SearchMatch", typeof(bool));
-            string[] columns = { "RecipientText", "AudienceText", "MethodText", "OperatorName",
-                "StateText", "CreatedUtc", "QueueStatus", "DueLocal" };
+            string[] columns = { "RecipientText", "RecipientSearchText", "AudienceText", "MethodText",
+                "OperatorName", "StateText", "CreatedUtc", "QueueStatus", "DueLocal" };
+            string[] terms = query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             foreach (DataRow row in table.Rows)
-                row["SearchMatch"] = columns.Where(table.Columns.Contains).Any(name =>
-                    Convert.ToString(row[name])?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true);
+                row["SearchMatch"] = terms.All(term => columns.Where(table.Columns.Contains).Any(name =>
+                    Convert.ToString(row[name])?.Contains(term, StringComparison.CurrentCultureIgnoreCase) == true));
             table.DefaultView.RowFilter = statusClause.Length == 0 ? "SearchMatch = true"
                 : "SearchMatch = true AND " + statusClause;
         }
