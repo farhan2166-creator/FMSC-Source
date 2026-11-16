@@ -74,6 +74,21 @@ internal static class CommunicationAutomationSqlChecks
             },51284);
         }
 
+        var singleException=Sql.Proc("msg.SaveAutomationFamilyException",
+            Sql.P("@UserId",f.Admin),Sql.P("@AdmissionId",newId),
+            Sql.P("@EventCode","Admission"),
+            Sql.P("@UntilUtc",DateTime.UtcNow.AddDays(2)),
+            Sql.P("@Reason","Synthetic event exemption"));
+        long singleExceptionId=Convert.ToInt64(singleException.Rows[0]["ExceptionId"]);
+        inbox=Sql.Proc("msg.ReadAutomationCandidates",Sql.P("@UserId",f.Admin));
+        r.Check(!inbox.AsEnumerable().Any(row=>Convert.ToInt32(row["AdmissionId"])==newId),
+            "A guardian-level opt-out suppresses an individual student's event suggestion.");
+        Sql.Proc("msg.RevokeAutomationFamilyException",
+            Sql.P("@UserId",f.Admin),Sql.P("@ExceptionId",singleExceptionId));
+        inbox=Sql.Proc("msg.ReadAutomationCandidates",Sql.P("@UserId",f.Admin));
+        r.Check(inbox.AsEnumerable().Any(row=>Convert.ToInt32(row["AdmissionId"])==newId),
+            "Guardian opt-out removal restores a currently eligible event without resetting consent.");
+
         Sql.Proc("msg.DismissAutomationCandidate",Sql.P("@UserId",f.Admin),
             Sql.P("@CandidateId",candidate));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.AutomationCandidate WHERE CandidateId=@Id AND State='Dismissed'",
