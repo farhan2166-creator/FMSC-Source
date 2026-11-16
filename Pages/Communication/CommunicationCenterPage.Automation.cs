@@ -25,7 +25,7 @@ public sealed partial class CommunicationCenterPage
         if(!IsMeta)
         {
             message.Text=CommunicationAutomationInboxStore.SuggestedBody(
-                eventSuggestion.EventCode);
+                eventSuggestion.EventCode,CurrentLanguage,financial);
         }
         else
         {

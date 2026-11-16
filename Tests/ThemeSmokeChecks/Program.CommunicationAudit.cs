@@ -110,6 +110,16 @@ internal static partial class Program
                 && !CommunicationHistoryDialog.CanCheckProviderDelivery("WhatsAppBusinessManual","ReportedSent",91)
                 && !CommunicationHistoryDialog.CanCheckProviderDelivery("Twilio","Accepted",null),
                 "Only an identified Twilio provider attempt can be checked without resending; manual handoffs and delivered messages cannot.");
+            string familyUrdu = CommunicationAutomationInboxStore.SuggestedBody(
+                "OutstandingFees","ur",familyFinancial:true);
+            string familyEnglish = CommunicationAutomationInboxStore.SuggestedBody(
+                "OutstandingFees","en",familyFinancial:true);
+            Check(familyUrdu.Contains("خاندان",StringComparison.Ordinal)
+                && familyUrdu.Contains("[OutstandingAmount]",StringComparison.Ordinal)
+                && !familyUrdu.Contains("[StudentName]",StringComparison.Ordinal)
+                && familyEnglish.Contains("family",StringComparison.OrdinalIgnoreCase)
+                && !familyEnglish.Contains("[StudentName]",StringComparison.Ordinal),
+                "Family fee suggestions avoid misrepresenting the household's amount as one student's bill.");
             CheckProviderBodyDeadline();
             CheckCommunicationAsyncAndCancellation();
             CheckCommunicationSessionsAndOptions();
@@ -799,6 +809,15 @@ internal static partial class Program
             var action = Field<ModernButton>(admission, "action");
             var templates = Field<ModernComboBox>(admission, "templates");
             var scope = Field<ModernComboBox>(admission, "scope");
+            var recordLanguage = Field<ModernComboBox>(admission, "language");
+            var originalDraft = Field<ModernTextBox>(admission, "message");
+            originalDraft.Text = "This record draft must not translate";
+            recordLanguage.SelectedIndex = 1;
+            Check(originalDraft.Text == "This record draft must not translate"
+                && templates.Items.OfType<CommunicationPreparedMessages.ComposeTemplate>()
+                    .All(item => item.LanguageCode == "ur"),
+                "Admission context language switching preserves the draft and shows only independently approved Urdu formats.");
+            recordLanguage.SelectedIndex = 0;
             var formats = templates.Items.OfType<CommunicationPreparedMessages.ComposeTemplate>().ToArray();
             Check(scope.Visible && scope.Items.Count == 2 && templates.Visible && action.Visible && action.Enabled
                 && !Descendants(admission).OfType<CommunicationCenterPage>().Any()
@@ -827,6 +846,14 @@ internal static partial class Program
         var feeFormats = Field<ModernComboBox>(fees, "templates").Items.OfType<CommunicationPreparedMessages.ComposeTemplate>().ToArray();
         var feeScope = Field<ModernComboBox>(fees, "scope");
         var feeContent = Field<ModernComboBox>(fees, "feeContent");
+        var feeLanguage = Field<ModernComboBox>(fees, "language");
+        feeLanguage.SelectedIndex = 1;
+        var urduFees = Field<ModernComboBox>(fees, "templates")
+            .Items.OfType<CommunicationPreparedMessages.ComposeTemplate>().ToArray();
+        Check(urduFees.Any(item => item.LanguageCode == "ur")
+            && urduFees.All(item => item.LanguageCode == "ur"),
+            "Fee context can offer a separately written Urdu fee notice without changing the ledger or sending.");
+        feeLanguage.SelectedIndex = 0;
         Check(feeFormats.Length > 0 && feeFormats.All(item => item.Purpose == "FeeReminder") && feeScope.Items.Count == 2,
             "Fee Collection offers relevant fee templates and only the current student or linked family scopes");
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();

@@ -107,21 +107,51 @@ internal static class CommunicationAutomationInboxStore
             DatabaseHelper.P("@ExceptionId",exceptionId));
     }
 
-    internal static string SuggestedBody(string eventCode) => eventCode switch
+    // Curated operator-reviewed versions only. Fee-family notices never
+    // imply one representative student is the entire household's balance.
+    internal static string SuggestedBody(string eventCode,string languageCode="en",
+        bool familyFinancial=false)
     {
-        "Admission" => CommunicationPreparedMessages.BuiltIns
-            .Single(t=>t.Name=="New admission welcome").Body,
-        "PaymentReceived" => CommunicationPreparedMessages.BuiltIns
-            .Single(t=>t.Name=="Payment received acknowledgement").Body,
-        "Birthday" => CommunicationPreparedMessages.BuiltIns
-            .Single(t=>t.Name=="Student birthday greeting").Body,
-        "OutstandingFees" => CommunicationPreparedMessages.BuiltIns
-            .Single(t=>t.Name=="Outstanding fee reminder").Body,
-        "UpcomingDue" => "Dear parent/guardian, a fee for [StudentName] (admission [AdmissionNumber]) is approaching its due date. Please review the current school fee statement or contact the accounts office.",
-        "OverdueFollowUp" => "Dear parent/guardian, a fee for [StudentName] (admission [AdmissionNumber]) is now past its due date. Please contact the accounts office to review the current balance.",
-        _ => throw new ArgumentOutOfRangeException(nameof(eventCode),
-            "This event does not have an approved school message suggestion.")
-    };
+        if(languageCode is not ("en" or "ur"))
+            throw new ArgumentException("Choose an approved English or Urdu template.");
+        if (familyFinancial && eventCode is ("OutstandingFees" or "UpcomingDue" or "OverdueFollowUp"))
+        {
+            return languageCode=="ur"
+                ? "محترم والدین/سرپرست، آپ کے خاندان کی موجودہ بقایا فیس PKR [OutstandingAmount] ہے۔ تصدیق شدہ تفصیل کے لیے اسکول اکاؤنٹس دفتر سے رابطہ کریں۔"
+                : "Dear parent/guardian, the current outstanding fee balance for your linked family is PKR [OutstandingAmount]. For the verified bill and payment details, please contact the school accounts office.";
+        }
+        if(languageCode=="ur")
+            return eventCode switch
+            {
+                "Admission" => CommunicationPreparedMessages.BuiltIns
+                    .Single(t=>t.Name=="New admission welcome (Urdu)").Body,
+                "PaymentReceived" => CommunicationPreparedMessages.BuiltIns
+                    .Single(t=>t.Name=="Payment received acknowledgement (Urdu)").Body,
+                "Birthday" => CommunicationPreparedMessages.BuiltIns
+                    .Single(t=>t.Name=="Student birthday greeting (Urdu)").Body,
+                "OutstandingFees" => CommunicationPreparedMessages.BuiltIns
+                    .Single(t=>t.Name=="Outstanding fee reminder (Urdu)").Body,
+                "UpcomingDue" => "محترم والدین/سرپرست، [StudentName] کی فیس کی مقررہ تاریخ قریب ہے۔ درست تفصیل کے لیے اسکول کے اکاؤنٹس دفتر سے رابطہ کریں۔",
+                "OverdueFollowUp" => "محترم والدین/سرپرست، [StudentName] کی واجب الادا فیس کی مقررہ تاریخ گزر چکی ہے۔ تازہ بقایا رقم کے لیے اسکول اکاؤنٹس دفتر سے رابطہ کریں۔",
+                _ => throw new ArgumentOutOfRangeException(nameof(eventCode),
+                    "This event does not have an approved Urdu format.")
+            };
+        return eventCode switch
+        {
+            "Admission" => CommunicationPreparedMessages.BuiltIns
+                .Single(t=>t.Name=="New admission welcome").Body,
+            "PaymentReceived" => CommunicationPreparedMessages.BuiltIns
+                .Single(t=>t.Name=="Payment received acknowledgement").Body,
+            "Birthday" => CommunicationPreparedMessages.BuiltIns
+                .Single(t=>t.Name=="Student birthday greeting").Body,
+            "OutstandingFees" => CommunicationPreparedMessages.BuiltIns
+                .Single(t=>t.Name=="Outstanding fee reminder").Body,
+            "UpcomingDue" => "Dear parent/guardian, a fee for [StudentName] (admission [AdmissionNumber]) is approaching its due date. Please review the current school fee statement or contact the accounts office.",
+            "OverdueFollowUp" => "Dear parent/guardian, a fee for [StudentName] (admission [AdmissionNumber]) is now past its due date. Please contact the accounts office to review the current balance.",
+            _ => throw new ArgumentOutOfRangeException(nameof(eventCode),
+                "This event does not have an approved school message suggestion.")
+        };
+    }
 
     internal static string EventLabel(string code) => code switch
     {
