@@ -148,7 +148,26 @@ internal static partial class Program
             "Operator-controlled WhatsApp session can be resumed with a dedicated native dialog.");
 
         var type = typeof(CommunicationCenterPage);
-        using var page = new CommunicationCenterPage(false);
+        // A SQL-free layout contract must not open the live school database
+        // when navigating Queue. Session records are provided by a deliberately
+        // empty synthetic reader, while navigation and filtering remain real.
+        using var page = new CommunicationCenterPage(false,
+            new CommunicationCenterPage.Operations(
+                _ => throw new InvalidOperationException("No SQL in UI contract"),
+                () => Task.FromResult(true),
+                (_, _, _, _) => throw new InvalidOperationException("No sends in UI contract"),
+                (_, _) => throw new InvalidOperationException("No chat in UI contract"),
+                () => false,
+                _ =>
+                {
+                    var rows = new DataTable();
+                    rows.Columns.Add("BatchId", typeof(Guid));
+                    rows.Columns.Add("Channel", typeof(string));
+                    rows.Columns.Add("Audience", typeof(string));
+                    rows.Columns.Add("CreatedUtc", typeof(DateTime));
+                    rows.Columns.Add("Method", typeof(string));
+                    return Task.FromResult(rows);
+                }));
         var audience = (ModernComboBox)type.GetField("audience", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var audienceOptions = audience.Items.Cast<object>().Select(item => item.ToString()).ToArray();
         Check(page.SelectedAudience == CommunicationAudience.Class
