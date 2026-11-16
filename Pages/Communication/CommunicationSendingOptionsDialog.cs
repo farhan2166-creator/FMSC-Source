@@ -143,10 +143,15 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         content.Controls.Add(Labelled("Reserve for important messages", importantReserve), 0, 4);
         var saveWindow = new ModernButton { Text = "Save Sending Hours", ThemeRole = "Secondary" };
         var saveQuota = new ModernButton { Text = "Save Daily Limit", ThemeRole = "Primary" };
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill };
-        foreach (var button in new[] { saveWindow, saveQuota })
+        var calendarButton = new ModernButton
         {
-            button.Width = AppScale.Scale(175);
+            Name = "communicationSchoolCalendar", Text = "Working Days & Holidays",
+            ThemeRole = "Secondary"
+        };
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        foreach (var button in new[] { saveWindow, saveQuota, calendarButton })
+        {
+            button.Width = AppScale.Scale(button == calendarButton ? 215 : 175);
             button.Height = AppMetrics.ButtonHeight;
             actions.Controls.Add(button);
         }
@@ -214,6 +219,12 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             Changed = true;
             await RefreshQueueAsync();
         });
+        calendarButton.Click += (_, _) =>
+        {
+            using var dialog = new CommunicationSchoolCalendarDialog();
+            dialog.ShowDialog(this);
+            if (dialog.Changed) Changed = true;
+        };
         quotaProvider.SelectedIndexChanged += (_, _) => ApplySelectedQuota();
         page.Controls.Add(content);
         return page;
