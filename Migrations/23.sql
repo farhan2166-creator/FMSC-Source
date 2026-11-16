@@ -196,7 +196,7 @@ BEGIN
  JOIN msg.Recipient R ON R.BatchId=B.BatchId
  WHERE (B.CreatedBy=@UserId OR EXISTS(
    SELECT 1 FROM dbo.Users U JOIN dbo.Roles AccessRole ON AccessRole.RoleId=U.RoleId
-   WHERE U.UserId=@UserId AND AccessRole.RoleName=N'Administrator'))
+   WHERE U.UserId=@UserId AND AccessRole.RoleName=N''Administrator''))
  GROUP BY B.BatchId,B.Audience,B.Channel,B.Purpose,B.CreatedUtc,B.CreatedBy,
   A.ProviderCode,S.DueUtc,S.ExpiresUtc,S.Priority,S.HoldForReview
  ORDER BY S.DueUtc,B.BatchId;
@@ -401,7 +401,7 @@ BEGIN
       WHERE R.RecipientId=@RecipientId;
     IF @Limit IS NOT NULL
     BEGIN
-    -- A provider allowance is for the school's calendar day, not UTC.
+    -- A provider allowance uses the school calendar day, not UTC.
     -- Compute both local-midnight boundaries separately to respect DST.
     DECLARE @QuotaZone sysname,@LocalDay date,@LocalMidnight datetime2(3),
             @StartUtc datetime2(3),@NextUtc datetime2(3);
@@ -462,7 +462,7 @@ BEGIN
  LEFT JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId
  WHERE (B.CreatedBy=@UserId OR EXISTS(
    SELECT 1 FROM dbo.Users U JOIN dbo.Roles AccessRole ON AccessRole.RoleId=U.RoleId
-   WHERE U.UserId=@UserId AND AccessRole.RoleName=N'Administrator')) AND
+   WHERE U.UserId=@UserId AND AccessRole.RoleName=N''Administrator'')) AND
    ((M.BatchId IS NOT NULL AND H.State IN (''Pending'',''Opened''))
    OR (A.BatchId IS NOT NULL AND
      (R.State IN (''Pending'',''Unknown'',''Submitted'',''Failed'')
