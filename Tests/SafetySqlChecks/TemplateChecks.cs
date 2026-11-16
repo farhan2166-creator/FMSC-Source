@@ -31,6 +31,10 @@ internal static class TemplateChecks
         Refused("UPDATE dbo.AdmissionNumberCounter SET LastNumber=1;");
         Refused("UPDATE msg.ChannelSettings SET ProviderCode='Changed' WHERE Channel='Sms';");
         Refused("UPDATE msg.ChannelSettings SET Enabled=1,ProviderCode='Changed' WHERE Channel='Sms';");
+        Refused("UPDATE msg.AutomationRule SET BaselineAdmissionId=1 WHERE EventCode='Admission';");
+        Refused("UPDATE msg.AutomationRule SET BaselinePaymentId=1 WHERE EventCode='PaymentReceived';");
+        Refused("UPDATE msg.AutomationScanControl SET LastScanClaimUtc='20261116' WHERE ControlId=1;");
+        Refused("DELETE FROM msg.AutomationScanControl WHERE ControlId=1;");
         Refused("CREATE TABLE dbo.FMSC_UnknownRecords(Id int); INSERT dbo.FMSC_UnknownRecords VALUES(1);");
         Refused("CREATE TABLE msg.Roles(Id int); INSERT msg.Roles VALUES(1);");
         ReplacementTemplateGuard.RequireNoSchoolRecords(connection);
