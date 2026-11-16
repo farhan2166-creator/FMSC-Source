@@ -17,6 +17,13 @@ CREATE TABLE msg.SendControl(
     ChangedBy int NULL
 );
 INSERT msg.SendControl(Id,Paused) VALUES(1,0);
+CREATE TABLE msg.HistoryExportAudit(
+    ExportId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_MsgHistoryExportAudit PRIMARY KEY,
+    RequestedBy int NOT NULL,
+    RowCount int NOT NULL CONSTRAINT CK_MsgHistoryExportRowCount CHECK(RowCount>0),
+    FileType varchar(3) NOT NULL CONSTRAINT CK_MsgHistoryExportFileType CHECK(FileType IN ('CSV','PDF')),
+    RequestedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgHistoryExportDate DEFAULT(SYSUTCDATETIME())
+);
 CREATE TABLE msg.SendControlHistory(
     ChangeId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_MsgSendControlHistory PRIMARY KEY,
     Paused bit NOT NULL,
@@ -79,6 +86,17 @@ BEGIN
     THROW 51260,''Communication API sending is paused. An administrator must resume it in Queue.'',1;
 END');
 
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.RecordHistoryExport @UserId int,@RowCount int,@FileType varchar(3)
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @RowCount IS NULL OR @RowCount<1 OR @FileType NOT IN (''PDF'',''CSV'')
+     THROW 51265,''Only nonempty PDF or CSV history exports are allowed.'',1;
+ INSERT msg.HistoryExportAudit(RequestedBy,RowCount,FileType)
+ VALUES(@UserId,@RowCount,@FileType);
+END');
 
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'23',SYSDATETIME(),SUSER_SNAME(),N'Administrator API master pause and action-focused queue projection');

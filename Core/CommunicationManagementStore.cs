@@ -42,6 +42,16 @@ internal static class CommunicationManagementStore
         return DatabaseHelper.ExecuteUserAsync("msg.SetSendPaused", DatabaseHelper.Bit("@Paused", paused));
     }
 
+    internal static Task RecordHistoryExportAsync(int rowCount, string format)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Only communication administrators can export history.");
+        if (rowCount < 1 || format is not ("CSV" or "PDF"))
+            throw new ArgumentException("A nonempty PDF or CSV export is required.");
+        return DatabaseHelper.ExecuteUserAsync("msg.RecordHistoryExport",
+            DatabaseHelper.Int("@RowCount", rowCount), DatabaseHelper.P("@FileType", format));
+    }
+
     private static async Task<DataTable> ReadSessionsAsync(bool unfinished, int limit = 100)
     {
         int actor = CurrentUser.UserId;

@@ -69,17 +69,26 @@ public sealed partial class CommunicationCenterPage
         search.TextChanged += (_, _) => FilterSessions(grid, search.Text, unfinished, queueView.Text);
         grid.DataSourceChanged += (_, _) => FilterSessions(grid, search.Text, unfinished, queueView.Text);
         bool showPause = unfinished && CurrentUser.HasPermission("Communication.Configure");
+        bool showExport = !unfinished && CurrentUser.HasPermission("Communication.Configure");
         var toolbar = new TableLayoutPanel
         {
             Dock = DockStyle.Top, Height = AppMetrics.ButtonHeight + AppScale.Scale(10),
-            ColumnCount = showPause ? 4 : unfinished ? 3 : 2, RowCount = 1, Margin = Padding.Empty
+            ColumnCount = showPause ? 4 : (unfinished || showExport) ? 3 : 2, RowCount = 1, Margin = Padding.Empty
         };
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         if (unfinished) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(165)));
         if (showPause) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(185)));
+        if (showExport) toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(145)));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(166)));
         toolbar.Controls.Add(search, 0, 0);
         if (unfinished) toolbar.Controls.Add(queueView, 1, 0);
+        if (showExport)
+        {
+            var export = PageButton("communicationExportHistory", "Export…", 135);
+            export.Dock = DockStyle.Fill;
+            export.Click += async (_, _) => await ExportHistoryAsync(grid);
+            toolbar.Controls.Add(export, 1, 0);
+        }
         if (showPause)
         {
             masterPauseButton = PageButton("communicationPauseAll", "Pause All Sending", 175);
@@ -249,6 +258,52 @@ public sealed partial class CommunicationCenterPage
         metaSelection = draft.MetaTemplate;
         message.Text = IsMeta && metaSelection is null ? "" : draft.Body;
         SetStep(0);
+    }
+
+    private async Task ExportHistoryAsync(DataGridView grid)
+    {
+        if (IsBusy || !CurrentUser.HasPermission("Communication.Configure")
+            || grid.DataSource is not DataTable history) return;
+        using var report = new DataTable("Communication History");
+        var fields = new (string Source, string Heading)[]
+        {
+            ("CreatedUtc", "Created (UTC)"), ("RecipientText", "Recipient"),
+            ("AudienceText", "Audience"), ("MethodText", "Method"),
+            ("OperatorName", "Started by"), ("StateText", "Outcome")
+        };
+        foreach (var field in fields)
+            report.Columns.Add(field.Heading, field.Source == "CreatedUtc" ? typeof(DateTime) : typeof(string));
+        foreach (DataRowView row in history.DefaultView)
+        {
+            var values = fields.Select(field => row.Row.Table.Columns.Contains(field.Source)
+                ? row[field.Source] : DBNull.Value).ToArray();
+            report.Rows.Add(values);
+        }
+        if (report.Rows.Count == 0) { Warn("No filtered history to export."); return; }
+        using var save = new SaveFileDialog
+        {
+            Title = "Export Communication History",
+            Filter = "PDF report (*.pdf)|*.pdf|CSV data (*.csv)|*.csv",
+            FileName = "FMSC_Communication_History_" + DateTime.Today.ToString("yyyyMMdd"),
+            AddExtension = true,
+            OverwritePrompt = true,
+            RestoreDirectory = true
+        };
+        if (save.ShowDialog(FindForm()) != DialogResult.OK) return;
+        string format = save.FilterIndex == 1 ? "PDF" : "CSV";
+        try
+        {
+            await CommunicationManagementStore.RecordHistoryExportAsync(report.Rows.Count, format);
+            if (IsDisposed) return;
+            string destination = save.FileName;
+            if (format == "PDF")
+                await Task.Run(() => PdfTableExporter.Export(destination, "Communication History",
+                    "Filtered records · recipient numbers masked", report, AppTheme.Primary));
+            else
+                await Task.Run(() => CsvFileExporter.Write(report, destination));
+            if (!IsDisposed) SetStatus("Filtered communication history exported.");
+        }
+        catch (Exception ex) { if (!IsDisposed) Fail(ex); }
     }
 
     private async Task RefreshSendControlAsync()
