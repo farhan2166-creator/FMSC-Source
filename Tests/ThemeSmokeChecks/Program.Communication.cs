@@ -313,6 +313,16 @@ internal static partial class Program
         Check(builtinArray.Any(t => TemplateProperty(t, "Purpose") == "FeeReminder")
             && builtinArray.Any(t => TemplateProperty(t, "Name") == "New admission welcome"),
             "Prebuilt fee reminder and student-admission formats are available");
+        var builtinChoices = ((System.Collections.IEnumerable)prepared.GetProperty(
+            "BuiltInChoices", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!)
+            .Cast<object>().ToArray();
+        var urduChoices = builtinChoices.Where(item =>
+            TemplateProperty(item, "Name").EndsWith("(Urdu)", StringComparison.Ordinal)).ToArray();
+        Check(urduChoices.Length >= 5 && urduChoices.All(item =>
+            TemplateProperty(item, "Channel") == "WhatsApp")
+            && builtinChoices.Any(item => TemplateProperty(item, "Name") == "New admission welcome"
+                && TemplateProperty(item, "Channel").Length == 0),
+            "Urdu prepared formats are explicitly selectable only on free WhatsApp, never paid SMS.");
         var valuesType = prepared.GetNestedType("Values", BindingFlags.NonPublic)!;
         object Details(decimal? amount) => Activator.CreateInstance(valuesType,
             23, "Sample Student", "F-0023", new DateTime(2026, 11, 9), amount)!;
@@ -321,6 +331,11 @@ internal static partial class Program
             (string)render.Invoke(null, new[] { format, data })!;
         string feeText = RenderFormat(TemplateProperty(FeeTemplate(), "Body"), Details(1250.50m));
         string admissionText = RenderFormat(TemplateProperty(AdmissionTemplate(), "Body"), Details(1250.50m));
+        string urduFeeText = RenderFormat(TemplateProperty(builtinArray.First(item =>
+            TemplateProperty(item, "Name") == "Outstanding fee reminder (Urdu)"), "Body"), Details(1250.50m));
+        Check(urduFeeText.Contains("بقایا", StringComparison.Ordinal)
+            && urduFeeText.Contains("1,250.50", StringComparison.Ordinal),
+            "Urdu fee draft renders the same guarded live financial placeholder values as English.");
         Check(feeText.Contains("Sample Student") && feeText.Contains("1,250.50")
             && feeText.Contains("F-0023") && !feeText.Contains("[OutstandingAmount]"),
             "Fee reminders use real per-recipient balance and admission identifiers");
