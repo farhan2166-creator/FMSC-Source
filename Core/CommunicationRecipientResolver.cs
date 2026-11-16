@@ -84,10 +84,21 @@ internal static class CommunicationRecipientResolver
         LEFT JOIN dbo.CampusClassSections CCS ON CCS.ClassSectionId=E.ClassSectionId
         LEFT JOIN dbo.Classes ClassRecord ON ClassRecord.ClassId=CCS.ClassId
         OUTER APPLY (
+            -- The fee balance is always calculated from live charge balances.
+            -- For family fees, include only currently active linked siblings.
             SELECT SUM(dbo.GetFeeChargeBalance(BC.BillingChargeId)) Outstanding
             FROM dbo.BillingCharges BC
-            WHERE @Audience=N'OutstandingFees'
-              AND BC.AdmissionId=S.AdmissionId AND BC.Status<>N'Cancelled'
+            JOIN dbo.Students FeeStudent ON FeeStudent.AdmissionId=BC.AdmissionId
+                AND FeeStudent.Status=N'Active'
+            WHERE @Audience IN (N'OutstandingFees',N'FeeStudent',N'FeeFamily')
+              AND BC.Status<>N'Cancelled'
+              AND (BC.AdmissionId=S.AdmissionId
+                 OR (@Audience=N'FeeFamily' AND EXISTS(
+                    SELECT 1 FROM dbo.FamilyMembers SelectedMember
+                    JOIN dbo.FamilyMembers RelatedMember
+                      ON RelatedMember.FamilyId=SelectedMember.FamilyId
+                    WHERE SelectedMember.AdmissionId=S.AdmissionId
+                      AND RelatedMember.AdmissionId=BC.AdmissionId)))
         ) B
         WHERE S.Status=N'Active' AND (
             @Audience=N'School'
@@ -99,7 +110,9 @@ internal static class CommunicationRecipientResolver
                 AND (@ClassId=0 OR CCS.ClassId=@ClassId)
                 AND (@StudentId=0 OR S.AdmissionId=@StudentId)
                 AND B.Outstanding>0)
-            OR (@Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily') AND S.AdmissionId=@StudentId)
+            OR (@Audience IN (N'Student',N'Family',N'FeeStudent',N'FeeFamily')
+                AND S.AdmissionId=@StudentId
+                AND (@Audience NOT IN (N'FeeStudent',N'FeeFamily') OR B.Outstanding>0))
         )
         ORDER BY S.StudentName, S.AdmissionId;
         """;
