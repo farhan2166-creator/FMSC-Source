@@ -39,6 +39,33 @@
       "schema": "msg",
       "name": "ClaimAutomationReviewScan",
       "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "FeeReminderEligible",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveFeeReminderPolicy",
+      "type": "P"
+    }
+  ],
+  "checkConstraints": [
+    {
+      "schema": "msg",
+      "objectName": "AutomationRule",
+      "name": "CK_MsgFeeReminderGapDays"
+    },
+    {
+      "schema": "msg",
+      "objectName": "AutomationRule",
+      "name": "CK_MsgFeeRemindersPerMonth"
+    },
+    {
+      "schema": "msg",
+      "objectName": "DispatchControl",
+      "name": "CK_MsgRoutineFamilyDailyLimit"
     }
   ]
 }

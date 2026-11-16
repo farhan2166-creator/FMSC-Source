@@ -5,6 +5,64 @@ IF EXISTS(SELECT 1 FROM dbo.DatabaseVersion WHERE TRY_CONVERT(int,VersionNumber)
 IF ISNULL((SELECT TOP(1) TRY_CONVERT(int,VersionNumber)
   FROM dbo.DatabaseVersion ORDER BY VersionId DESC),0)<>25
  THROW 51280,'Fee suggestion intake requires schema 25.',1;
+-- Administrator-visible review frequency controls. These do not enable
+-- automatic dispatch, alter existing school records or create provider work.
+ALTER TABLE msg.AutomationRule ADD
+ FeeReminderGapDays int NOT NULL
+  CONSTRAINT DF_MsgFeeReminderGapDays DEFAULT(7),
+ FeeRemindersPerMonth int NOT NULL
+  CONSTRAINT DF_MsgFeeRemindersPerMonth DEFAULT(2);
+ALTER TABLE msg.AutomationRule ADD
+ CONSTRAINT CK_MsgFeeReminderGapDays CHECK(FeeReminderGapDays BETWEEN 1 AND 90),
+ CONSTRAINT CK_MsgFeeRemindersPerMonth CHECK(FeeRemindersPerMonth BETWEEN 1 AND 12);
+ALTER TABLE msg.DispatchControl ADD
+ RoutineFamilyDailyLimit int NOT NULL
+  CONSTRAINT DF_MsgRoutineFamilyDailyLimit DEFAULT(3);
+ALTER TABLE msg.DispatchControl ADD
+ CONSTRAINT CK_MsgRoutineFamilyDailyLimit CHECK(RoutineFamilyDailyLimit BETWEEN 1 AND 20);
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveFeeReminderPolicy
+ @UserId int,@EventCode varchar(32),@GapDays int,@PerMonth int,@PerDay int
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @EventCode NOT IN (''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'')
+    OR @GapDays NOT BETWEEN 1 AND 90
+    OR @PerMonth NOT BETWEEN 1 AND 12 OR @PerDay NOT BETWEEN 1 AND 20
+   THROW 51288,''Choose valid fee reminder limits and an available fee event.'',1;
+ BEGIN TRANSACTION;
+ UPDATE msg.AutomationRule WITH(UPDLOCK,HOLDLOCK)
+ SET FeeReminderGapDays=@GapDays,FeeRemindersPerMonth=@PerMonth,
+     UpdatedUtc=SYSUTCDATETIME(),UpdatedBy=@UserId
+ WHERE EventCode=@EventCode;
+ IF @@ROWCOUNT<>1 THROW 51288,''This fee reminder event no longer exists.'',1;
+ UPDATE msg.DispatchControl WITH(UPDLOCK,HOLDLOCK)
+ SET RoutineFamilyDailyLimit=@PerDay,UpdatedUtc=SYSUTCDATETIME(),UpdatedBy=@UserId
+ WHERE ControlId=1;
+ IF @@ROWCOUNT<>1 THROW 51288,''Communication sending controls are missing.'',1;
+ COMMIT;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadDispatchControl @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ SELECT ControlId,MasterPaused,UnattendedEnabled,WindowStart,WindowEnd,
+        TimeZoneId,MaxPerMinute,UpdatedUtc,UpdatedBy,RoutineFamilyDailyLimit
+ FROM msg.DispatchControl WHERE ControlId=1;
+ SELECT Channel,ProviderCode,DailyLimit,ReservedImportant,UpdatedUtc
+ FROM msg.ProviderQuota ORDER BY Channel,ProviderCode;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadAutomationRules @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ SELECT EventCode,Mode,CampusId,ClassId,ActivationBaselineUtc,UpdatedUtc,
+        FeeReminderGapDays,FeeRemindersPerMonth
+ FROM msg.AutomationRule ORDER BY EventCode;
+END');
+
 EXEC(N'CREATE OR ALTER FUNCTION msg.LiveFeeEventEligible
 (@AdmissionId int,@EventCode varchar(32),@SchoolDate date)
 RETURNS TABLE
@@ -26,6 +84,44 @@ AS RETURN
        ON BilledMember.FamilyId=SelectedMember.FamilyId
      WHERE SelectedMember.AdmissionId=@AdmissionId
        AND BilledMember.AdmissionId=C.AdmissionId))
+)');
+
+-- This is an eligibility predicate for reviewed fee suggestions only. The
+-- family suffix is stable across the three fee events and excludes another
+-- family with a longer identifier (e.g., :F1 cannot match :F11).
+-- Previously approved reminders are counted even when a provider later
+-- reports Unknown: only a new explicit reviewed batch can record another.
+EXEC(N'CREATE OR ALTER FUNCTION msg.FeeReminderEligible
+(@AdmissionId int,@EventCode varchar(32),@LocalDate date)
+RETURNS TABLE
+AS RETURN
+(
+ SELECT CONVERT(bit,1) Allowed
+ FROM msg.AutomationRule R
+ OUTER APPLY (SELECT TOP(1) FamilyId FROM dbo.FamilyMembers
+              WHERE AdmissionId=@AdmissionId) F
+ CROSS APPLY (VALUES(CASE WHEN F.FamilyId IS NULL
+  THEN CONCAT('':S'',@AdmissionId) ELSE CONCAT('':F'',F.FamilyId) END)) KeyOf(Suffix)
+ CROSS JOIN msg.DispatchControl D
+ WHERE R.EventCode=@EventCode AND R.Mode=''Review'' AND D.ControlId=1
+   AND (SELECT COUNT_BIG(*) FROM msg.AutomationCandidate C WITH(HOLDLOCK)
+         WHERE C.State=''Prepared'' AND C.EventCode IN
+            (''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'')
+           AND RIGHT(C.SourceKey,LEN(KeyOf.Suffix))=KeyOf.Suffix
+           AND YEAR(CONVERT(date,(C.ReviewedUtc AT TIME ZONE ''UTC'') AT TIME ZONE D.TimeZoneId))=YEAR(@LocalDate)
+           AND MONTH(CONVERT(date,(C.ReviewedUtc AT TIME ZONE ''UTC'') AT TIME ZONE D.TimeZoneId))=MONTH(@LocalDate)
+       )<R.FeeRemindersPerMonth
+   AND NOT EXISTS(SELECT 1 FROM msg.AutomationCandidate C WITH(HOLDLOCK)
+       WHERE C.State=''Prepared''
+         AND C.EventCode IN (''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'')
+         AND RIGHT(C.SourceKey,LEN(KeyOf.Suffix))=KeyOf.Suffix
+         AND C.ReviewedUtc>DATEADD(day,-R.FeeReminderGapDays,SYSUTCDATETIME()))
+   AND (SELECT COUNT_BIG(*) FROM msg.AutomationCandidate C WITH(HOLDLOCK)
+         WHERE C.State=''Prepared'' AND C.EventCode IN
+             (''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'')
+           AND RIGHT(C.SourceKey,LEN(KeyOf.Suffix))=KeyOf.Suffix
+           AND CONVERT(date,(C.ReviewedUtc AT TIME ZONE ''UTC'') AT TIME ZONE D.TimeZoneId)=@LocalDate
+       )<D.RoutineFamilyDailyLimit
 )');
 
 EXEC(N'CREATE OR ALTER PROCEDURE msg.ScanFeeReviewCandidates @UserId int
@@ -70,6 +166,7 @@ AS BEGIN
      ORDER BY E.EnrollmentId DESC
    ) Placement
    CROSS APPLY msg.LiveFeeEventEligible(S.AdmissionId,R.EventCode,@Day) Eligible
+   CROSS APPLY msg.FeeReminderEligible(S.AdmissionId,R.EventCode,@Day) Policy
    WHERE R.EventCode IN(''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'')
      AND R.Mode=''Review''
      AND G.HasConsent=1 AND G.PhoneE164 IS NOT NULL
@@ -117,6 +214,7 @@ AS BEGIN
    ORDER BY E.EnrollmentId DESC
  ) Placement
  CROSS APPLY msg.LiveFeeEventEligible(S.AdmissionId,C.EventCode,@Day) Eligible
+ CROSS APPLY msg.FeeReminderEligible(S.AdmissionId,C.EventCode,@Day) Policy
  WHERE C.State=''Pending''
    AND C.EventCode IN(''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'')
    AND C.CreatedUtc>=DATEADD(day,-7,SYSUTCDATETIME())
@@ -201,6 +299,18 @@ AS BEGIN
              AND NOT EXISTS(SELECT 1 FROM dbo.FeePayments Changed
                 WHERE Changed.RelatedFeePaymentId=P.FeePaymentId))))
     THROW 51285,''This event is no longer eligible for review. Refresh the suggestions.'',1;
+ -- Lock the reviewed fee approval decision across candidates. Daily/monthly
+ -- caps must not be bypassed by two staff members approving different events
+ -- for the same family at the same time.
+ IF @EventCode IN (''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'')
+ BEGIN
+   DECLARE @FeeReviewLock int;
+   EXEC @FeeReviewLock=sys.sp_getapplock @Resource=N''FMSC_msg_fee_review_approval'',
+     @LockMode=''Exclusive'',@LockOwner=''Transaction'',@LockTimeout=10000;
+   IF @FeeReviewLock<0 THROW 51289,''Fee reminder review is busy. Retry after refresh.'',1;
+   IF NOT EXISTS(SELECT 1 FROM msg.FeeReminderEligible(@StudentId,@EventCode,@Today))
+      THROW 51287,''This family recently received a fee reminder or reached a reminder limit. Review the limits and refresh suggestions.'',1;
+ END;
  IF NOT EXISTS(SELECT 1 FROM msg.Batch B
   JOIN msg.Recipient Recipient ON Recipient.BatchId=B.BatchId
   WHERE B.BatchId=@BatchId AND B.CreatedBy=@UserId AND B.ConfirmedBy=@UserId

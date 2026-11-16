@@ -330,19 +330,32 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             Name = "communicationFamilyExceptions", Text = "Family Exceptions…",
             ThemeRole = "Secondary", Width = AppScale.Scale(185)
         };
+        var feeLimits = new ModernButton
+        {
+            Name = "communicationFeeReminderLimits", Text = "Fee Reminder Limits…",
+            ThemeRole = "Secondary", Width = AppScale.Scale(187)
+        };
         var automationActions = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty
         };
-        save.Height = exceptions.Height = AppMetrics.ButtonHeight;
+        save.Height = exceptions.Height = feeLimits.Height = AppMetrics.ButtonHeight;
         automationActions.Controls.Add(save);
         automationActions.Controls.Add(exceptions);
+        automationActions.Controls.Add(feeLimits);
         content.Controls.Add(automationActions, 0, 3);
         content.Controls.Add(automationFeedback, 0, 4);
         exceptions.Click += (_, _) =>
         {
             if (busy || !CurrentUser.HasPermission("Communication.Configure")) return;
             using var dialog = new CommunicationFamilyExceptionsDialog();
+            dialog.ShowDialog(this);
+            if (dialog.Changed) Changed = true;
+        };
+        feeLimits.Click += (_, _) =>
+        {
+            if (busy || !CurrentUser.HasPermission("Communication.Configure")) return;
+            using var dialog = new CommunicationFeeReminderPolicyDialog();
             dialog.ShowDialog(this);
             if (dialog.Changed) Changed = true;
         };

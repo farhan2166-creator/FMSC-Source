@@ -37,14 +37,15 @@ internal static class ReplacementTemplateGuard
                     OR TimeZoneId<>N'Pakistan Standard Time'
                     OR MaxPerMinute<>60 OR PreferredChannel<>'WhatsApp'
                     OR PreferredProviderCode<>'WhatsAppBusinessManual'
-                    OR UpdatedBy IS NOT NULL)
+                    OR UpdatedBy IS NOT NULL OR RoutineFamilyDailyLimit<>3)
                 OR (SELECT COUNT(*) FROM msg.AutomationRule)<>8
                 OR EXISTS (SELECT 1 FROM msg.AutomationRule
                     WHERE EventCode NOT IN ('Admission','PaymentReceived','OutstandingFees',
                       'UpcomingDue','OverdueFollowUp','Announcement','ExaminationResult','Birthday')
                       OR Mode<>'Off' OR CampusId<>0 OR ClassId<>0
                       OR ActivationBaselineUtc IS NOT NULL OR UpdatedBy IS NOT NULL
-                      OR BaselineAdmissionId<>0 OR BaselinePaymentId<>0)
+                      OR BaselineAdmissionId<>0 OR BaselinePaymentId<>0
+                      OR FeeReminderGapDays<>7 OR FeeRemindersPerMonth<>2)
                 OR (SELECT COUNT(*) FROM msg.BackgroundWorkerLease)<>1
                 OR EXISTS(SELECT 1 FROM msg.BackgroundWorkerLease
                     WHERE LeaseId<>1 OR EnrollmentId IS NOT NULL OR LeaseNonce IS NOT NULL

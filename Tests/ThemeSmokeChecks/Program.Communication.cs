@@ -147,6 +147,8 @@ internal static partial class Program
         Check(manualDialogType is not null,
             "Operator-controlled WhatsApp session can be resumed with a dedicated native dialog.");
 
+        Check(assembly.GetType("FMSC_SMS.Pages.Communication.CommunicationFeeReminderPolicyDialog") is not null,
+            "Fee reminder event limits have a dedicated compact administrator settings dialog.");
         var type = typeof(CommunicationCenterPage);
         // A SQL-free layout contract must not open the live school database
         // when navigating Queue. Session records are provided by a deliberately

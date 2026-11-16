@@ -42,6 +42,17 @@ BEGIN TRY
  IF @Status NOT IN(N'Active',N'Left',N'Promoted') THROW 59609,'Choose Active, Left or Promoted.',1;
  IF @Status=N'Active' AND @LeaveDate IS NOT NULL THROW 59610,'An active enrollment cannot have a leaving date.',1;
  IF @Status<>N'Active' AND @LeaveDate IS NULL THROW 59611,'Enter the leaving or promotion date for a closed enrollment.',1;
+ -- A gap alone does not establish that the student left the school.
+ DECLARE @CanRecordDeparture bit=0;
+ IF @EnrollmentId=0 AND @Status=N'Left' AND @StudentStatus=N'Active'
+  AND EXISTS(SELECT 1 FROM dbo.Students WHERE AdmissionId=@AdmissionId AND WithdrawalDate IS NULL
+   AND NULLIF(LTRIM(RTRIM(AdmissionNumber)),N'') IS NOT NULL)
+  AND NOT EXISTS(SELECT 1 FROM dbo.Enrollments WHERE AdmissionId=@AdmissionId
+   AND (Status IN(N'Active',N'Pending') OR (Status<>N'Cancelled' AND (EnrollmentDate>=@StartDate OR LeavingDate>@LeaveDate))))
+  AND NOT EXISTS(SELECT 1 FROM dbo.StudentPostingHolds WITH(UPDLOCK,HOLDLOCK) WHERE AdmissionId=@AdmissionId AND ResumeDate IS NULL)
+  SET @CanRecordDeparture=1;
+ IF @RecordHistoricalDeparture=1 AND @CanRecordDeparture=0
+  THROW 59624,'This placement cannot record the school departure. Reload Placement History and check for a later placement, an open placement or an active hold.',1;
  IF @Status=N'Active' AND EXISTS(SELECT 1 FROM dbo.Enrollments WHERE AdmissionId=@AdmissionId AND EnrollmentId<>@EnrollmentId AND Status=N'Active')
   THROW 59612,'An active enrollment already exists. Correct that record, or close it with its verified leaving date first.',1;
  IF @EnrollmentId>0 AND @Status=N'Promoted' AND NOT EXISTS(SELECT 1 FROM dbo.Enrollments WHERE AdmissionId=@AdmissionId AND EnrollmentId<>@EnrollmentId AND Status=N'Active')
@@ -66,8 +77,12 @@ BEGIN TRY
    AND (@OldYear<>@YearId OR @OldPlacement<>@PlacementId OR @OldStart<>@StartDate OR @OldStatus<>@Status OR ISNULL(@OldLeave,'19000101')<>ISNULL(@LeaveDate,'19000101'))
    THROW 59617,'This record has a leaving certificate. Use Correct Leaving Date for its departure date; correct or reissue the certificate before changing its placement.',1;
  END;
- -- Snapshot includes every dependency that can change the reviewed outcome.
+ -- Bind the reviewed details and departure eligibility. The operator selects
+ -- whether to record the departure after seeing the eligible preview.
  SET @Current=CONCAT(
+  (SELECT @UserId UserId,@EnrollmentId EnrollmentId,@YearId YearId,@PlacementId PlacementId,
+   @StartDate StartDate,@LeaveDate LeaveDate,@BillingStartDate BillingStartDate,@Status Status,@Reason Reason,@Legacy Legacy,
+   @CanRecordDeparture CanRecordDeparture FOR JSON PATH,INCLUDE_NULL_VALUES,WITHOUT_ARRAY_WRAPPER),
   (SELECT * FROM dbo.Enrollments WHERE AdmissionId=@AdmissionId ORDER BY EnrollmentId FOR JSON PATH,INCLUDE_NULL_VALUES),
   (SELECT * FROM dbo.StudentFeeAssignments WHERE AdmissionId=@AdmissionId ORDER BY StudentFeeAssignmentId FOR JSON PATH,INCLUDE_NULL_VALUES),
   (SELECT * FROM dbo.BillingCharges WHERE AdmissionId=@AdmissionId ORDER BY BillingChargeId FOR JSON PATH,INCLUDE_NULL_VALUES),
@@ -100,7 +115,7 @@ BEGIN TRY
   SELECT @Snapshot Snapshot,@Cancelled CancelCount,@Amount CancelledAmount,@Blocked BlockedCount,
    (SELECT COUNT(*) FROM dbo.BillingCharges WHERE EnrollmentId=@EnrollmentId AND Status<>N'Cancelled')-@Cancelled-@Blocked RetainedCharges,
    (SELECT COUNT(*) FROM dbo.StudentFeeAssignments WHERE EnrollmentId=@EnrollmentId) FeeAssignments,
-   CAST(CASE WHEN @EnrollmentId=0 THEN 1 ELSE 0 END AS bit) Creating;
+   @CanRecordDeparture CanRecordDeparture;
   COMMIT; RETURN;
  END;
  IF @ExpectedSnapshot IS NULL OR @ExpectedSnapshot<>@Snapshot THROW 59618,'Records changed after review. Review the correction again; nothing was applied.',1;
@@ -130,6 +145,12 @@ BEGIN TRY
  END;
  INSERT dbo.EnrollmentHistory(EnrollmentId,AdmissionId,ActionType,ActionDate,OldClassSectionId,NewClassSectionId,OldStatus,NewStatus,Remarks,UserId)
  VALUES(@EnrollmentId,@AdmissionId,N'CORRECTION',@StartDate,@OldPlacement,@PlacementId,@OldStatus,@Status,@Reason,@UserId);
+ IF @RecordHistoricalDeparture=1
+ BEGIN
+  UPDATE dbo.Students SET Status=N'Left',WithdrawalDate=@LeaveDate,UpdatedAt=SYSDATETIME() WHERE AdmissionId=@AdmissionId;
+  INSERT dbo.StudentStatusHistory(AdmissionId,OldStatus,NewStatus,Reason,EffectiveDate,Remarks,CreatedBy)
+  VALUES(@AdmissionId,@StudentStatus,N'Left',LEFT(@Reason,250),@LeaveDate,@Reason,@UserId);
+ END;
  -- Synchronize student status only when this is their latest enrollment.
  IF @CreatingHistory=0 AND NOT EXISTS(SELECT 1 FROM dbo.Enrollments WHERE AdmissionId=@AdmissionId AND EnrollmentId<>@EnrollmentId AND EnrollmentDate>@StartDate)
   AND @Status IN(N'Active',N'Left')

@@ -87,6 +87,21 @@ internal static class CommunicationQueuePolicyStore
             DatabaseHelper.Int("@ClassId", classId));
     }
 
+    internal static Task SaveFeeReminderPolicyAsync(
+        string eventCode, int gapDays, int monthlyLimit, int familyDailyLimit)
+    {
+        RequireAdministrator();
+        if (eventCode is not ("OutstandingFees" or "UpcomingDue" or "OverdueFollowUp")
+            || gapDays is < 1 or > 90 || monthlyLimit is < 1 or > 12
+            || familyDailyLimit is < 1 or > 20)
+            throw new ArgumentException("Choose a valid fee event and safe per-family reminder limits.");
+        return DatabaseHelper.ExecuteUserAsync("msg.SaveFeeReminderPolicy",
+            DatabaseHelper.P("@EventCode", eventCode),
+            DatabaseHelper.Int("@GapDays", gapDays),
+            DatabaseHelper.Int("@PerMonth", monthlyLimit),
+            DatabaseHelper.Int("@PerDay", familyDailyLimit));
+    }
+
     internal static Task<DataTable> ReadPreferredMethodAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Send"))

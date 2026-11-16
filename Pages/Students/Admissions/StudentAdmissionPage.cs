@@ -2744,18 +2744,21 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
     private void UpdateAdmissionEntryFlow()
     {
         if(currentAdmissionId<=0)editEnrollmentDate.Text=admissionDate.Value.ToString("dd-MMM-yyyy");
-        bool missing = currentAdmissionId > 0 && _editEnrollmentId <= 0;
         bool placementUnlocked = currentAdmissionId <= 0 && HasRequiredAdmissionDetails();
+        bool canActivate = legacySetupPending && !studentPostingHeld &&
+            AdmissionWorkflowActions.CanActivateLegacy(_workspaceStudentStatus) && CurrentUser.HasPermission("Students.Administer");
         Campus.Enabled = placementUnlocked;
         Year.Enabled = placementUnlocked;
         Class.Enabled = placementUnlocked;
         Section.Enabled = placementUnlocked;
         transport.Enabled = placementUnlocked;
         placementGuidance.Text = currentAdmissionId > 0
-            ? "Use Actions → Activate Current Student for legacy setup, or Placement History for recorded placements."
+            ? canActivate
+                ? "Use Actions → Placement History. For a student who currently attends, choose Activate Current Student."
+                : "Use Actions → Placement History to review recorded placements."
             : placementUnlocked ? "Monthly billing uses today's cutoff. Past academic years generate no fees."
                 : "Complete the required student and family fields above to unlock academic placement.";
-        placementGuidance.ForeColor = placementUnlocked
+        placementGuidance.ForeColor = placementUnlocked || currentAdmissionId > 0 && !canActivate
             ? AppTheme.MutedText
             : AppTheme.Warning;
     }
@@ -3108,11 +3111,8 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                     ? admissionDate.Value.ToString(
                         "dd-MMM-yyyy")
                     : "-";
-            string currentEnrollmentDate=row.Table.Columns.Contains("EnrollmentDate") && row["EnrollmentDate"]!=DBNull.Value &&
-                row.Table.Columns.Contains("EnrollmentStatus") && Convert.ToString(row["EnrollmentStatus"])=="Active"
-                ? Convert.ToDateTime(row["EnrollmentDate"]).ToString("dd-MMM-yyyy") : "-";
-            viewEnrollmentDate.Text=currentEnrollmentDate;
-            editEnrollmentDate.Text=currentEnrollmentDate;
+            viewEnrollmentDate.Text = placementStartDate?.ToString("dd-MMM-yyyy") ?? "-";
+            editEnrollmentDate.Text = viewEnrollmentDate.Text;
             viewYear.Text =
                 PlacementText(
                     "YearName");

@@ -13,6 +13,12 @@ internal sealed class StudentPlacementCorrectionDialog : ApplicationWindowForm
     private readonly ModernDatePicker start = HumanUi.Date(), leave = HumanUi.Date(), billing = HumanUi.Date();
     private readonly ModernTextBox reason = HumanUi.TextBox(false, 500), impact = HumanUi.TextBox(true, 0);
     private readonly CheckBox legacy = new() { Text = "Verified legacy dates (before admission or overlapping history)", AutoSize = true };
+    private readonly CheckBox recordDeparture = new()
+    {
+        Text = "Also record the student as Left using this leaving date",
+        AutoSize = true,
+        Visible = false
+    };
     private readonly ModernButton review = new() { Text = "Review", ThemeRole = "Secondary" },
         confirm = new() { Text = "Confirm Placement", ThemeRole = "Primary" },
         apply = new() { Text = "Apply Correction", ThemeRole = "Warning", Enabled = false },
@@ -86,20 +92,21 @@ internal sealed class StudentPlacementCorrectionDialog : ApplicationWindowForm
         AddField("Campus / Class / Section", placement, 0, 1); AddField("Status", status, 1, 1);
         AddField("Placement Start Date", start, 0, 2); AddField("Leaving / Promotion date", leave, 1, 2, false);
         AddField("Billing start (optional)", billing, 0, 3, false);
-        var reasonField = HumanUi.Field("Correction reason", reason, true);
+        var reasonField = HumanUi.Field(editingEnrollment == 0 ? "Reason for adding this placement" : "Correction reason", reason, true);
         reasonField.Height = AppMetrics.FieldRowHeight;
         fields.Controls.Add(reasonField, 1, 3);
         foreach (Control input in new Control[] { year, status, start, leave, billing })
             input.MaximumSize = new Size(0, input.MaximumSize.Height);
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(14), ColumnCount = 1, RowCount = 5 };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(14), ColumnCount = 1, RowCount = 6 };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         introduction = new Label { AutoSize = true, Dock = DockStyle.Fill,
             MaximumSize = new Size(AppScale.Scale(780), 0),
             Text = $"{studentName}\n" +
-                (editingEnrollment == 0 ? "Record a verified gap in this student's history. Use Promotion, Transfer or Re-admission for an actual move."
+                (editingEnrollment == 0 ? "Enter the verified details for the missing placement."
                 : editingEnrollment.HasValue ? "Review the unconfirmed placement, then review its impact before saving."
                 : "Select a placement to view its details and available actions.") };
         root.Controls.Add(introduction, 0, 0);
@@ -108,10 +115,12 @@ internal sealed class StudentPlacementCorrectionDialog : ApplicationWindowForm
         root.Controls.Add(fields, 0, 1); root.Controls.Add(legacy, 0, 2);
         addHistory.Width = AppScale.Scale(275);
         edit.Width = AppScale.Scale(240);
-        var buttons = HumanUi.ButtonRowInOrder(dates, edit, addHistory, review, apply, confirm, close); buttons.Dock = DockStyle.Fill;
+        if (editingEnrollment == 0) apply.Text = "Save Placement";
+        var buttons = HumanUi.ButtonRowInOrder(dates, edit, addHistory, review, apply, confirm, close);
+        buttons.Dock = DockStyle.Fill;
         dates.Width = review.Width = apply.Width = confirm.Width = AppScale.Scale(160);
         edit.Width = AppScale.Scale(240); close.Width = AppScale.Scale(110);
-        root.Controls.Add(impact, 0, 3); root.Controls.Add(buttons, 0, 4);
+        root.Controls.Add(impact, 0, 3); root.Controls.Add(recordDeparture, 0, 4); root.Controls.Add(buttons, 0, 5);
         Controls.Add(root); CancelButton = close;
         record.SelectedIndexChanged += (_, _) => LoadSelected();
         year.SelectedIndexChanged += (_, _) => { ConfigureMissingPeriod(true); ResetReview(); };
@@ -150,6 +159,7 @@ internal sealed class StudentPlacementCorrectionDialog : ApplicationWindowForm
     {
         if (loading || updatingPeriod) return;
         plan = null; apply.Enabled = false;
+        recordDeparture.Checked = recordDeparture.Visible = false;
         confirm.Enabled = !busy && CanConfirmPlacement && !HasPlacementEdits;
         if (editingEnrollment.HasValue) impact.Text = editingEnrollment == 0
             ? MissingWindow is DataRow window
@@ -168,6 +178,7 @@ internal sealed class StudentPlacementCorrectionDialog : ApplicationWindowForm
         addHistory.AccessibleDescription = missingWindows.Rows.Count > 0 ? "Record a verified gap in placement history."
             : "No missing historical placement can be added: no eligible gaps are available.";
         confirm.Enabled = !value && CanConfirmPlacement && !HasPlacementEdits;
+        recordDeparture.Enabled = !value && plan is not null;
         apply.Enabled = !value && !Confirmed && plan is not null && Convert.ToInt32(plan["BlockedCount"]) == 0;
     }
     private async Task LoadAsync(int selected = -1)
@@ -287,6 +298,16 @@ internal sealed class StudentPlacementCorrectionDialog : ApplicationWindowForm
                 picker.MaxDate = DateTimePicker.MaximumDateTime;
             }
         var current = SelectedRecord();
+        bool closedPlacement = current?["LeavingDate"] is DateTime;
+        edit.Text = closedPlacement ? "Correct Placement" : "Complete Placement";
+        if (editingEnrollment > 0)
+        {
+            Text = edit.Text;
+            string heading = introduction.Text[..introduction.Text.IndexOf('\n')];
+            introduction.Text = heading + (closedPlacement
+                ? "\nReview the recorded placement and the effect of any correction before saving."
+                : "\nReview the unconfirmed placement and its effect before saving.");
+        }
         // Existing history keeps its recorded year; a new placement uses the configured current year.
         year.SelectedValue = editingEnrollment == 0
             ? missingWindows.Rows.Count > 0 ? missingWindows.Rows[0]["WindowId"] : 0
@@ -343,10 +364,13 @@ internal sealed class StudentPlacementCorrectionDialog : ApplicationWindowForm
             return;
         }
         string DateText(string column) => current[column] is DateTime date ? date.ToString("dd MMM yyyy") : "Not recorded";
-        impact.Text = $"{record.Text}\r\n{(Confirmed ? "Confirmed placement" : "Unconfirmed placement")}\r\n\r\n" +
+        bool closedPlacement = current["LeavingDate"] is DateTime;
+        string state = closedPlacement ? "Closed placement" : Confirmed ? "Confirmed placement" : "Unconfirmed placement";
+        impact.Text = $"{record.Text}\r\n{state}\r\n\r\n" +
             $"Placement starts: {DateText("EnrollmentDate")}\r\nBilling starts: {DateText("BillingStartDate")}\r\n{(HistoryStatus(current)=="Repeated Class"?"Moved to next year":"Leaving / promotion date")}: {DateText("LeavingDate")}\r\n\r\n" +
             (Confirmed ? "To fix a date error, choose Correct Dates.\r\n\r\nUse Promotion for a new academic year, Transfer to change campus/class/section, or Re-admission after leaving."
-            : "Choose Complete Placement to review this draft and its effect on fees, then confirm the saved placement. Activation of a legacy student uses Activate Current Student in Admission.");
+            : closedPlacement ? "Choose Correct Placement to review changes to this record. The Admission badge shows the student's overall status."
+            : "Choose Complete Placement to review the draft and its effect on fees. Legacy activation is available in Admission for students who currently attend.");
         if (missingWindows.Rows.Count == 0) impact.Text += "\r\n\r\nNo missing historical placement can be added: no eligible gaps are available.";
     }
     private async Task OpenEditorAsync(int enrollmentId)
@@ -368,7 +392,7 @@ internal sealed class StudentPlacementCorrectionDialog : ApplicationWindowForm
     private Task<DataTable> RunAsync(string? snapshot = null) => PlacementCorrection.ReviewAsync(admission,
         Math.Max(0, SelectedEnrollmentId), SelectedYearId, placement.SelectedId, start.Value.Date,
         leave.Checked ? leave.Value.Date : null, editingEnrollment != 0 && billing.Checked ? billing.Value.Date : null,
-        Convert.ToString(status.SelectedItem) ?? "", reason.Text.Trim(), legacy.Checked, snapshot);
+        Convert.ToString(status.SelectedItem) ?? "", reason.Text.Trim(), legacy.Checked, recordDeparture.Checked, snapshot);
     private async Task ReviewAsync()
     {
         if (busy || !CanReviewPlacement) return;
@@ -381,20 +405,32 @@ internal sealed class StudentPlacementCorrectionDialog : ApplicationWindowForm
         try
         {
             plan = (await RunAsync()).Rows[0];
+            if (editingEnrollment == 0)
+            {
+                ShowHistoricalReview(Convert.ToBoolean(plan["CanRecordDeparture"]));
+                return;
+            }
             impact.Text = $"{year.Text}\r\n{placement.Text}\r\n{status.Text}: {start.Value:dd MMM yyyy}" +
                 (leave.Checked ? $" → {leave.Value:dd MMM yyyy}" : "") +
-                (editingEnrollment == 0 ? "\r\nBilling: not applicable to historical placement." :
-                    "\r\nBilling starts: " + (billing.Checked ? billing.Value.ToString("dd MMM yyyy") : "placement start date")) +
+                "\r\nBilling start: " + (billing.Checked ? billing.Value.ToString("dd MMM yyyy") : "Not recorded") +
                 $"\r\n\r\nReverse {plan["CancelCount"]} out-of-period unpaid charge(s): Rs. {Convert.ToDecimal(plan["CancelledAmount"]):N0}." +
                 $"\r\nKeep {plan["RetainedCharges"]} valid charge(s). Existing fee rates and payments are preserved." +
-                (Convert.ToBoolean(plan["Creating"]) ? "\r\nThis records historical placement only. No fees or bills are created; the student's current status is preserved." :
-                "\r\nNo new charges are posted. Review fee setup in Admission after correcting placement.") +
+                "\r\nNo new charges are posted." +
                 (Convert.ToInt32(plan["BlockedCount"]) > 0 ? $"\r\n\r\n{plan["BlockedCount"]} affected charge(s) have payments. Resolve those in Fee Corrections, then review again." :
                 "\r\n\r\nApply saves the correction and listed reversals together, with your reason in history.");
             OperationFeedback.Apply(impact,Convert.ToInt32(plan["BlockedCount"]! )>0);
         }
         catch (Exception ex) { plan = null; OperationFeedback.Set(impact,DbMessage.UserMessage(ex),true); }
         finally { SetBusy(false); }
+    }
+    private void ShowHistoricalReview(bool canRecordDeparture)
+    {
+        recordDeparture.Visible = canRecordDeparture;
+        impact.Text = "Save adds this placement to history and preserves existing fees and payments." +
+            (canRecordDeparture
+                ? "\r\nSelect the option below if this is the verified date the student left."
+                : "\r\nThe student's overall status stays the same.");
+        OperationFeedback.Apply(impact, false);
     }
     private async Task ApplyAsync()
     {
@@ -407,11 +443,14 @@ internal sealed class StudentPlacementCorrectionDialog : ApplicationWindowForm
             if (editingEnrollment>0)
             {
                 await LoadAsync(SelectedEnrollmentId);
-                if (loadSucceeded) impact.Text="Placement changes saved. Review the saved details and fee plan before choosing Confirm Placement.";
+                if (loadSucceeded)
+                    impact.Text = CanConfirmPlacement
+                        ? "Placement changes saved. Review the saved details and fee plan before choosing Confirm Placement."
+                        : "Placement changes saved.";
             }
             else { DialogResult = DialogResult.OK;busy = false; Close(); }
         }
-        catch (Exception ex) { plan = null; OperationFeedback.Set(impact,DbMessage.UserMessage(ex),true); }
+        catch (Exception ex) { ResetReview(); OperationFeedback.Set(impact,DbMessage.UserMessage(ex),true); }
         finally { if (!IsDisposed) SetBusy(false); }
     }
     private async Task CorrectDatesAsync()

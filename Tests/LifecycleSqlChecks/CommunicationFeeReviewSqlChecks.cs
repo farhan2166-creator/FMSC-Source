@@ -53,6 +53,26 @@ internal static class CommunicationFeeReviewSqlChecks
         Sql.Proc("msg.SaveAutomationMode",
             Sql.P("@UserId",f.Admin),Sql.P("@EventCode","OutstandingFees"),
             Sql.P("@Mode","Review"),Sql.P("@CampusId",0),Sql.P("@ClassId",0));
+        await r.Refused("Only an administrator may configure fee reminder frequency",()=>{
+            Sql.Proc("msg.SaveFeeReminderPolicy",Sql.P("@UserId",f.Restricted),
+                Sql.P("@EventCode","OutstandingFees"),Sql.P("@GapDays",7),
+                Sql.P("@PerMonth",2),Sql.P("@PerDay",3));
+            return Task.CompletedTask;
+        },50003);
+        await r.Refused("Zero-day or unbounded reminder policies are rejected at SQL boundary",()=>{
+            Sql.Proc("msg.SaveFeeReminderPolicy",Sql.P("@UserId",f.Admin),
+                Sql.P("@EventCode","OutstandingFees"),Sql.P("@GapDays",0),
+                Sql.P("@PerMonth",2),Sql.P("@PerDay",3));
+            return Task.CompletedTask;
+        },51288);
+        Sql.Proc("msg.SaveFeeReminderPolicy",Sql.P("@UserId",f.Admin),
+            Sql.P("@EventCode","OutstandingFees"),Sql.P("@GapDays",7),
+            Sql.P("@PerMonth",2),Sql.P("@PerDay",3));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.FeeReminderEligible(@Id,'OutstandingFees',CONVERT(date,SYSUTCDATETIME()))",
+            Sql.P("@Id",student))==1 &&
+            Sql.Count("SELECT COUNT(*) FROM msg.AutomationRule WHERE EventCode='OutstandingFees' AND FeeReminderGapDays=7 AND FeeRemindersPerMonth=2")==1 &&
+            Sql.Count("SELECT COUNT(*) FROM msg.DispatchControl WHERE ControlId=1 AND RoutineFamilyDailyLimit=3")==1,
+            "Administrator-configured family limits begin with safe defaults and leave eligible unsent reviews visible.");
         using(var first=Sql.Proc("msg.ClaimAutomationReviewScan",Sql.P("@UserId",f.Admin)))
             r.Check(first.Rows.Count==1 && Convert.ToBoolean(first.Rows[0]["ShouldScan"]),
                 "Only one authorized background scan can claim the school review slot.");
@@ -75,6 +95,31 @@ internal static class CommunicationFeeReviewSqlChecks
             if(candidate is not null)
             {
                 long candidateId=Convert.ToInt64(candidate["CandidateId"]);
+                // A transaction-local synthetic confirmed message stands in for
+                // an already reviewed family reminder. All fake batch and ledger
+                // changes are rolled back; only the policy predicate is observed.
+                int eligibleAfterPriorReview=Sql.Count("""
+                    SET NOCOUNT ON; SET XACT_ABORT ON;
+                    BEGIN TRANSACTION;
+                    DECLARE @Batch uniqueidentifier=NEWID();
+                    INSERT msg.Batch(BatchId,ClientRequestId,Channel,Purpose,Body,Audience,
+                        StudentId,State,CreatedBy,ConfirmedBy,ConfirmedUtc)
+                    VALUES(@Batch,NEWID(),'WhatsApp','FeeReminder',N'Synthetic review',
+                        'FeeStudent',@Student,'Confirmed',@Admin,@Admin,SYSUTCDATETIME());
+                    UPDATE msg.AutomationCandidate
+                    SET State='Prepared',ReviewedBy=@Admin,
+                        ReviewedUtc=SYSUTCDATETIME(),BatchId=@Batch
+                    WHERE CandidateId=@Candidate;
+                    DECLARE @Result int=(SELECT COUNT(*) FROM msg.FeeReminderEligible(
+                        @Student,'OutstandingFees',CONVERT(date,SYSUTCDATETIME())));
+                    ROLLBACK TRANSACTION;
+                    SELECT @Result;
+                    """,Sql.P("@Student",student),Sql.P("@Candidate",candidateId),
+                    Sql.P("@Admin",f.Admin));
+                r.Check(eligibleAfterPriorReview==0 &&
+                    Sql.Count("SELECT COUNT(*) FROM msg.AutomationCandidate WHERE CandidateId=@Candidate AND State='Pending'",
+                        Sql.P("@Candidate",candidateId))==1,
+                    "A confirmed fee reminder suppresses duplicate family proposals within the gap; test state rolls back.");
                 await r.Refused("A fee suggestion cannot be resolved with an invented communication batch",()=>{
                     Sql.Proc("msg.MarkAutomationCandidatePrepared",
                         Sql.P("@UserId",f.Admin),Sql.P("@CandidateId",candidateId),

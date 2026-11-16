@@ -18,14 +18,15 @@ internal static class SiblingFieldSyncChecks
             Sql.P("@UserId", actor ?? f.Admin), Sql.P("@Anchor", anchor), Sql.P("@FamilyId", rows.Rows[0]["FamilyId"]),
             Sql.P("@Reviewed", JsonSerializer.Serialize(expected ?? Expected(rows))), Sql.P("@NewValue", value));
         string OtherFields(string field) => Convert.ToString(Sql.Scalar($"""
-            SELECT AdmissionId,{string.Join(",", new[] { "Address", "ContactNumber", "AlternateContactNumber", "FatherName", "PreviousSchool" }
+            SELECT AdmissionId,{string.Join(",", new[] { "Address", "ContactNumber", "AlternateContactNumber", "FatherName", "PreviousSchool", "FatherOccupation", "CasteTribe" }
                 .Where(name => name != field).Select(name => "[" + name + "]"))},SchoolMessageConsent,Status
             FROM dbo.Students WHERE AdmissionId IN (@A,@B,@C,@D) ORDER BY AdmissionId FOR JSON PATH,INCLUDE_NULL_VALUES
             """, Sql.P("@A", anchor), Sql.P("@B", sibling), Sql.P("@C", second), Sql.P("@D", outsider))) ?? "";
         foreach (var (field, value) in new[]
         {
             ("Address", "Owner's Street, Fictional Town"), ("ContactNumber", "03001234567"),
-            ("AlternateContactNumber", "0911234567"), ("FatherName", "Shared Fictional Parent"), ("PreviousSchool", "Fictional Previous School")
+            ("AlternateContactNumber", "0911234567"), ("FatherName", "Shared Fictional Parent"), ("PreviousSchool", "Fictional Previous School"),
+            ("FatherOccupation", "Fictional Teacher"), ("CasteTribe", "Fictional Tribe")
         })
         {
             using var rows = Read(field);
@@ -55,6 +56,15 @@ internal static class SiblingFieldSyncChecks
         await r.Refused("Student viewing alone cannot perform a shared update", () => { Apply("Address", fresh, "Unauthorized Address", f.Restricted); return Task.CompletedTask; }, 50003);
         await r.Refused("Required address cannot be cleared", () => { Apply("Address", fresh, ""); return Task.CompletedTask; }, 51210);
         await r.Refused("Oversized values are rejected without truncation", () => { Apply("Address", fresh, new string('a', 501)); return Task.CompletedTask; }, 51210);
+        foreach (var (field, length) in new[] { ("FatherOccupation", 250), ("CasteTribe", 100) })
+        {
+            using var reviewed = Read(field);
+            await r.Refused("New shared fields retain their database length limits", () =>
+            {
+                Apply(field, reviewed, new string('a', length + 1));
+                return Task.CompletedTask;
+            }, 51210);
+        }
         using var clear = Read("AlternateContactNumber");
         using var cleared = Apply("AlternateContactNumber", clear, "");
         r.Check(Value(anchor, "AlternateContactNumber") == "" && Value(added, "AlternateContactNumber") == "",
@@ -75,6 +85,6 @@ internal static class SiblingFieldSyncChecks
         bool refused = false;
         try { _ = SiblingFieldSyncSql.Apply("Address]; DELETE FROM dbo.Students;--"); }
         catch (ArgumentException) { refused = true; }
-        r.Check(refused, "SQL column selection is restricted to the five supported fields.");
+        r.Check(refused, "SQL column selection is restricted to the supported shared fields.");
     }
 }
