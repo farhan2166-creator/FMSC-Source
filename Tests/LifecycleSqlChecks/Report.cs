@@ -25,7 +25,13 @@ internal sealed class Report
         catch (Exception ex)
         {
             int? code = ex is SqlException sql ? sql.Number : ex.InnerException is SqlException inner ? inner.Number : null;
-            string assertion = ex is AssertionFailure ? ex.Message : "Unexpected " + ex.GetType().Name + (code.HasValue ? " (SQL " + code + ")" : "");
+            var sqlError = ex as SqlException ?? ex.InnerException as SqlException;
+            string context = sqlError is null ? "" :
+                " in " + (Convert.ToString(sqlError.Data["FMSC_TestOperation"]) ??
+                    (string.IsNullOrWhiteSpace(sqlError.Procedure) ? "SQL" : sqlError.Procedure)) +
+                " at SQL line " + sqlError.LineNumber;
+            string assertion = ex is AssertionFailure ? ex.Message : "Unexpected " +
+                ex.GetType().Name + (code.HasValue ? " (SQL " + code + context + ")" : "");
             Scenarios.Add(new(name, "FAIL", Assertions - before, watch.Elapsed.TotalSeconds, assertion,
                 name.StartsWith("Fixture", StringComparison.Ordinal) ? "Missing synthetic fixture dependency or provisioning issue" :
                 ex is AssertionFailure ? "Persisted-state assertion failure; investigate expectation versus production behavior" : "Unexpected production operation/constraint error", code));
