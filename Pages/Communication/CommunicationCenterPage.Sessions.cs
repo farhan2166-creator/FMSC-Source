@@ -7,7 +7,7 @@ public sealed partial class CommunicationCenterPage
 {
     private HumanCard SessionsCard(DataGridView grid, bool unfinished)
     {
-        var card = HumanUi.Card(unfinished ? "Unfinished" : "History");
+        var card = HumanUi.Card(unfinished ? "Queue" : "History");
         card.Header.Visible = false;
         grid.Name = unfinished ? "communicationUnfinishedGrid" : "communicationHistoryGrid";
         grid.AutoGenerateColumns = false;
@@ -33,10 +33,10 @@ public sealed partial class CommunicationCenterPage
         grid.Columns["CreatedUtc"]!.DefaultCellStyle.Format = "dd MMM yyyy  HH:mm";
         var search = HumanUi.TextBox(false, 100);
         search.Name = unfinished ? "communicationUnfinishedSearch" : "communicationHistorySearch";
-        search.AccessibleName = search.PlaceholderText = unfinished ? "Search unfinished sessions" : "Search history";
+        search.AccessibleName = search.PlaceholderText = unfinished ? "Search queued batches" : "Search history";
         search.Dock = DockStyle.Fill;
         var open = PageButton(unfinished ? "communicationResumeSession" : "communicationViewHistory",
-            unfinished ? "Resume Session" : "View Message", 155, unfinished ? "Primary" : "Secondary");
+            unfinished ? "Open Batch" : "View Message", 155, unfinished ? "Primary" : "Secondary");
         open.Dock = DockStyle.Fill;
         open.Enabled = false;
         grid.CurrentCellChanged += (_, _) => open.Enabled = grid.CurrentRow?.DataBoundItem is DataRowView;
@@ -68,7 +68,7 @@ public sealed partial class CommunicationCenterPage
     }
 
     private Task NavigateSessionsAsync(bool unfinished) =>
-        RunBusyAsync(unfinished ? "Reading unfinished sessions." : "Reading communication history.",
+        RunBusyAsync(unfinished ? "Reading queued batches." : "Reading communication history.",
             () => ShowSessionsAsync(unfinished), this);
 
     private async Task ShowSessionsAsync(bool unfinished)
@@ -124,7 +124,7 @@ public sealed partial class CommunicationCenterPage
         grid.DataSource = table;
         previous?.Dispose();
         if (!unfinished) return;
-        unfinishedButton.Text = table.Rows.Count == 0 ? "Unfinished" : $"Unfinished ({table.Rows.Count:N0})";
+        unfinishedButton.Text = table.Rows.Count == 0 ? "Queue" : $"Queue ({table.Rows.Count:N0})";
         AppMetrics.FitButtonWidth(unfinishedButton, minWidth: AppScale.Scale(140));
     }
 
@@ -133,7 +133,7 @@ public sealed partial class CommunicationCenterPage
         if (grid.DataSource is not DataTable table) return;
         string query = search.Trim();
         grid.Tag = table.Rows.Count > 0 && query.Length > 0 ? "No sessions match your search."
-            : unfinished ? "You have no unfinished sessions." : "No message sessions yet.";
+            : unfinished ? "No unfinished batches require attention." : "No message sessions yet.";
         if (query.Length == 0) table.DefaultView.RowFilter = "";
         else
         {
