@@ -316,6 +316,12 @@ BEGIN
                 @Zone sysname,@LocalTime datetimeoffset,@LocalDate date,@IsoDay tinyint;
         SELECT @OriginalSenderId=B.CreatedBy FROM msg.Batch B WHERE B.BatchId=@BatchId;
         EXEC dbo.RequirePermission @OriginalSenderId,N''Communication.Send'';
+        IF @Kind=''Staff''
+            EXEC dbo.RequirePermission @OriginalSenderId,N''Staff.View'';
+        ELSE
+            EXEC dbo.RequirePermission @OriginalSenderId,N''Students.View'';
+        IF @Audience IN (''OutstandingFees'',''FeeStudent'',''FeeFamily'')
+            EXEC dbo.RequirePermission @OriginalSenderId,N''Fees.View'';
         SELECT @StartHour=WindowStart,@EndHour=WindowEnd,@Zone=TimeZoneId
         FROM msg.DispatchControl WITH(HOLDLOCK) WHERE ControlId=1;
         SET @LocalTime=(SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE @Zone;
