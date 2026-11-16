@@ -232,17 +232,380 @@ function Write-FmscUninstallStatus {
     param([string]$Message)
     if ($script:StatusText) { $script:StatusText.Text = $Message; [Windows.Forms.Application]::DoEvents() }
 }
-# Remove only our exact per-user backup tasks, never similarly named school jobs.
+# Remove only our exact per-user FMSC background tasks, never similarly named school jobs.
 function Remove-FmscCloudBackupTasks {
     $scheduler = New-Object -ComObject 'Schedule.Service'
     $scheduler.Connect()
     $folder = $scheduler.GetFolder('\')
     foreach ($task in @($folder.GetTasks(1))) {
-        if ($task.Name -notmatch '^FMSC Cloud Backup S-1-5-21-(?:[0-9]+-){3}[0-9]+$') { continue }
+        $backupTask = $task.Name -match '^FMSC Cloud Backup S-1-5-21-(?:[0-9]+-){3}[0-9]+
+        $folder.DeleteTask($task.Name, 0)
+    }
+}
+function Invoke-FmscUninstall {
+    $mutex = New-Object Threading.Mutex($false,'Global\FMSCInstallerActivation')
+    $held = $false
+    try {
+        try { $held = $mutex.WaitOne(0) }
+        catch [Threading.AbandonedMutexException] { $held = $true }
+        if (-not $held) { throw 'FMSC installation or update is running. Uninstall refused.' }
+        Assert-FmscUninstallReady
+        $roots = @(Get-FmscDeletionRoots)
+        foreach ($root in $roots) { Test-FmscNoLinks $root.Path }
+        Test-FmscNoLinks $DataDirectory
+        Write-FmscUninstallStatus 'Checking protected school databases and backups...'
+        $preserved = Join-Path $DataDirectory ('UninstallPreserved\' + (Get-Date -Format 'yyyyMMdd-HHmmss') +
+            '-' + [guid]::NewGuid().ToString('N'))
+        $protected = @(Save-FmscProtectedFiles -Roots $roots -PreservationDirectory $preserved)
+        Assert-FmscProtectedCopies -Roots $roots -Records $protected
+        Remove-FmscCloudBackupTasks
+        # Deleting the tasks prevents new runs; refuse any backup that started meanwhile.
+        Assert-FmscUninstallReady
+        Write-FmscUninstallStatus 'Removing application, updater and temporary files...'
+        foreach ($root in $roots) {
+            Test-FmscNoLinks $root.Path
+            # Recheck the protected files in the current root before each deletion.
+            Assert-FmscProtectedCopies -Roots @($root) -Records @($protected |
+                Where-Object { $_.Source.StartsWith($root.Path.TrimEnd('\')+'\',
+                    [StringComparison]::OrdinalIgnoreCase) })
+            Remove-Item -LiteralPath $root.Path -Recurse -Force -ErrorAction Stop
+        }
+        Write-FmscUninstallStatus 'Removing FMSC logs and unneeded database-folder files...'
+        Remove-FmscNonProtectedContents $DataDirectory
+        Write-FmscUninstallStatus 'Removing FMSC Windows registration and shortcuts...'
+        foreach ($desktop in @(
+            [Environment]::GetFolderPath('Desktop'),
+            [Environment]::GetFolderPath('CommonDesktopDirectory')
+        )) {
+            if (-not [string]::IsNullOrWhiteSpace($desktop)) {
+                $shortcut = Join-Path $desktop 'FMSC SMS.lnk'
+                if (Test-Path -LiteralPath $shortcut -PathType Leaf) {
+                    # Shortcut is an owned FMSC shortcut only when it targets
+                    # our own stable launcher. Never remove a re-pointed shortcut.
+                    $shell = New-Object -ComObject WScript.Shell
+                    if ($shell.CreateShortcut($shortcut).TargetPath -ieq
+                        (Join-Path $UpdaterDirectory 'FMSC.Launcher.exe')) {
+                        Remove-Item -LiteralPath $shortcut -Force -ErrorAction Stop
+                    }
+                }
+            }
+        }
+        if (Test-Path -LiteralPath $UninstallRegistryPath) {
+            Remove-Item -LiteralPath $UninstallRegistryPath -Recurse -Force -ErrorAction Stop
+        }
+        Write-FmscUninstallStatus ('Uninstall complete. School data and archived encrypted recovery material remain in ' + $DataDirectory)
+    } finally {
+        if ($held) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+function Show-FmscUninstallWindow {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [Windows.Forms.Application]::EnableVisualStyles()
+    $form = New-Object Windows.Forms.Form
+    $form.Text = 'FMSC School Management - Uninstaller'
+    $form.ClientSize = [Drawing.Size]::new(680,350)
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.Font = New-Object Drawing.Font('Segoe UI',10)
+    try {
+        $iconFile = Join-Path $AppDirectory 'FMSC.Uninstall.exe'
+        if (Test-Path -LiteralPath $iconFile -PathType Leaf) {
+            $form.Icon = [Drawing.Icon]::ExtractAssociatedIcon($iconFile)
+        }
+    } catch { } # Branding must never affect uninstall safety.
+    $form.BackColor = [Drawing.Color]::FromArgb(246,248,251)
+    $heading = New-Object Windows.Forms.Label
+    $heading.SetBounds(26,24,620,42)
+    $heading.Text = 'Uninstall FMSC School Management'
+    $heading.Font = New-Object Drawing.Font('Segoe UI',17,[Drawing.FontStyle]::Bold)
+    $explanation = New-Object Windows.Forms.Label
+    $explanation.SetBounds(28,85,620,122)
+    $explanation.Text = ('This removes the FMSC application, updater, temporary files, local settings and shortcuts.' +
+        [Environment]::NewLine + [Environment]::NewLine +
+        'School databases and backups are kept; SQL Server LocalDB stays installed.' +
+        [Environment]::NewLine +
+        'Queued encrypted backups and their recovery metadata are archived, not deleted.' +
+        [Environment]::NewLine +
+        'Cloud accounts are disconnected locally. Keep your recovery passphrase separately.')
+    $explanation.ForeColor = [Drawing.Color]::FromArgb(50,60,75)
+    $script:StatusText = New-Object Windows.Forms.Label
+    $script:StatusText.SetBounds(28,219,625,55)
+    $script:StatusText.Text = 'Ready. No files will be deleted until you confirm.'
+    $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(37,99,235)
+    $start = New-Object Windows.Forms.Button
+    $start.SetBounds(427,291,122,37)
+    $start.Text = 'Uninstall'
+    $start.BackColor = [Drawing.Color]::FromArgb(186,45,45)
+    $start.ForeColor = [Drawing.Color]::White
+    $start.FlatStyle = 'Flat'
+    $close = New-Object Windows.Forms.Button
+    $close.SetBounds(560,291,94,37)
+    $close.Text = 'Cancel'
+    $close.Add_Click({ $form.Close() })
+    $start.Add_Click({
+        $answer = [Windows.Forms.MessageBox]::Show($form,
+            'Remove FMSC application and settings from this computer?' +
+            [Environment]::NewLine + [Environment]::NewLine +
+            'The school database and backup files will remain on disk.',
+            'Confirm FMSC uninstall','YesNo','Warning')
+        if ($answer -ne [Windows.Forms.DialogResult]::Yes) { return }
+        $start.Enabled = $false
+        $close.Enabled = $false
+        $form.ControlBox = $false
+        $uninstallSucceeded = $false
+        try {
+            Invoke-FmscUninstall
+            $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(20,132,70)
+            [Windows.Forms.MessageBox]::Show($form,
+                'FMSC has been uninstalled. School data, backups and queued cloud recovery material were retained.' +
+                [Environment]::NewLine + $DataDirectory,
+                'FMSC Uninstall Complete','OK','Information') | Out-Null
+            $uninstallSucceeded = $true
+        } catch {
+            $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(171,57,57)
+            $script:StatusText.Text = 'Uninstall stopped: ' + $_.Exception.Message
+            [Windows.Forms.MessageBox]::Show($form,
+                $_.Exception.Message + [Environment]::NewLine +
+                'Any database and backup files remain protected. Resolve the error before retrying.',
+                'FMSC Uninstall Stopped','OK','Error') | Out-Null
+            $close.Text = 'Close'
+        } finally {
+            $close.Enabled = $true
+            $form.ControlBox = $true
+            # The completion message is the final step of a successful uninstall.
+            # Close the GUI automatically after acknowledgement; keep errors visible.
+            if ($uninstallSucceeded) { $form.Close() }
+        }
+    })
+    $form.Controls.AddRange(@($heading,$explanation,$script:StatusText,$start,$close))
+    [Windows.Forms.Application]::Run($form)
+    $form.Dispose()
+}
+try {
+if (-not (Test-FmscAdministrator)) { throw 'Run FMSC.Uninstall.exe with administrator approval.' }
+if (-not $Execute) {
+    $staged = New-FmscStage
+    $powerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $arguments = '-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "' +
+        $staged + '" -Execute -StagingProcessId ' + $PID
+    Start-Process -FilePath $powerShell -ArgumentList $arguments -WindowStyle Hidden -ErrorAction Stop
+    return
+}
+$expectedStage = [IO.Path]::GetFullPath($StageBase).TrimEnd('\') + '\'
+if (-not $PSScriptRoot.StartsWith($expectedStage,[StringComparison]::OrdinalIgnoreCase) -or
+    (Split-Path $PSScriptRoot -Leaf) -notmatch '^[a-f0-9]{32}$' -or
+    (Split-Path $PSCommandPath -Leaf) -cne 'Uninstall-FMSC.ps1') {
+    throw 'The FMSC uninstall engine is not running from its protected staging directory.'
+}
+Test-FmscNoLinks $PSScriptRoot
+if ($StagingProcessId -gt 0) {
+    Wait-Process -Id $StagingProcessId -Timeout 30 -ErrorAction SilentlyContinue
+}
+try {
+    Show-FmscUninstallWindow
+} finally {
+    # The script has been parsed by PowerShell; the staging copy is disposable.
+    try { Remove-Item -LiteralPath $PSScriptRoot -Recurse -Force -ErrorAction Stop } catch { }
+}
+} catch {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [Windows.Forms.MessageBox]::Show($_.Exception.Message,
+            'FMSC Uninstall Stopped','OK','Error') | Out-Null
+    } catch { }
+    exit 1
+}
+
+        $communicationTask = $task.Name -match '^FMSC Communication Queue S-1-5-21-(?:[0-9]+-){3}[0-9]+
+        $folder.DeleteTask($task.Name, 0)
+    }
+}
+function Invoke-FmscUninstall {
+    $mutex = New-Object Threading.Mutex($false,'Global\FMSCInstallerActivation')
+    $held = $false
+    try {
+        try { $held = $mutex.WaitOne(0) }
+        catch [Threading.AbandonedMutexException] { $held = $true }
+        if (-not $held) { throw 'FMSC installation or update is running. Uninstall refused.' }
+        Assert-FmscUninstallReady
+        $roots = @(Get-FmscDeletionRoots)
+        foreach ($root in $roots) { Test-FmscNoLinks $root.Path }
+        Test-FmscNoLinks $DataDirectory
+        Write-FmscUninstallStatus 'Checking protected school databases and backups...'
+        $preserved = Join-Path $DataDirectory ('UninstallPreserved\' + (Get-Date -Format 'yyyyMMdd-HHmmss') +
+            '-' + [guid]::NewGuid().ToString('N'))
+        $protected = @(Save-FmscProtectedFiles -Roots $roots -PreservationDirectory $preserved)
+        Assert-FmscProtectedCopies -Roots $roots -Records $protected
+        Remove-FmscCloudBackupTasks
+        # Deleting the tasks prevents new runs; refuse any backup that started meanwhile.
+        Assert-FmscUninstallReady
+        Write-FmscUninstallStatus 'Removing application, updater and temporary files...'
+        foreach ($root in $roots) {
+            Test-FmscNoLinks $root.Path
+            # Recheck the protected files in the current root before each deletion.
+            Assert-FmscProtectedCopies -Roots @($root) -Records @($protected |
+                Where-Object { $_.Source.StartsWith($root.Path.TrimEnd('\')+'\',
+                    [StringComparison]::OrdinalIgnoreCase) })
+            Remove-Item -LiteralPath $root.Path -Recurse -Force -ErrorAction Stop
+        }
+        Write-FmscUninstallStatus 'Removing FMSC logs and unneeded database-folder files...'
+        Remove-FmscNonProtectedContents $DataDirectory
+        Write-FmscUninstallStatus 'Removing FMSC Windows registration and shortcuts...'
+        foreach ($desktop in @(
+            [Environment]::GetFolderPath('Desktop'),
+            [Environment]::GetFolderPath('CommonDesktopDirectory')
+        )) {
+            if (-not [string]::IsNullOrWhiteSpace($desktop)) {
+                $shortcut = Join-Path $desktop 'FMSC SMS.lnk'
+                if (Test-Path -LiteralPath $shortcut -PathType Leaf) {
+                    # Shortcut is an owned FMSC shortcut only when it targets
+                    # our own stable launcher. Never remove a re-pointed shortcut.
+                    $shell = New-Object -ComObject WScript.Shell
+                    if ($shell.CreateShortcut($shortcut).TargetPath -ieq
+                        (Join-Path $UpdaterDirectory 'FMSC.Launcher.exe')) {
+                        Remove-Item -LiteralPath $shortcut -Force -ErrorAction Stop
+                    }
+                }
+            }
+        }
+        if (Test-Path -LiteralPath $UninstallRegistryPath) {
+            Remove-Item -LiteralPath $UninstallRegistryPath -Recurse -Force -ErrorAction Stop
+        }
+        Write-FmscUninstallStatus ('Uninstall complete. School data and archived encrypted recovery material remain in ' + $DataDirectory)
+    } finally {
+        if ($held) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+function Show-FmscUninstallWindow {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [Windows.Forms.Application]::EnableVisualStyles()
+    $form = New-Object Windows.Forms.Form
+    $form.Text = 'FMSC School Management - Uninstaller'
+    $form.ClientSize = [Drawing.Size]::new(680,350)
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.Font = New-Object Drawing.Font('Segoe UI',10)
+    try {
+        $iconFile = Join-Path $AppDirectory 'FMSC.Uninstall.exe'
+        if (Test-Path -LiteralPath $iconFile -PathType Leaf) {
+            $form.Icon = [Drawing.Icon]::ExtractAssociatedIcon($iconFile)
+        }
+    } catch { } # Branding must never affect uninstall safety.
+    $form.BackColor = [Drawing.Color]::FromArgb(246,248,251)
+    $heading = New-Object Windows.Forms.Label
+    $heading.SetBounds(26,24,620,42)
+    $heading.Text = 'Uninstall FMSC School Management'
+    $heading.Font = New-Object Drawing.Font('Segoe UI',17,[Drawing.FontStyle]::Bold)
+    $explanation = New-Object Windows.Forms.Label
+    $explanation.SetBounds(28,85,620,122)
+    $explanation.Text = ('This removes the FMSC application, updater, temporary files, local settings and shortcuts.' +
+        [Environment]::NewLine + [Environment]::NewLine +
+        'School databases and backups are kept; SQL Server LocalDB stays installed.' +
+        [Environment]::NewLine +
+        'Queued encrypted backups and their recovery metadata are archived, not deleted.' +
+        [Environment]::NewLine +
+        'Cloud accounts are disconnected locally. Keep your recovery passphrase separately.')
+    $explanation.ForeColor = [Drawing.Color]::FromArgb(50,60,75)
+    $script:StatusText = New-Object Windows.Forms.Label
+    $script:StatusText.SetBounds(28,219,625,55)
+    $script:StatusText.Text = 'Ready. No files will be deleted until you confirm.'
+    $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(37,99,235)
+    $start = New-Object Windows.Forms.Button
+    $start.SetBounds(427,291,122,37)
+    $start.Text = 'Uninstall'
+    $start.BackColor = [Drawing.Color]::FromArgb(186,45,45)
+    $start.ForeColor = [Drawing.Color]::White
+    $start.FlatStyle = 'Flat'
+    $close = New-Object Windows.Forms.Button
+    $close.SetBounds(560,291,94,37)
+    $close.Text = 'Cancel'
+    $close.Add_Click({ $form.Close() })
+    $start.Add_Click({
+        $answer = [Windows.Forms.MessageBox]::Show($form,
+            'Remove FMSC application and settings from this computer?' +
+            [Environment]::NewLine + [Environment]::NewLine +
+            'The school database and backup files will remain on disk.',
+            'Confirm FMSC uninstall','YesNo','Warning')
+        if ($answer -ne [Windows.Forms.DialogResult]::Yes) { return }
+        $start.Enabled = $false
+        $close.Enabled = $false
+        $form.ControlBox = $false
+        $uninstallSucceeded = $false
+        try {
+            Invoke-FmscUninstall
+            $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(20,132,70)
+            [Windows.Forms.MessageBox]::Show($form,
+                'FMSC has been uninstalled. School data, backups and queued cloud recovery material were retained.' +
+                [Environment]::NewLine + $DataDirectory,
+                'FMSC Uninstall Complete','OK','Information') | Out-Null
+            $uninstallSucceeded = $true
+        } catch {
+            $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(171,57,57)
+            $script:StatusText.Text = 'Uninstall stopped: ' + $_.Exception.Message
+            [Windows.Forms.MessageBox]::Show($form,
+                $_.Exception.Message + [Environment]::NewLine +
+                'Any database and backup files remain protected. Resolve the error before retrying.',
+                'FMSC Uninstall Stopped','OK','Error') | Out-Null
+            $close.Text = 'Close'
+        } finally {
+            $close.Enabled = $true
+            $form.ControlBox = $true
+            # The completion message is the final step of a successful uninstall.
+            # Close the GUI automatically after acknowledgement; keep errors visible.
+            if ($uninstallSucceeded) { $form.Close() }
+        }
+    })
+    $form.Controls.AddRange(@($heading,$explanation,$script:StatusText,$start,$close))
+    [Windows.Forms.Application]::Run($form)
+    $form.Dispose()
+}
+try {
+if (-not (Test-FmscAdministrator)) { throw 'Run FMSC.Uninstall.exe with administrator approval.' }
+if (-not $Execute) {
+    $staged = New-FmscStage
+    $powerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $arguments = '-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "' +
+        $staged + '" -Execute -StagingProcessId ' + $PID
+    Start-Process -FilePath $powerShell -ArgumentList $arguments -WindowStyle Hidden -ErrorAction Stop
+    return
+}
+$expectedStage = [IO.Path]::GetFullPath($StageBase).TrimEnd('\') + '\'
+if (-not $PSScriptRoot.StartsWith($expectedStage,[StringComparison]::OrdinalIgnoreCase) -or
+    (Split-Path $PSScriptRoot -Leaf) -notmatch '^[a-f0-9]{32}$' -or
+    (Split-Path $PSCommandPath -Leaf) -cne 'Uninstall-FMSC.ps1') {
+    throw 'The FMSC uninstall engine is not running from its protected staging directory.'
+}
+Test-FmscNoLinks $PSScriptRoot
+if ($StagingProcessId -gt 0) {
+    Wait-Process -Id $StagingProcessId -Timeout 30 -ErrorAction SilentlyContinue
+}
+try {
+    Show-FmscUninstallWindow
+} finally {
+    # The script has been parsed by PowerShell; the staging copy is disposable.
+    try { Remove-Item -LiteralPath $PSScriptRoot -Recurse -Force -ErrorAction Stop } catch { }
+}
+} catch {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [Windows.Forms.MessageBox]::Show($_.Exception.Message,
+            'FMSC Uninstall Stopped','OK','Error') | Out-Null
+    } catch { }
+    exit 1
+}
+
+        if (-not ($backupTask -or $communicationTask)) { continue }
+        $expected = if ($backupTask) { '--cloud-backup-scheduled' } else { '--communication-queue-worker' }
         $actions = @($task.Definition.Actions)
         if ($actions.Count -ne 1 -or $actions[0].Type -ne 0 -or
             $actions[0].Path.Trim('"') -ine (Join-Path $AppDirectory 'FMSC_SMS.exe') -or
-            $actions[0].Arguments.Trim() -cne '--cloud-backup-scheduled') {
+            $actions[0].Arguments.Trim() -cne $expected) {
             throw 'An FMSC-named scheduled task has an unexpected action. Uninstall stopped for review.'
         }
         $folder.DeleteTask($task.Name, 0)
