@@ -256,6 +256,7 @@ internal static class CommunicationApiSqlChecks
             Sql.P("@Date",holidayDate))==0,
             "Removing a holiday does not change school messages or any financial records.");
         await CommunicationAutomationSqlChecks.Run(f,r);
+        await CommunicationFeeReviewSqlChecks.Run(f,r);
 
     }
 }
