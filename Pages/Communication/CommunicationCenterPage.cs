@@ -613,15 +613,38 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     {
         if (!CurrentUser.HasPermission("Communication.Send") || methodChanged) return;
         int actor = CurrentUser.UserId;
+        var preferredTask = CommunicationQueuePolicyStore.ReadPreferredMethodAsync();
         var readiness = await Task.WhenAll(
             operations.ReadManualMode(),
             CommunicationApiBatchStore.IsReadyAsync("WhatsApp", "MetaCloud"),
             CommunicationApiBatchStore.IsReadyAsync("Sms", "Twilio"));
+        using var preferred = await preferredTask;
         if (IsDisposed || actor != CurrentUser.UserId || methodChanged || step == 1) return;
-        // Choosing Meta replaces the text with an approved template. Preserve a draft already being written.
-        int ready = Array.IndexOf(readiness, true);
-        if (readiness.Count(value => value) == 1 && (ready != 1 || message.Text.Length == 0))
-            deliveryMethod.SelectedIndex = ready;
+        // A school-wide choice is the initial suggestion, never a forced
+        // recipient-specific fallback. Explicit user changes always win.
+        int selected = -1;
+        if (preferred.Rows.Count == 1)
+        {
+            string channel = Convert.ToString(preferred.Rows[0]["PreferredChannel"]) ?? "";
+            string provider = Convert.ToString(preferred.Rows[0]["PreferredProviderCode"]) ?? "";
+            selected = (channel, provider) switch
+            {
+                ("WhatsApp", "WhatsAppBusinessManual") => 0,
+                ("WhatsApp", "MetaCloud") => 1,
+                ("Sms", "Twilio") => 2,
+                _ => -1
+            };
+        }
+        if (selected >= 0 && readiness[selected] && (selected != 1 || message.Text.Length == 0))
+            deliveryMethod.SelectedIndex = selected;
+        else if (readiness.Count(value => value) == 1)
+        {
+            // Selecting the sole available method still requires a final
+            // review and charge disclosure. Never replace an edited draft.
+            int only = Array.IndexOf(readiness, true);
+            if (only != 1 || message.Text.Length == 0)
+                deliveryMethod.SelectedIndex = only;
+        }
     }
 
     private bool ValidateDraft()
