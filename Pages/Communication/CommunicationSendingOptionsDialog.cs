@@ -315,7 +315,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(height)));
         content.Controls.Add(new Label
         {
-            Text = "Automation rules are Off. Activation is blocked in this development build until event capture, review and deduplication pass acceptance.",
+            Text = "Admission, payment and birthday events can prepare suggestions for staff review. All events start Off; automatic sending remains disabled.",
             Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText, AutoSize = false
         }, 0, 0);
         var rule = Labelled("School event", automationEvent);
@@ -332,15 +332,20 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         {
             if (automationEvent.SelectedItem is not AutomationChoice selected)
                 throw new InvalidOperationException("Choose an automation event.");
-            if (automationMode.SelectedIndex != 0)
+            bool review=automationMode.SelectedIndex==1;
+            if(automationMode.SelectedIndex==2 ||
+               (review && selected.Code is not ("Admission" or "PaymentReceived" or "Birthday")))
             {
-                automationFeedback.Text = "Automatic event generation is not active in this development build. Existing rules remain Off.";
+                automationFeedback.Text="Only admission, payment and birthday suggestions are currently available for review. Automatic sending stays disabled.";
                 return;
             }
-            await CommunicationQueuePolicyStore.SaveAutomationModeAsync(selected.Code, "Off");
+            await CommunicationQueuePolicyStore.SaveAutomationModeAsync(
+                selected.Code,review ? "Review" : "Off");
             Changed = true;
             await RefreshAutomationAsync();
-            automationFeedback.Text = "Automation preference saved.";
+            automationFeedback.Text=review
+                ? "Review suggestions enabled. Open Queue → Event Suggestions to prepare messages; nothing sends automatically."
+                : "This event's suggestions are paused. No automatic messages will be sent.";
         });
         page.Controls.Add(content);
         return page;
