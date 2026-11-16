@@ -11,6 +11,8 @@ internal static class AdmissionSiblingSyncData
     internal static readonly Field AlternatePhone = new("AlternateContactNumber", "Alternate Phone", SchemaLengths.AlternateContactNumber, Phone: true);
     internal static readonly Field FatherName = new("FatherName", "Father Name", SchemaLengths.StudentFatherName, true);
     internal static readonly Field PreviousSchool = new("PreviousSchool", "Previous School", SchemaLengths.StudentPreviousSchool);
+    internal static readonly Field FatherOccupation = new("FatherOccupation", "Father Occupation", SchemaLengths.StudentFatherOccupation);
+    internal static readonly Field CasteTribe = new("CasteTribe", "Caste / Tribe", SchemaLengths.StudentCasteTribe);
     internal sealed record Row(int AdmissionId, string AdmissionNumber, string StudentName, string OldValue);
     internal sealed record Preview(int Actor, int Anchor, int FamilyId, Field Field, string NewValue, IReadOnlyList<Row> Rows)
     {
@@ -25,6 +27,7 @@ internal static class AdmissionSiblingSyncData
         {
             "Address" => Address, "ContactNumber" => PrimaryPhone, "AlternateContactNumber" => AlternatePhone,
             "FatherName" => FatherName, "PreviousSchool" => PreviousSchool,
+            "FatherOccupation" => FatherOccupation, "CasteTribe" => CasteTribe,
             _ => throw new ArgumentException("Unsupported sibling field.")
         };
         if (field != known) throw new ArgumentException("Unsupported sibling field definition.");
