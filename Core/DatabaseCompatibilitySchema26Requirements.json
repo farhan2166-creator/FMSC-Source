@@ -79,6 +79,21 @@
       "schema": "msg",
       "name": "RoutineFamilyDailyEligible",
       "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "TemplateRevision",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadTemplateRevisions",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "RestoreTemplateRevision",
+      "type": "P"
     }
   ],
   "checkConstraints": [
@@ -111,6 +126,16 @@
       "schema": "msg",
       "objectName": "BatchTakeover",
       "name": "CK_MsgBatchTakeoverReason"
+    },
+    {
+      "schema": "msg",
+      "objectName": "TemplateRevision",
+      "name": "CK_MsgTemplateRevisionOperation"
+    },
+    {
+      "schema": "msg",
+      "objectName": "TemplateRevision",
+      "name": "CK_MsgTemplateRevisionNumber"
     }
   ],
   "columns": [
@@ -145,6 +170,12 @@
       "objectName": "BatchTakeover",
       "name": "PK_MsgBatchTakeover",
       "keys": "TakeoverId"
+    },
+    {
+      "schema": "msg",
+      "objectName": "TemplateRevision",
+      "name": "UQ_MsgTemplateRevisionNumber",
+      "keys": "TemplateId,RevisionNumber"
     }
   ]
 }

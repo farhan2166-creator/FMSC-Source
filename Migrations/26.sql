@@ -38,6 +38,81 @@ EXEC(N'ALTER TABLE msg.Template ADD CONSTRAINT CK_MsgTemplateLanguageCode
 -- historical compatibility manifests. Urdu editions use a distinct name
 -- (for example "Fee notice (Urdu)") and carry LanguageCode='ur'.
 
+
+-- Preserve each school-approved template revision independently of current
+-- editable content. A restore creates a NEW version, never erases the audit.
+CREATE TABLE msg.TemplateRevision(
+ RevisionId bigint IDENTITY(1,1) NOT NULL
+  CONSTRAINT PK_MsgTemplateRevision PRIMARY KEY,
+ TemplateId int NOT NULL CONSTRAINT FK_MsgTemplateRevisionTemplate
+  REFERENCES msg.Template(TemplateId),
+ RevisionNumber int NOT NULL,
+ Name nvarchar(100) NOT NULL,
+ Channel varchar(10) NOT NULL,
+ Purpose varchar(20) NOT NULL,
+ LanguageCode varchar(2) NOT NULL,
+ Body nvarchar(1600) NOT NULL,
+ Active bit NOT NULL,
+ Operation varchar(12) NOT NULL,
+ ChangedBy int NULL,
+ ChangedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgTemplateRevisionUtc
+  DEFAULT SYSUTCDATETIME(),
+ CONSTRAINT UQ_MsgTemplateRevisionNumber UNIQUE(TemplateId,RevisionNumber),
+ CONSTRAINT CK_MsgTemplateRevisionOperation
+  CHECK(Operation IN ('Baseline','Created','Edited','Restored')),
+ CONSTRAINT CK_MsgTemplateRevisionNumber CHECK(RevisionNumber>=1)
+);
+INSERT msg.TemplateRevision
+ (TemplateId,RevisionNumber,Name,Channel,Purpose,LanguageCode,Body,Active,
+  Operation,ChangedBy,ChangedUtc)
+SELECT TemplateId,1,Name,Channel,Purpose,LanguageCode,Body,Active,
+ 'Baseline',UpdatedBy,UpdatedUtc
+FROM msg.Template;
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadTemplateRevisions
+ @UserId int,@TemplateId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @TemplateId<=0 OR NOT EXISTS(SELECT 1 FROM msg.Template WHERE TemplateId=@TemplateId)
+   THROW 51295,''Choose a saved school template to view its versions.'',1;
+ SELECT RevisionNumber,Name,Channel,Purpose,LanguageCode,Body,Active,
+        Operation,ChangedBy,ChangedUtc
+ FROM msg.TemplateRevision
+ WHERE TemplateId=@TemplateId ORDER BY RevisionNumber DESC;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.RestoreTemplateRevision
+ @UserId int,@TemplateId int,@RevisionNumber int
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @TemplateId<=0 OR @RevisionNumber<=0
+   THROW 51295,''Choose a saved template and an existing version.'',1;
+ BEGIN TRANSACTION;
+ IF NOT EXISTS(SELECT 1 FROM msg.Template WITH(UPDLOCK,HOLDLOCK)
+      WHERE TemplateId=@TemplateId)
+   THROW 51295,''This template no longer exists.'',1;
+ DECLARE @Name nvarchar(100),@Channel varchar(10),@Purpose varchar(20),
+         @LanguageCode varchar(2),@Body nvarchar(1600),@Active bit;
+ SELECT @Name=Name,@Channel=Channel,@Purpose=Purpose,
+        @LanguageCode=LanguageCode,@Body=Body,@Active=Active
+ FROM msg.TemplateRevision
+ WHERE TemplateId=@TemplateId AND RevisionNumber=@RevisionNumber;
+ IF @Name IS NULL THROW 51295,''The chosen template version no longer exists.'',1;
+ UPDATE msg.Template
+ SET Name=@Name,Channel=@Channel,Purpose=@Purpose,LanguageCode=@LanguageCode,
+     Body=@Body,Active=@Active,UpdatedBy=@UserId,UpdatedUtc=SYSUTCDATETIME()
+ WHERE TemplateId=@TemplateId;
+ INSERT msg.TemplateRevision
+  (TemplateId,RevisionNumber,Name,Channel,Purpose,LanguageCode,Body,
+   Active,Operation,ChangedBy)
+ SELECT @TemplateId,MAX(RevisionNumber)+1,@Name,@Channel,@Purpose,
+        @LanguageCode,@Body,@Active,''Restored'',@UserId
+ FROM msg.TemplateRevision WHERE TemplateId=@TemplateId;
+ COMMIT TRANSACTION;
+END');
+
 EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadMessageLanguage @UserId int
 AS BEGIN
  SET NOCOUNT ON;
@@ -84,21 +159,37 @@ AS BEGIN
    OR LEN(LTRIM(RTRIM(ISNULL(@Body,N''''))))=0 OR LEN(@Body)>1600
    OR @Body LIKE N''%{{%'' OR @Body LIKE N''%}}%''
    THROW 51089,''Choose a valid school template, language and body.'',1;
+ BEGIN TRANSACTION;
+ DECLARE @SavedTemplateId int,@Operation varchar(12);
  IF @TemplateId=0
  BEGIN
    INSERT msg.Template(Name,Channel,Purpose,Body,Active,UpdatedBy,LanguageCode)
    VALUES(@Name,@Channel,@Purpose,@Body,@Active,@UserId,@LanguageCode);
-   SELECT CONVERT(int,SCOPE_IDENTITY()) TemplateId;
+   SET @SavedTemplateId=CONVERT(int,SCOPE_IDENTITY());
+   SET @Operation=''Created'';
  END
  ELSE
  BEGIN
+   IF NOT EXISTS(SELECT 1 FROM msg.Template WITH(UPDLOCK,HOLDLOCK)
+        WHERE TemplateId=@TemplateId)
+     THROW 51089,''The template no longer exists.'',1;
    UPDATE msg.Template SET Name=@Name,Channel=@Channel,Purpose=@Purpose,
      Body=@Body,Active=@Active,LanguageCode=@LanguageCode,UpdatedBy=@UserId,
      UpdatedUtc=SYSUTCDATETIME()
    WHERE TemplateId=@TemplateId;
    IF @@ROWCOUNT<>1 THROW 51089,''The template no longer exists.'',1;
-   SELECT @TemplateId TemplateId;
+   SET @SavedTemplateId=@TemplateId;
+   SET @Operation=''Edited'';
  END;
+ INSERT msg.TemplateRevision
+  (TemplateId,RevisionNumber,Name,Channel,Purpose,LanguageCode,Body,
+   Active,Operation,ChangedBy)
+ SELECT T.TemplateId,COALESCE((SELECT MAX(R.RevisionNumber)
+   FROM msg.TemplateRevision R WHERE R.TemplateId=T.TemplateId),0)+1,
+   T.Name,T.Channel,T.Purpose,T.LanguageCode,T.Body,T.Active,@Operation,@UserId
+ FROM msg.Template T WHERE T.TemplateId=@SavedTemplateId;
+ COMMIT TRANSACTION;
+ SELECT @SavedTemplateId TemplateId;
 END');
 
 EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveFeeReminderPolicy

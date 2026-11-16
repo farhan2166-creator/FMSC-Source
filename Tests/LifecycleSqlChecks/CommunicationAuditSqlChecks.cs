@@ -161,6 +161,38 @@ internal static class CommunicationAuditSqlChecks
         r.Check(!Sql.Proc("msg.ReadComposeTemplates", Sql.P("@UserId", f.Admin)).AsEnumerable().Any(row => Convert.ToInt32(row["TemplateId"]) == templateId)
             && Sql.Proc("msg.ReadTemplates", Sql.P("@UserId", f.Admin)).AsEnumerable().Any(row => Convert.ToInt32(row["TemplateId"]) == templateId && (string)row["Body"] == "New synthetic notice"),
             "Edited templates persist their new content and inactive templates leave the sender list");
+        var revisions=Sql.Proc("msg.ReadTemplateRevisions",Sql.P("@UserId",f.Admin),
+            Sql.P("@TemplateId",templateId));
+        r.Check(revisions.Rows.Count==2
+            && Convert.ToInt32(revisions.Rows[0]["RevisionNumber"])==2
+            && Convert.ToString(revisions.Rows[0]["Operation"])=="Edited"
+            && Convert.ToString(revisions.Rows[0]["Body"])=="New synthetic notice"
+            && Convert.ToString(revisions.Rows[1]["Operation"])=="Created"
+            && Convert.ToString(revisions.Rows[1]["Body"])=="Old synthetic notice",
+            "Every template save records an immutable, ordered operator version.");
+        Sql.Proc("msg.RestoreTemplateRevision",Sql.P("@UserId",f.Admin),
+            Sql.P("@TemplateId",templateId),Sql.P("@RevisionNumber",1));
+        var restored=Sql.Proc("msg.ReadTemplateRevisions",Sql.P("@UserId",f.Admin),
+            Sql.P("@TemplateId",templateId));
+        r.Check(restored.Rows.Count==3
+            && Convert.ToInt32(restored.Rows[0]["RevisionNumber"])==3
+            && Convert.ToString(restored.Rows[0]["Operation"])=="Restored"
+            && Convert.ToString(restored.Rows[0]["Body"])=="Old synthetic notice"
+            && Sql.Count("SELECT COUNT(*) FROM msg.Template WHERE TemplateId=@Id AND Body=N'Old synthetic notice' AND Active=1",
+                Sql.P("@Id",templateId))==1,
+            "Restoring a historical template creates an audited new version and reactivates its original content.");
+        bool rejectedVersion=false;
+        try
+        {
+            Sql.Proc("msg.RestoreTemplateRevision",Sql.P("@UserId",f.Admin),
+                Sql.P("@TemplateId",templateId),Sql.P("@RevisionNumber",99999));
+        }
+        catch(SqlException) { rejectedVersion=true; }
+        r.Check(rejectedVersion
+            && Sql.Count("SELECT COUNT(*) FROM msg.TemplateRevision WHERE TemplateId=@Id",
+                Sql.P("@Id",templateId))==3,
+            "A missing version cannot change the template or append false history.");
+
         var one = Confirm(fees with { StudentId = b.Id }, single);
         r.Check(Convert.ToInt64(one.Rows[0]["RecipientCount"]) == 1, "SQL confirms exactly the single-student fee audience reviewed in Collection.");
         Guid key = Guid.NewGuid();

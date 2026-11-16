@@ -270,6 +270,26 @@ internal static class CommunicationManagementStore
             DatabaseHelper.P("@Channel", channel));
     }
 
+    internal static Task<DataTable> ReadTemplateRevisionsAsync(int templateId)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Template version history requires communication administrator access.");
+        if (templateId <= 0) throw new ArgumentOutOfRangeException(nameof(templateId));
+        return DatabaseHelper.QueryUserAsync("msg.ReadTemplateRevisions",
+            DatabaseHelper.Int("@TemplateId", templateId));
+    }
+
+    internal static Task RestoreTemplateRevisionAsync(int templateId, int revisionNumber)
+    {
+        if (!CurrentUser.HasPermission("Communication.Configure"))
+            throw new UnauthorizedAccessException("Restoring a template requires communication administrator access.");
+        if (templateId <= 0 || revisionNumber <= 0)
+            throw new ArgumentException("Choose an existing template version to restore.");
+        return DatabaseHelper.ExecuteUserAsync("msg.RestoreTemplateRevision",
+            DatabaseHelper.Int("@TemplateId", templateId),
+            DatabaseHelper.Int("@RevisionNumber", revisionNumber));
+    }
+
     internal static async Task SaveTemplateAsync(
         int templateId, string name, string channel, string purpose, string body, bool active, string languageCode = "en")
     {

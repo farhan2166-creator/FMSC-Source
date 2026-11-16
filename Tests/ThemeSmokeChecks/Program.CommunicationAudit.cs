@@ -71,6 +71,10 @@ internal static partial class Program
                 && CommunicationPreparedMessages.BuiltInChoices.Any(item =>
                     item.LanguageCode == "en" && item.Name == "New admission welcome"),
                 "English and Urdu prepared messages are separate curated versions.");
+            using (var versions = new CommunicationTemplateVersionsDialog(1, "Synthetic template"))
+                Check(versions.Controls.Find("communicationTemplateVersionGrid", true).Length == 1
+                    && versions.Controls.Find("communicationRestoreTemplateVersion", true).Length == 1,
+                    "Template history is a separate administrator-only audit view with explicit restore.");
             using (var languageComposer = new CommunicationCenterPage(false))
             {
                 var languageInput = Field<ModernComboBox>(languageComposer, "languageChoice");

@@ -14,6 +14,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
     private readonly ModernTextBox preview = HumanUi.TextBox(true, 1600);
     private readonly ModernButton edit = new() { Text = CustomizeTemplateText, Enabled = false };
     private readonly ModernButton add = new() { Text = "New Template…", ThemeRole = "Primary", Enabled = false };
+    private readonly ModernButton versions = new() { Name = "communicationTemplateVersions", Text = "Version History…", Enabled = false };
     private readonly Label feedback = new() { Dock = DockStyle.Fill, AutoEllipsis = true };
     private readonly Func<Task<DataTable>> read;
     private readonly TableLayoutPanel layout;
@@ -75,7 +76,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         preview.ScrollBars = ScrollBars.Vertical;
         var close = new ModernButton { Text = "Close", DialogResult = DialogResult.Cancel };
         CancelButton = close;
-        var buttons = HumanUi.DialogButtons(add, edit, close);
+        var buttons = HumanUi.DialogButtons(add, edit, versions, close);
         buttons.Dock = DockStyle.Fill;
         layout = new TableLayoutPanel
         {
@@ -116,6 +117,11 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             if (templates.CurrentRow?.DataBoundItem is DataRowView row) await RunAsync(() => EditAsync(row.Row));
         };
         add.Click += async (_, _) => await RunAsync(() => EditAsync(null));
+        versions.Click += async (_, _) =>
+        {
+            if (templates.CurrentRow?.DataBoundItem is DataRowView row)
+                await RunAsync(() => VersionsAsync(row.Row));
+        };
         Shown += async (_, _) => await RunAsync(RefreshAsync);
         FormClosing += (_, e) => { if (busy) { e.Cancel = true; DialogResult = DialogResult.None; } };
         FormClosed += (_, _) => (templates.DataSource as DataTable)?.Dispose();
@@ -126,6 +132,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         var row = (templates.CurrentRow?.DataBoundItem as DataRowView)?.Row;
         preview.Text = row?.Field<string>("Body") ?? "";
         edit.Enabled = !busy && row is not null;
+        versions.Enabled = !busy && row?.Field<int>("TemplateId") > 0;
         edit.Text = row?.Field<int>("TemplateId") > 0 ? EditTemplateText : CustomizeTemplateText;
     }
 
@@ -223,6 +230,19 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             dialog.Channel, dialog.Purpose, dialog.Body, dialog.Active, dialog.LanguageCode);
         Changed = true;
         await RefreshAsync();
+    }
+
+    private async Task VersionsAsync(DataRow row)
+    {
+        int id = row.Field<int>("TemplateId");
+        if (id <= 0) return;
+        using var versionsDialog = new CommunicationTemplateVersionsDialog(id,
+            row.Field<string>("Name") ?? "School template");
+        if (versionsDialog.ShowDialog(this) == DialogResult.OK && versionsDialog.Restored)
+        {
+            Changed = true;
+            await RefreshAsync();
+        }
     }
 
     private async Task RunAsync(Func<Task> action)
