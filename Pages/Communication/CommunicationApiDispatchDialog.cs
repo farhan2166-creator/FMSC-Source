@@ -23,6 +23,7 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
     private readonly ModernButton check=new() {Text="Check SMS Status",ThemeRole="Secondary",Width=AppScale.Scale(180),Height=AppMetrics.ButtonHeight,Enabled=false};
     private readonly ModernButton retry=new() {Text="Approve Retry",ThemeRole="Secondary",Width=AppScale.Scale(150),Height=AppMetrics.ButtonHeight,Enabled=false};
     private readonly ModernButton cancelPending=new() {Text="Cancel Pending",ThemeRole="Secondary",Width=AppScale.Scale(165),Height=AppMetrics.ButtonHeight,Enabled=false};
+    private readonly ModernButton releaseHold=new() {Text="Approve Resumption",ThemeRole="Secondary",Width=AppScale.Scale(190),Height=AppMetrics.ButtonHeight,Enabled=false};
     private readonly ModernButton close=new() {Text="Close",ThemeRole="Secondary",Width=AppScale.Scale(100),Height=AppMetrics.ButtonHeight};
     private CancellationTokenSource? cancellation;
     private bool busy,closeRequested,scheduleBlocked;
@@ -40,6 +41,17 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         foreach(var (field,title,width) in new[]{("RecipientName","School record",210),("Destination","Number ending",110),("State","Status",105),("OutcomeDetail","Details",230)})
             grid.Columns.Add(new DataGridViewTextBoxColumn {Name=field,DataPropertyName=field,HeaderText=title,
                 MinimumWidth=width,AutoSizeMode=DataGridViewAutoSizeColumnMode.Fill,SortMode=DataGridViewColumnSortMode.NotSortable});
+        releaseHold.Click+=async(_,_)=>await RunAsync(async()=>{
+            if(!CurrentUser.IsAdministrator || !CurrentUser.HasPermission("Communication.Configure"))
+                throw new UnauthorizedAccessException("Administrator approval is required.");
+            if(ModernMessageDialog.Show(this,
+                "Approve this reviewed scheduled batch for sending under current eligibility, provider and school limits?",
+                "Approve Resumption",MessageBoxButtons.YesNo,MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
+            await DatabaseHelper.ExecuteUserAsync("msg.ReleaseScheduledHold",
+                DatabaseHelper.P("@BatchId",batch));
+            await RefreshAsync();
+        });
         cancelPending.Click+=async(_,_)=>await RunAsync(async()=>{
             if(ModernMessageDialog.Show(this,"Cancel all remaining Pending messages in this batch? Submitted or uncertain attempts keep their existing status.",
                 "Cancel Pending",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
@@ -47,7 +59,7 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
             await RefreshAsync();
         });
         var buttons=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false,AutoScroll=true};
-        buttons.Controls.AddRange(new Control[]{send,stop,check,cancelPending,close});
+        buttons.Controls.AddRange(new Control[]{send,stop,check,releaseHold,cancelPending,close});
         var retryRow=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=2,RowCount=1};
         retryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));retryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,AppScale.Scale(170)));
         retryRow.Controls.Add(HumanUi.Field("Reason (only a definitively failed message can be approved for retry)",reason),0,0);
@@ -207,6 +219,9 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         cancelPending.Enabled=!busy && Rows.Any(r=>Convert.ToString(r["State"])=="Pending");
         check.Enabled=!busy && selected is not null && Convert.ToString(selected["ProviderCode"])=="Twilio"
             && !selected.IsNull("ProviderMessageId") && Convert.ToString(selected["State"]) is "Accepted" or "Submitted" or "Unknown";
+        releaseHold.Enabled=!busy && CurrentUser.IsAdministrator &&
+            Rows.Any(r=>r.Table.Columns.Contains("HoldForReview") &&
+                !r.IsNull("HoldForReview") && Convert.ToBoolean(r["HoldForReview"]));
         retry.Enabled=reason.Enabled=!busy && selected is not null && Convert.ToString(selected["State"])=="Failed";
     }
 }
