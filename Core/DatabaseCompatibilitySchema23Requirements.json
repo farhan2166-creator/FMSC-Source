@@ -114,6 +114,46 @@
       "schema": "msg",
       "name": "TR_ManualHandoff_ScheduleGuard",
       "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "WorkerAuthorization",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "RegisterWorker",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ActivateWorker",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "DisableBackgroundSending",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "RequireWorker",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadWorkerIdentity",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadReadyWorkerRecipients",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_Attempt_DailyAndRateLimits",
+      "type": "TR"
     }
   ],
   "columns": [

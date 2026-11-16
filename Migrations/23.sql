@@ -367,5 +367,180 @@ BEGIN
 END');
 
 
+-- Credentials are DPAPI-protected per Windows account in the user profile.
+-- SQL stores only a hash of the 32-byte bearer secret, bound to a registered device
+-- identity and the registering FMSC user's live credential version.
+CREATE TABLE msg.WorkerAuthorization(
+ WorkerId uniqueidentifier NOT NULL CONSTRAINT PK_MsgWorkerAuthorization PRIMARY KEY,
+ TokenHash binary(32) NOT NULL,
+ WindowsProof binary(32) NOT NULL,
+ DeviceProof binary(32) NOT NULL,
+ ActorId int NOT NULL,
+ CredentialProof binary(32) NOT NULL,
+ Enabled bit NOT NULL CONSTRAINT DF_MsgWorkerEnabled DEFAULT(0),
+ RegisteredUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgWorkerCreated DEFAULT(SYSUTCDATETIME()),
+ RegisteredBy int NOT NULL,
+ LastUsedUtc datetime2(3) NULL,
+ CONSTRAINT FK_MsgWorkerUser FOREIGN KEY(ActorId) REFERENCES dbo.Users(UserId),
+ CONSTRAINT FK_MsgWorkerRegistrar FOREIGN KEY(RegisteredBy) REFERENCES dbo.Users(UserId)
+);
+CREATE UNIQUE INDEX UX_MsgWorkerSingleDevice ON msg.WorkerAuthorization(WindowsProof,DeviceProof) WHERE Enabled=1;
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.RegisterWorker
+ @UserId int,@WorkerId uniqueidentifier,@Token varbinary(32),
+ @WindowsProof binary(32),@DeviceProof binary(32)
+AS
+BEGIN
+ SET NOCOUNT ON;SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''System.Administration'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ IF @WorkerId IS NULL OR @Token IS NULL OR DATALENGTH(@Token)<>32
+  OR @WindowsProof IS NULL OR @DeviceProof IS NULL OR
+  @WindowsProof=0x0 OR @DeviceProof=0x0
+  THROW 51282,''A valid authorized Windows user and device are required.'',1;
+ DECLARE @CredentialProof binary(32)=(
+  SELECT HASHBYTES(''SHA2_256'',U.PasswordHash+U.PasswordSalt)
+  FROM dbo.Users U WHERE U.UserId=@UserId AND U.MustChangePassword=0
+    AND U.PasswordHash IS NOT NULL AND U.PasswordSalt IS NOT NULL);
+ IF @CredentialProof IS NULL THROW 51282,''Sign in with an active FMSC administrator account.'',1;
+ BEGIN TRANSACTION;
+ UPDATE msg.WorkerAuthorization SET Enabled=0
+  WHERE WindowsProof=@WindowsProof AND DeviceProof=@DeviceProof;
+ INSERT msg.WorkerAuthorization(WorkerId,TokenHash,WindowsProof,DeviceProof,
+    ActorId,CredentialProof,Enabled,RegisteredBy)
+ VALUES(@WorkerId,HASHBYTES(''SHA2_256'',@Token),@WindowsProof,@DeviceProof,
+    @UserId,@CredentialProof,0,@UserId);
+ COMMIT TRANSACTION;
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ActivateWorker
+ @UserId int,@WorkerId uniqueidentifier
+AS
+BEGIN
+ SET NOCOUNT ON;SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''System.Administration'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF NOT EXISTS(SELECT 1 FROM msg.WorkerAuthorization
+   WHERE WorkerId=@WorkerId AND ActorId=@UserId AND Enabled=0)
+  THROW 51283,''The communication worker requires a registered authorization.'',1;
+ BEGIN TRANSACTION;
+ UPDATE msg.WorkerAuthorization SET Enabled=1 WHERE WorkerId=@WorkerId AND ActorId=@UserId;
+ UPDATE msg.DispatchSettings SET UnattendedEnabled=1,UpdatedUtc=SYSUTCDATETIME(),UpdatedBy=@UserId WHERE Id=1;
+ COMMIT TRANSACTION;
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.DisableBackgroundSending @UserId int
+AS
+BEGIN
+ SET NOCOUNT ON;SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''System.Administration'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ BEGIN TRANSACTION;
+ UPDATE msg.DispatchSettings SET UnattendedEnabled=0,UpdatedBy=@UserId,UpdatedUtc=SYSUTCDATETIME() WHERE Id=1;
+ UPDATE msg.WorkerAuthorization SET Enabled=0;
+ UPDATE msg.AutomationRule SET Mode=''Off'',UpdatedBy=@UserId,UpdatedUtc=SYSUTCDATETIME()
+  WHERE Mode<>''Off'';
+ COMMIT TRANSACTION;
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.RequireWorker
+ @WorkerId uniqueidentifier,@Token varbinary(32),
+ @WindowsProof binary(32),@DeviceProof binary(32),@ActorId int OUTPUT
+AS
+BEGIN
+ SET NOCOUNT ON;
+ SET @ActorId=NULL;
+ IF @Token IS NULL OR DATALENGTH(@Token)<>32
+  THROW 51284,''The worker credential is invalid.'',1;
+ SELECT @ActorId=W.ActorId FROM msg.WorkerAuthorization W
+ JOIN dbo.Users U ON U.UserId=W.ActorId
+ WHERE W.WorkerId=@WorkerId AND W.Enabled=1
+  AND W.TokenHash=HASHBYTES(''SHA2_256'',@Token)
+  AND W.WindowsProof=@WindowsProof AND W.DeviceProof=@DeviceProof
+  AND W.CredentialProof=HASHBYTES(''SHA2_256'',U.PasswordHash+U.PasswordSalt)
+  AND U.MustChangePassword=0 AND EXISTS(
+      SELECT 1 FROM msg.DispatchSettings WHERE Id=1 AND UnattendedEnabled=1);
+ IF @ActorId IS NULL THROW 51284,''The worker enrollment is revoked or no longer valid.'',1;
+ EXEC dbo.RequirePermission @ActorId,N''Communication.Send'';
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadWorkerIdentity
+ @WorkerId uniqueidentifier,@Token varbinary(32),
+ @WindowsProof binary(32),@DeviceProof binary(32)
+AS
+BEGIN
+ SET NOCOUNT ON;
+ DECLARE @ActorId int;
+ EXEC msg.RequireWorker @WorkerId,@Token,@WindowsProof,@DeviceProof,@ActorId OUTPUT;
+ SELECT U.UserId,U.Username,U.MustChangePassword,
+   COALESCE((
+       SELECT STRING_AGG(DISTINCTR.RoleName,'','') FROM (
+         SELECT R.RoleName FROM dbo.Roles R WHERE R.RoleId=U.RoleId
+         UNION
+         SELECT R.RoleName FROM dbo.UserRoles UR JOIN dbo.Roles R ON R.RoleId=UR.RoleId
+           WHERE UR.UserId=U.UserId
+       ) DISTINCTR
+   ),N'''') RoleName
+ FROM dbo.Users U WHERE U.UserId=@ActorId;
+END');
+
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadReadyWorkerRecipients
+ @WorkerId uniqueidentifier,@Token varbinary(32),
+ @WindowsProof binary(32),@DeviceProof binary(32)
+AS
+BEGIN
+ SET NOCOUNT ON;
+ DECLARE @ActorId int;
+ EXEC msg.RequireWorker @WorkerId,@Token,@WindowsProof,@DeviceProof,@ActorId OUTPUT;
+ IF EXISTS(SELECT 1 FROM msg.SendControl WHERE Id=1 AND Paused=1) RETURN;
+ DECLARE @WorkingDays tinyint,@Start time(0),@End time(0),@MaxRate int;
+ SELECT @WorkingDays=WorkingDaysMask,@Start=SendFrom,@End=SendUntil,
+   @MaxRate=MaximumPerMinute FROM msg.DispatchSettings WHERE Id=1;
+ DECLARE @NowLocal datetime2(3)=SYSDATETIME(),@NowUtc datetime2(3)=SYSUTCDATETIME();
+ DECLARE @Today bit=CONVERT(bit,POWER(CONVERT(bigint,2),
+   DATEDIFF(day,CONVERT(date,''19000101''),CONVERT(date,@NowLocal))%7));
+ IF CONVERT(time(0),@NowLocal)<@Start OR CONVERT(time(0),@NowLocal)>=@End RETURN;
+ IF (@WorkingDays & CONVERT(int,POWER(2,DATEDIFF(day,''19000101'',CONVERT(date,@NowLocal))%7)))=0 RETURN;
+ IF (SELECT COUNT_BIG(*) FROM msg.Attempt WHERE RequestUtc>DATEADD(minute,-1,@NowUtc))>=@MaxRate RETURN;
+ SELECT TOP(60) B.BatchId,R.RecipientId,B.Channel
+ FROM msg.Batch B
+ JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
+ JOIN msg.Recipient R ON R.BatchId=B.BatchId
+ JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId
+ WHERE B.CreatedBy=@ActorId AND R.State=''Pending''
+   AND B.State NOT IN (''Cancelled'',''Completed'')
+   AND S.State=''Ready'' AND S.SendAtUtc<=@NowUtc AND S.ExpiresUtc>@NowUtc
+ ORDER BY S.SendAtUtc,R.RecipientId;
+END');
+
+
+EXEC(N'CREATE OR ALTER TRIGGER msg.TR_Attempt_DailyAndRateLimits ON msg.Attempt AFTER INSERT AS
+BEGIN
+ SET NOCOUNT ON;
+ DECLARE @SmsCap int,@WhatsAppCap int,@PerMinute int;
+ SELECT @SmsCap=MaximumSmsDaily,@WhatsAppCap=MaximumWhatsAppDaily,@PerMinute=MaximumPerMinute
+ FROM msg.DispatchSettings WITH(UPDLOCK,HOLDLOCK) WHERE Id=1;
+ -- Every provider submission consumes the admin''s limit, including tests.
+ DECLARE @TodayUtc datetime2(3)=DATEADD(minute,-DATEPART(tzoffset,SYSDATETIMEOFFSET()),
+    CONVERT(datetime2(3),CONVERT(date,SYSDATETIME())));
+ IF (EXISTS(SELECT 1 FROM inserted WHERE Channel=''Sms'')
+      AND (SELECT COUNT_BIG(*) FROM msg.Attempt WITH(HOLDLOCK)
+           WHERE Channel=''Sms'' AND RequestUtc>=@TodayUtc)>@SmsCap)
+   OR (EXISTS(SELECT 1 FROM inserted WHERE Channel=''WhatsApp'')
+      AND (SELECT COUNT_BIG(*) FROM msg.Attempt WITH(HOLDLOCK)
+           WHERE Channel=''WhatsApp'' AND RequestUtc>=@TodayUtc)>@WhatsAppCap)
+    THROW 51285,''Daily API sending limit reached; no provider request was made.'',1;
+ IF (SELECT COUNT_BIG(*) FROM msg.Attempt WITH(HOLDLOCK)
+       WHERE RequestUtc>=DATEADD(minute,-1,SYSUTCDATETIME()))>@PerMinute
+    THROW 51286,''Rate limit reached; retry pending messages later.'',1;
+END');
+
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'23',SYSDATETIME(),SUSER_SNAME(),N'Administrator API master pause and action-focused queue projection');
