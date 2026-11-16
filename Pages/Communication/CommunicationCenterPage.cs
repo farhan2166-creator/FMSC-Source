@@ -779,7 +779,10 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             if(!manualModeAvailable || target is null || reviewed is null || target!=CurrentTarget()
                 || body!=message.Text || manualRequestId==Guid.Empty)
                 throw new CommunicationValidationException("The review changed or the selected method is unavailable. Review recipients again.");
-            if(!Confirm($"Send {reviewed.Included} reviewed message(s) using {deliveryMethod.Text}? Provider charges may apply. You can stop the remaining messages while sending.","Confirm Send",false))return;
+            string costNotice = SmsChargeDisclosure(target, reviewed, body);
+            if(!Confirm($"Send {reviewed.Included} reviewed message(s) using {deliveryMethod.Text}? "
+                + costNotice + " You can stop the remaining messages while sending.",
+                "Confirm Send",false))return;
             int actor=CurrentUser.UserId;Guid request=manualRequestId;
             var saved=await CommunicationApiBatchStore.ConfirmAsync(target,reviewed,body,request,ApiProvider,metaSelection);
             if(IsDisposed || actor!=CurrentUser.UserId)return;
@@ -795,6 +798,23 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         }
         catch(CommunicationValidationException ex){if(!IsDisposed)Warn(ex.Message);}
         catch(Exception ex){if(!IsDisposed)Fail(ex);}
+    }
+
+    /// <summary>
+    /// Explicitly disclose potentially higher Unicode SMS billing for the
+    /// actual personalized preview, not just the English draft with fields.
+    /// Provider tariffs and segment counts vary; never promise a fixed price.
+    /// </summary>
+    private static string SmsChargeDisclosure(
+        CommunicationTarget target, CommunicationPreview reviewed, string body)
+    {
+        if (target.Channel != "Sms") return "Provider charges may apply.";
+        bool unicode = reviewed.Entries.Where(entry => entry.Included).Any(entry =>
+            CommunicationPreparedMessages.Render(body,
+                CommunicationPreparedMessages.FromPreview(entry)).Any(ch => ch > 127));
+        return unicode
+            ? "This SMS includes Unicode characters (for example Urdu names or text). Unicode and long messages may be split into multiple separately billed SMS segments; review provider charges."
+            : "Long SMS messages may be split into multiple separately billed segments; review provider charges.";
     }
 
     private async Task StartManualHandoffAsync()
