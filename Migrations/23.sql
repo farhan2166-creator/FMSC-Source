@@ -10,11 +10,11 @@ IF OBJECT_ID(N'msg.Attempt',N'U') IS NULL OR OBJECT_ID(N'msg.ApiBatch',N'U') IS 
     THROW 51260,'Communication API dispatch tables are missing.',1;
 
 CREATE TABLE msg.SendControl(
-    Id tinyint NOT NULL CONSTRAINT PK_MsgSendControl PRIMARY KEY
-        CONSTRAINT CK_MsgSendControlId CHECK(Id=1),
+    Id tinyint NOT NULL CONSTRAINT PK_MsgSendControl PRIMARY KEY,
     Paused bit NOT NULL CONSTRAINT DF_MsgSendControlPaused DEFAULT(0),
     UpdatedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgSendControlUpdatedUtc DEFAULT(SYSUTCDATETIME()),
-    ChangedBy int NULL
+    ChangedBy int NULL,
+    CONSTRAINT CK_MsgSendControlId CHECK (Id = 1)
 );
 INSERT msg.SendControl(Id,Paused) VALUES(1,0);
 CREATE TABLE msg.HistoryExportAudit(
