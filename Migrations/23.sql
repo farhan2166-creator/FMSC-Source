@@ -503,8 +503,6 @@ BEGIN
  SELECT @WorkingDays=WorkingDaysMask,@Start=SendFrom,@End=SendUntil,
    @MaxRate=MaximumPerMinute FROM msg.DispatchSettings WHERE Id=1;
  DECLARE @NowLocal datetime2(3)=SYSDATETIME(),@NowUtc datetime2(3)=SYSUTCDATETIME();
- DECLARE @Today bit=CONVERT(bit,POWER(CONVERT(bigint,2),
-   DATEDIFF(day,CONVERT(date,''19000101''),CONVERT(date,@NowLocal))%7));
  IF CONVERT(time(0),@NowLocal)<@Start OR CONVERT(time(0),@NowLocal)>=@End RETURN;
  IF (@WorkingDays & CONVERT(int,POWER(2,DATEDIFF(day,''19000101'',CONVERT(date,@NowLocal))%7)))=0 RETURN;
  IF (SELECT COUNT_BIG(*) FROM msg.Attempt WHERE RequestUtc>DATEADD(minute,-1,@NowUtc))>=@MaxRate RETURN;
@@ -514,6 +512,8 @@ BEGIN
  JOIN msg.Recipient R ON R.BatchId=B.BatchId
  JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId
  WHERE B.CreatedBy=@ActorId AND R.State=''Pending''
+   AND ((B.Channel=''Sms'' AND EXISTS(SELECT 1 FROM msg.DispatchSettings WHERE Id=1 AND MaximumSmsDaily>0))
+       OR (B.Channel=''WhatsApp'' AND EXISTS(SELECT 1 FROM msg.DispatchSettings WHERE Id=1 AND MaximumWhatsAppDaily>0)))
    AND B.State NOT IN (''Cancelled'',''Completed'')
    AND S.State=''Ready'' AND S.SendAtUtc<=@NowUtc AND S.ExpiresUtc>@NowUtc
  ORDER BY S.SendAtUtc,R.RecipientId;
@@ -529,10 +529,10 @@ BEGIN
  -- Every provider submission consumes the admin''s limit, including tests.
  DECLARE @TodayUtc datetime2(3)=DATEADD(minute,-DATEPART(tzoffset,SYSDATETIMEOFFSET()),
     CONVERT(datetime2(3),CONVERT(date,SYSDATETIME())));
- IF (EXISTS(SELECT 1 FROM inserted WHERE Channel=''Sms'')
+ IF (@SmsCap>0 AND EXISTS(SELECT 1 FROM inserted WHERE Channel=''Sms'')
       AND (SELECT COUNT_BIG(*) FROM msg.Attempt WITH(HOLDLOCK)
            WHERE Channel=''Sms'' AND RequestUtc>=@TodayUtc)>@SmsCap)
-   OR (EXISTS(SELECT 1 FROM inserted WHERE Channel=''WhatsApp'')
+   OR (@WhatsAppCap>0 AND EXISTS(SELECT 1 FROM inserted WHERE Channel=''WhatsApp'')
       AND (SELECT COUNT_BIG(*) FROM msg.Attempt WITH(HOLDLOCK)
            WHERE Channel=''WhatsApp'' AND RequestUtc>=@TodayUtc)>@WhatsAppCap)
     THROW 51285,''Daily API sending limit reached; no provider request was made.'',1;
