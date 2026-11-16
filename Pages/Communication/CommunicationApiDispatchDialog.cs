@@ -25,7 +25,7 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
     private readonly ModernButton cancelPending=new() {Text="Cancel Pending",ThemeRole="Secondary",Width=AppScale.Scale(165),Height=AppMetrics.ButtonHeight,Enabled=false};
     private readonly ModernButton close=new() {Text="Close",ThemeRole="Secondary",Width=AppScale.Scale(100),Height=AppMetrics.ButtonHeight};
     private CancellationTokenSource? cancellation;
-    private bool busy,closeRequested;
+    private bool busy,closeRequested,scheduleBlocked;
     private FileStream? lease;
     internal CommunicationApiDispatchDialog(Guid batch,bool startConfirmed=false,Operations? operations=null)
     {
@@ -131,7 +131,35 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         int delivered=rows.Count(r=>Convert.ToString(r["State"])=="Delivered");
         int failed=rows.Count(r=>Convert.ToString(r["State"])=="Failed");
         progress.Maximum=Math.Max(1,rows.Length);progress.Value=rows.Length-pending;
-        status.Text=$"{pending} pending · {accepted} accepted · {delivered} delivered · {failed} failed · {unknown} unknown\nOnly Pending messages can be sent. Stopping keeps the remainder for later.";
+        scheduleBlocked=false;
+        string? scheduleStatus=null;
+        if (table.Columns.Contains("DueUtc") && rows.Length>0)
+        {
+            DataRow row=rows[0];
+            if (!row.IsNull("DueUtc"))
+            {
+                DateTime due=DateTime.SpecifyKind(Convert.ToDateTime(row["DueUtc"]),DateTimeKind.Utc);
+                if (due>DateTime.UtcNow)
+                {
+                    scheduleBlocked=true;
+                    scheduleStatus="Scheduled for "+due.ToLocalTime().ToString("dd MMM yyyy h:mm tt")+".";
+                }
+                else if (table.Columns.Contains("ExpiresUtc") && !row.IsNull("ExpiresUtc") &&
+                         DateTime.SpecifyKind(Convert.ToDateTime(row["ExpiresUtc"]),DateTimeKind.Utc)<=DateTime.UtcNow)
+                {
+                    scheduleBlocked=true;
+                    scheduleStatus="This scheduled batch has expired. Unsent messages are not eligible for sending.";
+                }
+                else if (table.Columns.Contains("HoldForReview") &&
+                         !row.IsNull("HoldForReview") && Convert.ToBoolean(row["HoldForReview"]))
+                {
+                    scheduleBlocked=true;
+                    scheduleStatus="This batch is paused pending review.";
+                }
+            }
+        }
+        status.Text=$"{pending} pending · {accepted} accepted · {delivered} delivered · {failed} failed · {unknown} unknown\n"+
+            (scheduleStatus ?? "Only Pending messages can be sent. Stopping keeps the remainder for later.");
         ShowSelectedMessage();
         UpdateActions();
     }
@@ -175,7 +203,8 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
     private void UpdateActions()
     {
         var selected=(grid.CurrentRow?.DataBoundItem as DataRowView)?.Row;
-        send.Enabled=cancelPending.Enabled=!busy && Rows.Any(r=>Convert.ToString(r["State"])=="Pending");
+        send.Enabled=!busy && !scheduleBlocked && Rows.Any(r=>Convert.ToString(r["State"])=="Pending");
+        cancelPending.Enabled=!busy && Rows.Any(r=>Convert.ToString(r["State"])=="Pending");
         check.Enabled=!busy && selected is not null && Convert.ToString(selected["ProviderCode"])=="Twilio"
             && !selected.IsNull("ProviderMessageId") && Convert.ToString(selected["State"]) is "Accepted" or "Submitted" or "Unknown";
         retry.Enabled=reason.Enabled=!busy && selected is not null && Convert.ToString(selected["State"])=="Failed";
