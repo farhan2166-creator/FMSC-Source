@@ -129,7 +129,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
     }
 
     private static string ChannelLabel(DataRow row) => row.Field<int>("TemplateId") < 0
-        ? "WhatsApp / SMS"
+        ? row.Field<string>("Channel") == "WhatsApp" ? "WhatsApp" : "WhatsApp / SMS"
         : row.Field<string>("Channel") is "Sms" ? "SMS" : row.Field<string>("Channel") ?? "";
 
     // Presentation-only grouping: existing SQL template purposes and saved
@@ -180,7 +180,7 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
             var row = rows.NewRow();
             row["TemplateId"] = -index - 1;
             row["Name"] = item.Name + " (built-in)";
-            row["Channel"] = "WhatsApp";
+            row["Channel"] = item.Channel ?? "All";
             row["Purpose"] = item.Purpose;
             row["Body"] = item.Body;
             row["Active"] = true;
@@ -206,7 +206,8 @@ internal sealed class CommunicationTemplatesDialog : ApplicationWindowForm
         string name = row?.Field<string>("Name") ?? "";
         using var dialog = new CommunicationTemplateDialog(
             id < 0 ? "Custom " + name.Replace(" (built-in)", "") : name,
-            row?.Field<string>("Channel") ?? "WhatsApp", row?.Field<string>("Purpose") ?? "Announcement",
+            (id < 0 && row?.Field<string>("Channel") == "All" ? "WhatsApp" : row?.Field<string>("Channel")) ?? "WhatsApp",
+            row?.Field<string>("Purpose") ?? "Announcement",
             row?.Field<string>("Body") ?? "", row?.Field<bool>("Active") ?? true);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         await CommunicationManagementStore.SaveTemplateAsync(Math.Max(0, id), dialog.TemplateName,
