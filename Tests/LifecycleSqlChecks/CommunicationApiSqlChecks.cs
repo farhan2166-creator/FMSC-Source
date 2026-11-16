@@ -43,6 +43,47 @@ internal static class CommunicationApiSqlChecks
         await r.Refused("A reviewed API batch cannot be converted into manual WhatsApp",()=>{
             Sql.Query("INSERT msg.ManualBatch(BatchId,CreatedBy) VALUES(@Batch,@User)",Sql.P("@Batch",batch),Sql.P("@User",f.Admin));return Task.CompletedTask;
         },51131);
+        // Real, owned SQL fixture: scheduling must be inert until its due
+        // time, an administrator must be able to pause every API claim, and
+        // neither action may create a phantom provider attempt.
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.DispatchControl WHERE ControlId=1 AND MasterPaused=0 AND UnattendedEnabled=0")==1 &&
+            Sql.Count("SELECT COUNT(*) FROM msg.AutomationRule WHERE Mode='Off'")==8,
+            "New communication automation and background processing start disabled.");
+        var scheduled=Confirm(Guid.NewGuid(),new string('S',64));
+        Guid scheduleBatch=(Guid)scheduled.Rows[0]["BatchId"];
+        long scheduleRecipient=Convert.ToInt64(Sql.Scalar(
+            "SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Batch",
+            Sql.P("@Batch",scheduleBatch)));
+        DateTime dueUtc=DateTime.UtcNow.AddHours(3);
+        Sql.Proc("msg.ScheduleReviewedBatch",
+            Sql.P("@UserId",f.Admin),Sql.P("@BatchId",scheduleBatch),
+            Sql.P("@DueUtc",dueUtc),Sql.P("@ExpiresUtc",dueUtc.AddHours(24)),
+            Sql.P("@Priority","Normal"));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.BatchSchedule WHERE BatchId=@Batch AND DueUtc>@Now",
+            Sql.P("@Batch",scheduleBatch),Sql.P("@Now",DateTime.UtcNow))==1,
+            "Scheduling persists a future due time without dispatching a provider request.");
+        await r.Refused("A scheduled API recipient cannot be claimed before its due time",()=>{
+            Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),
+                Sql.P("@RecipientId",scheduleRecipient),Sql.P("@AttemptKey",Guid.NewGuid()),
+                Sql.P("@ExpectedProviderCode","Twilio"));
+            return Task.CompletedTask;
+        },51241);
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Id",
+            Sql.P("@Id",scheduleRecipient))==0,
+            "Premature scheduled claims do not write an attempt or spend a provider allowance.");
+        Sql.Proc("msg.SetMasterPause",Sql.P("@UserId",f.Admin),Sql.P("@Paused",true));
+        await r.Refused("Master pause blocks API claims even on confirmed unscheduled batches",()=>{
+            Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),
+                Sql.P("@RecipientId",recipient),Sql.P("@AttemptKey",Guid.NewGuid()),
+                Sql.P("@ExpectedProviderCode","Twilio"));
+            return Task.CompletedTask;
+        },51240);
+        Sql.Proc("msg.SetMasterPause",Sql.P("@UserId",f.Admin),Sql.P("@Paused",false));
+        Sql.Proc("msg.CancelPendingApiMessages",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",scheduleBatch));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Id",
+            Sql.P("@Id",scheduleRecipient))==0,
+            "Cancelling scheduled unsent work does not create an API request.");
+
         var attempt=Guid.NewGuid();
         var claim=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",recipient),Sql.P("@AttemptKey",attempt),Sql.P("@ExpectedProviderCode","Twilio"));
         r.Check(Convert.ToBoolean(claim.Rows[0]["Claimed"]) && Sql.Count("SELECT COUNT(*) FROM msg.Recipient WHERE RecipientId=@Id AND State='Unknown'",Sql.P("@Id",recipient))==1,
