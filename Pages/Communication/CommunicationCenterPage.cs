@@ -161,8 +161,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         newMessageButton = PageButton("communicationNewMessage", "New Message", 140, "TabInactive");
         unfinishedButton = PageButton("communicationUnfinished", "Queue", 140, "TabInactive");
         historyButton = PageButton("communicationHistory", "History", 120, "TabInactive");
-        templatesButton = PageButton("communicationTemplates", "Templates…", 135);
-        configureButton = PageButton("communicationConfigureSending", "Configure Sending…", 200);
+        templatesButton = PageButton("communicationTemplates", "Templates", 125);
+        configureButton = PageButton("communicationConfigureSending", "Settings", 120);
         newMessageButton.Click += (_, _) =>
         {
             if (!IsBusy) SetStep(preview is null ? 0 : 1);
