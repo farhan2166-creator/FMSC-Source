@@ -151,7 +151,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         confirm.Click += async (_, _) => await RunBusyAsync(
             "Confirming the reviewed message…", StartReviewedMessageAsync, this);
         newMessageButton = PageButton("communicationNewMessage", "New Message", 140, "TabInactive");
-        unfinishedButton = PageButton("communicationUnfinished", "Unfinished", 140, "TabInactive");
+        unfinishedButton = PageButton("communicationUnfinished", "Queue", 140, "TabInactive");
         historyButton = PageButton("communicationHistory", "History", 120, "TabInactive");
         templatesButton = PageButton("communicationTemplates", "Templates…", 135);
         configureButton = PageButton("communicationConfigureSending", "Configure Sending…", 200);
@@ -735,7 +735,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             var saved=await CommunicationApiBatchStore.ConfirmAsync(target,reviewed,body,request,ApiProvider,metaSelection);
             if(IsDisposed || actor!=CurrentUser.UserId)return;
             if(request!=manualRequestId || target!=CurrentTarget() || body!=message.Text)
-                throw new CommunicationValidationException("The batch was saved, but the current review changed. Open it in Unfinished; nothing was sent.");
+                throw new CommunicationValidationException("The batch was saved, but the current review changed. Open it in Queue; nothing was sent.");
             using(var dialog=new CommunicationApiDispatchDialog(saved.BatchId,startConfirmed:!saved.AlreadyConfirmed))dialog.ShowDialog(FindForm());
             if (!IsDisposed)
             {
@@ -770,10 +770,10 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             CommunicationConfirmation saved = await operations.ConfirmBatch(target, reviewed, body, request);
             if (IsDisposed) return;
             if (actor != CurrentUser.UserId)
-                throw new InvalidOperationException("Signed-in user changed. Open Unfinished.");
+                throw new InvalidOperationException("Signed-in user changed. Open Queue.");
             if (request != manualRequestId || target != CurrentTarget() || body != message.Text)
             {
-                Warn("The reviewed batch was saved, but the current message changed. Review that batch in Unfinished; no chat was opened.");
+                Warn("The reviewed batch was saved, but the current message changed. Review that batch in Queue; no chat was opened.");
                 return;
             }
             // The operator has reviewed and confirmed this batch. Open the first
