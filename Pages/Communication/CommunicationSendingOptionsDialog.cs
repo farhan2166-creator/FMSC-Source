@@ -27,6 +27,8 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
     private readonly Label automationFeedback = new() { AutoSize = true, ForeColor = AppTheme.MutedText };
     private readonly Label masterState = new() { AutoSize = true, ForeColor = AppTheme.Text };
     private readonly ModernButton masterToggle = new() { Name = "communicationMasterPause", ThemeRole = "Secondary", Text = "Pause All Sending" };
+    private readonly ModernButton workerToggle = new() { Name = "communicationBackgroundToggle", ThemeRole = "Secondary", Text = "Enable Background Sending" };
+    private readonly Label workerState = new() { AutoSize = true, ForeColor = AppTheme.MutedText };
     private readonly DateTimePicker startTime = new() { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
     private readonly DateTimePicker endTime = new() { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true };
     private readonly NumericUpDown speed = new() { Minimum = 1, Maximum = 600, Value = 60 };
@@ -37,7 +39,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
     private readonly ModernComboBox automationMode = HumanUi.Combo();
     private DataTable? ruleData;
     private DataTable? quotaData;
-    private bool masterPaused;
+    private bool masterPaused, backgroundEnabled;
     private bool busy;
     internal bool Changed { get; private set; }
 
@@ -49,7 +51,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         ShowInTaskbar = false;
         MinimizeBox = MaximizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedDialog;
-        ClientSize = new Size(AppScale.Scale(800), AppScale.Scale(535));
+        ClientSize = new Size(AppScale.Scale(800), AppScale.Scale(610));
         BackColor = AppTheme.PageBackground;
         layout = new TableLayoutPanel
         {
@@ -110,12 +112,12 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         var page = new TabPage("Queue & Schedule") { BackColor = AppTheme.PageBackground };
         var content = new TableLayoutPanel
         {
-            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 7,
+            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 8,
             Padding = new Padding(AppScale.Scale(15)), Margin = Padding.Empty
         };
         content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        for (int i = 0; i < 7; i++)
+        for (int i = 0; i < 8; i++)
             content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(i == 0 ? 58 : 65)));
 
         var masterRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
@@ -150,7 +152,14 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         }
         content.Controls.Add(actions, 0, 5);
         content.SetColumnSpan(actions, 2);
-        content.Controls.Add(queueFeedback, 0, 6);
+        var workerRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true };
+        workerToggle.Width = AppScale.Scale(235);
+        workerToggle.Height = AppMetrics.ButtonHeight;
+        workerRow.Controls.Add(workerToggle);
+        workerRow.Controls.Add(workerState);
+        content.Controls.Add(workerRow, 0, 6);
+        content.SetColumnSpan(workerRow, 2);
+        content.Controls.Add(queueFeedback, 0, 7);
         content.SetColumnSpan(queueFeedback, 2);
 
         masterToggle.Click += async (_, _) => await RunAsync(async () =>
@@ -169,7 +178,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         {
             await CommunicationQueuePolicyStore.SaveSendingWindowAsync(
                 TimeOnly.FromDateTime(startTime.Value), TimeOnly.FromDateTime(endTime.Value),
-                TimeZoneInfo.Local.Id, Decimal.ToInt32(speed.Value));
+                TimeZoneInfo.Local.Id, Decimal.ToInt32(speed.Value), backgroundEnabled);
             Changed = true;
             queueFeedback.Text = "Sending hours saved. Background processing remains opt-in.";
         });
@@ -183,6 +192,28 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             Changed = true;
             queueFeedback.Text = "Daily provider allowance saved.";
         });
+        workerToggle.Click += async (_, _) => await RunAsync(async () =>
+        {
+            if (backgroundEnabled)
+            {
+                if (ModernMessageDialog.Show(this,
+                    "Disable unattended API sending on this Windows account?",
+                    Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+                await CommunicationBackgroundEnrollment.DisableAsync();
+            }
+            else
+            {
+                if (ModernMessageDialog.Show(this,
+                    "Authorize this Windows computer to process confirmed scheduled API messages while FMSC is closed? " +
+                    "A previously unfinished batch stays held for review and provider charges may apply.",
+                    Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+                await CommunicationBackgroundEnrollment.EnrollAsync();
+            }
+            Changed = true;
+            await RefreshQueueAsync();
+        });
         quotaProvider.SelectedIndexChanged += (_, _) => ApplySelectedQuota();
         page.Controls.Add(content);
         return page;
@@ -194,6 +225,10 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         if (rows.Rows.Count != 1) throw new InvalidOperationException("Sending controls are not available.");
         DataRow row = rows.Rows[0];
         masterPaused = row.Field<bool>("MasterPaused");
+        backgroundEnabled = row.Field<bool>("UnattendedEnabled");
+        workerToggle.Text = backgroundEnabled ? "Disable Background Sending" : "Enable Background Sending";
+        workerToggle.Enabled = CurrentUser.IsAdministrator;
+        workerState.Text = backgroundEnabled ? "  Authorized periodic queue processing" : "  Off until administrator enrollment";
         masterToggle.Text = masterPaused ? "Resume All Sending" : "Pause All Sending";
         masterState.Text = masterPaused ? "  All API sending paused" : "  API sending allowed when approved";
         var start = (TimeSpan)row["WindowStart"];
