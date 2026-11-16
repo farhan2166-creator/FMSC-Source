@@ -76,6 +76,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         new(CommunicationAudience.Student, "One student"), new(CommunicationAudience.Family, "Family / siblings"),
         new(CommunicationAudience.Class, "Class"), new(CommunicationAudience.Campus, "Campus"),
         new(CommunicationAudience.School, "Entire school"), new(CommunicationAudience.OutstandingFees, "Outstanding fees"),
+        new(CommunicationAudience.FeeStudent, "One student's fees"), new(CommunicationAudience.FeeFamily, "Family fee balance"),
         new(CommunicationAudience.Staff, "One staff member", "Staff.View")
     };
     internal CommunicationAudience SelectedAudience
@@ -129,7 +130,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         // SelectionChanged can fire before CurrentRow moves to the clicked cell.
         previewGrid.CurrentCellChanged += (_, _) => ShowSelectedMessage();
         audience.Items.AddRange(AudienceOptions.Where(option => CurrentUser.HasPermission(option.Permission)
-            && (option.Scope != CommunicationAudience.OutstandingFees || CurrentUser.HasPermission("Fees.View"))).ToArray());
+            && ((option.Scope is not (CommunicationAudience.OutstandingFees or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily)) || CurrentUser.HasPermission("Fees.View"))).ToArray());
         SelectedAudience = CurrentUser.HasPermission("Students.View") ? CommunicationAudience.Class : CommunicationAudience.Staff;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
@@ -565,7 +566,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             or CommunicationAudience.Class or CommunicationAudience.OutstandingFees;
         bool showClass = target is CommunicationAudience.Class
             or CommunicationAudience.OutstandingFees;
-        bool showStudent = target is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.OutstandingFees;
+        bool showStudent = target is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily or CommunicationAudience.OutstandingFees;
         bool showStaff = target == CommunicationAudience.Staff;
         Control layout = campusField.Parent!;
         layout.SuspendLayout();
@@ -577,11 +578,11 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         SetFieldCaption(classField, cls, "Class", target == CommunicationAudience.Class);
         SetFieldCaption(studentField, student, target switch
         {
-            CommunicationAudience.Family => "Student in the family",
+            CommunicationAudience.Family or CommunicationAudience.FeeFamily => "Student in the family",
             CommunicationAudience.OutstandingFees => "Student (optional)",
             _ => "Student"
         },
-            target is CommunicationAudience.Student or CommunicationAudience.Family);
+            target is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily);
         SetFieldCaption(staffField, staff, "Staff member", showStaff);
         UpdateLookupPrompt(campus, target == CommunicationAudience.OutstandingFees ? "All campuses" : "Select a campus");
         UpdateClassSelection();
@@ -708,7 +709,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         bool scoped = selected is CommunicationAudience.Campus or CommunicationAudience.Class or CommunicationAudience.OutstandingFees;
         return new(selected, scoped ? campus.SelectedId : 0,
             selected is CommunicationAudience.Class or CommunicationAudience.OutstandingFees ? cls.SelectedId : 0,
-            selected is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.OutstandingFees ? student.SelectedId : 0,
+            selected is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily or CommunicationAudience.OutstandingFees ? student.SelectedId : 0,
             selected == CommunicationAudience.Staff ? staff.SelectedId : 0, ComposeChannel);
     }
 
