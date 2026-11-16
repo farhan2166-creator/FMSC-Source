@@ -467,5 +467,62 @@ BEGIN
     COMMIT TRANSACTION;
 END');
 
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadSchoolWeekdays @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ SELECT IsoWeekday,Enabled FROM msg.NonWorkingWeekday ORDER BY IsoWeekday;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SetSchoolWeekday
+ @UserId int,@IsoWeekday tinyint,@Enabled bit
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @IsoWeekday NOT BETWEEN 1 AND 7 OR @Enabled IS NULL
+  THROW 51271,''Choose a valid working day and state.'',1;
+ BEGIN TRANSACTION;
+ UPDATE msg.NonWorkingWeekday WITH(UPDLOCK,HOLDLOCK)
+ SET Enabled=@Enabled WHERE IsoWeekday=@IsoWeekday;
+ IF @@ROWCOUNT<>1 THROW 51272,''School working-day configuration is incomplete.'',1;
+ IF NOT EXISTS(SELECT 1 FROM msg.NonWorkingWeekday WITH(HOLDLOCK) WHERE Enabled=1)
+  THROW 51273,''At least one working day must remain enabled.'',1;
+ COMMIT;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadSchoolHolidays @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ SELECT HolidayDate,Description FROM msg.SchoolHoliday
+ ORDER BY HolidayDate DESC;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.SetSchoolHoliday @UserId int,
+ @HolidayDate date,@Description nvarchar(150),@Remove bit=0
+AS BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ IF @HolidayDate IS NULL OR @HolidayDate<CONVERT(date,''20000101'')
+  OR @HolidayDate>CONVERT(date,''21000101'') OR @Remove IS NULL
+  THROW 51274,''Choose a valid school holiday date.'',1;
+ IF @Remove=0 AND (NULLIF(LTRIM(RTRIM(@Description)),N'''') IS NULL OR LEN(@Description)>150)
+  THROW 51275,''Enter a brief school holiday description.'',1;
+ BEGIN TRANSACTION;
+ IF @Remove=1
+  DELETE FROM msg.SchoolHoliday WHERE HolidayDate=@HolidayDate;
+ ELSE
+ BEGIN
+  UPDATE msg.SchoolHoliday WITH(UPDLOCK,HOLDLOCK)
+  SET Description=LTRIM(RTRIM(@Description)),
+   UpdatedBy=@UserId,UpdatedUtc=SYSUTCDATETIME()
+  WHERE HolidayDate=@HolidayDate;
+  IF @@ROWCOUNT=0
+   INSERT msg.SchoolHoliday(HolidayDate,Description,UpdatedBy)
+   VALUES(@HolidayDate,LTRIM(RTRIM(@Description)),@UserId);
+ END
+ COMMIT;
+END');
+
 INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
 VALUES(N'24',SYSDATETIME(),SUSER_SNAME(),N'Opt-in authorized communication background worker and SQL lease');
