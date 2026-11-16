@@ -117,13 +117,23 @@ internal static class CommunicationBackgroundWorker
                 string channel=Convert.ToString(next["Channel"]) ??
                     throw new InvalidDataException("Scheduled recipient has no approved channel.");
                 int author=Convert.ToInt32(next["CreatedBy"]);
+                string audience=Convert.ToString(next["Audience"]) ?? "";
                 try
                 {
-                    // Verify original sender remains authorized. The SQL
-                    // claim independently checks again before any HTTP call.
+                    // Verify original sender retains permissions for the
+                    // specific audience, not just generic sending access.
+                    // The SQL claim independently checks again before HTTP.
+                    string permissionSql =
+                        "EXEC dbo.RequirePermission @UserId,N'Communication.Send'; " +
+                        (audience=="Staff"
+                            ? "EXEC dbo.RequirePermission @UserId,N'Staff.View'; "
+                            : "EXEC dbo.RequirePermission @UserId,N'Students.View'; ") +
+                        (audience is "OutstandingFees" or "FeeStudent" or "FeeFamily"
+                            ? "EXEC dbo.RequirePermission @UserId,N'Fees.View'; "
+                            : "") +
+                        "SELECT CONVERT(bit,1) Authorized;";
                     using var sender=await DatabaseHelper.QuerySqlAsync(
-                        "EXEC dbo.RequirePermission @UserId,N'Communication.Send'; SELECT CONVERT(bit,1) Authorized;",
-                        token,DatabaseHelper.Int("@UserId",author));
+                        permissionSql,token,DatabaseHelper.Int("@UserId",author));
                     if(sender.Rows.Count!=1) throw new UnauthorizedAccessException(
                         "Original sender is no longer authorized.");
                 }
