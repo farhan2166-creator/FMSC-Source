@@ -71,10 +71,11 @@ internal static partial class Program
                 && CommunicationPreparedMessages.BuiltInChoices.Any(item =>
                     item.LanguageCode == "en" && item.Name == "New admission welcome"),
                 "English and Urdu prepared messages are separate curated versions.");
-            using (var versions = new CommunicationTemplateVersionsDialog(1, "Synthetic template"))
-                Check(versions.Controls.Find("communicationTemplateVersionGrid", true).Length == 1
-                    && versions.Controls.Find("communicationRestoreTemplateVersion", true).Length == 1,
-                    "Template history is a separate administrator-only audit view with explicit restore.");
+            bool unauthorisedVersionsBlocked = false;
+            try { using var forbidden = new CommunicationTemplateVersionsDialog(1, "Synthetic template"); }
+            catch (UnauthorizedAccessException) { unauthorisedVersionsBlocked = true; }
+            Check(unauthorisedVersionsBlocked,
+                "A communication sender without administrator permission cannot inspect template version history.");
             using (var languageComposer = new CommunicationCenterPage(false))
             {
                 var languageInput = Field<ModernComboBox>(languageComposer, "languageChoice");
@@ -179,6 +180,10 @@ internal static partial class Program
             CurrentUser.SignIn(7204, "Administrator fixture", "Messaging administrator", false,
                 new[] { "Communication.Configure", "Communication.Send", "Communication.View",
                     "Students.View", "Staff.View", "Fees.View" });
+            using (var versions = new CommunicationTemplateVersionsDialog(1, "Synthetic template"))
+                Check(versions.Controls.Find("communicationTemplateVersionGrid", true).Length == 1
+                    && versions.Controls.Find("communicationRestoreTemplateVersion", true).Length == 1,
+                    "Administrators can open the separate audited template version and restore screen.");
             using var takeover = new CommunicationTakeoverDialog();
             Check(takeover.Controls.Find("communicationTakeoverQueue", true).Length == 1
                 && takeover.Controls.Find("communicationTakeoverReason", true).Length == 1,
