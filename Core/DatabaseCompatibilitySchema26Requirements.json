@@ -113,13 +113,5 @@
       "isIdentity": false,
       "isComputed": false
     }
-  ],
-  "uniqueIndexes": [
-    {
-      "schema": "msg",
-      "objectName": "Template",
-      "name": "UQ_MsgTemplateNameLanguage",
-      "keys": "Name,Channel,LanguageCode"
-    }
   ]
 }

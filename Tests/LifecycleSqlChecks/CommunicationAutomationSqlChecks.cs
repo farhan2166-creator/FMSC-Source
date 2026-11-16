@@ -34,14 +34,14 @@ internal static class CommunicationAutomationSqlChecks
             Sql.P("@Body", "Synthetic English notice."),Sql.P("@Active",true),
             Sql.P("@LanguageCode","en"));
         Sql.Proc("msg.SaveTemplate",Sql.P("@UserId",f.Admin),
-            Sql.P("@TemplateId",0),Sql.P("@Name",syntheticName),
+            Sql.P("@TemplateId",0),Sql.P("@Name",syntheticName+" (Urdu)"),
             Sql.P("@Channel","WhatsApp"),Sql.P("@Purpose","Announcement"),
             Sql.P("@Body", "مصنوعی اردو اطلاع۔"),Sql.P("@Active",true),
             Sql.P("@LanguageCode","ur"));
-        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Template WHERE Name=@Name AND Channel='WhatsApp' AND LanguageCode IN ('en','ur')",
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Template WHERE Name IN (@Name,@Name+N' (Urdu)') AND Channel='WhatsApp' AND LanguageCode IN ('en','ur')",
             Sql.P("@Name",syntheticName))==2,
             "English and Urdu versions of one approved template coexist without translation.");
-        Sql.Query("DELETE FROM msg.Template WHERE Name=@Name",Sql.P("@Name",syntheticName));
+        Sql.Query("DELETE FROM msg.Template WHERE Name IN (@Name,@Name+N' (Urdu)')",Sql.P("@Name",syntheticName));
         Sql.Proc("msg.SaveMessageLanguage",Sql.P("@UserId",f.Admin),
             Sql.P("@LanguageCode","en"));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt")==attemptsBeforeLanguage,

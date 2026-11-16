@@ -34,9 +34,9 @@ EXEC(N'ALTER TABLE msg.DispatchControl ADD CONSTRAINT CK_MsgDefaultMessageLangua
  CHECK(DefaultMessageLanguage IN (''en'',''ur''))');
 EXEC(N'ALTER TABLE msg.Template ADD CONSTRAINT CK_MsgTemplateLanguageCode
  CHECK(LanguageCode IN (''en'',''ur''))');
-ALTER TABLE msg.Template DROP CONSTRAINT UQ_MsgTemplateName;
-EXEC(N'ALTER TABLE msg.Template ADD CONSTRAINT UQ_MsgTemplateNameLanguage
- UNIQUE(Name,Channel,LanguageCode)');
+-- Preserve the original (Name,Channel) uniqueness required by all
+-- historical compatibility manifests. Urdu editions use a distinct name
+-- (for example "Fee notice (Urdu)") and carry LanguageCode='ur'.
 
 EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadMessageLanguage @UserId int
 AS BEGIN
