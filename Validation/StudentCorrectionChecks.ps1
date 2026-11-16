@@ -73,7 +73,7 @@ try{
  $before=Query "SELECT COUNT(*) Total FROM dbo.BillingCharges WHERE EnrollmentId=$enrollment;"
  Assert ($before.Rows[0].Total -eq 0) 'Draft fee setup does not post charges'
  $correction=[IO.File]::ReadAllText((Join-Path $taskRoot 'Pages/Students/Admissions/PlacementCorrection.sql'))
- $params=@{UserId=1;AdmissionId=$admission;EnrollmentId=$enrollment;YearId=28;PlacementId=40;StartDate=[datetime]'2026-04-01';LeaveDate=[DBNull]::Value;BillingStartDate=[datetime]'2026-10-01';Status='Active';Reason='Correct draft class';Legacy=$false;Preview=$true;ExpectedSnapshot=[DBNull]::Value}
+ $params=@{UserId=1;AdmissionId=$admission;EnrollmentId=$enrollment;YearId=28;PlacementId=40;StartDate=[datetime]'2026-04-01';LeaveDate=[DBNull]::Value;BillingStartDate=[datetime]'2026-10-01';Status='Active';Reason='Correct draft class';Legacy=$false;Preview=$true;ExpectedSnapshot=[DBNull]::Value;RecordHistoricalDeparture=$false}
  $plan=Query $correction $params
  $params.Preview=$false; $params.ExpectedSnapshot=$plan.Rows[0].Snapshot
  [void](Query $correction $params)

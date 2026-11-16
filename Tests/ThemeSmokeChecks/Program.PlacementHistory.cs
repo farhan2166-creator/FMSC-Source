@@ -74,6 +74,17 @@ internal static partial class Program
         Check(Field<ModernButton>(editor, "review").Visible && !Field<ModernButton>(editor, "addHistory").Visible && !Field<ModernButton>(editor, "apply").Enabled,
             "Missing history requires review before applying and cannot recursively open history entry.");
         Capture(editor, "missing-history");
+        var departureOption = Field<CheckBox>(editor, "recordDeparture");
+        var displayReview = type.GetMethod("ShowHistoricalReview", flags)!;
+        displayReview.Invoke(editor, new object[] { false });
+        Check(!departureOption.Visible, "An ineligible historical placement offers no school departure action.");
+        displayReview.Invoke(editor, new object[] { true });
+        Check(departureOption.Visible && !departureOption.Checked, "An eligible historical placement requires explicit opt-in to school departure.");
+        Capture(editor, "historical-departure-review");
+        departureOption.Checked = true;
+        Field<ModernTextBox>(editor, "reason").Text = "Changed after review";
+        Check(!departureOption.Visible && !departureOption.Checked && !Field<ModernButton>(editor, "apply").Enabled,
+            "Changing the reviewed placement details clears the departure choice and requires a new review.");
         editor.Close();
         history.Columns.Add("RepeatedClass",typeof(bool));history.Rows[0]["RepeatedClass"]=true;history.Rows[0]["Status"]="Promoted";
         Seed(browser,history);list.SelectedValue=1;

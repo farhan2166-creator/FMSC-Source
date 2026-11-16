@@ -142,3 +142,48 @@ IF EXISTS(SELECT 1 FROM @MissingPlacements P JOIN @MissingWindows W ON W.WindowI
 IF NOT EXISTS(SELECT 1 FROM @MissingPlacements P JOIN @MissingWindows W ON W.WindowId=P.WindowId
  WHERE W.AcademicYearId=2 AND P.ClassSectionId=2 AND P.CanPromote=1) THROW 51000,'Valid progression to higher destination was lost.',1;
 PRINT 'PASS: missing class fits both previous and following placements; promotion requires a higher destination.';
+GO
+ALTER TABLE #Students ADD AdmissionNumber nvarchar(40), UpdatedAt datetime2;
+CREATE TABLE #StudentPostingHolds(AdmissionId int,ResumeDate date);
+CREATE TABLE #StudentStatusHistory(AdmissionId int,OldStatus nvarchar(30),NewStatus nvarchar(30),Reason nvarchar(250),
+ EffectiveDate date,Remarks nvarchar(500),CreatedBy int);
+UPDATE #Students SET AdmissionNumber=N'4' WHERE AdmissionId=4;
+INSERT #Students(AdmissionId,Status,AdmissionDate,AdmissionNumber) VALUES(10,N'Active','20140401',N'10');
+GO
+DECLARE @AdmissionId int=10,@EnrollmentId int=0,@Status nvarchar(30)=N'Left',@StudentStatus nvarchar(30)=N'Active',
+ @StartDate date='20140401',@LeaveDate date='20150331',@Reason nvarchar(500)=N'Verified school departure',
+ @RecordHistoricalDeparture bit=0,@UserId int=1;
+-- DEPARTURE_GUARD
+IF @CanRecordDeparture<>1 THROW 51000,'No departure option for an eligible final historical placement.',1;
+-- DEPARTURE_WRITE
+IF NOT EXISTS(SELECT 1 FROM #Students WHERE AdmissionId=10 AND Status=N'Active' AND WithdrawalDate IS NULL)
+ OR EXISTS(SELECT 1 FROM #StudentStatusHistory WHERE AdmissionId=10)
+ THROW 51000,'History-only save changed the student status or wrote a departure event.',1;
+GO
+DECLARE @AdmissionId int=10,@EnrollmentId int=0,@Status nvarchar(30)=N'Left',@StudentStatus nvarchar(30)=N'Active',
+ @StartDate date='20140401',@LeaveDate date='20150331',@Reason nvarchar(500)=N'Verified school departure',
+ @RecordHistoricalDeparture bit=1,@UserId int=1;
+-- DEPARTURE_GUARD
+-- DEPARTURE_WRITE
+IF NOT EXISTS(SELECT 1 FROM #Students WHERE AdmissionId=10 AND Status=N'Left' AND WithdrawalDate=@LeaveDate)
+ OR NOT EXISTS(SELECT 1 FROM #StudentStatusHistory WHERE AdmissionId=10 AND OldStatus=N'Active' AND NewStatus=N'Left'
+  AND EffectiveDate=@LeaveDate AND Reason=@Reason AND CreatedBy=@UserId)
+ THROW 51000,'Opted-in departure did not update the student and preserve the verified reason and date.',1;
+PRINT 'PASS: historical placement offers an explicit school departure, preserving status by default.';
+GO
+DECLARE @AdmissionId int=4,@EnrollmentId int=0,@Status nvarchar(30)=N'Left',@StudentStatus nvarchar(30)=N'Active',
+ @StartDate date='20140401',@LeaveDate date='20150331',@RecordHistoricalDeparture bit=1;
+BEGIN TRY
+ -- DEPARTURE_GUARD
+ THROW 51000,'Historical departure accepted when a later active placement exists.',1;
+END TRY BEGIN CATCH IF ERROR_NUMBER()<>59624 THROW; END CATCH;
+GO
+UPDATE #Students SET Status=N'Active',WithdrawalDate=NULL WHERE AdmissionId=10;
+INSERT #StudentPostingHolds VALUES(10,NULL);
+DECLARE @AdmissionId int=10,@EnrollmentId int=0,@Status nvarchar(30)=N'Left',@StudentStatus nvarchar(30)=N'Active',
+ @StartDate date='20140401',@LeaveDate date='20150331',@RecordHistoricalDeparture bit=1;
+BEGIN TRY
+ -- DEPARTURE_GUARD
+ THROW 51000,'Historical departure accepted during an active hold.',1;
+END TRY BEGIN CATCH IF ERROR_NUMBER()<>59624 THROW; END CATCH;
+PRINT 'PASS: later placements and active holds prevent backdated school departure.';
