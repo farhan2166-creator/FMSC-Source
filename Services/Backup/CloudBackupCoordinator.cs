@@ -297,7 +297,7 @@ internal static class CloudBackupCoordinator
         }
     }
 
-    private static bool IsUpdaterIdleForBackup()
+    internal static bool IsUpdaterIdleForBackup()
     {
         try
         {

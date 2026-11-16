@@ -49,6 +49,13 @@ internal static class Program
         // its protected cloud credentials and local SQL permissions. It never
         // opens the login window or exposes student data to the command line.
 #if !FMSC_LEVEL2
+        if (args.SequenceEqual(new[] { "--communication-queue-worker" }))
+        {
+            AppExceptionHandler.Register();
+            Environment.ExitCode = Services.Communication.CommunicationQueueWorker
+                .RunAsync().GetAwaiter().GetResult();
+            return;
+        }
         if (args.SequenceEqual(new[] { "--cloud-backup-scheduled" }))
         {
             AppExceptionHandler.Register();

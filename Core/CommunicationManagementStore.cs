@@ -28,6 +28,20 @@ internal static class CommunicationManagementStore
     internal static Task<DataTable> ReadMyUnfinishedBatchesAsync() =>
         ReadSessionsAsync(unfinished: true);
 
+    internal static Task<DataTable> ReadWorkerIdentityAsync(Guid workerId, byte[] secret, byte[] windows, byte[] device) =>
+        DatabaseHelper.QuerySqlAsync("EXEC msg.ReadWorkerIdentity @WorkerId,@Token,@WindowsProof,@DeviceProof",
+            DatabaseHelper.P("@WorkerId",workerId), DatabaseHelper.P("@Token",secret),
+            DatabaseHelper.P("@WindowsProof",windows), DatabaseHelper.P("@DeviceProof",device));
+
+    internal static Task<DataTable> ReadReadyWorkerRecipientsAsync(Guid workerId, byte[] secret, byte[] windows, byte[] device) =>
+        DatabaseHelper.QuerySqlAsync("EXEC msg.ReadReadyWorkerRecipients @WorkerId,@Token,@WindowsProof,@DeviceProof",
+            DatabaseHelper.P("@WorkerId",workerId), DatabaseHelper.P("@Token",secret),
+            DatabaseHelper.P("@WindowsProof",windows), DatabaseHelper.P("@DeviceProof",device));
+
+    internal static Task ExcludeChangedPendingAsync(long recipientId, string reason) =>
+        DatabaseHelper.ExecuteUserAsync("msg.ExcludeChangedPending", DatabaseHelper.P("@RecipientId",recipientId),
+            DatabaseHelper.P("@ExclusionCode",reason));
+
     internal static Task<DataTable> ReadDispatchSettingsAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Configure"))

@@ -13,6 +13,8 @@ internal sealed class CommunicationSettingsDialog : ApplicationWindowForm
     private readonly TabControl tabs = new() { Dock = DockStyle.Fill };
     private readonly ModernButton manageProviders = new() { Text = "Manage Sending Methods…", ThemeRole = "Secondary" };
     private readonly ModernButton savePolicy = new() { Text = "Save Sending Rules", ThemeRole = "Primary" };
+    private readonly ModernButton enableWorker = new() { Text = "Enable Background Sending", ThemeRole = "Secondary" };
+    private readonly ModernButton disableWorker = new() { Text = "Disable Background Sending", ThemeRole = "Secondary" };
     private readonly ModernButton saveRule = new() { Text = "Save Selected Rule", ThemeRole = "Primary" };
     private readonly ModernButton close = new() { Text = "Close", DialogResult = DialogResult.Cancel };
     private readonly Label feedback = new() { Dock = DockStyle.Fill, AutoEllipsis = true };
@@ -80,6 +82,24 @@ internal sealed class CommunicationSettingsDialog : ApplicationWindowForm
             changed |= dialog.Changed;
         };
         savePolicy.Click += async (_, _) => await PerformAsync(SavePolicyAsync);
+        enableWorker.Click += async (_, _) => await PerformAsync(async () =>
+        {
+            if (ModernMessageDialog.Show(this,
+                "Authorize this Windows account to send previously reviewed and scheduled API messages while FMSC is closed? Sending limits and permissions still apply.",
+                "Enable Background Sending", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            await FMSC_SMS.Services.Communication.CommunicationWorkerEnrollment.EnableAsync();
+            feedback.Text = "Background sending enrolled for this Windows account.";
+            changed = true;
+        });
+        disableWorker.Click += async (_, _) => await PerformAsync(async () =>
+        {
+            if (ModernMessageDialog.Show(this,
+                "Disable all school background communication processors? Unsent messages remain in Queue.",
+                "Disable Background Sending", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            await FMSC_SMS.Services.Communication.CommunicationWorkerEnrollment.DisableAsync();
+            feedback.Text = "Background sending disabled.";
+            changed = true;
+        });
         saveRule.Click += async (_, _) => await PerformAsync(SaveSelectedRuleAsync);
         rules.SelectionChanged += (_, _) => ShowSelectedRule();
     }
@@ -131,6 +151,11 @@ internal sealed class CommunicationSettingsDialog : ApplicationWindowForm
         });
         savePolicy.Width = AppScale.Scale(210);
         panel.Controls.Add(savePolicy);
+        panel.Controls.Add(Heading("Background processor"));
+        enableWorker.Width = AppScale.Scale(235);
+        disableWorker.Width = AppScale.Scale(235);
+        panel.Controls.Add(enableWorker);
+        panel.Controls.Add(disableWorker);
         page.Controls.Add(panel);
     }
 
