@@ -272,6 +272,10 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
             DatabaseHelper.ConnectionString=new SqlConnectionStringBuilder(original){InitialCatalog=restored!,Pooling=false}.ConnectionString;
             r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Id",Sql.P("@Id",communicationRecipient))==0,
                 "The restored-message refusal rolls back the attempted claim completely.");
+            await r.Refused("Restored approval evidence cannot be rewritten to bypass the restore hold",()=>{
+                Sql.Query("UPDATE B SET RestoreBoundaryHash=msg.RestoreBoundary() FROM msg.Batch B JOIN msg.Recipient R ON R.BatchId=B.BatchId WHERE R.RecipientId=@Id",
+                    Sql.P("@Id",communicationRecipient));return Task.CompletedTask;
+            },51343);
             long fresh=await ConfirmCommunicationRecovery();
             using var claimed=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",fresh),
                 Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));
