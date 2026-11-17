@@ -9,6 +9,16 @@
       "schema": "msg",
       "name": "AutomationSourceTombstone",
       "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "AttemptStatusPoll",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "ClaimDueTwilioReceipts",
+      "type": "P "
     }
   ],
   "triggers": []
