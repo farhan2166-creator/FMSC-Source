@@ -51,6 +51,9 @@ internal static partial class Program
             Descendants(page).Any(control=>ReferenceEquals(control,picker)) &&
             !Descendants(overview).Any(control=>ReferenceEquals(control,picker)),
             "Student selector remains available in the page heading");
+        Check(Descendants(picker).OfType<TextBox>()
+                .Any(input=>input.AccessibleName=="Student"),
+            "Header search retains the accessible Student input identity");
 
         var sectionLayout=(TableLayoutPanel)family.Parent!;
         Check(ReferenceEquals(overview.Parent,sectionLayout) &&
