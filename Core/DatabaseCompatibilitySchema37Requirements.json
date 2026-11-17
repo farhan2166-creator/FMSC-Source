@@ -1,0 +1,15 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "ScanAutomationCandidates",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "AutomationSourceTombstone",
+      "type": "U "
+    }
+  ],
+  "triggers": []
+}
