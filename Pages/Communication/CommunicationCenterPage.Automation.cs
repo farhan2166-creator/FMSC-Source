@@ -14,6 +14,11 @@ public sealed partial class CommunicationCenterPage
         if(dialog.ShowDialog(FindForm())!=DialogResult.OK ||
             dialog.SelectedSuggestion is not { } eventSuggestion)return;
 
+        UseEventSuggestion(eventSuggestion);
+    }
+
+    private void UseEventSuggestion(CommunicationAutomationInboxStore.Suggestion eventSuggestion)
+    {
         // This is an ordinary editable draft, NOT approved communication.
         // Selecting a suggestion never confirms a batch or starts sending.
         pendingAutomationSuggestion=null;

@@ -38,7 +38,7 @@ internal static class CommunicationReviewedContent
             preview.Entries.Where(e=>e.EligiblePhone==entry.PhoneE164).OrderBy(e=>e.RecordId)
             .Select(e=>new {e.RecordId,e.RecordName,e.AdmissionNumber,e.Outstanding}));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {
-            entry.Kind,entry.RecordId,entry.PhoneE164,rendered,members
+            entry.Kind,entry.RecordId,entry.PhoneE164,entry.FamilyId,rendered,members
         }))));
     }
 }

@@ -71,7 +71,7 @@ internal sealed class CommunicationTemplateDialog : ApplicationWindowForm
                     "Message Template",MessageBoxButtons.OK,MessageBoxIcon.Warning);
                 return;
             }
-            try { CommunicationPreparedMessages.ValidateFormat(Body, Purpose); }
+            try { CommunicationPreparedMessages.ValidateFormat(Body, Purpose,allowEventContext:CommunicationPreparedMessages.HasEventContext(Body)); }
             catch (CommunicationValidationException ex)
             {
                 ModernMessageDialog.Show(this, ex.Message, "Message Template", MessageBoxButtons.OK, MessageBoxIcon.Warning);

@@ -351,7 +351,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(height)));
         content.Controls.Add(new Label
         {
-            Text = "Review-only suggestions support admission, payments, birthdays and fee notices. All events start Off; automatic dispatch remains disabled.",
+            Text = "Each event starts Off. Prepare for Review requires an operator; Send Automatically needs a separate administrator approval for its API method, template and limits.",
             Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText, AutoSize = false
         }, 0, 0);
         var rule = Labelled("School event", automationEvent);
@@ -401,11 +401,21 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             if (automationEvent.SelectedItem is not AutomationChoice selected)
                 throw new InvalidOperationException("Choose an automation event.");
             bool review=automationMode.SelectedIndex==1;
+            if(automationMode.SelectedIndex==2 && selected.Code is ("Admission" or "PaymentReceived" or "Birthday" or "OutstandingFees" or "UpcomingDue" or "OverdueFollowUp"))
+            {
+                using var authorization=new CommunicationAutomaticRuleDialog(selected.Code);
+                if(authorization.ShowDialog(this)==DialogResult.OK && authorization.Changed)
+                {
+                    Changed=true;await RefreshAutomationAsync();
+                    automationFeedback.Text="Automatic event authorization saved. The enrolled processor rechecks each source, consent, pause and allowance before sending.";
+                }
+                return;
+            }
             if(automationMode.SelectedIndex==2 ||
                (review && selected.Code is not ("Admission" or "PaymentReceived" or "Birthday"
                     or "OutstandingFees" or "UpcomingDue" or "OverdueFollowUp")))
             {
-                automationFeedback.Text="Review is available for admissions, payments, birthdays and three fee-reminder events. Automatic sending remains disabled.";
+                automationFeedback.Text="The selected event needs an approved school notice source before it can be enabled.";
                 return;
             }
             await CommunicationQueuePolicyStore.SaveAutomationModeAsync(

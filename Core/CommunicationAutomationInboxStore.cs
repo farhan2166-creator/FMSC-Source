@@ -53,6 +53,18 @@ internal static class CommunicationAutomationInboxStore
             .OrderBy(suggestion=>suggestion.CreatedUtc).ThenBy(suggestion=>suggestion.CandidateId).ToArray();
     }
 
+    internal static async Task<Suggestion?> OfferReviewAsync(long candidateId)
+    {
+        RequireReviewPermission();int actor=CurrentUser.UserId;
+        await DatabaseHelper.ExecuteUserAsync("msg.OfferEventReview",DatabaseHelper.BigInt("@CandidateId",candidateId));
+        using var rows=await DatabaseHelper.QueryUserAsync("msg.ReadEventForReview",DatabaseHelper.BigInt("@CandidateId",candidateId));
+        if(actor!=CurrentUser.UserId)throw new UnauthorizedAccessException("The school operator changed.");
+        if(rows.Rows.Count!=1)return null;
+        DataRow row=rows.Rows[0];
+        return new(Convert.ToInt64(row["CandidateId"]),Convert.ToString(row["EventCode"])!,Convert.ToInt64(row["SourceRecordId"]),
+            Convert.ToInt32(row["AdmissionId"]),Convert.ToString(row["StudentName"])!,Convert.ToString(row["AdmissionNumber"]),Convert.ToDateTime(row["CreatedUtc"]));
+    }
+
     internal static Task DismissAsync(long candidateId)
     {
         RequireReviewPermission();

@@ -36,6 +36,8 @@ internal static class CommunicationHistoryStore
                 Correction.OriginalBatchId CorrectionOfBatchId,
                 Correction.Reason CorrectionReason,
                 Correction.LinkedUtc CorrectionLinkedUtc,
+                Automatic.EventCode AutomaticEventCode,Automatic.ApprovedUtc AutomaticAuthorizedUtc,
+                COALESCE(AutomaticActor.Username,CONVERT(nvarchar(30),Automatic.ApprovedBy)) AutomaticAuthorizedBy,
                 Planned.SourceKind PlanSourceKind,Planned.DueUtc OccurrenceDueUtc,Recurring.RuleId RecurringRuleId,
                 Recurring.Frequency RecurringFrequency,Recurring.Every RecurringEvery,
                 COALESCE(RuleAuthor.Username,CONVERT(nvarchar(30),Recurring.CreatedBy)) RecurringAuthorizedBy,
@@ -63,6 +65,8 @@ internal static class CommunicationHistoryStore
             ) Takeover
             LEFT JOIN dbo.Users TakeoverActor ON TakeoverActor.UserId=Takeover.ApprovedBy
             LEFT JOIN msg.PlannedWork Planned ON Planned.BatchId=B.BatchId
+            LEFT JOIN msg.AutomaticAuthorization Automatic ON Automatic.AuthorizationId=Planned.AuthorizationId
+            LEFT JOIN dbo.Users AutomaticActor ON AutomaticActor.UserId=Automatic.ApprovedBy
             LEFT JOIN msg.RecurringRule Recurring ON Recurring.RuleId=Planned.RuleId
             LEFT JOIN dbo.Users RuleAuthor ON RuleAuthor.UserId=Recurring.CreatedBy
             LEFT JOIN msg.BatchCorrection Correction ON Correction.CorrectionBatchId=B.BatchId

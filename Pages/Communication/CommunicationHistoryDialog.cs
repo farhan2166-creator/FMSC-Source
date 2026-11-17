@@ -308,6 +308,9 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         if(DisplayValue(row,"PlanSourceKind")=="Recurrence")
             narrative+=" · Recurring schedule: every "+DisplayValue(row,"RecurringEvery")+" "+DisplayValue(row,"RecurringFrequency")+
                 " · Authorized by "+DisplayValue(row,"RecurringAuthorizedBy")+" · Occurrence "+LocalWhen(row,"OccurrenceDueUtc");
+        if(DisplayValue(row,"PlanSourceKind")=="Event")
+            narrative+=" · Automatic event: "+DisplayValue(row,"AutomaticEventCode")+" · Authorized by "+DisplayValue(row,"AutomaticAuthorizedBy")+
+                " · Authorization "+LocalWhen(row,"AutomaticAuthorizedUtc");
         string takeoverReason = DisplayValue(row, "TakeoverReason");
         if (takeoverReason.Length > 0)
             narrative += " · Administrator takeover reason: " + takeoverReason;

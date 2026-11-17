@@ -12,7 +12,7 @@ internal sealed class CommunicationMetaTemplateDialog : ApplicationWindowForm
     private readonly List<ModernComboBox> mappings=new();
     internal CommunicationMetaTransport.Selection? Selection {get;private set;}
     internal CommunicationMetaTemplateDialog(IReadOnlyList<CommunicationMetaTransport.Template> templates,string purpose,
-        bool allowStudentFields = true,IReadOnlyDictionary<string,string>? contextFields = null)
+        bool allowStudentFields = true,IReadOnlyDictionary<string,string>? contextFields = null,bool allowEventContext=false)
     {
         var constants=contextFields?.ToDictionary(pair=>pair.Key,pair=>pair.Value,StringComparer.Ordinal)
             ?? new Dictionary<string,string>(StringComparer.Ordinal);
@@ -49,8 +49,8 @@ internal sealed class CommunicationMetaTemplateDialog : ApplicationWindowForm
             {
                 var selection=new CommunicationMetaTransport.Selection(selected,mappings.Select(m=>
                     constants.Aggregate(m.Text.Trim(),(text,pair)=>text.Replace(pair.Key,pair.Value,StringComparison.Ordinal))).ToArray());
-                string format = selection.Format();
-                CommunicationPreparedMessages.ValidateFormat(format,purpose);
+                string format = selection.Format(allowEventContext);
+                CommunicationPreparedMessages.ValidateFormat(format,purpose,allowEventContext);
                 if (!allowStudentFields && CommunicationPreparedMessages.HasFields(
                     format.Replace("[OutstandingAmount]","",StringComparison.Ordinal)))
                     throw new CommunicationValidationException("Use shared wording for a family message. Student fields require one student.");

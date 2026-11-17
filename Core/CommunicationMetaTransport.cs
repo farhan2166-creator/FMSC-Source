@@ -19,16 +19,17 @@ internal static class CommunicationMetaTransport
     }
     internal sealed record Selection(Template Template, string[] Fields)
     {
-        internal string Format()
+        internal string Format()=>Format(false);
+        internal string Format(bool allowEventContext)
         {
             ValidateTemplate(Template);
             if (Fields.Length != Template.ParameterCount)
                 throw new CommunicationValidationException("Map every approved template field before reviewing.");
             foreach (string field in Fields)
-                CommunicationPreparedMessages.ValidateFormat(field);
+                CommunicationPreparedMessages.ValidateFormat(field,allowEventContext:allowEventContext);
             string body = Slots.Replace(Template.Body, m => Fields[int.Parse(m.Groups[1].Value)-1]);
             string text = string.Join("\n", new[] { Template.Header, body, Template.Footer }.Where(s => s.Length > 0));
-            CommunicationPreparedMessages.ValidateFormat(text);
+            CommunicationPreparedMessages.ValidateFormat(text,allowEventContext:allowEventContext);
             return text;
         }
         internal string Payload(CommunicationPreparedMessages.Values values)

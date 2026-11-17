@@ -17,6 +17,9 @@ internal static class CommunicationPlannedWorkStore
     internal static async Task PrepareDueAsync(CommunicationBackgroundEnrollment.Enrollment enrollment,Guid lease,CancellationToken token)
     {
         int actor=CurrentUser.UserId;
+        await DatabaseHelper.ExecuteUserAsync("msg.RefreshAutomaticSources",token,CommunicationBackgroundEnrollment.Proof(enrollment,lease));
+        await DatabaseHelper.ExecuteUserAsync("msg.CreateAutomaticWork",token,CommunicationBackgroundEnrollment.Proof(enrollment,lease));
+
         using(var due=await DatabaseHelper.QueryUserAsync("msg.ReadDueRecurrences",token,CommunicationBackgroundEnrollment.Proof(enrollment,lease)))
         {
             foreach(DataRow row in due.Rows)
@@ -41,12 +44,15 @@ internal static class CommunicationPlannedWorkStore
                 }
             }
         }
-        // One potentially network-bound template validation per worker pass keeps
-        // preparation bounded and leaves time for already-confirmed dispatch.
+        var preparationStarted=DateTime.UtcNow;
+        bool skipSms=false,skipWhatsApp=false;
+        for(int prepared=0;prepared<20 && DateTime.UtcNow-preparationStarted<TimeSpan.FromSeconds(15);prepared++)
+        {
+            await DatabaseHelper.ExecuteUserAsync("msg.RenewBackgroundLease",token,CommunicationBackgroundEnrollment.Proof(enrollment,lease));
         Guard(actor,token);
         Guid nonce=Guid.NewGuid();
         using var work=await DatabaseHelper.QueryUserAsync("msg.ClaimPlannedWork",token,
-            CommunicationBackgroundEnrollment.Proof(enrollment,lease).Concat(new[]{DatabaseHelper.P("@ClaimNonce",nonce)}).ToArray());
+            CommunicationBackgroundEnrollment.Proof(enrollment,lease).Concat(new[]{DatabaseHelper.P("@ClaimNonce",nonce),DatabaseHelper.Bit("@SkipSms",skipSms),DatabaseHelper.Bit("@SkipWhatsApp",skipWhatsApp)}).ToArray());
         if(work.Rows.Count==0)return;
         DataRow current=work.Rows[0];
         var claim=new Claim((Guid)current["WorkId"],nonce,enrollment,lease);
@@ -59,19 +65,27 @@ internal static class CommunicationPlannedWorkStore
             string provider=Convert.ToString(current["ProviderCode"])!,body=Convert.ToString(current["Body"])!;
             var credential=CommunicationProviderCredentialStore.LoadForDispatch(target.Channel,provider);
             if(CommunicationProviderCredentialStore.IdentityHash(credential)!=Convert.ToString(current["ProfileHash"]))
-                throw new CommunicationValidationException("The authorized provider profile changed.");
+                {
+                await HoldAsync(claim,"ProviderChanged",token);
+                if(target.Channel=="Sms")skipSms=true;else skipWhatsApp=true;
+                continue;
+            }
             var preview=await CommunicationRecipientResolver.ReadAsync(target);
             if(preview.Included==0)
             {
-                await HoldAsync(claim,"NoEligibleRecipients",token);return;
+                await HoldAsync(claim,"NoEligibleRecipients",token);continue;
             }
             var template=current.IsNull("TemplateJson") ? null
                 : JsonSerializer.Deserialize<CommunicationMetaTransport.Selection>(Convert.ToString(current["TemplateJson"])!);
+            if(Convert.ToString(current["SourceKind"])=="Event")
+                (body,template)=CommunicationAutomaticMessages.Expand(current,body,template);
             Guard(actor,token);
             await CommunicationApiBatchStore.ConfirmAsync(target,preview,body,claim.WorkId,provider,template,claim);
         }
-        catch(CommunicationValidationException ex) when(ex.IsTemporary){return;}
-        catch(SqlException ex) when(ex.Number is 50003 or 51086 or 51131 or 51133 or 51401)
+        catch(CommunicationValidationException ex) when(ex.IsTemporary)
+        {if(Convert.ToString(current["Channel"])=="Sms")skipSms=true;else skipWhatsApp=true;}
+        catch(SqlException ex) when(ex.Number is 1205 or 1222 or -2){return;}
+        catch(SqlException ex) when(ex.Number is 50003 or 51086 or 51131 or 51133 or 51401 or 51431)
         {
             await HoldAsync(claim,"SourceChanged",token);
         }
@@ -80,6 +94,7 @@ internal static class CommunicationPlannedWorkStore
         {
             await HoldAsync(claim,"PreparationFailed",token);
             AppExceptionHandler.LogNonFatal(new InvalidOperationException("An authorized communication occurrence needs review."),"Communication preparation held");
+        }
         }
     }
     private static Task HoldAsync(Claim claim,string reason,CancellationToken token)=>DatabaseHelper.ExecuteUserAsync("msg.HoldPlannedWork",token,

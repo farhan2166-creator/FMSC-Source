@@ -47,6 +47,7 @@ internal static class CommunicationManagementStore
             sessions.Columns.Add(new DataColumn("RecipientSearchText", typeof(string)) { DefaultValue = "" });
             sessions.Columns.Add("SourceRowKind",typeof(string));
             sessions.Columns.Add("PlanRuleId",typeof(Guid));
+            sessions.Columns.Add("PlanCandidateId",typeof(long));
             foreach(DataRow session in sessions.Rows)session["SourceRowKind"]="Batch";
             if(unfinished)
             {
@@ -328,7 +329,7 @@ internal static class CommunicationManagementStore
             throw new UnauthorizedAccessException("Communication Settings permission is required.");
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(body))
             throw new ArgumentException("Template name and message are required.");
-        CommunicationPreparedMessages.ValidateFormat(body, purpose);
+        CommunicationPreparedMessages.ValidateFormat(body, purpose,allowEventContext:CommunicationPreparedMessages.HasEventContext(body));
         await DatabaseHelper.QueryUserAsync("msg.SaveTemplate",
             DatabaseHelper.Int("@TemplateId", templateId),
             DatabaseHelper.P("@Name", name.Trim()),

@@ -367,6 +367,13 @@ public sealed partial class CommunicationCenterPage
     private async Task OpenSessionAsync(DataGridViewRow? selected, bool unfinished)
     {
         if (IsBusy || selected?.DataBoundItem is not DataRowView row) return;
+        if(unfinished && row.Row.Table.Columns.Contains("SourceRowKind") && Convert.ToString(row["SourceRowKind"])=="Event")
+        {
+            int actor=CurrentUser.UserId;
+            var suggestion=await CommunicationAutomationInboxStore.OfferReviewAsync(Convert.ToInt64(row["PlanCandidateId"]));
+            if(actor==CurrentUser.UserId && !IsDisposed && suggestion is not null)UseEventSuggestion(suggestion);
+            return;
+        }
         if(unfinished && row.Row.Table.Columns.Contains("SourceRowKind") && Convert.ToString(row["SourceRowKind"])=="Recurrence")
         {
             using var schedules=new CommunicationRecurringSchedulesDialog((Guid)row["PlanRuleId"]);

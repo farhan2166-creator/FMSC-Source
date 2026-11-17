@@ -14,7 +14,7 @@ internal static class CommunicationPreparedMessages
     internal sealed record BuiltIn(string Name, string Purpose, string Body, bool FamilyOnly = false, string? Channel = null, string LanguageCode = "en");
     internal sealed record ComposeTemplate(string Name, string Purpose, string Body, string? Channel = null, bool FamilyOnly = false, string LanguageCode = "en")
     {
-        internal bool Matches(CommunicationTarget target) => Purpose == target.Purpose
+        internal bool Matches(CommunicationTarget target) => !HasEventContext(Body) && Purpose == target.Purpose
             && (Channel is null || Channel == target.Channel)
             && (!FamilyOnly || target.Audience == CommunicationAudience.Family);
         public override string ToString() => Name;
@@ -121,6 +121,7 @@ internal static class CommunicationPreparedMessages
     private static readonly Regex Field = new(
         @"\[(?<key>[A-Za-z][A-Za-z0-9]*)\]",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    internal static bool HasEventContext(string body)=>new[]{"[PaymentDetails]","[PaymentAmount]","[CreditApplied]","[ReceiptNumber]","[NoticeTitle]","[NoticeText]"}.Any(field=>body.Contains(field,StringComparison.Ordinal));
     internal static bool HasFields(string body) => Field.IsMatch(body);
 
     internal static Values FromPreview(CommunicationPreviewEntry entry)
@@ -131,11 +132,12 @@ internal static class CommunicationPreparedMessages
             ClassName = entry.ClassName
         };
 
-    internal static void ValidateFormat(string body, string? purpose = null)
+    internal static void ValidateFormat(string body, string? purpose = null,bool allowEventContext=false)
     {
         if (string.IsNullOrWhiteSpace(body) || body.Length > 1600)
             throw new CommunicationValidationException("Write a message of up to 1600 characters.");
         string remaining = Field.Replace(body, match => match.Groups["key"].Value switch {
+            "PaymentDetails" or "PaymentAmount" or "CreditApplied" or "ReceiptNumber" or "NoticeTitle" or "NoticeText" when allowEventContext => "",
             "RecipientName" or "StudentName" or "AdmissionNumber" or "AdmissionDate" => "",
             "FatherName" or "ClassName" when purpose != "Staff" => "",
             "FatherName" or "ClassName" => throw new CommunicationValidationException("Student and class fields cannot be used for a staff message."),
