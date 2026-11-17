@@ -143,6 +143,9 @@ internal static partial class Program
         source.Rows.Add(42, "91002", "Synthetic Ben", "Synthetic Guardian", "REG-42");
         source.Rows.Add(43, "29100", "Fixture 9100", DBNull.Value, DBNull.Value);
         source.Rows.Add(44, "9100a", "Fixture Sara", "Fixture Father", "REG-44");
+        source.Rows.Add(45, "QR-6591", "Test One", "Bakhtiar Ali", DBNull.Value);
+        source.Rows.Add(46, "6591", "Regular Student", "Different Guardian", DBNull.Value);
+        source.Rows.Add(47, "QR-65912", "Temporary Other", "Guardian Two", DBNull.Value);
         using var picker = new StudentPicker();
         int[] Matches(string term) => picker.FindMatches(source, term).Entries.Select(entry => entry.Id).ToArray();
 
@@ -157,5 +160,26 @@ internal static partial class Program
             "Student Picker accepts the admission number suffix regardless of case");
         Check(Matches("reg-4").SequenceEqual(new[] { 41, 44, 42 }) && Matches("G-41").Length == 0,
             "Student Picker retains registration number prefix matching");
+        Check(Matches("6591").OrderBy(id => id).SequenceEqual(new[] { 45, 46, 47 }) &&
+            Matches("659").OrderBy(id => id).SequenceEqual(new[] { 45, 46, 47 }),
+            "Numeric prefixes include official and QR temporary admissions without matching a middle substring");
+        Check(Matches("qr-6591").OrderBy(id => id).SequenceEqual(new[] { 45, 47 }) &&
+            Matches("qr6591").OrderBy(id => id).SequenceEqual(new[] { 45, 47 }) &&
+            Matches("QR-65912").SequenceEqual(new[] { 47 }) &&
+            Matches("591").Length == 0,
+            "QR references match with or without a hyphen, while numeric searches stay prefix-only");
+        Check(Matches("akhtia").SequenceEqual(new[] { 45 }),
+            "Temporary admissions retain interior father-name matching");
+        Check(picker.FindMatches(source, "6591").Highlight == -1,
+            "Ambiguous identical official and QR reference numbers do not preselect a student");
+        var quickResult = picker.FindMatches(source, "qr6591");
+        Check(quickResult.Highlight >= 0 && quickResult.Entries[quickResult.Highlight].Id == 45,
+            "An explicit QR reference can highlight its unique exact temporary record");
+        using var temporaryOnly = source.Clone();
+        temporaryOnly.ImportRow(source.Rows.Cast<DataRow>().Single(row => Convert.ToInt32(row["AdmissionId"]) == 45));
+        var numericQuick = picker.FindMatches(temporaryOnly, "6591");
+        Check(numericQuick.Entries.Count == 1 && numericQuick.Highlight == 0 &&
+              numericQuick.Entries[0].Cells[0] == "QR-6591",
+            "An unambiguous numeric search selects the QR record while keeping its full identifier visible");
     }
 }
