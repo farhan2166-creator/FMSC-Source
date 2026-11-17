@@ -152,6 +152,9 @@ public sealed class StudentProfilePage : V2Page
         var selector = HumanUi.Card("Find Student");
         selector.Content.Controls.Add(HumanUi.Field("Student", student, true));
         var header = BuildHeaderCard();
+        // The overview must accommodate all five identity lines, including
+        // contact and registration, at the current font/UI scale.
+        header.Margin = new Padding(0, AppScale.Scale(4), 0, AppScale.Scale(4));
         var sections = BuildSectionsGrid();
         var footer = BuildQuickActionsFooter();
         // Profile information follows the student selector in reading order.
@@ -164,13 +167,16 @@ public sealed class StudentProfilePage : V2Page
             Margin = Padding.Empty
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1, hasSubtitle: false)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(154)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute,
+            Math.Max(AppScale.Scale(154),
+                header.Margin.Vertical + header.Padding.Vertical +
+                header.Header.Height + header.Content.Padding.Vertical +
+                OverviewIdentityHeight() + AppScale.Scale(4))));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,
             Math.Max(AppScale.Scale(94), 2 * (AppTheme.CompactButtonHeight + UiDesignSystem.Spacing.Sm)
                 + UiDesignSystem.Spacing.Md)));
         selector.Margin = new Padding(0, 0, 0, AppScale.Scale(4));
-        header.Margin = new Padding(0, AppScale.Scale(4), 0, AppScale.Scale(4));
         root.Controls.Add(selector, 0, 0);
         root.Controls.Add(header, 0, 1);
         root.Controls.Add(sections, 0, 2);
@@ -178,6 +184,10 @@ public sealed class StudentProfilePage : V2Page
         SetContent(root);
         ClearProfile();
     }
+    private int OverviewIdentityHeight() =>
+        new[] { nameLabel, fatherLabel, placementLabel, contactLabel, registrationLabel }
+            .Sum(label => Math.Max(label.Height, AppMetrics.TextHeight(label.Font) + AppScale.Scale(2)));
+
     private HumanCard BuildHeaderCard()
     {
         var card = HumanUi.Card("Student Overview");
