@@ -106,7 +106,7 @@ internal sealed class CommunicationManualHandoff : UserControl
         Func<long, string, Task> Mark,
         Action<Uri> Launch,
         Action<string> Notify,
-        Func<long, Task>? RecordShellHandoff = null,
+        Func<long, CommunicationManualOpen, bool, Task>? RecordHandoffEvidence = null,
         Func<bool>? ConfirmRecoveredSend = null,
         Func<long, Task>? MarkRecovered = null);
     private readonly Operations operations;
@@ -123,9 +123,9 @@ internal sealed class CommunicationManualHandoff : UserControl
             CommunicationManualHandoffStore.OpenAsync, (id, outcome) => CommunicationManualHandoffStore.MarkAsync(id, outcome, false),
             uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }),
             message => ModernMessageDialog.Show(FindForm(), message, "Manual WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Warning),
-            CommunicationManualHandoffStore.RecordShellHandoffAsync,
+            CommunicationManualHandoffStore.RecordHandoffEvidenceAsync,
             () => ModernMessageDialog.Show(FindForm(),
-                "FMSC could not confirm the chat opened. Check the conversation in WhatsApp. Did you already send this message?",
+                "Check the original conversation in WhatsApp. Only report a send you can verify there. Did you already send this message?",
                 "Check WhatsApp", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes,
             id => CommunicationManualHandoffStore.MarkAsync(id, "ReportedSent", true));
         this.batchId=batchId;
@@ -192,17 +192,18 @@ internal sealed class CommunicationManualHandoff : UserControl
     {
         batchLease = CommunicationHandoffLease.Acquire(batchId);
         await RefreshAsync();
-        if (openFirstChat && !IsDisposed && current?.State == "Pending")
+        if (openFirstChat && !IsDisposed && current is { State: "Pending", RecoveryBlocked: false })
             await OpenAsync();
     }
 
     private void ApplyAvailability()
     {
         bool allowed=!busy && actorId==CurrentUser.UserId;
-        open.Enabled=allowed && (current?.State is "Pending" or "Opened");
-        bool canReport = current?.State=="Opened" && !failedOpen.Contains(current.RecipientId);
+        open.Enabled=allowed && current?.RecoveryBlocked==false && (current.State is "Pending" or "Opened");
+        bool canReport = current?.State=="Opened" && !failedOpen.Contains(current.RecipientId)
+            && (!current.RecoveryBlocked || (operations.ConfirmRecoveredSend is not null && operations.MarkRecovered is not null));
         reported.Enabled=allowed && canReport;
-        reported.Text=canReport && !current!.ShellHandoffRecorded && operations.ConfirmRecoveredSend is not null
+        reported.Text=canReport && (!current!.ShellHandoffRecorded || current.RecoveryBlocked) && operations.ConfirmRecoveredSend is not null
             ? "Check & Report" : remainingAfterCurrent > 0 ? "I Sent It · Next" : "I Sent It";
         skip.Enabled=allowed && (current?.State is "Pending" or "Opened");
         skip.Text=remainingAfterCurrent > 0 ? "Skip · Next" : "Skip";
@@ -238,11 +239,15 @@ internal sealed class CommunicationManualHandoff : UserControl
             destination.Text=current is null
                 ? "No unprocessed recipients remain. You can close this window."
                 : $"{current.RecordName}   •••• {current.LastFour}   ({DisplayState(current)})";
-            if (recipientChanged)
+            if (recipientChanged || current?.RecoveryBlocked==true)
             {
                 preparedMessage.Clear();
-                explanation.Text = Instructions;
-                if (nextRecipient is not null)
+                explanation.Text = nextRecipient?.RecoveryBlocked==true
+                    ? "This batch predates database recovery. Check WhatsApp for any earlier messages before reviewing a new request. Opening another chat is blocked; reporting an earlier send requires your explicit check."
+                    : Instructions;
+                if (nextRecipient?.RecoveryBlocked==true)
+                    preparedMessage.Text=nextRecipient.RetainedBody ?? "No retained message is available. Check the original WhatsApp conversation.";
+                else if (nextRecipient is not null)
                 {
                     try
                     {
@@ -267,7 +272,7 @@ internal sealed class CommunicationManualHandoff : UserControl
 
     private async Task OpenAsync()
     {
-        if(busy||current is null)return;
+        if(busy||current is null||current.RecoveryBlocked)return;
         if (current.State == "Opened" && !current.ShellHandoffRecorded
             && !failedOpen.Contains(current.RecipientId) && operations.ConfirmRecoveredSend is not null
             && ModernMessageDialog.Show(FindForm(), "Check WhatsApp first. Reopen only if you still need to send this message.",
@@ -294,14 +299,22 @@ internal sealed class CommunicationManualHandoff : UserControl
                 explanation.Text = Instructions;
                 // Browser or linked app opens only after SQL has persisted
                 // Opened. No automatic Send or delivery acknowledgement.
+                if(await operations.ReadPreview(batchId,id)!=handoff.Message)
+                    throw new CommunicationValidationException("The recipient or message changed while preparing the handoff. Review it again; no chat was opened.");
+                // Persist the exact prepared text before leaving FMSC. If the
+                // shell acknowledgment is lost, recovered reports still have
+                // honest immutable content evidence without a delivery claim.
+                if (operations.RecordHandoffEvidence is not null)
+                    await operations.RecordHandoffEvidence(id,handoff,false);
+                if(actorId!=CurrentUser.UserId) throw new InvalidOperationException("Signed-in account changed. No chat was launched.");
                 try { operations.Launch(handoff.Link); }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
                 {
                     throw new CommunicationValidationException("Windows could not open the WhatsApp link.");
                 }
                 failedOpen.Remove(id);
-                if (operations.RecordShellHandoff is not null)
-                    await operations.RecordShellHandoff(id);
+                if (operations.RecordHandoffEvidence is not null)
+                    await operations.RecordHandoffEvidence(id,handoff,true);
             }
             else if(!IsDisposed&&!handoff.Allowed)
                 Warn("Recipient is no longer eligible: "+handoff.ExclusionCode+".");
@@ -323,9 +336,10 @@ internal sealed class CommunicationManualHandoff : UserControl
     private async Task MarkAsync(string state)
     {
         if(busy||current is null)return;
-        bool recoveredReport = state == "ReportedSent" && !current.ShellHandoffRecorded
+        bool recoveredReport = state == "ReportedSent" && (!current.ShellHandoffRecorded || current.RecoveryBlocked)
             && operations.ConfirmRecoveredSend is not null;
         if (state=="ReportedSent" && (current.State!="Opened" || failedOpen.Contains(current.RecipientId)
+            || (current.RecoveryBlocked && (operations.ConfirmRecoveredSend is null || operations.MarkRecovered is null))
             || (recoveredReport && !operations.ConfirmRecoveredSend!()))) return;
         long id=current.RecipientId;
         bool recorded=false;
@@ -352,7 +366,7 @@ internal sealed class CommunicationManualHandoff : UserControl
                 // opening the next reviewed contact. This never marks the next
                 // message sent or bypasses SQL consent / destination rechecks.
                 // Do not reopen a previously Opened or uncertain chat.
-                if (recorded && current?.State=="Pending"
+                if (recorded && current is { State: "Pending", RecoveryBlocked: false }
                     && state is ("ReportedSent" or "Skipped"))
                     await OpenAsync();
                 if (recorded && !IsDisposed && closeOnCompletion && current is null)
@@ -364,6 +378,7 @@ internal sealed class CommunicationManualHandoff : UserControl
     internal void Warn(string message) => operations.Notify(message);
 
     private static string DisplayState(CommunicationManualRecipient recipient) =>
-        recipient.State == "Opened" && !recipient.ShellHandoffRecorded
+        recipient.RecoveryBlocked ? "Held after database recovery"
+        : recipient.State == "Opened" && !recipient.ShellHandoffRecorded
             ? "Check WhatsApp before reopening" : recipient.State;
 }

@@ -33,14 +33,15 @@ function Test-FmscNoLinks {
         }
     }
 }
-# Retain cloud recovery credentials and delivery evidence with encrypted backups.
+# Retain cloud recovery credentials and communication submission evidence.
 # OAuth tokens and general application settings are deliberately excluded.
 function Test-FmscCloudRecoveryArtifact {
     param([string]$RootPath,[string]$FilePath)
     if (-not $RootPath.TrimEnd('\').EndsWith('\AppData\Local\FMSC',
         [StringComparison]::OrdinalIgnoreCase)) { return $false }
     $relative = $FilePath.Substring($RootPath.TrimEnd('\').Length).TrimStart('\')
-    return $relative -match '^CloudBackups\\(?:recovery-key\.v1\.dpapi|queue\\[^\\]+\.fmscbackup\.dpapi|journal\\[^\\]+\.json)$'
+    return $relative -match '^CloudBackups\\(?:recovery-key\.v1\.dpapi|queue\\[^\\]+\.fmscbackup\.dpapi|journal\\[^\\]+\.json)$' -or
+        $relative -match '^Communication\\Attempts\\[A-Fa-f0-9]{32}\\[A-Fa-f0-9]{32}\\[a-f0-9]{32}\.(?:claim|result)\.dpapi$'
 }
 function Get-FmscProtectedFiles {
     param([Parameter(Mandatory=$true)][string]$Path)
@@ -232,17 +233,20 @@ function Write-FmscUninstallStatus {
     param([string]$Message)
     if ($script:StatusText) { $script:StatusText.Text = $Message; [Windows.Forms.Application]::DoEvents() }
 }
-# Remove only our exact per-user backup tasks, never similarly named school jobs.
+# Remove only our exact per-user FMSC background tasks, never similarly named school jobs.
 function Remove-FmscCloudBackupTasks {
     $scheduler = New-Object -ComObject 'Schedule.Service'
     $scheduler.Connect()
     $folder = $scheduler.GetFolder('\')
     foreach ($task in @($folder.GetTasks(1))) {
-        if ($task.Name -notmatch '^FMSC Cloud Backup S-1-5-21-(?:[0-9]+-){3}[0-9]+$') { continue }
+        $backupTask = $task.Name -match '^FMSC Cloud Backup S-1-5-21-(?:[0-9]+-){3}[0-9]+$'
+        $communicationTask = $task.Name -match '^FMSC Communication Queue S-1-5-21-(?:[0-9]+-){3}[0-9]+$'
+        if (-not ($backupTask -or $communicationTask)) { continue }
+        $expected = if ($backupTask) { '--cloud-backup-scheduled' } else { '--communication-queue-worker' }
         $actions = @($task.Definition.Actions)
         if ($actions.Count -ne 1 -or $actions[0].Type -ne 0 -or
             $actions[0].Path.Trim('"') -ine (Join-Path $AppDirectory 'FMSC_SMS.exe') -or
-            $actions[0].Arguments.Trim() -cne '--cloud-backup-scheduled') {
+            $actions[0].Arguments.Trim() -cne $expected) {
             throw 'An FMSC-named scheduled task has an unexpected action. Uninstall stopped for review.'
         }
         $folder.DeleteTask($task.Name, 0)
@@ -251,10 +255,19 @@ function Remove-FmscCloudBackupTasks {
 function Invoke-FmscUninstall {
     $mutex = New-Object Threading.Mutex($false,'Global\FMSCInstallerActivation')
     $held = $false
+    $workerMutex = $null
+    $workerHeld = $false
     try {
         try { $held = $mutex.WaitOne(0) }
         catch [Threading.AbandonedMutexException] { $held = $true }
         if (-not $held) { throw 'FMSC installation or update is running. Uninstall refused.' }
+        # Stop new provider attempts while preserving any in-flight HTTP request.
+        # Uninstall must not delete the application or private credential vault
+        # until the communication worker relinquishes this mutex.
+        $workerMutex = New-Object Threading.Mutex($false,'Global\FMSCCommunicationWorker')
+        try { $workerHeld = $workerMutex.WaitOne(120000) }
+        catch [Threading.AbandonedMutexException] { $workerHeld = $true }
+        if (-not $workerHeld) { throw 'Communication sending is still active. Uninstall refused.' }
         Assert-FmscUninstallReady
         $roots = @(Get-FmscDeletionRoots)
         foreach ($root in $roots) { Test-FmscNoLinks $root.Path }
@@ -301,6 +314,8 @@ function Invoke-FmscUninstall {
         }
         Write-FmscUninstallStatus ('Uninstall complete. School data and archived encrypted recovery material remain in ' + $DataDirectory)
     } finally {
+        if ($workerHeld) { $workerMutex.ReleaseMutex() }
+        if ($workerMutex) { $workerMutex.Dispose() }
         if ($held) { $mutex.ReleaseMutex() }
         $mutex.Dispose()
     }

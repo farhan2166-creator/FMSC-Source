@@ -23,9 +23,10 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
     private readonly ModernButton check=new() {Text="Check SMS Status",ThemeRole="Secondary",Width=AppScale.Scale(180),Height=AppMetrics.ButtonHeight,Enabled=false};
     private readonly ModernButton retry=new() {Text="Approve Retry",ThemeRole="Secondary",Width=AppScale.Scale(150),Height=AppMetrics.ButtonHeight,Enabled=false};
     private readonly ModernButton cancelPending=new() {Text="Cancel Pending",ThemeRole="Secondary",Width=AppScale.Scale(165),Height=AppMetrics.ButtonHeight,Enabled=false};
+    private readonly ModernButton releaseHold=new() {Text="Approve Resumption",ThemeRole="Secondary",Width=AppScale.Scale(190),Height=AppMetrics.ButtonHeight,Enabled=false};
     private readonly ModernButton close=new() {Text="Close",ThemeRole="Secondary",Width=AppScale.Scale(100),Height=AppMetrics.ButtonHeight};
     private CancellationTokenSource? cancellation;
-    private bool busy,closeRequested;
+    private bool busy,closeRequested,scheduleBlocked,recoveryBlocked;
     private FileStream? lease;
     internal CommunicationApiDispatchDialog(Guid batch,bool startConfirmed=false,Operations? operations=null)
     {
@@ -40,6 +41,17 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         foreach(var (field,title,width) in new[]{("RecipientName","School record",210),("Destination","Number ending",110),("State","Status",105),("OutcomeDetail","Details",230)})
             grid.Columns.Add(new DataGridViewTextBoxColumn {Name=field,DataPropertyName=field,HeaderText=title,
                 MinimumWidth=width,AutoSizeMode=DataGridViewAutoSizeColumnMode.Fill,SortMode=DataGridViewColumnSortMode.NotSortable});
+        releaseHold.Click+=async(_,_)=>await RunAsync(async()=>{
+            if(recoveryBlocked || !CurrentUser.IsAdministrator || !CurrentUser.HasPermission("Communication.Configure"))
+                throw new UnauthorizedAccessException("Administrator approval is required.");
+            if(ModernMessageDialog.Show(this,
+                "Approve this reviewed scheduled batch for sending under current eligibility, provider and school limits?",
+                "Approve Resumption",MessageBoxButtons.YesNo,MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
+            await DatabaseHelper.ExecuteUserAsync("msg.ReleaseScheduledHold",
+                DatabaseHelper.P("@BatchId",batch));
+            await RefreshAsync();
+        });
         cancelPending.Click+=async(_,_)=>await RunAsync(async()=>{
             if(ModernMessageDialog.Show(this,"Cancel all remaining Pending messages in this batch? Submitted or uncertain attempts keep their existing status.",
                 "Cancel Pending",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
@@ -47,7 +59,7 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
             await RefreshAsync();
         });
         var buttons=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false,AutoScroll=true};
-        buttons.Controls.AddRange(new Control[]{send,stop,check,cancelPending,close});
+        buttons.Controls.AddRange(new Control[]{send,stop,check,releaseHold,cancelPending,close});
         var retryRow=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=2,RowCount=1};
         retryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));retryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,AppScale.Scale(170)));
         retryRow.Controls.Add(HumanUi.Field("Reason (only a definitively failed message can be approved for retry)",reason),0,0);
@@ -77,11 +89,12 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         close.Click+=(_,_)=>Close();
         check.Click+=async(_,_)=>await RunAsync(async()=>{
             if(grid.CurrentRow?.DataBoundItem is not DataRowView selected || selected.Row.IsNull("AttemptId")
-                || selected.Row.IsNull("ProviderMessageId") || Convert.ToString(selected["ProviderCode"])!="Twilio")return;
+                || Convert.ToString(selected["ProviderCode"])!="Twilio")return;
             await this.operations.Reconcile(Convert.ToInt64(selected["AttemptId"]),cancellation!.Token);
             await RefreshAsync();
         });
         retry.Click+=async(_,_)=>await RunAsync(async()=>{
+            if(recoveryBlocked)return;
             if(grid.CurrentRow?.DataBoundItem is not DataRowView selected || Convert.ToString(selected["State"])!="Failed")return;
             if(string.IsNullOrWhiteSpace(reason.Text))throw new CommunicationValidationException("Enter why this definitively failed message should be retried.");
             if(ModernMessageDialog.Show(this,"Approve this failed message for another reviewed attempt? This does not send it yet.",
@@ -131,7 +144,46 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         int delivered=rows.Count(r=>Convert.ToString(r["State"])=="Delivered");
         int failed=rows.Count(r=>Convert.ToString(r["State"])=="Failed");
         progress.Maximum=Math.Max(1,rows.Length);progress.Value=rows.Length-pending;
-        status.Text=$"{pending} pending · {accepted} accepted · {delivered} delivered · {failed} failed · {unknown} unknown\nOnly Pending messages can be sent. Stopping keeps the remainder for later.";
+        scheduleBlocked=false;
+        string? scheduleStatus=null;
+        if (table.Columns.Contains("DueUtc") && rows.Length>0)
+        {
+            DataRow row=rows[0];
+            if (!row.IsNull("DueUtc"))
+            {
+                DateTime due=DateTime.SpecifyKind(Convert.ToDateTime(row["DueUtc"]),DateTimeKind.Utc);
+                if (due>DateTime.UtcNow)
+                {
+                    scheduleBlocked=true;
+                    // Scheduling belongs to the school timezone, regardless of the operator PC.
+                    scheduleStatus=table.Columns.Contains("DueSchool") && !row.IsNull("DueSchool")
+                        ? "Scheduled for "+Convert.ToDateTime(row["DueSchool"]).ToString("dd MMM yyyy h:mm tt")
+                          +" ("+Convert.ToString(row["SchoolTimeZone"])+")."
+                        : "This batch is scheduled for a later time.";
+                }
+                else if (table.Columns.Contains("ExpiresUtc") && !row.IsNull("ExpiresUtc") &&
+                         DateTime.SpecifyKind(Convert.ToDateTime(row["ExpiresUtc"]),DateTimeKind.Utc)<=DateTime.UtcNow)
+                {
+                    scheduleBlocked=true;
+                    scheduleStatus="This scheduled batch has expired. Unsent messages are not eligible for sending.";
+                }
+                else if (table.Columns.Contains("HoldForReview") &&
+                         !row.IsNull("HoldForReview") && Convert.ToBoolean(row["HoldForReview"]))
+                {
+                    scheduleBlocked=true;
+                    scheduleStatus="This batch is paused pending review.";
+                }
+            }
+        }
+        recoveryBlocked=rows.Any(row=>table.Columns.Contains("RecoveryBlocked") &&
+            !row.IsNull("RecoveryBlocked") && Convert.ToBoolean(row["RecoveryBlocked"]));
+        if(recoveryBlocked)
+        {
+            scheduleBlocked=true;
+            scheduleStatus="This batch predates database recovery. Reconcile earlier submissions before reviewing a new request. Pending messages remain held.";
+        }
+        status.Text=$"{pending} pending · {accepted} accepted · {delivered} delivered · {failed} failed · {unknown} unknown\n"+
+            (scheduleStatus ?? "Only Pending messages can be sent. Stopping keeps the remainder for later.");
         ShowSelectedMessage();
         UpdateActions();
     }
@@ -150,6 +202,7 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
     }
     private async Task SendPendingAsync()
     {
+        if(scheduleBlocked || recoveryBlocked)return;
         var pending=Rows.Where(r=>Convert.ToString(r["State"])=="Pending")
             .Select(r=>(Id:Convert.ToInt64(r["RecipientId"]),Channel:Convert.ToString(r["Channel"])!)).ToArray();
         foreach(var item in pending)
@@ -157,6 +210,7 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
             cancellation!.Token.ThrowIfCancellationRequested();Guard();
             var result=await operations.Send(item.Id,item.Channel,cancellation.Token);
             await RefreshAsync();
+            if(scheduleBlocked || recoveryBlocked)break;
             // A provider/network uncertainty must be reviewed before continuing
             // with more chargeable requests; never infer failure from a timeout.
             if(result.State=="Unknown")break;
@@ -175,9 +229,13 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
     private void UpdateActions()
     {
         var selected=(grid.CurrentRow?.DataBoundItem as DataRowView)?.Row;
-        send.Enabled=cancelPending.Enabled=!busy && Rows.Any(r=>Convert.ToString(r["State"])=="Pending");
+        send.Enabled=!busy && !scheduleBlocked && Rows.Any(r=>Convert.ToString(r["State"])=="Pending");
+        cancelPending.Enabled=!busy && Rows.Any(r=>Convert.ToString(r["State"])=="Pending");
         check.Enabled=!busy && selected is not null && Convert.ToString(selected["ProviderCode"])=="Twilio"
-            && !selected.IsNull("ProviderMessageId") && Convert.ToString(selected["State"]) is "Accepted" or "Submitted" or "Unknown";
-        retry.Enabled=reason.Enabled=!busy && selected is not null && Convert.ToString(selected["State"])=="Failed";
+            && !selected.IsNull("AttemptId") && Convert.ToString(selected["State"]) is "Accepted" or "Submitted" or "Unknown";
+        releaseHold.Enabled=!busy && !recoveryBlocked && CurrentUser.IsAdministrator &&
+            Rows.Any(r=>r.Table.Columns.Contains("HoldForReview") &&
+                !r.IsNull("HoldForReview") && Convert.ToBoolean(r["HoldForReview"]));
+        retry.Enabled=reason.Enabled=!busy && !recoveryBlocked && selected is not null && Convert.ToString(selected["State"])=="Failed";
     }
 }

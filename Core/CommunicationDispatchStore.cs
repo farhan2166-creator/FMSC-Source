@@ -5,16 +5,28 @@ using Microsoft.Data.SqlClient;
 namespace FMSC_SMS.Core;
 
 /// <summary>
-/// Provider-neutral, explicitly confirmed API dispatch boundary. No background worker,
-/// no automatic retry, no UI activation, and no sender startup side effects.
+/// Provider-neutral dispatch for explicitly confirmed foreground or scheduled batches.
+/// No automatic retry, UI activation, or sender startup side effects.
 /// Each outbound attempt is persisted by SQL BEFORE HTTP is invoked.
 /// </summary>
 internal static class CommunicationDispatchStore
 {
     internal sealed record DispatchResult(bool Claimed, long? AttemptId, string State, string? ExclusionCode);
 
-    internal static async Task<DispatchResult> SendOneReviewedAsync(
-        long recipientId,string channel,CancellationToken token=default)
+    internal static Task<DispatchResult> SendOneReviewedAsync(
+        long recipientId,string channel,CancellationToken token=default) =>
+        SendOneCoreAsync(recipientId,channel,null,null,token);
+
+    /// <summary>For unattended dispatch only: durably journal the SQL attempt
+    /// before the external POST. A journal failure leaves SQL Unknown without
+    /// contacting the provider, never an unrecorded automatic retry.</summary>
+    internal static Task<DispatchResult> SendOneWithClaimJournalAsync(
+        long recipientId,string channel,Action<long> journal,SqlParameter[] workerAuthorization,CancellationToken token=default) =>
+        SendOneCoreAsync(recipientId,channel,journal ?? throw new ArgumentNullException(nameof(journal)),
+            workerAuthorization ?? throw new ArgumentNullException(nameof(workerAuthorization)),token);
+
+    private static async Task<DispatchResult> SendOneCoreAsync(
+        long recipientId,string channel,Action<long>? journal,SqlParameter[]? workerAuthorization,CancellationToken token)
     {
         if (recipientId<=0) throw new ArgumentOutOfRangeException(nameof(recipientId));
         if (channel is not ("Sms" or "WhatsApp"))
@@ -23,10 +35,11 @@ internal static class CommunicationDispatchStore
             throw new UnauthorizedAccessException("School message sending is not authorized.");
         token.ThrowIfCancellationRequested();
         int actor=CurrentUser.UserId;
+        var evidence=await CommunicationDispatchEvidence.ReadAsync(recipientId,token);
         var prepared=await CommunicationApiBatchStore.PrepareRecipientAsync(recipientId,token);
         // The stored channel profile is authoritative. Never select a provider
         // merely from the local credential file or a hard-coded Twilio constant.
-        DataTable providerRows=await DatabaseHelper.QueryUserAsync("msg.ReadDispatchProvider",
+        using DataTable providerRows=await DatabaseHelper.QueryUserAsync("msg.ReadDispatchProvider",
             DatabaseHelper.P("@Channel",channel)).ConfigureAwait(false);
         if (actor!=CurrentUser.UserId || providerRows.Rows.Count!=1)
             throw new InvalidOperationException("Channel authorization or signed-in account changed.");
@@ -38,10 +51,21 @@ internal static class CommunicationDispatchStore
         token.ThrowIfCancellationRequested();
         Guid attemptKey=Guid.NewGuid();
         // A claim moves Pending to Unknown and records the attempt under lock.
-        DataTable claim=await DatabaseHelper.QueryUserAsync("msg.ClaimRecipient",
-            DatabaseHelper.P("@RecipientId",recipientId),
-            DatabaseHelper.P("@AttemptKey",attemptKey),
-            DatabaseHelper.P("@ExpectedProviderCode",adapter.ProviderCode));
+        var claimParameters=new List<SqlParameter> {
+            DatabaseHelper.P("@RecipientId",recipientId),DatabaseHelper.P("@AttemptKey",attemptKey),
+            DatabaseHelper.P("@ExpectedProviderCode",adapter.ProviderCode),DatabaseHelper.Bit("@IsWorker",workerAuthorization is not null)
+        };
+        if(workerAuthorization is not null)
+            claimParameters.AddRange(workerAuthorization.Select(parameter=>(SqlParameter)((ICloneable)parameter).Clone()));
+        DataTable claim;
+        try
+        {
+            claim=await DatabaseHelper.QueryUserAsync("msg.ClaimRecipient",claimParameters.ToArray());
+        }
+        catch(SqlException ex) when(ex.Number is 51341 or 51342)
+        {
+            throw new CommunicationValidationException("Sending is held because database recovery evidence requires administrator review. Reconcile any prior submission before resuming this message.");
+        }
         if (actor!=CurrentUser.UserId)
             throw new InvalidOperationException("Signed-in account changed after claim. The attempt is Unknown and cannot be automatically resent.");
         if (claim.Rows.Count!=1)
@@ -55,8 +79,20 @@ internal static class CommunicationDispatchStore
             || Convert.ToString(row["Channel"])!=channel)
             throw new InvalidOperationException("Provider claim identity changed; the attempt remains Unknown.");
 
+        // Both foreground and worker submissions retain exact attempt identity
+        // before HTTP; the worker also preserves its existing enrollment watermark.
+        // Re-read after claim as well: a restore between preflight and claim
+        // must not hide previously retained attempt keys behind reused IDs.
+        var claimedEvidence=await CommunicationDispatchEvidence.ReadAsync(recipientId,token);
+        if(actor!=CurrentUser.UserId || evidence.Identity!=claimedEvidence.Identity)
+            throw new CommunicationValidationException("The school or reviewed message changed after claim. Keep the attempt held for recovery.");
+        var durableClaim=CommunicationDispatchEvidence.RecordClaim(claimedEvidence,attemptId,attemptKey);
+        journal?.Invoke(attemptId);
+
         // Do not retry on cancellation, timeouts, 5xx or lost SQL responses.
         // The corresponding recipient is already Unknown until resolved.
+        if(actor!=CurrentUser.UserId)
+            throw new UnauthorizedAccessException("Account changed after claim. The attempt remains held; nothing was submitted.");
         CommunicationDeliveryOutcome outcome;
         using (var handler=new HttpClientHandler { AllowAutoRedirect=false,UseCookies=false })
         using (var client=new HttpClient(handler) { Timeout=TimeSpan.FromSeconds(25) })
@@ -70,6 +106,11 @@ internal static class CommunicationDispatchStore
         string? failureCode=outcome.FailureCode;
         if(failureCode is not null && (failureCode.Length>50 || !failureCode.All(c=>char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
             failureCode="ProviderRejected";
+        // Retain the provider reference before SQL acknowledgment. A lost SQL
+        // response must not erase independently available recovery evidence.
+        CommunicationDispatchEvidence.RecordResult(durableClaim,outcome);
+        if(actor!=CurrentUser.UserId)
+            throw new CommunicationValidationException("The account changed during submission. Its provider response is retained for reconciliation; do not send it again.");
         await DatabaseHelper.QueryUserAsync("msg.RecordProviderResult",
             DatabaseHelper.P("@AttemptKey",attemptKey),
             DatabaseHelper.P("@Outcome",outcome.State),
@@ -89,13 +130,23 @@ internal static class CommunicationDispatchStore
         if (!CurrentUser.HasPermission("Communication.Send"))
             throw new UnauthorizedAccessException("Reconciliation is not authorized.");
         int actor=CurrentUser.UserId;
-        DataTable rows=await DatabaseHelper.QueryUserAsync(
+        using DataTable rows=await DatabaseHelper.QueryUserAsync(
             "msg.ReadAttemptForReconciliation",DatabaseHelper.P("@AttemptId",attemptId));
         if (rows.Rows.Count!=1)
             throw new InvalidOperationException("The attempt has no correlatable provider identifier.");
         string channel=Convert.ToString(rows.Rows[0]["Channel"])!;
         string provider=Convert.ToString(rows.Rows[0]["ProviderCode"])!;
-        string sid=Convert.ToString(rows.Rows[0]["ProviderMessageId"])!;
+        string sid=Convert.ToString(rows.Rows[0]["ProviderMessageId"]) ?? "";
+        bool recoveredReference=sid.Length==0;
+        if(recoveredReference)
+        {
+            var evidence=await CommunicationDispatchEvidence.ReadAsync(Convert.ToInt64(rows.Rows[0]["RecipientId"]),token);
+            sid=CommunicationDispatchEvidence.ReadResult(evidence,(Guid)rows.Rows[0]["AttemptKey"])?.ProviderMessageId ?? "";
+            if(sid.Length==0)
+                throw new CommunicationValidationException("This uncertain attempt has no retained provider reference. Keep it held for provider/administrator review; do not resend it.");
+        }
+        if(actor!=CurrentUser.UserId)
+            throw new UnauthorizedAccessException("Account changed before checking the provider. Nothing was submitted.");
         ICommunicationTransportAdapter adapter=CommunicationTransportRegistry.ResolveForDispatch(
             channel,provider);
         using var handler=new HttpClientHandler { AllowAutoRedirect=false,UseCookies=false };
@@ -105,6 +156,14 @@ internal static class CommunicationDispatchStore
         if (result.State=="Unknown") return "Unknown";
         if (actor!=CurrentUser.UserId)
             throw new InvalidOperationException("Account changed during reconciliation.");
+        if(recoveredReference)
+        {
+            // The protected response supplies correlation only. The authenticated
+            // provider GET above supplies status; disk evidence alone is never delivery.
+            await DatabaseHelper.QueryUserAsync("msg.RecordProviderResult",
+                DatabaseHelper.P("@AttemptKey",(Guid)rows.Rows[0]["AttemptKey"]),DatabaseHelper.P("@Outcome","Unknown"),
+                DatabaseHelper.P("@ProviderMessageId",sid),DatabaseHelper.P("@FailureCode",null)).ConfigureAwait(false);
+        }
         string eventId="poll-"+sid+"-"+result.State;
         await DatabaseHelper.QueryUserAsync("msg.ApplyVerifiedReceipt",
             DatabaseHelper.P("@ProviderCode",provider),

@@ -19,16 +19,17 @@ internal static class CommunicationMetaTransport
     }
     internal sealed record Selection(Template Template, string[] Fields)
     {
-        internal string Format()
+        internal string Format()=>Format(false);
+        internal string Format(bool allowEventContext)
         {
             ValidateTemplate(Template);
             if (Fields.Length != Template.ParameterCount)
                 throw new CommunicationValidationException("Map every approved template field before reviewing.");
             foreach (string field in Fields)
-                CommunicationPreparedMessages.ValidateFormat(field);
+                CommunicationPreparedMessages.ValidateFormat(field,allowEventContext:allowEventContext);
             string body = Slots.Replace(Template.Body, m => Fields[int.Parse(m.Groups[1].Value)-1]);
             string text = string.Join("\n", new[] { Template.Header, body, Template.Footer }.Where(s => s.Length > 0));
-            CommunicationPreparedMessages.ValidateFormat(text);
+            CommunicationPreparedMessages.ValidateFormat(text,allowEventContext:allowEventContext);
             return text;
         }
         internal string Payload(CommunicationPreparedMessages.Values values)
@@ -106,25 +107,41 @@ internal static class CommunicationMetaTransport
     private static async Task ForPagesAsync(CommunicationProviderCredentialStore.Credential c,string path,
         HttpClient client,CancellationToken token,Action<JsonElement> read)
     {
+        var callerToken=token;
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(client.Timeout==Timeout.InfiniteTimeSpan || client.Timeout>TimeSpan.FromSeconds(25)
             ? TimeSpan.FromSeconds(25) : client.Timeout);token=deadline.Token;
         string? after=null;
-        for(int page=0;page<10;page++)
+        try
         {
-            using var request=Request(c,HttpMethod.Get,path+"?limit=100"+(after is null ? "" : "&after="+Uri.EscapeDataString(after)));
-            using var response=await client.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,token).ConfigureAwait(false);
-            if(!response.IsSuccessStatusCode) throw new CommunicationValidationException("Meta could not verify the account or templates (HTTP "+(int)response.StatusCode+"). Check the token and permissions in Settings.");
-            using var doc=JsonDocument.Parse(await ReadBoundedAsync(response,token));
-            if(!doc.RootElement.TryGetProperty("data",out var data) || data.ValueKind!=JsonValueKind.Array)
-                throw new CommunicationValidationException("Meta returned an incomplete account response. Nothing was enabled or sent.");
-            foreach(var row in data.EnumerateArray()) read(row);
-            after=null;
-            if(doc.RootElement.TryGetProperty("paging",out var paging) && paging.TryGetProperty("next",out _)
-                && paging.TryGetProperty("cursors",out var cursors)) after=Get(cursors,"after");
-            if(string.IsNullOrWhiteSpace(after)) return;
+            for(int page=0;page<10;page++)
+            {
+                using var request=Request(c,HttpMethod.Get,path+"?limit=100"+(after is null ? "" : "&after="+Uri.EscapeDataString(after)));
+                using var response=await client.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,token).ConfigureAwait(false);
+                if(response.StatusCode==HttpStatusCode.TooManyRequests || (int)response.StatusCode>=500)
+                    throw new CommunicationValidationException("Meta account and template checks are temporarily unavailable. Try again later; nothing was sent.",true);
+                if(!response.IsSuccessStatusCode) throw new CommunicationValidationException("Meta could not verify the account or templates (HTTP "+(int)response.StatusCode+"). Check the token and permissions in Settings.");
+                using var doc=JsonDocument.Parse(await ReadBoundedAsync(response,token));
+                if(!doc.RootElement.TryGetProperty("data",out var data) || data.ValueKind!=JsonValueKind.Array)
+                    throw new CommunicationValidationException("Meta returned an incomplete account response. Nothing was enabled or sent.");
+                foreach(var row in data.EnumerateArray()) read(row);
+                after=null;
+                if(doc.RootElement.TryGetProperty("paging",out var paging) && paging.TryGetProperty("next",out _)
+                    && paging.TryGetProperty("cursors",out var cursors)) after=Get(cursors,"after");
+                if(string.IsNullOrWhiteSpace(after)) return;
+            }
+            throw new CommunicationValidationException("The Meta account exceeds the supported template or phone list size. Nothing was enabled or sent.");
         }
-        throw new CommunicationValidationException("The Meta account exceeds the supported template or phone list size. Nothing was enabled or sent.");
+        catch(HttpRequestException)
+        {
+            // Only this read-only GET can be retried after a network failure.
+            // An uncertain message POST keeps its durable Unknown outcome.
+            throw new CommunicationValidationException("Meta account and template checks could not connect. Try again later; nothing was sent.",true);
+        }
+        catch(OperationCanceledException) when(!callerToken.IsCancellationRequested)
+        {
+            throw new CommunicationValidationException("Meta account and template checks timed out. Try again later; nothing was sent.",true);
+        }
     }
     internal static async Task<CommunicationDeliveryOutcome> SendOnceAsync(
         CommunicationProviderCredentialStore.Credential c,string destination,string templatePayload,HttpClient client,CancellationToken token)

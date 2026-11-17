@@ -479,7 +479,23 @@ internal static class CommunicationV2SqlChecks
             () => { Sql.Proc("msg.MarkManualHandoff", Sql.P("@UserId",f.Admin),
                 Sql.P("@RecipientId",manualRecipient),Sql.P("@Outcome","ReportedSent"));
                 return Task.CompletedTask; },51115);
-        Sql.Proc("msg.RecordShellHandoff", Sql.P("@UserId",f.Admin), Sql.P("@RecipientId",manualRecipient));
+        int openedCount=Convert.ToInt32(manualOpened.Rows[0]["OpenCount"]);
+        void RecordPrepared(string body,int count) => Sql.Proc("msg.RecordShellHandoff",
+            Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualRecipient),
+            Sql.P("@OpenCount",count),Sql.P("@RenderedBody",body),Sql.P("@ShellOpened",false));
+        RecordPrepared("Synthetic opened message & اطلاع",openedCount);
+        RecordPrepared("Synthetic opened message & اطلاع",openedCount);
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ManualOpenEvidence WHERE RecipientId=@Id AND OpenCount=@Count AND RenderedBody=N'Synthetic opened message & اطلاع' AND LaunchedUtc IS NULL",
+            Sql.P("@Id",manualRecipient),Sql.P("@Count",openedCount))==1
+            && Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND ShellHandoffUtc IS NULL",Sql.P("@Id",manualRecipient))==1,
+            "Exact Unicode handoff content is durably prepared once before the shell opens, without claiming sending or delivery.");
+        await r.Refused("A handoff retry cannot overwrite the original prepared text",()=>{
+            RecordPrepared("Different content",openedCount);return Task.CompletedTask;
+        },51114);
+        await r.Refused("A stale or fabricated handoff opening cannot record content",()=>{
+            RecordPrepared("Synthetic opened message & اطلاع",openedCount+1);return Task.CompletedTask;
+        },51114);
+        Sql.Proc("msg.RecordShellHandoff", Sql.P("@UserId",f.Admin), Sql.P("@RecipientId",manualRecipient), Sql.P("@OpenCount", Sql.Count("SELECT OpenCount FROM msg.ManualHandoff WHERE RecipientId=@Id", Sql.P("@Id", manualRecipient))), Sql.P("@RenderedBody", "Synthetic opened message & اطلاع"), Sql.P("@ShellOpened",true));
         Sql.Proc("msg.MarkManualHandoff",
             Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualRecipient),
             Sql.P("@Outcome","ReportedSent"));

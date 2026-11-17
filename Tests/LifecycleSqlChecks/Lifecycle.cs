@@ -27,6 +27,8 @@ internal sealed class Lifecycle(Fixture f, Report r)
             () => CommunicationApiSqlChecks.Run(f,r), a);
         await r.Stage("Admission: confirmed single-field sibling sync and stale-review protection",
             () => SiblingFieldSyncChecks.Run(f, r), a);
+        await r.Stage("Communication maintenance: retained dedupe keys and bounded terminal cleanup",
+            () => CommunicationRetentionSqlChecks.Run(f,r), a);
     }
 
     private Task Admission()

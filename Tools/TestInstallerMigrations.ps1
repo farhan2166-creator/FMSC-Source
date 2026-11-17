@@ -234,4 +234,15 @@ $synthetic.CompatibilityVerified=$true
 $synthetic.RunningSelectionValid=$false
 Assert-ReleasePolicy $false 'wrong or ambiguous running executable cannot pass'
 Write-Output 'PASS: version-independent installed-release acceptance rejects stale, corrupted and incompatible evidence.'
+# Execute the actual numeric-only CI sanitizer against synthetic SQL errors.
+$smokeAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'RunDisposableWindowsInstall.ps1'),[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Disposable Windows acceptance script does not parse.'}
+$diagnostic=$smokeAst.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-FmscSafeSqlFailureCodes'},$true)
+if(-not $diagnostic){throw 'Missing numeric-only SQL diagnostic helper.'}
+. ([scriptblock]::Create($diagnostic.Extent.Text))
+$syntheticErrors="Msg 195, Level 15: synthetic private SQL text`nSQL error: 51341`nMsg 195, duplicate`n03001234567 arbitrary private text"
+$codes=@(Get-FmscSafeSqlFailureCodes $syntheticErrors)
+if(($codes -join ',') -cne '195,51341'){throw 'SQL diagnostics must retain genuine parser and application error numbers without exposing private text.'}
+if(@(Get-FmscSafeSqlFailureCodes 'No SQL error code; unrelated reference 6501').Count -ne 0){throw 'Private text or unrelated numbers entered SQL diagnostics.'}
+Write-Output 'PASS: numeric-only SQL diagnostics retain parser errors and never emit private SQL text.'
 $global:LASTEXITCODE = 0

@@ -20,7 +20,9 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         Func<int, bool, bool, Task<FeeMessageDocument>>? ReadFeeDocument = null,
         Func<FeeMessageDocument, Task<Bitmap>>? RenderImage = null,
         Action<Image>? CopyImage = null,
-        CommunicationManualHandoff.Operations? FeeHandoff = null);
+        CommunicationManualHandoff.Operations? FeeHandoff = null,
+        Func<Method, CommunicationPreview, string, bool>? AuthorizePaidSend = null,
+        Func<Guid,CommunicationFinancialReview,Task>? ReserveFinancialReview = null);
 
     private sealed record ReviewedMessage(CommunicationTarget Target, CommunicationPreview Preview, string Body, Guid RequestId,
         FeeMessageDocument? Document);
@@ -36,13 +38,17 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     };
 
     private readonly int actor = CurrentUser.UserId;
+    private readonly bool useLiveSchoolLanguage;
     private readonly CommunicationTarget studentTarget;
     private readonly bool fees;
     private readonly Operations operations;
+    private CommunicationFinancialReview? metaFinancialSelectionSource;
     private readonly ModernComboBox scope = HumanUi.Combo();
     private readonly ModernComboBox feeContent = HumanUi.Combo();
     private readonly CheckBox attachImage = new() { Text = "Share as image in WhatsApp", Checked = true, Dock = DockStyle.Fill };
     private readonly ModernComboBox method = HumanUi.Combo(), templates = HumanUi.Combo(), recipients = HumanUi.Combo();
+    private readonly ModernComboBox language = HumanUi.Combo();
+    private string SelectedLanguage => language.SelectedIndex == 1 ? "ur" : "en";
     private readonly ModernTextBox message = HumanUi.TextBox(true, 1600), preview = HumanUi.TextBox(true, 1600);
     private readonly Label destination = new() { Dock = DockStyle.Fill, AutoEllipsis = true, Font = AppTheme.ButtonFont, UseMnemonic = false };
     private readonly Label summary = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
@@ -74,6 +80,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     internal CommunicationRecordMessageDialog(int admissionId, string display, bool fees, Operations? operations = null)
     {
         this.fees = fees;
+        useLiveSchoolLanguage = operations is null;
         studentTarget = CommunicationRecordEntry.Target(admissionId, fees);
         this.operations = operations ?? new Operations(
             option => option.Provider is { } provider
@@ -102,7 +109,11 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         scope.Name = "communicationRecordScope";
         scope.Items.AddRange(new object[] { "This student", "Linked family / siblings" });
         scope.SelectedIndex = 0;
-        options = Pair(HumanUi.Field("Send to", scope), HumanUi.Field("Send using", method));
+        language.Name = "communicationRecordLanguage";
+        language.Items.AddRange(new object[] { "English", "اردو / Urdu" });
+        language.SelectedIndex = 0;
+        options = Triple(HumanUi.Field("Send to", scope),
+            HumanUi.Field("Send using", method),HumanUi.Field("Language", language));
         feeContent.Items.AddRange(new object[] { "Outstanding balance / bill", "Latest payment / receipt" });
         feeContent.SelectedIndex = 0;
         feeOptions.Controls.Add(Pair(HumanUi.Field("Fee message", feeContent), attachImage));
@@ -147,12 +158,19 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         {
             if (metaSelection is not null || SelectedMethod?.IsMeta == true) ClearDraft();
             message.ReadOnly = SelectedMethod?.IsMeta == true;
+            language.Enabled = SelectedMethod?.IsMeta != true;
             RefreshTemplates(selectDefault: fees && message.Text.Length == 0);
             UpdateView();
         };
         templates.SelectedIndexChanged += (_, _) =>
         {
             if (templates.SelectedItem is ComposeTemplate selected) message.Text = selected.Body;
+        };
+        language.SelectedIndexChanged += (_, _) =>
+        {
+            // Never silently translate or replace a draft when the sender
+            // changes the language; only a separately selected template does.
+            RefreshTemplates();
         };
         recipients.SelectedIndexChanged += (_, _) => preview.Text = (recipients.SelectedItem as Recipient)?.Text ?? "";
         chooseMeta.Click += async (_, _) => await RunAsync(ChooseMetaAsync);
@@ -167,6 +185,22 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         Disposed += (_, _) => { review?.Document?.Dispose(); handoffImage?.Dispose(); };
         feeOptions.VisibleChanged += (_, _) => feeRow.Height = fees && feeOptions.Visible ? AppMetrics.FieldRowHeight : 0;
         UpdateView();
+    }
+
+    private static Control Triple(Control first, Control second, Control third)
+    {
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
+            Margin = Padding.Empty
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 37));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        panel.Controls.Add(first,0,0);
+        panel.Controls.Add(second,1,0);
+        panel.Controls.Add(third,2,0);
+        return panel;
     }
 
     private static Control Pair(Control left, Control right)
@@ -205,12 +239,21 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         method.SelectedIndex = 0;
         choices = await operations.ReadTemplates();
         EnsureAccess();
+        if (useLiveSchoolLanguage)
+        {
+            using var preference = await CommunicationManagementStore.ReadMessageLanguageAsync();
+            EnsureAccess();
+            if (preference.Rows.Count == 1)
+                language.SelectedIndex =
+                    Convert.ToString(preference.Rows[0]["DefaultMessageLanguage"]) == "ur" ? 1 : 0;
+        }
         RefreshTemplates(selectDefault: fees);
     }
 
     private void ClearDraft()
     {
         metaSelection = null;
+        metaFinancialSelectionSource = null;
         message.Clear();
         status.Text = "";
     }
@@ -223,20 +266,30 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         {
             IEnumerable<ComposeTemplate> options;
             if (fees && IsReceipt)
-                options = new[] { new ComposeTemplate("Payment recorded", "Individual",
-                    "Dear parent/guardian, the school recorded a payment of PKR [PaymentAmount]. Receipt: [ReceiptNumber]. Thank you.") };
+                options = SelectedLanguage == "ur"
+                    ? new[] { new ComposeTemplate("Payment recorded (Urdu)", "Individual",
+                        "محترم والدین/سرپرست، [PaymentDetails] رسید نمبر: [ReceiptNumber]۔ شکریہ۔", LanguageCode: "ur") }
+                    : new[] { new ComposeTemplate("Payment recorded", "Individual",
+                        "Dear parent/guardian, [PaymentDetails] Receipt: [ReceiptNumber]. Thank you.") };
             else if (fees && IsFamily)
-                options = new[]
-                {
-                    new ComposeTemplate("Family outstanding details", "FeeReminder", CommunicationFeeDetails.Template),
-                    new ComposeTemplate("Family outstanding balance", "FeeReminder",
-                        "Dear Parent/Guardian,\n\nFamily outstanding balance: PKR [OutstandingAmount]\n\nFor payment queries, please contact the school accounts office.\n\nRegards : FMSC")
-                };
+                options = SelectedLanguage == "ur"
+                    ? new[] { new ComposeTemplate("Family outstanding balance (Urdu)", "FeeReminder",
+                        "محترم والدین/سرپرست، آپ کے خاندان کی موجودہ بقایا فیس PKR [OutstandingAmount] ہے۔ تصدیق شدہ تفصیل کے لیے اسکول کے اکاؤنٹس دفتر سے رابطہ کریں۔",
+                        LanguageCode: "ur") }
+                    : new[]
+                    {
+                        new ComposeTemplate("Family outstanding details", "FeeReminder", CommunicationFeeDetails.Template),
+                        new ComposeTemplate("Family outstanding balance", "FeeReminder",
+                            "Dear Parent/Guardian,\n\nFamily outstanding balance: PKR [OutstandingAmount]\n\nFor payment queries, please contact the school accounts office.\n\nRegards : FMSC")
+                    };
             else
             {
                 var target = fees ? Target with { Audience = CommunicationAudience.OutstandingFees } : Target;
-                options = choices.Where(item => item.Matches(target) && (!IsFamily || !HasFields(item.Body)));
-                if (fees) options = new[] { new ComposeTemplate("Student outstanding details", "FeeReminder", CommunicationFeeDetails.Template) }.Concat(options);
+                options = choices.Where(item => item.LanguageCode == SelectedLanguage
+                    && item.Matches(target) && (!IsFamily || !HasFields(item.Body)));
+                if (fees && SelectedLanguage == "en")
+                    options = new[] { new ComposeTemplate("Student outstanding details",
+                        "FeeReminder", CommunicationFeeDetails.Template) }.Concat(options);
             }
             templates.Items.AddRange(options.Cast<object>().ToArray());
         }
@@ -247,9 +300,21 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     {
         var approved = await CommunicationApiBatchStore.ReadMetaTemplatesAsync();
         EnsureAccess();
-        using var dialog = new CommunicationMetaTemplateDialog(approved, "Individual", allowStudentFields: !IsFamily);
+        using var financialDocument=fees ? await ReadFeeDocumentAsync() : null;
+        EnsureAccess();
+        IReadOnlyDictionary<string,string>? financialFields=financialDocument is null ? null
+            : IsReceipt ? new Dictionary<string,string> {
+                ["[PaymentAmount]"]=financialDocument.Amount.ToString("N2",System.Globalization.CultureInfo.InvariantCulture),
+                ["[CreditApplied]"]=financialDocument.CreditApplied.ToString("N2",System.Globalization.CultureInfo.InvariantCulture),
+                ["[ReceiptNumber]"]=financialDocument.ReceiptNumber
+            } : new Dictionary<string,string> {
+                ["[OutstandingAmount]"]=financialDocument.Amount.ToString("N2",System.Globalization.CultureInfo.InvariantCulture)
+            };
+        using var dialog = new CommunicationMetaTemplateDialog(approved,
+            fees && !IsReceipt ? "FeeReminder" : "Individual",allowStudentFields:!IsFamily,contextFields:financialFields);
         if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Selection is null) return;
         metaSelection = dialog.Selection;
+        metaFinancialSelectionSource = financialDocument?.FinancialReview;
         message.Text = metaSelection.Format();
     }
 
@@ -270,12 +335,18 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
             {
                 document = await ReadFeeDocumentAsync();
                 EnsureAccess();
+                if(option.IsMeta && metaFinancialSelectionSource!=document.FinancialReview)
+                    throw new CommunicationValidationException("The financial document changed after choosing its Meta fields. Choose the template again for the current document.");
+                if(document.FinancialReview is not null)
+                    target=target with {FinancialReviewRequired=true};
                 if (!option.IsMeta)
                 {
                     // Resolve composer-only fields before saving the exact reviewed batch text.
                     string amount = document.Amount.ToString("N2", System.Globalization.CultureInfo.InvariantCulture);
                     body = IsReceipt ? body.Replace("[PaymentAmount]", amount, StringComparison.Ordinal)
                             .Replace("[ReceiptNumber]", document.ReceiptNumber, StringComparison.Ordinal)
+                            .Replace("[CreditApplied]",document.CreditApplied.ToString("N2",System.Globalization.CultureInfo.InvariantCulture),StringComparison.Ordinal)
+                            .Replace("[PaymentDetails]",FeeMessageReceiptSource.PaymentDetails(document.Amount,document.CreditApplied,SelectedLanguage),StringComparison.Ordinal)
                         : CommunicationFeeDetails.Expand(body, document.OutstandingDetails)
                             .Replace("[OutstandingAmount]", amount, StringComparison.Ordinal);
                 }
@@ -320,10 +391,38 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         Bitmap? image = null;
         try
         {
+            if (option.Provider is not null)
+            {
+                bool unicode = option.Channel == "Sms" &&
+                    (reviewed.Body.Any(ch => ch > 127) ||
+                     reviewed.Preview.Entries.Where(row => row.Included)
+                        .Any(row => row.RecordName.Any(ch => ch > 127)));
+                string cost = unicode
+                    ? "Personalized SMS contains Unicode text. Long or Unicode messages may use multiple separately billed SMS segments."
+                    : option.Channel == "Sms"
+                        ? "SMS messages may use multiple separately billed segments."
+                        : "WhatsApp API provider charges may apply. Provider acceptance does not confirm delivery.";
+                // Production always asks for explicit approval. Synthetic UI
+                // contracts may inject a deterministic decision so no modal
+                // window can indefinitely block a headless test runner.
+                bool approved = operations.AuthorizePaidSend is { } authorize
+                    ? authorize(option, reviewed.Preview, reviewed.Body)
+                    : ModernMessageDialog.Show(this,
+                        $"Send {reviewed.Preview.Included:N0} reviewed message(s)? {cost} "
+                          + "The recipients and message must be checked before approval.",
+                        "Confirm Paid Sending", MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning) == DialogResult.Yes;
+                if (!approved) return;
+            }
             if (ShareImage && reviewed.Document is { } imageDocument)
                 image = await PrepareImageAsync(imageDocument);
             if (reviewed.Document is { } document)
                 await VerifyDocumentAsync(document);
+            if(reviewed.Document?.FinancialReview is { } financialSource)
+            {
+                await (operations.ReserveFinancialReview ?? CommunicationFinancialReviewStore.ReserveAsync)(reviewed.RequestId,financialSource);
+                EnsureAccess();
+            }
             var batch = await operations.Confirm(option, reviewed.Target, reviewed.Preview, reviewed.Body, reviewed.RequestId, metaSelection);
             EnsureAccess();
             if (fees && option.Provider is null)

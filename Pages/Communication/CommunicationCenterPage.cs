@@ -20,6 +20,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private string ComposeChannel => deliveryMethod.SelectedIndex == 2 ? "Sms" : "WhatsApp";
     private string ApiProvider => IsMeta ? "MetaCloud" : "Twilio";
     private readonly ModernComboBox templateChoice = HumanUi.Combo();
+    private readonly ModernComboBox languageChoice = HumanUi.Combo();
+    private bool languageChanged;
+    private string CurrentLanguage => languageChoice.SelectedIndex == 1 ? "ur" : "en";
     private IReadOnlyList<CommunicationPreparedMessages.ComposeTemplate> composeTemplates = CommunicationPreparedMessages.BuiltInChoices;
     private readonly ModernTextBox message = HumanUi.TextBox(true, 1600);
     private readonly CheckBox showExcluded = new()
@@ -27,6 +30,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         AutoSize = true, Dock = DockStyle.Top, ForeColor = AppTheme.Text
     };
     private readonly ModernTextBox sampleMessage = HumanUi.TextBox(true, 2400);
+    // Live draft view is deliberately not a recipient-specific send preview.
+    // Actual personalized text and current eligibility still require Review.
+    private readonly ModernTextBox draftPreview = HumanUi.TextBox(true, 1600);
     private readonly Label summary = new()
     {
         Dock = DockStyle.Top, AutoSize = true, ForeColor = AppTheme.Text,
@@ -47,6 +53,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     private readonly Panel campusField, classField, studentField, staffField;
     private readonly ModernButton next = PageButton("communicationReviewMessage", "Review Message", 165, "Primary");
     private readonly ModernButton confirm = PageButton("communicationConfirmMessage", "Open in WhatsApp", 230, "Primary");
+    private readonly ModernButton schedule = PageButton("communicationScheduleMessage", "Schedule…", 145);
     private readonly ModernButton historyButton, unfinishedButton, newMessageButton, templatesButton, configureButton;
     // Compose and review share one workspace. Nothing is sent until the reviewed
     // snapshot is confirmed, just as in the former full-screen review step.
@@ -72,6 +79,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         new(CommunicationAudience.Student, "One student"), new(CommunicationAudience.Family, "Family / siblings"),
         new(CommunicationAudience.Class, "Class"), new(CommunicationAudience.Campus, "Campus"),
         new(CommunicationAudience.School, "Entire school"), new(CommunicationAudience.OutstandingFees, "Outstanding fees"),
+        new(CommunicationAudience.FeeStudent, "One student's fees"), new(CommunicationAudience.FeeFamily, "Family fee balance"),
         new(CommunicationAudience.Staff, "One staff member", "Staff.View")
     };
     internal CommunicationAudience SelectedAudience
@@ -114,14 +122,22 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         deliveryMethod.Name="communicationDeliveryMethod";
         deliveryMethod.Items.AddRange(new object[]{"WhatsApp Business · manual","WhatsApp · Meta API","SMS · Twilio"});
         deliveryMethod.SelectedIndex=0;
+        draftPreview.Name = "communicationDraftPreview";
+        draftPreview.ReadOnly = true;
+        draftPreview.TabStop = false;
+        draftPreview.ScrollBars = ScrollBars.Vertical;
+        draftPreview.Text = "";
         sampleMessage.ReadOnly = true;
         sampleMessage.ScrollBars = ScrollBars.Vertical;
         sampleMessage.Dock = DockStyle.Fill;
         // SelectionChanged can fire before CurrentRow moves to the clicked cell.
         previewGrid.CurrentCellChanged += (_, _) => ShowSelectedMessage();
         audience.Items.AddRange(AudienceOptions.Where(option => CurrentUser.HasPermission(option.Permission)
-            && (option.Scope != CommunicationAudience.OutstandingFees || CurrentUser.HasPermission("Fees.View"))).ToArray());
+            && ((option.Scope is not (CommunicationAudience.OutstandingFees or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily)) || CurrentUser.HasPermission("Fees.View"))).ToArray());
         SelectedAudience = CurrentUser.HasPermission("Students.View") ? CommunicationAudience.Class : CommunicationAudience.Staff;
+        languageChoice.Name = "communicationComposeLanguage";
+        languageChoice.Items.AddRange(new object[] { "English", "اردو / Urdu" });
+        languageChoice.SelectedIndex = 0;
         templateChoice.Items.Add("Write your own message");
         templateChoice.SelectedIndex = 0;
 
@@ -150,14 +166,21 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         };
         confirm.Click += async (_, _) => await RunBusyAsync(
             "Confirming the reviewed message…", StartReviewedMessageAsync, this);
+        schedule.Click += async (_, _) => await RunBusyAsync(
+            "Scheduling the reviewed message…", ScheduleReviewedMessageAsync, this);
         newMessageButton = PageButton("communicationNewMessage", "New Message", 140, "TabInactive");
-        unfinishedButton = PageButton("communicationUnfinished", "Unfinished", 140, "TabInactive");
+        unfinishedButton = PageButton("communicationUnfinished", "Queue", 140, "TabInactive");
         historyButton = PageButton("communicationHistory", "History", 120, "TabInactive");
-        templatesButton = PageButton("communicationTemplates", "Templates…", 135);
-        configureButton = PageButton("communicationConfigureSending", "Configure Sending…", 200);
+        templatesButton = PageButton("communicationTemplates", "Templates", 125);
+        configureButton = PageButton("communicationConfigureSending", "Settings", 120);
         newMessageButton.Click += (_, _) =>
         {
-            if (!IsBusy) SetStep(preview is null ? 0 : 1);
+            if (!IsBusy)
+            {
+                pendingCorrectionOriginal=null;
+                pendingCorrectionReason=null;
+                SetStep(preview is null ? 0 : 1);
+            }
         };
         unfinishedButton.Click += async (_, _) => await NavigateSessionsAsync(unfinished: true);
         historyButton.Click += async (_, _) => await NavigateSessionsAsync(unfinished: false);
@@ -166,6 +189,14 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         UseToolbar();
         SetContent(BuildWorkspace());
         deliveryMethod.SelectionChangeCommitted += (_, _) => methodChanged = true;
+        languageChoice.SelectionChangeCommitted += (_, _) => languageChanged = true;
+        languageChoice.SelectedIndexChanged += (_, _) =>
+        {
+            // Switching languages never silently translates or overwrites
+            // existing message text; a template must be chosen explicitly.
+            RefreshTemplateChoices();
+            InvalidatePreview();
+        };
         deliveryMethod.SelectedIndexChanged += (_, _) =>
         {
             if (metaSelection is not null || IsMeta) message.Clear();
@@ -198,17 +229,30 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 await RunBusyAsync("Reading approved Meta templates…",ChooseMetaTemplateAsync,this);
                 return;
             }
+            if (!IsMeta && templateChoice.SelectedItem is string action
+                && action == "Search matching templates…")
+            {
+                templateChoice.SelectedIndex = 0;
+                OpenComposerTemplateBrowser();
+                return;
+            }
             if (templateChoice.SelectedItem is CommunicationPreparedMessages.ComposeTemplate selected)
                 message.Text = selected.Body;
         };
-        message.TextChanged += (_, _) => InvalidatePreview();
+        message.TextChanged += (_, _) =>
+        {
+            draftPreview.Text = message.Text;
+            InvalidatePreview();
+        };
 
         ChangeAudienceFields();
         SetStep(0);
         RefreshTemplateChoices();
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
         bool view = CurrentUser.HasPermission("Communication.View");
-        int landing = compose ? UnfinishedStep : view ? HistoryStep : AdministrationStep;
+        // The everyday entry point is the composer, not a work-in-progress
+        // list. Queue remains one click away when there is work to resume.
+        int landing = compose ? 0 : view ? HistoryStep : AdministrationStep;
         SetStep(landing);
         if (initialize)
         {
@@ -217,6 +261,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 if (CurrentUser.HasPermission("Students.View")) Defer(BindLookupsAsync);
                 Defer(LoadComposeTemplatesAsync);
                 Defer(SelectReadyMethodAsync);
+                Defer(SelectSchoolLanguageAsync);
+                Defer(RefreshQueueAttentionAsync);
             }
             if (landing is HistoryStep or UnfinishedStep)
                 Defer(() => step == landing ? NavigateSessionsAsync(landing == UnfinishedStep) : Task.CompletedTask);
@@ -224,6 +270,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         Disposed += (_, _) =>
         {
             previewTable?.Dispose();
+            queueAlertIcon?.Dispose();
             (historyGrid.DataSource as DataTable)?.Dispose();
             (unfinishedGrid.DataSource as DataTable)?.Dispose();
         };
@@ -338,7 +385,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         var fields = new TableLayoutPanel
         {
             Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 1, RowCount = 6, MaximumSize = new Size(AppScale.Scale(980), 0),
+            ColumnCount = 1, RowCount = 7, MaximumSize = new Size(AppScale.Scale(980), 0),
             Padding = new Padding(AppScale.Scale(8), 0, AppScale.Scale(8), AppScale.Scale(8)), Margin = Padding.Empty
         };
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -348,7 +395,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         var recipients = ComposeFieldRow(audienceField, campusField, classField, studentField, staffField);
         var methodField = HumanUi.Field("Send using", deliveryMethod, true);
         var templateField = HumanUi.Field("Template (optional)", templateChoice);
-        var sending = ComposeFieldRow(methodField, templateField);
+        var languageField = HumanUi.Field("Language", languageChoice);
+        var sending = ComposeFieldRow(methodField, languageField, templateField);
         sending.Margin = new Padding(0, AppScale.Scale(6), 0, 0);
         fields.Controls.Add(recipients, 0, 0);
         fields.Controls.Add(targetIssue, 0, 1);
@@ -357,6 +405,10 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         editor.Height = AppScale.Scale(200);
         fields.Controls.Add(editor, 0, 3);
         fields.Controls.Add(messageIssue, 0, 4);
+        var livePreview = HumanUi.Field("Live draft preview · review for personalized messages", draftPreview);
+        livePreview.Height = AppScale.Scale(140);
+        draftPreview.Dock = DockStyle.Fill;
+        fields.Controls.Add(livePreview, 0, 5);
         foreach (var issue in new[] { targetIssue, messageIssue })
         {
             issue.Visible = false;
@@ -364,11 +416,12 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         }
         var footer = ActionFooter(next);
         footer.Dock = DockStyle.Fill;
-        fields.Controls.Add(footer, 0, 5);
+        fields.Controls.Add(footer, 0, 6);
         fields.RowStyles[0] = new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight);
         fields.RowStyles[2] = new RowStyle(SizeType.Absolute, AppMetrics.FieldRowHeight + sending.Margin.Vertical);
         fields.RowStyles[3] = new RowStyle(SizeType.Absolute, editor.Height);
-        fields.RowStyles[5] = new RowStyle(SizeType.Absolute, footer.Height);
+        fields.RowStyles[5] = new RowStyle(SizeType.Absolute, livePreview.Height);
+        fields.RowStyles[6] = new RowStyle(SizeType.Absolute, footer.Height);
         bool fitting = false;
         void FitFields()
         {
@@ -382,7 +435,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
                 int columnWidth = width / columns;
                 audienceField.Width = campusField.Width = classField.Width = columnWidth;
                 studentField.Width = staffField.Width = Math.Min(width, columnWidth * 2);
-                methodField.Width = templateField.Width = columnWidth;
+                methodField.Width = languageField.Width = templateField.Width = columnWidth;
                 fields.RowStyles[0].Height = WrappedRowsHeight(recipients, width);
                 fields.RowStyles[2].Height = WrappedRowsHeight(sending, width) + sending.Margin.Vertical;
                 targetIssue.MaximumSize = messageIssue.MaximumSize = new Size(width, 0);
@@ -461,7 +514,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         };
         previewGrid.VisibleChanged += (_, _) => details.RowStyles[2].Height = previewGrid.Visible ? 55 : 0;
         card.Content.Controls.Add(details);
-        card.Content.Controls.Add(ActionFooter(confirm));
+        card.Content.Controls.Add(ActionFooter(confirm, schedule));
         return card;
     }
 
@@ -477,14 +530,14 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         Width = AppScale.Scale(width), Height = AppMetrics.ButtonHeight
     };
 
-    private static FlowLayoutPanel ActionFooter(ModernButton button)
+    private static FlowLayoutPanel ActionFooter(params ModernButton[] buttons)
     {
         var footer = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom, Height = AppMetrics.ButtonHeight + AppScale.Scale(10),
             FlowDirection = FlowDirection.RightToLeft, WrapContents = false
         };
-        footer.Controls.Add(button);
+        footer.Controls.AddRange(buttons);
         return footer;
     }
 
@@ -505,6 +558,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         if (!dialog.Changed) return;
         InvalidatePreview();
         Defer(SelectReadyMethodAsync);
+        if (!languageChanged) Defer(SelectSchoolLanguageAsync);
     }
     private async Task LoadComposeTemplatesAsync()
     {
@@ -530,10 +584,30 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             templateChoice.SelectedIndex=0;
             return;
         }
+        templateChoice.Items.Add("Search matching templates…");
         foreach (var item in composeTemplates)
-            if (item.Matches(target))
+            if (item.Matches(target) && item.LanguageCode == CurrentLanguage)
                 templateChoice.Items.Add(item);
         templateChoice.SelectedIndex = 0;
+    }
+
+    private void OpenComposerTemplateBrowser()
+    {
+        if (IsBusy || IsMeta || !CurrentUser.HasPermission("Communication.Send")) return;
+        int actor = CurrentUser.UserId;
+        CommunicationTarget target = CurrentTarget();
+        var compatible = composeTemplates.Where(item =>
+            item.Matches(target) && item.LanguageCode == CurrentLanguage).ToArray();
+        using var dialog = new CommunicationComposerTemplateBrowser(compatible);
+        if (dialog.ShowDialog(FindForm()) != DialogResult.OK ||
+            dialog.SelectedTemplate is not { } selected) return;
+        if (IsDisposed || actor != CurrentUser.UserId || target != CurrentTarget()
+            || IsMeta || !CurrentUser.HasPermission("Communication.Send")) return;
+        if (message.Text.Length > 0 && message.Text != selected.Body &&
+            !Confirm("Replace your current message draft with the selected template?",
+                "Replace Draft", false)) return;
+        message.Text = selected.Body;
+        InvalidatePreview();
     }
 
     private void ChangeAudienceFields()
@@ -543,7 +617,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             or CommunicationAudience.Class or CommunicationAudience.OutstandingFees;
         bool showClass = target is CommunicationAudience.Class
             or CommunicationAudience.OutstandingFees;
-        bool showStudent = target is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.OutstandingFees;
+        bool showStudent = target is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily or CommunicationAudience.OutstandingFees;
         bool showStaff = target == CommunicationAudience.Staff;
         Control layout = campusField.Parent!;
         layout.SuspendLayout();
@@ -555,11 +629,11 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         SetFieldCaption(classField, cls, "Class", target == CommunicationAudience.Class);
         SetFieldCaption(studentField, student, target switch
         {
-            CommunicationAudience.Family => "Student in the family",
+            CommunicationAudience.Family or CommunicationAudience.FeeFamily => "Student in the family",
             CommunicationAudience.OutstandingFees => "Student (optional)",
             _ => "Student"
         },
-            target is CommunicationAudience.Student or CommunicationAudience.Family);
+            target is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily);
         SetFieldCaption(staffField, staff, "Staff member", showStaff);
         UpdateLookupPrompt(campus, target == CommunicationAudience.OutstandingFees ? "All campuses" : "Select a campus");
         UpdateClassSelection();
@@ -587,19 +661,53 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             table.Rows[0][lookup.DisplayMember] = prompt;
     }
 
+    private async Task SelectSchoolLanguageAsync()
+    {
+        if (!CurrentUser.HasPermission("Communication.Send") || languageChanged) return;
+        int actor = CurrentUser.UserId;
+        using DataTable language = await CommunicationManagementStore.ReadMessageLanguageAsync();
+        if (IsDisposed || actor != CurrentUser.UserId || languageChanged
+            || step == 1 || language.Rows.Count != 1) return;
+        string code = Convert.ToString(language.Rows[0]["DefaultMessageLanguage"]) ?? "en";
+        languageChoice.SelectedIndex = code == "ur" ? 1 : 0;
+    }
+
     private async Task SelectReadyMethodAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Send") || methodChanged) return;
         int actor = CurrentUser.UserId;
+        var preferredTask = CommunicationQueuePolicyStore.ReadPreferredMethodAsync();
         var readiness = await Task.WhenAll(
             operations.ReadManualMode(),
             CommunicationApiBatchStore.IsReadyAsync("WhatsApp", "MetaCloud"),
             CommunicationApiBatchStore.IsReadyAsync("Sms", "Twilio"));
+        using var preferred = await preferredTask;
         if (IsDisposed || actor != CurrentUser.UserId || methodChanged || step == 1) return;
-        // Choosing Meta replaces the text with an approved template. Preserve a draft already being written.
-        int ready = Array.IndexOf(readiness, true);
-        if (readiness.Count(value => value) == 1 && (ready != 1 || message.Text.Length == 0))
-            deliveryMethod.SelectedIndex = ready;
+        // A school-wide choice is the initial suggestion, never a forced
+        // recipient-specific fallback. Explicit user changes always win.
+        int selected = -1;
+        if (preferred.Rows.Count == 1)
+        {
+            string channel = Convert.ToString(preferred.Rows[0]["PreferredChannel"]) ?? "";
+            string provider = Convert.ToString(preferred.Rows[0]["PreferredProviderCode"]) ?? "";
+            selected = (channel, provider) switch
+            {
+                ("WhatsApp", "WhatsAppBusinessManual") => 0,
+                ("WhatsApp", "MetaCloud") => 1,
+                ("Sms", "Twilio") => 2,
+                _ => -1
+            };
+        }
+        if (selected >= 0 && readiness[selected] && (selected != 1 || message.Text.Length == 0))
+            deliveryMethod.SelectedIndex = selected;
+        else if (readiness.Count(value => value) == 1)
+        {
+            // Selecting the sole available method still requires a final
+            // review and charge disclosure. Never replace an edited draft.
+            int only = Array.IndexOf(readiness, true);
+            if (only != 1 || message.Text.Length == 0)
+                deliveryMethod.SelectedIndex = only;
+        }
     }
 
     private bool ValidateDraft()
@@ -645,6 +753,9 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
 
     private void ClearReviewedDraft()
     {
+        pendingCorrectionOriginal=null;
+        pendingCorrectionReason=null;
+        pendingAutomationSuggestion=null;
         InvalidatePreview();
         metaSelection = null;
         message.Clear();
@@ -662,7 +773,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         bool scoped = selected is CommunicationAudience.Campus or CommunicationAudience.Class or CommunicationAudience.OutstandingFees;
         return new(selected, scoped ? campus.SelectedId : 0,
             selected is CommunicationAudience.Class or CommunicationAudience.OutstandingFees ? cls.SelectedId : 0,
-            selected is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.OutstandingFees ? student.SelectedId : 0,
+            selected is CommunicationAudience.Student or CommunicationAudience.Family or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily or CommunicationAudience.OutstandingFees ? student.SelectedId : 0,
             selected == CommunicationAudience.Staff ? staff.SelectedId : 0, ComposeChannel);
     }
 
@@ -685,6 +796,8 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         bool compose = CommunicationAccess.CanCompose(CurrentUser.HasPermission);
         next.Visible = compose && step == 0;
         confirm.Visible = compose && step == 1;
+        schedule.Visible = compose && step == 1 && !IsManual;
+        schedule.Enabled = schedule.Visible && manualModeAvailable && preview is { Included: > 0 };
         confirm.Text = IsManual ? (preview?.Included == 1 ? "Open in WhatsApp" : "Start WhatsApp Chats") : "Confirm & Send";
         confirm.Enabled = step == 1 && manualModeAvailable && preview is { Included: > 0 }
             && CurrentUser.HasPermission("Communication.Send");
@@ -730,12 +843,17 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             if(!manualModeAvailable || target is null || reviewed is null || target!=CurrentTarget()
                 || body!=message.Text || manualRequestId==Guid.Empty)
                 throw new CommunicationValidationException("The review changed or the selected method is unavailable. Review recipients again.");
-            if(!Confirm($"Send {reviewed.Included} reviewed message(s) using {deliveryMethod.Text}? Provider charges may apply. You can stop the remaining messages while sending.","Confirm Send",false))return;
+            string costNotice = SmsChargeDisclosure(target, reviewed, body);
+            if(!Confirm($"Send {reviewed.Included} reviewed message(s) using {deliveryMethod.Text}? "
+                + costNotice + " You can stop the remaining messages while sending.",
+                "Confirm Send",false))return;
             int actor=CurrentUser.UserId;Guid request=manualRequestId;
             var saved=await CommunicationApiBatchStore.ConfirmAsync(target,reviewed,body,request,ApiProvider,metaSelection);
             if(IsDisposed || actor!=CurrentUser.UserId)return;
             if(request!=manualRequestId || target!=CurrentTarget() || body!=message.Text)
-                throw new CommunicationValidationException("The batch was saved, but the current review changed. Open it in Unfinished; nothing was sent.");
+                throw new CommunicationValidationException("The batch was saved, but the current review changed. Open it in Queue; nothing was sent.");
+            await LinkPendingCorrectionAsync(saved.BatchId);
+            await MarkAutomationSuggestionPreparedAsync(target,saved.BatchId);
             using(var dialog=new CommunicationApiDispatchDialog(saved.BatchId,startConfirmed:!saved.AlreadyConfirmed))dialog.ShowDialog(FindForm());
             if (!IsDisposed)
             {
@@ -745,6 +863,23 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         }
         catch(CommunicationValidationException ex){if(!IsDisposed)Warn(ex.Message);}
         catch(Exception ex){if(!IsDisposed)Fail(ex);}
+    }
+
+    /// <summary>
+    /// Explicitly disclose potentially higher Unicode SMS billing for the
+    /// actual personalized preview, not just the English draft with fields.
+    /// Provider tariffs and segment counts vary; never promise a fixed price.
+    /// </summary>
+    private static string SmsChargeDisclosure(
+        CommunicationTarget target, CommunicationPreview reviewed, string body)
+    {
+        if (target.Channel != "Sms") return "Provider charges may apply.";
+        bool unicode = reviewed.Entries.Where(entry => entry.Included).Any(entry =>
+            CommunicationPreparedMessages.Render(body,
+                CommunicationPreparedMessages.FromPreview(entry)).Any(ch => ch > 127));
+        return unicode
+            ? "This SMS includes Unicode characters (for example Urdu names or text). Unicode and long messages may be split into multiple separately billed SMS segments; review provider charges."
+            : "Long SMS messages may be split into multiple separately billed segments; review provider charges.";
     }
 
     private async Task StartManualHandoffAsync()
@@ -770,12 +905,14 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             CommunicationConfirmation saved = await operations.ConfirmBatch(target, reviewed, body, request);
             if (IsDisposed) return;
             if (actor != CurrentUser.UserId)
-                throw new InvalidOperationException("Signed-in user changed. Open Unfinished.");
+                throw new InvalidOperationException("Signed-in user changed. Open Queue.");
             if (request != manualRequestId || target != CurrentTarget() || body != message.Text)
             {
-                Warn("The reviewed batch was saved, but the current message changed. Review that batch in Unfinished; no chat was opened.");
+                Warn("The reviewed batch was saved, but the current message changed. Review that batch in Queue; no chat was opened.");
                 return;
             }
+            await LinkPendingCorrectionAsync(saved.BatchId);
+            await MarkAutomationSuggestionPreparedAsync(target,saved.BatchId);
             // The operator has reviewed and confirmed this batch. Open the first
             // chat now rather than requiring another redundant click. No message
             // is sent by FMSC; every WhatsApp send remains operator-controlled.

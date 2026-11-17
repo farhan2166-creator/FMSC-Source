@@ -12,8 +12,10 @@ internal sealed class CommunicationMetaTemplateDialog : ApplicationWindowForm
     private readonly List<ModernComboBox> mappings=new();
     internal CommunicationMetaTransport.Selection? Selection {get;private set;}
     internal CommunicationMetaTemplateDialog(IReadOnlyList<CommunicationMetaTransport.Template> templates,string purpose,
-        bool allowStudentFields = true)
+        bool allowStudentFields = true,IReadOnlyDictionary<string,string>? contextFields = null,bool allowEventContext=false)
     {
+        var constants=contextFields?.ToDictionary(pair=>pair.Key,pair=>pair.Value,StringComparer.Ordinal)
+            ?? new Dictionary<string,string>(StringComparer.Ordinal);
         Text="Approved Meta template";StartPosition=FormStartPosition.CenterParent;ShowInTaskbar=false;
         ClientSize=new Size(AppScale.Scale(710),AppScale.Scale(650));MinimumSize=new Size(AppScale.Scale(590),AppScale.Scale(490));
         BackColor=AppTheme.PageBackground;
@@ -33,21 +35,24 @@ internal sealed class CommunicationMetaTemplateDialog : ApplicationWindowForm
                 if (allowStudentFields)
                     input.Items.AddRange(new object[]{"[StudentName]","[AdmissionNumber]","[AdmissionDate]"});
                 if(purpose=="FeeReminder")input.Items.Add("[OutstandingAmount]");
+                input.Items.AddRange(constants.Keys.Where(key=>!input.Items.Contains(key)).Cast<object>().ToArray());
                 mappings.Add(input);fields.RowStyles.Add(new RowStyle(SizeType.Absolute,AppMetrics.FieldRowHeight));
                 fields.Controls.Add(HumanUi.Field("Field "+(i+1)+" · choose school data or type a value",input,true),0,i);
             }
         };
         if(choice.Items.Count>0)choice.SelectedIndex=0;
-        var apply=new ModernButton {Text="Use Template",ThemeRole="Primary",Width=AppScale.Scale(160),Height=AppMetrics.ButtonHeight,Enabled=templates.Count>0};
+        var apply=new ModernButton {Name="communicationUseMetaTemplate",Text="Use Template",ThemeRole="Primary",Width=AppScale.Scale(160),Height=AppMetrics.ButtonHeight,Enabled=templates.Count>0};
         var cancel=new ModernButton {Text="Cancel",DialogResult=DialogResult.Cancel,ThemeRole="Secondary",Height=AppMetrics.ButtonHeight};
         apply.Click+=(_,_)=>{
             if(choice.SelectedItem is not CommunicationMetaTransport.Template selected)return;
             try
             {
-                var selection=new CommunicationMetaTransport.Selection(selected,mappings.Select(m=>m.Text.Trim()).ToArray());
-                string format = selection.Format();
-                CommunicationPreparedMessages.ValidateFormat(format,purpose);
-                if (!allowStudentFields && CommunicationPreparedMessages.HasFields(format))
+                var selection=new CommunicationMetaTransport.Selection(selected,mappings.Select(m=>
+                    constants.Aggregate(m.Text.Trim(),(text,pair)=>text.Replace(pair.Key,pair.Value,StringComparison.Ordinal))).ToArray());
+                string format = selection.Format(allowEventContext);
+                CommunicationPreparedMessages.ValidateFormat(format,purpose,allowEventContext);
+                if (!allowStudentFields && CommunicationPreparedMessages.HasFields(
+                    format.Replace("[OutstandingAmount]","",StringComparison.Ordinal)))
                     throw new CommunicationValidationException("Use shared wording for a family message. Student fields require one student.");
                 Selection=selection;DialogResult=DialogResult.OK;Close();
             }

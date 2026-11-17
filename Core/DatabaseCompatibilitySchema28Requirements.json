@@ -1,0 +1,218 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "FinancialReviewProof",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "ReceiptSource",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadFinancialReviewSource",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReserveFinancialReview",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "BindFinancialReview",
+      "type": "P"
+    },
+    {
+      "schema": "dbo",
+      "name": "CollectionReviewToken",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "BillSource",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "FinancialSource",
+      "type": "IF"
+    }
+  ],
+  "columns": [
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "FinancialReviewKey",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "ClientRequestId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "CollectionReceiptId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "AdmissionId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "WholeFamily",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "SourceHash",
+      "type": "binary",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "ReviewedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "CreatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "LastCheckedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "SourceKind",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    }
+  ],
+  "uniqueIndexes": [
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "PK_MsgFinancialReviewProof",
+      "keys": "ClientRequestId"
+    }
+  ],
+  "checkConstraints": [
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "CK_MsgFinancialReviewProofStudent"
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "CK_MsgFinancialReviewProofKey"
+    },
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "CK_MsgBatchFinancialReview"
+    },
+    {
+      "schema": "msg",
+      "objectName": "FinancialReviewProof",
+      "name": "CK_MsgFinancialReviewProofSource"
+    }
+  ],
+  "parameters": [
+    {
+      "schema": "msg",
+      "objectName": "ConfirmReviewedManualBatch",
+      "name": "@FinancialReviewRequired",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ConfirmReviewedApiBatch",
+      "name": "@FinancialReviewRequired",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isOutput": false
+    }
+  ]
+}

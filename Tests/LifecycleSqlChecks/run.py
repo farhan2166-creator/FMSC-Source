@@ -211,6 +211,13 @@ def main():
             # numeric codes and SQL severity/state, never the SQL or raw output.
             sql_codes = re.findall(r"Msg (\d+), Level (\d+), State (\d+)", result.stdout + result.stderr)
             codes = ["SQL Msg " + code + " level " + level + " state " + state for code, level, state in sql_codes[-3:]]
+            # sqlcmd headers report their batch-relative source line. A decimal
+            # line number is safe diagnostic metadata; never surface SQL text,
+            # the server name, statement or the following error message.
+            sql_lines = re.findall(
+                r"Msg [0-9]{1,8}, Level [0-9]{1,3}, State [0-9]{1,3},[^\r\n]{0,160}\bLine ([0-9]{1,8})",
+                result.stdout + result.stderr)
+            sql_location = ["SQL batch source line " + sql_lines[-1]] if sql_lines else []
             # Only labels emitted by the owned synthetic mutation test's Check()
             # helper are eligible for evidence; reject punctuation that could
             # carry a connection string, SQL statement or student record.
@@ -249,7 +256,7 @@ def main():
             assertion_location = (["Report fixture " + assertion_locations[-1][0]
                 + " at " + assertion_locations[-1][1] + ":" + assertion_locations[-1][2]]
                 if assertion_locations else [])
-            safe = errors + codes + fixture_error + manifest_error + admin_location + report_location + report_column + assertion_location
+            safe = errors + codes + sql_location + fixture_error + manifest_error + admin_location + report_location + report_column + assertion_location
             raise RuntimeError("Child command failed with exit " + str(result.returncode) +
                                ("; " + " | ".join(safe[-3:]) if safe else ""))
         return result.stdout + result.stderr

@@ -1,0 +1,133 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "TR_Attempt_ActorImmutable",
+      "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_Worker_RestoreBoundaryImmutable",
+      "type": "TR"
+    }
+  ],
+  "columns": [
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "ClaimedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "ClaimKind",
+      "type": "varchar",
+      "maxLength": 12,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "WorkerEnrollmentId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "BackgroundWorkerEnrollment",
+      "name": "RestoreBoundaryHash",
+      "type": "binary",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    }
+  ],
+  "checkConstraints": [
+    {
+      "schema": "msg",
+      "objectName": "Attempt",
+      "name": "CK_MsgAttemptActor"
+    }
+  ],
+  "parameters": [
+    {
+      "schema": "msg",
+      "objectName": "VerifyBackgroundWorker",
+      "name": "@ReturnState",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ClaimRecipient",
+      "name": "@IsWorker",
+      "type": "bit",
+      "maxLength": 1,
+      "precision": 1,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ClaimRecipient",
+      "name": "@EnrollmentId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ClaimRecipient",
+      "name": "@WindowsSid",
+      "type": "nvarchar",
+      "maxLength": 370,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ClaimRecipient",
+      "name": "@SecretHash",
+      "type": "varbinary",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ClaimRecipient",
+      "name": "@LeaseNonce",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isOutput": false
+    }
+  ]
+}

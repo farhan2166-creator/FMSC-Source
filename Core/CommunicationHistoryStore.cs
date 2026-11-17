@@ -29,13 +29,53 @@ internal static class CommunicationHistoryStore
                 B.StaffId,SelectedStudent.StudentName AS SelectedStudentName,SelectedStaff.StaffName AS SelectedStaffName,
                 CASE WHEN M.BatchId IS NOT NULL THEN 'WhatsAppBusinessManual' ELSE A.ProviderCode END ProviderCode,
                 A.TemplateJson,COALESCE(H.State,R.State) Outcome,
+                B.CreatedUtc PreparedUtc,B.ConfirmedUtc ApprovedUtc,
+                COALESCE(Creator.Username,CONVERT(nvarchar(30),B.CreatedBy)) PreparedByName,
+                COALESCE(Approver.Username,CONVERT(nvarchar(30),B.ConfirmedBy)) ApprovedByName,
+                Takeover.ApprovedUtc TakeoverUtc,Takeover.Reason TakeoverReason,
+                Correction.OriginalBatchId CorrectionOfBatchId,
+                Correction.Reason CorrectionReason,
+                Correction.LinkedUtc CorrectionLinkedUtc,
+                Automatic.EventCode AutomaticEventCode,Automatic.ApprovedUtc AutomaticAuthorizedUtc,
+                COALESCE(AutomaticActor.Username,CONVERT(nvarchar(30),Automatic.ApprovedBy)) AutomaticAuthorizedBy,
+                Planned.SourceKind PlanSourceKind,Planned.DueUtc OccurrenceDueUtc,Recurring.RuleId RecurringRuleId,
+                Recurring.Frequency RecurringFrequency,Recurring.Every RecurringEvery,
+                COALESCE(RuleAuthor.Username,CONVERT(nvarchar(30),Recurring.CreatedBy)) RecurringAuthorizedBy,
+                COALESCE(TakeoverActor.Username,CONVERT(nvarchar(30),Takeover.ApprovedBy)) TakeoverApprovedBy,
+                H.LastOpenedUtc,H.ReportedUtc,
+                COALESCE(Reporter.Username,CONVERT(nvarchar(30),H.ChangedBy)) ManualReportedByName,
+                Evidence.AttemptId,Evidence.RequestUtc,Evidence.ResponseUtc,
+                Evidence.ProviderMessageId,Evidence.FailureCode,Evidence.ClaimKind,Evidence.WorkerEnrollmentId,
+                COALESCE(ClaimActor.Username,CONVERT(nvarchar(30),Evidence.ClaimedBy)) AttemptActorName,
                 COALESCE(S.StudentName,T.StaffName,N'School record') RecipientName,
-                COALESCE(S.AdmissionNumber,T.StaffNumber) RecordNumber,RIGHT(R.PhoneE164,4) LastFour,J.RenderedBody
+                COALESCE(S.AdmissionNumber,T.StaffNumber) RecordNumber,RIGHT(R.PhoneE164,4) LastFour,
+                COALESCE(J.RenderedBody,ManualEvidence.RenderedBody) RenderedBody
             FROM msg.Batch B
             LEFT JOIN msg.ManualBatch M ON M.BatchId=B.BatchId
             LEFT JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
             LEFT JOIN msg.Recipient R ON R.BatchId=B.BatchId
             LEFT JOIN msg.ManualHandoff H ON H.RecipientId=R.RecipientId
+            LEFT JOIN dbo.Users Creator ON Creator.UserId=B.CreatedBy
+            LEFT JOIN dbo.Users Approver ON Approver.UserId=B.ConfirmedBy
+            LEFT JOIN dbo.Users Reporter ON Reporter.UserId=H.ChangedBy
+            OUTER APPLY (
+                SELECT TOP(1) T.ApprovedUtc,T.ApprovedBy,T.Reason
+                FROM msg.BatchTakeover T WHERE T.BatchId=B.BatchId
+                ORDER BY T.TakeoverId DESC
+            ) Takeover
+            LEFT JOIN dbo.Users TakeoverActor ON TakeoverActor.UserId=Takeover.ApprovedBy
+            LEFT JOIN msg.PlannedWork Planned ON Planned.BatchId=B.BatchId
+            LEFT JOIN msg.AutomaticAuthorization Automatic ON Automatic.AuthorizationId=Planned.AuthorizationId
+            LEFT JOIN dbo.Users AutomaticActor ON AutomaticActor.UserId=Automatic.ApprovedBy
+            LEFT JOIN msg.RecurringRule Recurring ON Recurring.RuleId=Planned.RuleId
+            LEFT JOIN dbo.Users RuleAuthor ON RuleAuthor.UserId=Recurring.CreatedBy
+            LEFT JOIN msg.BatchCorrection Correction ON Correction.CorrectionBatchId=B.BatchId
+            OUTER APPLY (
+                SELECT TOP(1) X.AttemptId,X.RequestUtc,X.ResponseUtc,X.ProviderMessageId,X.FailureCode,X.ClaimedBy,X.ClaimKind,X.WorkerEnrollmentId
+                FROM msg.Attempt X WHERE X.RecipientId=R.RecipientId
+                ORDER BY X.AttemptId DESC
+            ) Evidence
+            LEFT JOIN dbo.Users ClaimActor ON ClaimActor.UserId=Evidence.ClaimedBy
             LEFT JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
             LEFT JOIN dbo.Staff T ON T.StaffId=R.StaffId
             LEFT JOIN dbo.Students SelectedStudent ON SelectedStudent.AdmissionId=B.StudentId
@@ -45,6 +85,10 @@ internal static class CommunicationHistoryStore
                 WITH (Kind varchar(8),RecordId int,Phone varchar(16),RenderedBody nvarchar(1600) '$.Text') X
                 WHERE X.Kind=R.RecipientKind AND X.RecordId=COALESCE(R.AdmissionId,R.StaffId) AND X.Phone=R.PhoneE164
             ) J
+            OUTER APPLY (
+                SELECT TOP(1) E.RenderedBody FROM msg.ManualOpenEvidence E
+                WHERE E.RecipientId=R.RecipientId ORDER BY E.OpenCount DESC
+            ) ManualEvidence
             WHERE B.BatchId=@BatchId
             ORDER BY R.RecipientId;
             """;

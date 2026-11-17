@@ -147,14 +147,43 @@ internal static partial class Program
         Check(manualDialogType is not null,
             "Operator-controlled WhatsApp session can be resumed with a dedicated native dialog.");
 
+        Check(assembly.GetType("FMSC_SMS.Pages.Communication.CommunicationFeeReminderPolicyDialog") is not null,
+            "Fee reminder event limits have a dedicated compact administrator settings dialog.");
         var type = typeof(CommunicationCenterPage);
-        using var page = new CommunicationCenterPage(false);
+        // A SQL-free layout contract must not open the live school database
+        // when navigating Queue. Session records are provided by a deliberately
+        // empty synthetic reader, while navigation and filtering remain real.
+        using var page = new CommunicationCenterPage(false,
+            new CommunicationCenterPage.Operations(
+                _ => throw new InvalidOperationException("No SQL in UI contract"),
+                () => Task.FromResult(true),
+                (_, _, _, _) => throw new InvalidOperationException("No sends in UI contract"),
+                (_, _) => throw new InvalidOperationException("No chat in UI contract"),
+                () => false,
+                _ =>
+                {
+                    var rows = new DataTable();
+                    rows.Columns.Add("BatchId", typeof(Guid));
+                    rows.Columns.Add("Channel", typeof(string));
+                    rows.Columns.Add("Audience", typeof(string));
+                    rows.Columns.Add("CreatedUtc", typeof(DateTime));
+                    rows.Columns.Add("Method", typeof(string));
+                    return Task.FromResult(rows);
+                }));
         var audience = (ModernComboBox)type.GetField("audience", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
-        var audienceOptions = audience.Items.Cast<object>().Select(item => item.ToString()).ToArray();
+        var audienceScopes = audience.Items.Cast<object>()
+            .Select(item => (CommunicationAudience)item.GetType().GetProperty("Scope")!.GetValue(item)!)
+            .ToArray();
+        var expectedScopes = new[] {
+            CommunicationAudience.Class,CommunicationAudience.Campus,CommunicationAudience.School,
+            CommunicationAudience.Student,CommunicationAudience.Family,CommunicationAudience.Staff,
+            CommunicationAudience.OutstandingFees,CommunicationAudience.FeeStudent,
+            CommunicationAudience.FeeFamily
+        };
         Check(page.SelectedAudience == CommunicationAudience.Class
-            && audienceOptions.Length == (int)CommunicationAudience.Staff + 1
-            && audienceOptions.Distinct().Count() == audienceOptions.Length,
-            "New communication starts with a scoped class, while all supported audience choices remain available");
+            && expectedScopes.All(audienceScopes.Contains)
+            && audienceScopes.Distinct().Count() == audienceScopes.Length,
+            "New communication starts with a class and supports every configured recipient audience without a fixed list length");
         var send = (ModernButton)type.GetField("confirm", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
         var templates = (ModernComboBox)type.GetField("templateChoice",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
@@ -199,13 +228,25 @@ internal static partial class Program
                 $"{button.Name}: button={button.Bounds}, panel={button.Parent?.ClientRectangle}")));
         host.ClientSize = new Size(1200, 780);
         Application.DoEvents();
+        var liveDraft = (ModernTextBox)Descendants(page)
+            .Single(control => control.Name == "communicationDraftPreview");
+        Check(targetCard.Visible && liveDraft.Visible && liveDraft.ReadOnly,
+            "New Message opens on the composer and shows a read-only live draft view");
+        var draftEditor = (ModernTextBox)type.GetField("message",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        draftEditor.Text = "FMSC draft preview fixture";
+        Check(liveDraft.Text == draftEditor.Text && !send.Enabled,
+            "Typing updates the live preview but never authorizes sending without review");
+        draftEditor.Clear();
+        ((ModernButton)navigation[1]).PerformClick();
+        Application.DoEvents();
         Check(Descendants(page).Single(control => control.Name == "communicationUnfinishedGrid").Visible,
-            "The center opens on the dedicated unfinished queue");
+            "Queue navigation opens the dedicated unfinished-batch list");
         var unfinishedSearch = page.Controls.Find("communicationUnfinishedSearch", true).Single();
         int buttonBottom = navigation.Max(button => button.RectangleToScreen(button.ClientRectangle).Bottom);
         int gap = unfinishedSearch.PointToScreen(Point.Empty).Y - buttonBottom;
         Check(gap >= 0 && gap < navigation[0].Height,
-            $"The session search starts directly below the navigation, with a gap smaller than a button (gap: {gap}px).");
+            $"The queue search starts directly below navigation (gap: {gap}px).");
         ((ModernButton)navigation[0]).PerformClick();
         Application.DoEvents();
         var workspace = (TableLayoutPanel)type.GetField("composerLayout",
@@ -231,6 +272,61 @@ internal static partial class Program
             "Review appears beside the editable message, without replacing the composer");
         setStep.Invoke(page, new object[] { 0 });
         Application.DoEvents();
+        // Search across every saved recipient (not only the group's display
+        // label); exports must respect the filtered rows and neutralize formulas.
+        var historyGridForSearch = (DataGridView)type.GetField("historyGrid",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!;
+        var historyFixture = new DataTable();
+        historyFixture.Columns.Add("CreatedUtc", typeof(DateTime));
+        foreach (string column in new[] { "MethodText", "RecipientText", "RecipientSearchText",
+            "AudienceText", "OperatorName", "StateText" })
+            historyFixture.Columns.Add(column, typeof(string));
+        historyFixture.Rows.Add(new DateTime(2026,11,16), "WhatsApp · manual",
+            "=HYPERLINK(\"https://example.com\")", "Ayesha 352 guardian Shama",
+            "Class", "Admin", "Sent, \"confirmed\"");
+        historyFixture.Rows.Add(new DateTime(2026,11,15), "SMS · Twilio",
+            "Other student", "Bilal 900 guardian Salma", "Class", "Admin", "Accepted");
+        historyGridForSearch.DataSource = historyFixture;
+        var filterHistory = type.GetMethod("FilterSessions",
+            BindingFlags.Instance | BindingFlags.NonPublic)!;
+        filterHistory.Invoke(page, new object[] { historyGridForSearch, "Shama 352", false });
+        Check(historyFixture.DefaultView.Count == 1,
+            "History searches multiple terms across saved group member and guardian identities.");
+        var csvFormatter = type.GetMethod("FormatHistoryCsv",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        string historyCsv = (string)csvFormatter.Invoke(null,
+            new object[] { historyFixture.DefaultView })!;
+        Check(historyCsv.Contains("'=HYPERLINK", StringComparison.Ordinal)
+            && historyCsv.Contains("Sent, \"\"confirmed\"\"", StringComparison.Ordinal)
+            && !historyCsv.Contains("Bilal", StringComparison.Ordinal)
+            && !historyCsv.Contains("https://wa.me", StringComparison.Ordinal),
+            "Filtered history CSV quotes content, neutralizes formulas and excludes nonmatching recipients.");
+
+        var historyExportRows = type.GetMethod("HistoryExportRows",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        using (var pdfSafeRows = (DataTable)historyExportRows.Invoke(null,
+            new object[] { historyFixture.DefaultView })!)
+        {
+            Check(pdfSafeRows.Rows.Count == 1 && pdfSafeRows.Columns.Count == 6
+                && !pdfSafeRows.Columns.Contains("RecipientSearchText")
+                && !pdfSafeRows.Columns.Contains("Body")
+                && !pdfSafeRows.Columns.Contains("PhoneE164")
+                && !Convert.ToString(pdfSafeRows.Rows[0]["Recipient"])!.Contains("Bilal", StringComparison.Ordinal),
+                "Filtered PDF history projects only authorized summary columns, never unfiltered search or contact data.");
+            string pdfFile = Path.Combine(Path.GetTempPath(),
+                "FMSC-History-Contract-" + Guid.NewGuid().ToString("N") + ".pdf");
+            try
+            {
+                PdfTableExporter.Export(pdfFile, "Synthetic FMSC communication history",
+                    "Filtered fixture; not a live school record", pdfSafeRows, Color.DarkBlue);
+                using var rendered = PdfSharp.Pdf.IO.PdfReader.Open(pdfFile,
+                    PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import);
+                Check(rendered.PageCount >= 1,
+                    "Filtered communication history can be written as a valid PDF without source data.");
+            }
+            finally { if (File.Exists(pdfFile)) File.Delete(pdfFile); }
+        }
+
         // The production formatter is internal: exercise it through reflection
         // without weakening accessibility or exposing student data to tests.
         var prepared = assembly.GetType("FMSC_SMS.Core.CommunicationPreparedMessages")!;
@@ -244,6 +340,32 @@ internal static partial class Program
         Check(builtinArray.Any(t => TemplateProperty(t, "Purpose") == "FeeReminder")
             && builtinArray.Any(t => TemplateProperty(t, "Name") == "New admission welcome"),
             "Prebuilt fee reminder and student-admission formats are available");
+        var builtinChoices = ((System.Collections.IEnumerable)prepared.GetProperty(
+            "BuiltInChoices", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!)
+            .Cast<object>().ToArray();
+        var urduChoices = builtinChoices.Where(item =>
+            TemplateProperty(item, "Name").EndsWith("(Urdu)", StringComparison.Ordinal)).ToArray();
+        Check(urduChoices.Length >= 5 && urduChoices.All(item =>
+            TemplateProperty(item, "Channel") == "WhatsApp")
+            && builtinChoices.Any(item => TemplateProperty(item, "Name") == "New admission welcome"
+                && TemplateProperty(item, "Channel").Length == 0),
+            "Urdu prepared formats are explicitly selectable only on free WhatsApp, never paid SMS.");
+        var smsChargeDisclosure = type.GetMethod("SmsChargeDisclosure",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        var unicodeStudent = new CommunicationPreviewEntry(23, "عائشہ", "Student",
+            "+923001234567", "Included", null, "F-0023");
+        var smsAudience = new CommunicationTarget(CommunicationAudience.Student,0,0,23,0,"Sms");
+        var waAudience = smsAudience with { Channel = "WhatsApp" };
+        var unicodePreview = new CommunicationPreview(new[] { unicodeStudent });
+        string smsNotice = (string)smsChargeDisclosure.Invoke(null,
+            new object[] { smsAudience, unicodePreview, "Dear [StudentName]" })!;
+        string waNotice = (string)smsChargeDisclosure.Invoke(null,
+            new object[] { waAudience, unicodePreview, "Dear [StudentName]" })!;
+        Check(smsNotice.Contains("Unicode", StringComparison.Ordinal)
+            && smsNotice.Contains("billed", StringComparison.Ordinal)
+            && !waNotice.Contains("Unicode", StringComparison.Ordinal),
+            "SMS confirmation warns about Unicode even when it comes only from a personalized student name.");
+
         var valuesType = prepared.GetNestedType("Values", BindingFlags.NonPublic)!;
         object Details(decimal? amount) => Activator.CreateInstance(valuesType,
             23, "Sample Student", "F-0023", new DateTime(2026, 11, 9), amount)!;
@@ -252,6 +374,11 @@ internal static partial class Program
             (string)render.Invoke(null, new[] { format, data })!;
         string feeText = RenderFormat(TemplateProperty(FeeTemplate(), "Body"), Details(1250.50m));
         string admissionText = RenderFormat(TemplateProperty(AdmissionTemplate(), "Body"), Details(1250.50m));
+        string urduFeeText = RenderFormat(TemplateProperty(builtinArray.First(item =>
+            TemplateProperty(item, "Name") == "Outstanding fee reminder (Urdu)"), "Body"), Details(1250.50m));
+        Check(urduFeeText.Contains("بقایا", StringComparison.Ordinal)
+            && urduFeeText.Contains("1,250.50", StringComparison.Ordinal),
+            "Urdu fee draft renders the same guarded live financial placeholder values as English.");
         Check(feeText.Contains("Sample Student") && feeText.Contains("1,250.50")
             && feeText.Contains("F-0023") && !feeText.Contains("[OutstandingAmount]"),
             "Fee reminders use real per-recipient balance and admission identifiers");
@@ -377,6 +504,24 @@ internal static partial class Program
         Check(Descendants(targetCard).Contains(templates)
             && Descendants(targetCard).OfType<ModernTextBox>().Any(),
             "Audience, prepared templates and message editing are reachable in the composition step");
+        using (var events = new CommunicationAutomationInboxDialog(
+            () => Task.FromResult<IReadOnlyList<CommunicationAutomationInboxStore.Suggestion>>(
+                new[] { new CommunicationAutomationInboxStore.Suggestion(
+                    91,"Admission",101,101,"Synthetic admissions student","FMSC-101",DateTime.UtcNow) }),
+            _ => Task.CompletedTask))
+        {
+            events.Show(host);
+            Application.DoEvents();
+            var eventGrid=(DataGridView)events.Controls.Find("communicationAutomationInbox",true).Single();
+            var prepare=(ModernButton)events.Controls.Find("communicationPrepareEvent",true).Single();
+            Check(eventGrid.Rows.Count==1 && prepare.Enabled,
+                "School event suggestions show an actionable, permission-independent synthetic preview.");
+            prepare.PerformClick();
+            Application.DoEvents();
+            Check(events.SelectedSuggestion?.CandidateId==91,
+                "Preparing an event only returns its source identity to the normal composer.");
+            events.Close();
+        }
         host.Close();
     }
 }

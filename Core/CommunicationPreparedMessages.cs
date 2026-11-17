@@ -11,10 +11,10 @@ namespace FMSC_SMS.Core;
 /// </summary>
 internal static class CommunicationPreparedMessages
 {
-    internal sealed record BuiltIn(string Name, string Purpose, string Body, bool FamilyOnly = false);
-    internal sealed record ComposeTemplate(string Name, string Purpose, string Body, string? Channel = null, bool FamilyOnly = false)
+    internal sealed record BuiltIn(string Name, string Purpose, string Body, bool FamilyOnly = false, string? Channel = null, string LanguageCode = "en");
+    internal sealed record ComposeTemplate(string Name, string Purpose, string Body, string? Channel = null, bool FamilyOnly = false, string LanguageCode = "en")
     {
-        internal bool Matches(CommunicationTarget target) => Purpose == target.Purpose
+        internal bool Matches(CommunicationTarget target) => !HasEventContext(Body) && Purpose == target.Purpose
             && (Channel is null || Channel == target.Channel)
             && (!FamilyOnly || target.Audience == CommunicationAudience.Family);
         public override string ToString() => Name;
@@ -41,6 +41,10 @@ internal static class CommunicationPreparedMessages
             "Dear parent/guardian, the outstanding fee balance for [StudentName] (admission [AdmissionNumber]) is PKR [OutstandingAmount]. Please contact the school office if you have already paid."),
         new BuiltIn("New admission welcome", "Individual",
             "Dear parent/guardian, [StudentName] (admission [AdmissionNumber]) joined the school on [AdmissionDate]. Welcome to the school! Please contact the office if you need assistance."),
+        new BuiltIn("Payment received acknowledgement", "Individual",
+            "Dear parent/guardian, a fee payment for [StudentName] (admission [AdmissionNumber]) has been recorded. Please refer to the issued receipt for the official payment details."),
+        new BuiltIn("Student birthday greeting", "Individual",
+            "Dear parent/guardian, best wishes to [StudentName] on their birthday! Warm greetings from the school."),
         new BuiltIn("Individual student notice", "Individual",
             "Dear parent/guardian of [StudentName], please contact the school office regarding an important notice."),
         new BuiltIn("School announcement", "Announcement",
@@ -88,17 +92,36 @@ internal static class CommunicationPreparedMessages
         new BuiltIn("Family records update", "Individual",
             "Dear parent/guardian, please let the school office know if the contact or emergency details for any of your children have changed.", FamilyOnly: true),
         new BuiltIn("Family meeting request", "Individual",
-            "Dear parent/guardian, the school would like to arrange a meeting about your children's school records. Please contact the office to agree on a convenient time.", FamilyOnly: true)
+            "Dear parent/guardian, the school would like to arrange a meeting about your children's school records. Please contact the office to agree on a convenient time.", FamilyOnly: true),
+        // Curated Urdu drafts: explicitly chosen and reviewed by the operator.
+        // Limit to free manual WhatsApp; billed Unicode SMS needs separate
+        // segment/cost disclosure, and Meta needs an approved provider template.
+        new BuiltIn("Outstanding fee reminder (Urdu)", "FeeReminder",
+            "محترم والدین/سرپرست، [StudentName] (داخلہ نمبر [AdmissionNumber]) کی بقایا فیس PKR [OutstandingAmount] ہے۔ اگر ادائیگی ہو چکی ہے تو براہ کرم اسکول دفتر سے رابطہ کریں۔", Channel: "WhatsApp", LanguageCode: "ur"),
+        new BuiltIn("New admission welcome (Urdu)", "Individual",
+            "محترم والدین/سرپرست، [StudentName] (داخلہ نمبر [AdmissionNumber]) کا اسکول میں داخلہ [AdmissionDate] کو ہوا۔ آپ کو خوش آمدید کہتے ہیں۔", Channel: "WhatsApp", LanguageCode: "ur"),
+        new BuiltIn("Payment received acknowledgement (Urdu)", "Individual",
+            "محترم والدین/سرپرست، [StudentName] کی فیس کی ادائیگی درج ہو گئی ہے۔ سرکاری تفصیل کے لیے جاری کردہ رسید ملاحظہ کریں۔", Channel: "WhatsApp", LanguageCode: "ur"),
+        new BuiltIn("Student birthday greeting (Urdu)", "Individual",
+            "محترم والدین/سرپرست، [StudentName] کو سالگرہ کی بہت مبارک ہو۔ اسکول کی طرف سے نیک تمنائیں۔", Channel: "WhatsApp", LanguageCode: "ur"),
+        new BuiltIn("Examination information (Urdu)", "Announcement",
+            "محترم والدین/سرپرست، اسکول کی جانب سے امتحانات کے متعلق اہم اطلاع ہے۔ تصدیق شدہ شیڈول اور ہدایات کے لیے دفتر سے رابطہ کریں۔", Channel: "WhatsApp", LanguageCode: "ur"),
+        new BuiltIn("School announcement (Urdu)", "Announcement",
+            "محترم والدین/سرپرست، اسکول کی جانب سے ایک اہم اعلان ہے۔ مزید تفصیل کے لیے اسکول دفتر سے رابطہ کریں۔", Channel: "WhatsApp", LanguageCode: "ur"),
+        new BuiltIn("Parent-teacher meeting request (Urdu)", "Individual",
+            "محترم والدین/سرپرست، [StudentName] کے متعلق والدین اور استاد کی ملاقات طے کرنے کے لیے براہ کرم اسکول دفتر سے رابطہ کریں۔", Channel: "WhatsApp", LanguageCode: "ur")
     };
 
     internal static IReadOnlyList<ComposeTemplate> BuiltInChoices { get; } = BuiltIns
-        .Select(item => new ComposeTemplate(item.Name, item.Purpose, item.Body, FamilyOnly: item.FamilyOnly)).ToArray();
+        .Select(item => new ComposeTemplate(item.Name, item.Purpose, item.Body,
+            Channel: item.Channel, FamilyOnly: item.FamilyOnly, LanguageCode: item.LanguageCode)).ToArray();
 
     // These are deliberately limited, readable placeholders. No SQL, scripting,
     // formula expressions, or arbitrary data paths can be supplied by a template.
     private static readonly Regex Field = new(
         @"\[(?<key>[A-Za-z][A-Za-z0-9]*)\]",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    internal static bool HasEventContext(string body)=>new[]{"[PaymentDetails]","[PaymentAmount]","[CreditApplied]","[ReceiptNumber]","[NoticeTitle]","[NoticeText]"}.Any(field=>body.Contains(field,StringComparison.Ordinal));
     internal static bool HasFields(string body) => Field.IsMatch(body);
 
     internal static Values FromPreview(CommunicationPreviewEntry entry)
@@ -109,11 +132,12 @@ internal static class CommunicationPreparedMessages
             ClassName = entry.ClassName
         };
 
-    internal static void ValidateFormat(string body, string? purpose = null)
+    internal static void ValidateFormat(string body, string? purpose = null,bool allowEventContext=false)
     {
         if (string.IsNullOrWhiteSpace(body) || body.Length > 1600)
             throw new CommunicationValidationException("Write a message of up to 1600 characters.");
         string remaining = Field.Replace(body, match => match.Groups["key"].Value switch {
+            "PaymentDetails" or "PaymentAmount" or "CreditApplied" or "ReceiptNumber" or "NoticeTitle" or "NoticeText" when allowEventContext => "",
             "RecipientName" or "StudentName" or "AdmissionNumber" or "AdmissionDate" => "",
             "FatherName" or "ClassName" when purpose != "Staff" => "",
             "FatherName" or "ClassName" => throw new CommunicationValidationException("Student and class fields cannot be used for a staff message."),
@@ -199,6 +223,25 @@ internal static class CommunicationPreparedMessages
         };
     }
 
+    internal static Values FamilyFeeValues(CommunicationPreviewEntry selected)
+    {
+        var members=selected.FamilyFees.OrderBy(m=>m.RecordId).ToArray();
+        if(members.Length==0 || members.Any(m=>m.RecordId<=0 || m.Outstanding<0) ||
+            members.Select(m=>m.RecordId).Distinct().Count()!=members.Length ||
+            members.All(m=>m.RecordId!=selected.RecordId) ||
+            members.Sum(m=>m.Outstanding)!=(selected.Outstanding ?? 0))
+            throw new CommunicationValidationException("The family fee records changed. Review the family balance again.");
+        var values=FromPreview(selected);
+        if(members.Length==1) return values;
+        return values with {
+            RecordName=string.Join(", ",members.Select(m=>CommunicationRecipientResolver.DisplayName("Student",m.RecordId,m.RecordName))),
+            AdmissionNumber=string.Join(", ",members.Select(m=>string.IsNullOrWhiteSpace(m.AdmissionNumber)
+                ? m.RecordId.ToString(CultureInfo.InvariantCulture) : m.AdmissionNumber)),
+            AdmissionDate=members.All(m=>m.AdmissionDate==members[0].AdmissionDate) ? members[0].AdmissionDate : null,
+            FatherName=null,ClassName=null
+        };
+    }
+
     // The identical classroom/campus/active-enrollment rules used by both
     // preview and msg.OpenManualHandoff are re-applied immediately before
     // preparing the human-controlled WhatsApp URL. No unrelated family or
@@ -222,7 +265,8 @@ internal static class CommunicationPreparedMessages
         FROM msg.ManualHandoff H
         JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
         JOIN msg.Batch B ON B.BatchId=R.BatchId
-        JOIN dbo.Students S ON msg.NormalizeMobile(S.ContactNumber)=R.PhoneE164
+        CROSS JOIN dbo.Students S
+        CROSS APPLY msg.RecordGuardian(S.AdmissionId) Guardian
         OUTER APPLY (
             SELECT TOP (1) E.ClassSectionId,E.Status
             FROM dbo.Enrollments E WHERE E.AdmissionId=S.AdmissionId
@@ -238,7 +282,7 @@ internal static class CommunicationPreparedMessages
           AND B.Audience='OutstandingFees'
           AND (H.State='Opened' OR (@PreviewBatchId=B.BatchId AND H.State='Pending'))
           AND R.State='Pending' AND B.State IN ('Confirmed','Sending')
-          AND S.Status=N'Active' AND S.SchoolMessageConsent=1
+          AND S.Status=N'Active' AND Guardian.HasConsent=1 AND Guardian.PhoneE164=R.PhoneE164
           AND E.Status=N'Active'
           AND (B.CampusId=0 OR CCS.CampusId=B.CampusId)
           AND (B.ClassId=0 OR CCS.ClassId=B.ClassId)
@@ -304,20 +348,23 @@ internal static class CommunicationPreparedMessages
             IF @Owner<>@UserId EXEC dbo.RequirePermission @UserId,N'Communication.View';
             IF @Audience='Staff' EXEC dbo.RequirePermission @UserId,N'Staff.View';
             ELSE EXEC dbo.RequirePermission @UserId,N'Students.View';
-            IF @NeedFees=1 AND @Audience<>'OutstandingFees'
-                THROW 51120,'Fee amounts require the outstanding-fee audience.',1;
+            IF @NeedFees=1 AND @Audience NOT IN ('OutstandingFees','FeeStudent','FeeFamily')
+                THROW 51120,'Fee amounts require a fee-specific audience.',1;
             IF @Audience IN ('OutstandingFees','FeeStudent','FeeFamily') EXEC dbo.RequirePermission @UserId,N'Fees.View';
             SELECT COALESCE(R.AdmissionId,R.StaffId) RecordId,
                 COALESCE(NULLIF(LTRIM(RTRIM(S.StudentName)),N''),
                          NULLIF(LTRIM(RTRIM(T.StaffName)),N''),N'') RecordName,
                 S.AdmissionNumber,S.AdmissionDate,S.FatherName,
                 CASE WHEN E.Status=N'Active' THEN ClassRecord.ClassName END AS ClassName,
-                F.Outstanding,@Audience AS Audience,@Body AS Body
+                F.Outstanding,@Audience AS Audience,@Body AS Body,R.PhoneE164,
+                (SELECT STRING_AGG(CONVERT(varchar(max),M.AdmissionId),',')
+                    WITHIN GROUP(ORDER BY M.AdmissionId)
+                 FROM msg.ReviewedFeeStudent M WHERE M.RecipientId=R.RecipientId) ReviewedFamilyIds
             FROM msg.ManualHandoff H
             JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
             LEFT JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
             LEFT JOIN dbo.Staff T ON T.StaffId=R.StaffId
-            OUTER APPLY msg.RecordGuardian(CASE WHEN @Audience IN ('Student','Family','FeeStudent','FeeFamily') THEN @StudentId ELSE 0 END) Guardian
+            OUTER APPLY msg.RecordGuardian(S.AdmissionId) Guardian
             OUTER APPLY (SELECT TOP(1) E.ClassSectionId,E.Status FROM dbo.Enrollments E
                 WHERE E.AdmissionId=S.AdmissionId
                 ORDER BY CASE WHEN E.Status=N'Active' THEN 0 ELSE 1 END,E.EnrollmentId DESC) E
@@ -326,19 +373,28 @@ internal static class CommunicationPreparedMessages
             OUTER APPLY (
                 SELECT SUM(dbo.GetFeeChargeBalance(C.BillingChargeId)) Outstanding
                 FROM dbo.BillingCharges C
-                WHERE (@NeedFees=1 OR @Audience='OutstandingFees') AND C.AdmissionId=S.AdmissionId
+                JOIN dbo.Students FeeStudent
+                  ON FeeStudent.AdmissionId=C.AdmissionId AND FeeStudent.Status=N'Active'
+                WHERE (@NeedFees=1 OR @Audience IN ('OutstandingFees','FeeStudent','FeeFamily'))
                   AND C.Status<>N'Cancelled'
+                  AND (C.AdmissionId=S.AdmissionId
+                    OR (@Audience='FeeFamily' AND EXISTS (
+                      SELECT 1 FROM dbo.FamilyMembers Origin
+                      JOIN dbo.FamilyMembers Related ON Related.FamilyId=Origin.FamilyId
+                      WHERE Origin.AdmissionId=S.AdmissionId
+                        AND Related.AdmissionId=C.AdmissionId)))
             ) F
             WHERE H.RecipientId=@RecipientId
               AND (H.State='Opened' OR (@PreviewBatchId IS NOT NULL AND H.State='Pending'))
               AND R.State='Pending'
+              AND EXISTS(SELECT 1 FROM msg.PreparedEventEligible(R.BatchId))
               AND NOT EXISTS (
                   SELECT 1 FROM msg.Suppression O
                   WHERE O.Channel='WhatsApp' AND O.PhoneE164=R.PhoneE164)
               AND ((S.AdmissionId IS NOT NULL AND S.Status=N'Active'
                     AND ((@Audience IN ('Student','Family','FeeStudent','FeeFamily') AND S.AdmissionId=@StudentId
                         AND Guardian.HasConsent=1 AND Guardian.PhoneE164=R.PhoneE164)
-                    OR (S.SchoolMessageConsent=1 AND msg.NormalizeMobile(S.ContactNumber)=R.PhoneE164
+                    OR (Guardian.HasConsent=1 AND Guardian.PhoneE164=R.PhoneE164
                     AND (@Audience='School'
                       OR (@Audience='Campus' AND E.Status=N'Active' AND CCS.CampusId=@CampusId)
                       OR (@Audience='Class' AND E.Status=N'Active' AND CCS.CampusId=@CampusId AND CCS.ClassId=@ClassId)
@@ -369,6 +425,16 @@ internal static class CommunicationPreparedMessages
         };
         if (string.Equals(Convert.ToString(row["Audience"]), "OutstandingFees", StringComparison.Ordinal))
             selected = await ReadSharedFeeValuesAsync(recipientId, actor, selected, previewBatchId);
+        if (string.Equals(Convert.ToString(row["Audience"]), "FeeFamily", StringComparison.Ordinal))
+        {
+            var family=await CommunicationRecipientResolver.ReadAsync(
+                new(CommunicationAudience.FeeFamily,0,0,selected.RecordId,0,"WhatsApp"));
+            var current=family.Entries.SingleOrDefault(e=>e.Included);
+            if(actor!=CurrentUser.UserId || current is null || current.PhoneE164!=Convert.ToString(row["PhoneE164"]) ||
+                string.Join(",",current.FamilyFees.Select(m=>m.RecordId).Order())!=Convert.ToString(row["ReviewedFamilyIds"]))
+                throw new CommunicationValidationException("The reviewed family changed. Review a new family fee message; no chat was opened.");
+            selected=FromPreview(current);
+        }
         return (selected, (string)row["Body"]);
     }
 }

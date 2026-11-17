@@ -33,8 +33,11 @@ internal static class CommunicationApiBatchStore
         using var client=new HttpClient(handler) {Timeout=TimeSpan.FromSeconds(25)};
         return await CommunicationMetaTransport.ReadTemplatesAsync(c,client,token);
     }
+    internal static Task<CommunicationConfirmation> ConfirmAsync(CommunicationTarget target,
+        CommunicationPreview preview,string body,Guid request,string provider,CommunicationMetaTransport.Selection? template)=>
+        ConfirmAsync(target,preview,body,request,provider,template,null);
     internal static async Task<CommunicationConfirmation> ConfirmAsync(CommunicationTarget target,
-        CommunicationPreview preview,string body,Guid request,string provider,CommunicationMetaTransport.Selection? template)
+        CommunicationPreview preview,string body,Guid request,string provider,CommunicationMetaTransport.Selection? template,CommunicationPlannedWorkStore.Claim? plannedWork)
     {
         int actor=CurrentUser.UserId;
         if(!await IsReadyAsync(target.Channel,provider))
@@ -54,7 +57,7 @@ internal static class CommunicationApiBatchStore
             throw new CommunicationValidationException("Recipients or message values changed. Review the message again; nothing was sent.");
         return await CommunicationBatchStore.ConfirmPreviewAsync(target,preview,body,request,
             apiProvider:provider,profileHash:CommunicationProviderCredentialStore.IdentityHash(credential),
-            reviewJson:reviewed,templateJson:template is null ? null : JsonSerializer.Serialize(template));
+            reviewJson:reviewed,templateJson:template is null ? null : JsonSerializer.Serialize(template),plannedWork:plannedWork);
     }
     internal static Task<DataTable> ReadAsync(Guid batch) => DatabaseHelper.QueryUserAsync(
         "msg.ReadApiBatch",DatabaseHelper.P("@BatchId",batch));
@@ -75,7 +78,14 @@ internal static class CommunicationApiBatchStore
         if(row is null || Convert.ToString(row["State"])!="Pending")
             throw new CommunicationValidationException("Only an unattempted pending recipient can be sent. Review uncertain attempts in History.");
         string provider=Convert.ToString(row["ProviderCode"])!,channel=Convert.ToString(row["Channel"])!;
-        var credential=CommunicationProviderCredentialStore.LoadForDispatch(channel,provider);
+        CommunicationProviderCredentialStore.Credential credential;
+        try { credential=CommunicationProviderCredentialStore.LoadForDispatch(channel,provider); }
+        catch(Exception ex) when(ex is IOException or CryptographicException or JsonException or ArgumentException or InvalidOperationException)
+        {
+            // This is still pre-claim validation. A disk journal failure after
+            // claiming is different: it must stop the worker, not just this batch.
+            throw new CommunicationValidationException("Protected credentials need administrator review for this sending method.");
+        }
         if(CommunicationProviderCredentialStore.IdentityHash(credential)!=Convert.ToString(row["ProfileHash"]))
             throw new CommunicationValidationException("The sending account changed. Restore its reviewed profile or prepare a new message.");
         var target=new CommunicationTarget(Enum.Parse<CommunicationAudience>(Convert.ToString(row["Audience"])!),

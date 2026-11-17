@@ -16,6 +16,7 @@
     <Compile Include="../../Core/DatabaseCompatibility.cs" Link="DatabaseCompatibility.cs" />
     <Compile Include="../../Core/DatabaseCompatibilityFailure.cs" Link="DatabaseCompatibilityFailure.cs" />
     <Compile Include="../../Pages/Finance/StudentAccounts/FeeDiscountPeriod.cs" Link="FeeDiscountPeriod.cs" />
+    <Compile Include="../../Core/Reports/Fees/FeeMessageReceiptSource.cs" Link="FeeMessageReceiptSource.cs" />
     <Compile Include="../../Core/WholeRupees.cs" Link="WholeRupees.cs" />
     <Compile Include="../../Core/Tvp.cs" Link="Tvp.cs" />
     <Compile Include="../../Core/PermissionCatalog.cs" Link="PermissionCatalog.cs" />
@@ -30,6 +31,18 @@
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema19Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema19Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema20Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema20Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema22Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema22Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema23Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema23Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema24Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema24Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema25Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema25Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema35Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema35Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema34Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema34Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema32Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema32Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema31Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema31Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema30Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema30Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema29Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema29Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema28Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema28Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema27Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema27Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema26Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema26Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema17Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema17Requirements.json" />
     <EmbeddedResource Include="../../Core/PermissionCatalog.json" LogicalName="FMSC_SMS.Core.PermissionCatalog.json" />
     <Using Include="System.Data" /><Using Include="FMSC_SMS" /><Using Include="FMSC_SMS.Core" />

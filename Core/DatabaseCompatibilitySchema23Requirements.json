@@ -1,0 +1,64 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "DispatchControl",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "ProviderQuota",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "BatchSchedule",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "AutomationRule",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "AutomationException",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadDispatchControl",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveDispatchControl",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SetMasterPause",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveProviderQuota",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ScheduleReviewedBatch",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadScheduledBatches",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SaveAutomationMode",
+      "type": "P"
+    }
+  ]
+}

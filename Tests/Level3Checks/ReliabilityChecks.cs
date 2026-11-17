@@ -7,6 +7,8 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
 {
     private int student, enrollment;
     private long charge;
+    private long communicationRecipient,communicationScheduled,manualPending,manualOpened,postBackupLostRecipient;
+    private Guid postBackupLostBatch,postBackupLostAttempt,automaticRestoreAuthorization;
     private string? backup, restored, snapshot;
     private Guid Owner => Guid.Parse(Environment.GetEnvironmentVariable("FMSC_TEST_RUN_ID")!);
     private string Catalog => new SqlConnectionStringBuilder(DatabaseHelper.ConnectionString).InitialCatalog;
@@ -31,9 +33,12 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
         await r.Stage("L3-FIN-07 | concurrent production posting and competing collections", Concurrent, ready);
         await r.Stage("L3-FIN-05 | exact correction and reversal ledger persistence", Adjustments, ready);
         await r.Stage("L3-SEC-04 | SQL permissions rechecked after role removal", StalePermission, ready);
-        bool saved = await r.Stage("L3-DB-01 | checksum backup and VERIFYONLY", Backup, ready);
+        bool communicationReady=await r.Stage("L3-COM-01 | reviewed communication before backup",PrepareCommunicationRecovery,ready);
+        bool saved = await r.Stage("L3-DB-01 | checksum backup and VERIFYONLY", Backup, ready && communicationReady);
+        await r.Stage("L3-COM-02 | durable post-backup submission without HTTP",ClaimCommunicationRecovery,saved);
         bool loaded = await r.Stage("L3-DB-02 | restore to absent owned catalog and new files", Restore, saved);
         await r.Stage("L3-DB-03 | restored compatibility, complete ledger and CHECKDB", CheckRestore, loaded);
+        await r.Stage("L3-COM-03 | restored pending and wholly lost post-backup message stay held",RestoredCommunicationRecovery,loaded);
         await r.Stage("L3-DB-04 | old, new and structurally incompatible schema refusal", Compatibility, ready);
         await r.Stage("L3 database target guards | wrong owner and non-test catalog refusal", TargetGuards, ready);
         await r.Stage("L3-PRF-01 | 1000 production admissions and repeated real searches", SearchWorkload, ready);
@@ -212,6 +217,187 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
             """;
         if (connection is null) return Convert.ToString(Sql.Scalar(query))!;
         using var command = new SqlCommand(query, connection); return Convert.ToString(command.ExecuteScalar())!;
+    }
+    private async Task PrepareCommunicationRecovery()
+    {
+        Sql.ValidateTarget();
+        Sql.Query("UPDATE dbo.Students SET ContactNumber='03008000981' WHERE AdmissionId=@Id",Sql.P("@Id",student));
+        Sql.Proc("msg.RecordAdmissionConsent",Sql.P("@UserId",f.Admin),Sql.P("@AdmissionId",student),Sql.P("@Consent",true),Sql.P("@Authority","Students.Admit"));
+        Sql.Proc("msg.ConfigureChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),Sql.P("@ProviderCode","Twilio"));
+        Sql.Proc("msg.EnableApiChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),Sql.P("@ProviderCode","Twilio"));
+        // Real automatic authorization saved BEFORE the backup. A later
+        // restoration must invalidate it even when every newer batch and
+        // attempt was lost and the old SQL catalog has no corresponding row.
+        Sql.Proc("msg.SaveTemplate",Sql.P("@UserId",f.Admin),Sql.P("@TemplateId",0),
+            Sql.P("@Name","Synthetic restore-bound automatic message"),
+            Sql.P("@Channel","Sms"),Sql.P("@Purpose","Announcement"),
+            Sql.P("@Body","Synthetic restore-bound message."),Sql.P("@Active",true),
+            Sql.P("@LanguageCode","en"));
+        int approvedTemplate=Sql.Count("SELECT TemplateId FROM msg.Template WHERE Name=N'Synthetic restore-bound automatic message'");
+        int approvedRevision=Sql.Count("SELECT MAX(RevisionNumber) FROM msg.TemplateRevision WHERE TemplateId=@Id",Sql.P("@Id",approvedTemplate));
+        automaticRestoreAuthorization=Guid.NewGuid();
+        Sql.Query("""
+            INSERT msg.AutomaticAuthorization(AuthorizationId,EventCode,TemplateId,TemplateRevision,Body,
+              LanguageCode,Channel,ProviderCode,ProfileHash,TemplateJson,CampusId,ClassId,
+              DailyFamilyLimit,ExpiryHours,Priority,ApprovedBy,RestoreBoundaryHash,AcademicToken)
+            VALUES(@Authorization,'Birthday',@Template,@Revision,N'Synthetic restore-bound message.',
+              'en','Sms','Twilio',REPLICATE('A',64),NULL,0,0,3,24,'Normal',@Admin,msg.RestoreBoundary(),NULL);
+            UPDATE msg.AutomationRule SET Mode='Automatic',AuthorizationId=@Authorization,CampusId=0,ClassId=0
+              WHERE EventCode='Birthday';
+            """,Sql.P("@Authorization",automaticRestoreAuthorization),Sql.P("@Template",approvedTemplate),
+            Sql.P("@Revision",approvedRevision),Sql.P("@Admin",f.Admin));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.AutomaticAuthorized(@Id)",Sql.P("@Id",automaticRestoreAuthorization))==1,
+            "A genuine pre-backup automatic authorization is eligible before SQL restore.");
+
+        communicationRecipient=await ConfirmCommunicationRecovery();
+        communicationScheduled=await ConfirmCommunicationRecovery();
+        using(var scheduleBatch=Sql.Query("SELECT BatchId FROM msg.Recipient WHERE RecipientId=@Id",Sql.P("@Id",communicationScheduled)))
+            Sql.Proc("msg.ScheduleReviewedBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",scheduleBatch.Rows[0]["BatchId"]),
+                Sql.P("@DueUtc",DateTime.UtcNow.AddDays(1)),Sql.P("@ExpiresUtc",DateTime.UtcNow.AddDays(2)),Sql.P("@Priority","Normal"));
+        Sql.Proc("msg.EnableManualWhatsApp",Sql.P("@UserId",f.Admin));
+        manualPending=await ConfirmCommunicationRecovery(manual:true);
+        manualOpened=await ConfirmCommunicationRecovery(manual:true);
+        Sql.Proc("msg.SetMasterPause",Sql.P("@UserId",f.Admin),Sql.P("@Paused",true));
+        try
+        {
+            using var opened=Sql.Proc("msg.OpenManualHandoff",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualOpened));
+            r.Check(Convert.ToBoolean(opened.Rows[0]["Opened"]),"API Pause All preserves explicitly controlled manual WhatsApp handoff.");
+            Sql.Proc("msg.RecordShellHandoff",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualOpened),
+                Sql.P("@OpenCount",opened.Rows[0]["OpenCount"]),Sql.P("@RenderedBody","Synthetic retained recovery notice & اطلاع"),Sql.P("@ShellOpened",true));
+            await r.Refused("The same pause still blocks a provider attempt",()=>{
+                Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",communicationRecipient),
+                    Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));return Task.CompletedTask;
+            },51240);
+        }
+        finally{Sql.Proc("msg.SetMasterPause",Sql.P("@UserId",f.Admin),Sql.P("@Paused",false));}
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Id",Sql.P("@Id",communicationRecipient))==0,
+            "The backed-up reviewed message is genuinely unattempted.");
+    }
+    private async Task<long> ConfirmCommunicationRecovery(bool manual=false)
+    {
+        var target=new CommunicationTarget(CommunicationAudience.Student,0,0,student,0,manual ? "WhatsApp" : "Sms");
+        var preview=await CommunicationRecipientResolver.ReadAsync(target);
+        using var recipients=new DataTable();recipients.Columns.Add("RecipientKind");recipients.Columns.Add("RecordId",typeof(int));recipients.Columns.Add("PhoneE164");
+        foreach(var entry in preview.Entries.Where(entry=>entry.Included))recipients.Rows.Add(entry.Kind,entry.RecordId,entry.PhoneE164);
+        r.Check(recipients.Rows.Count==1,"The recovery message resolves one real, consented school record.");
+        string body=manual ? "Synthetic retained recovery notice & اطلاع" : "Synthetic recovery notice.";
+        var args=new List<SqlParameter>{Sql.P("@UserId",f.Admin),Sql.P("@ClientRequestId",Guid.NewGuid()),
+            Sql.P("@Channel",target.Channel),Sql.P("@Purpose","Individual"),Sql.P("@Body",body),Sql.P("@Audience","Student"),
+            Sql.P("@CampusId",0),Sql.P("@ClassId",0),Sql.P("@StudentId",student),Sql.P("@StaffId",0),
+            new SqlParameter("@Recipients",SqlDbType.Structured){TypeName="msg.RecipientSelection",Value=recipients}};
+        if(manual)args.Add(new SqlParameter("@ReviewedFees",SqlDbType.Structured){TypeName="msg.RecipientSelection",Value=recipients.Clone()});
+        else args.AddRange(new[]{Sql.P("@ProviderCode","Twilio"),Sql.P("@ProfileHash",new string('A',64)),
+            Sql.P("@ReviewJson",CommunicationReviewedContent.ReviewJson(target,preview,body)),Sql.P("@TemplateJson",null)});
+        using var saved=Sql.Proc(manual ? "msg.ConfirmReviewedManualBatch" : "msg.ConfirmReviewedApiBatch",args.ToArray());
+        return Convert.ToInt64(Sql.Scalar("SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Id",Sql.P("@Id",saved.Rows[0]["BatchId"])));
+    }
+    private async Task ClaimCommunicationRecovery()
+    {
+        using var claimed=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",communicationRecipient),
+            Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));
+        r.Check(Convert.ToBoolean(claimed.Rows[0]["Claimed"]),"A real SQL attempt is persisted after the backup; no provider request is issued.");
+        postBackupLostRecipient=await ConfirmCommunicationRecovery();
+        postBackupLostBatch=(Guid)Sql.Scalar("SELECT BatchId FROM msg.Recipient WHERE RecipientId=@Id",
+            Sql.P("@Id",postBackupLostRecipient))!;
+        postBackupLostAttempt=Guid.NewGuid();
+        using(var lost=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),
+            Sql.P("@RecipientId",postBackupLostRecipient),Sql.P("@AttemptKey",postBackupLostAttempt),
+            Sql.P("@ExpectedProviderCode","Twilio")))
+            r.Check(Convert.ToBoolean(lost.Rows[0]["Claimed"]),
+                "A second reviewed batch and its uncertain attempt exist only after the backup; no HTTP is attempted.");
+        return;
+    }
+    private async Task RestoredCommunicationRecovery()
+    {
+        using(var connection=RestoredConnection())
+        using(var command=new SqlCommand("msg.ClaimRecipient",connection){CommandType=CommandType.StoredProcedure})
+        {
+            command.Parameters.AddRange(new[]{Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",communicationRecipient),
+                Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio")});
+            bool refused=false;
+            try{using var reader=command.ExecuteReader();while(reader.Read()){} }
+            catch(SqlException ex) when(ex.Number==51341){refused=true;r.ExpectedRefusals++;}
+            r.Check(refused,"Independent SQL restore history holds a restored Pending message even on an account without its original local journal.");
+        }
+        string original=DatabaseHelper.ConnectionString;
+        try
+        {
+            // RestoredConnection above verified this exact owner-marked catalog.
+            // ValidateTarget reads the source environment and would reset us to
+            // the original database, defeating the real restored-state check.
+            DatabaseHelper.ConnectionString=new SqlConnectionStringBuilder(original){InitialCatalog=restored!,Pooling=false}.ConnectionString;
+            r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Id",Sql.P("@Id",communicationRecipient))==0,
+                "The restored-message refusal rolls back the attempted claim completely.");
+            r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Batch WHERE BatchId=@Id",Sql.P("@Id",postBackupLostBatch))==0
+                && Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE AttemptKey=@Id",Sql.P("@Id",postBackupLostAttempt))==0,
+                "A real SQL restore removed the entire later reviewed batch and the later uncertain attempt.");
+            r.Check(Sql.Count("SELECT COUNT(*) FROM msg.AutomationRule WHERE EventCode='Birthday' AND Mode='Automatic' AND AuthorizationId=@Id",
+                    Sql.P("@Id",automaticRestoreAuthorization))==1
+                && Sql.Count("SELECT COUNT(*) FROM msg.AutomaticAuthorized(@Id)",Sql.P("@Id",automaticRestoreAuthorization))==0,
+                "Automatic authorization from the older recovery epoch is held even when a newer batch and its attempt vanished completely.");
+
+            await r.Refused("Restored approval evidence cannot be rewritten to bypass the restore hold",()=>{
+                Sql.Query("UPDATE B SET RestoreBoundaryHash=msg.RestoreBoundary() FROM msg.Batch B JOIN msg.Recipient R ON R.BatchId=B.BatchId WHERE R.RecipientId=@Id",
+                    Sql.P("@Id",communicationRecipient));return Task.CompletedTask;
+            },51343);
+            Guid Batch(long recipient)=>(Guid)Sql.Scalar("SELECT BatchId FROM msg.Recipient WHERE RecipientId=@Id",Sql.P("@Id",recipient))!;
+            using var queue=Sql.Proc("msg.ReadMyUnfinishedBatches",Sql.P("@UserId",f.Admin));
+            r.Check(new[]{communicationRecipient,communicationScheduled,manualPending,manualOpened}.All(id=>queue.AsEnumerable().Any(row=>
+                (Guid)row["BatchId"]==Batch(id) && Convert.ToBoolean(row["RecoveryBlocked"]) && Convert.ToString(row["QueueStatus"])=="Needs Attention")),
+                "Restored API and manual batches are visible in Needs Attention before any external operation.");
+            using var api=Sql.Proc("msg.ReadApiBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationRecipient)));
+            r.Check(api.Rows.Count==1 && Convert.ToBoolean(api.Rows[0]["RecoveryBlocked"]),"The API sending session reads the same authoritative restore hold.");
+            foreach(long manual in new[]{manualPending,manualOpened})
+            {
+                using var rows=Sql.Proc("msg.ReadManualHandoff",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(manual)));
+                r.Check(rows.Rows.Count==1 && Convert.ToBoolean(rows.Rows[0]["RecoveryBlocked"]),"A restored manual session exposes its recovery boundary without opening a chat.");
+                await r.Refused("A restored manual message cannot open or reopen WhatsApp",()=>{
+                    Sql.Proc("msg.OpenManualHandoff",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manual));return Task.CompletedTask;
+                },51341);
+                await r.Refused("A restored manual send cannot be claimed without explicit recovery verification",()=>{
+                    Sql.Proc("msg.MarkManualHandoff",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manual),Sql.P("@Outcome","ReportedSent"));return Task.CompletedTask;
+                },51115);
+            }
+            await r.Refused("Stale callbacks cannot add or acknowledge shell evidence after recovery",()=>{
+                Sql.Proc("msg.RecordShellHandoff",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualOpened),
+                    Sql.P("@OpenCount",1),Sql.P("@RenderedBody","Synthetic retained recovery notice & اطلاع"),Sql.P("@ShellOpened",true));return Task.CompletedTask;
+            },51341);
+            using var retained=Sql.Proc("msg.ReadManualHandoff",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(manualOpened)));
+            r.Check(Convert.ToString(retained.Rows[0]["RetainedBody"])=="Synthetic retained recovery notice & اطلاع",
+                "Recovery exposes immutable historical text, rather than rendering today's financial values as earlier content.");
+            r.Check(Sql.Count("SELECT OpenCount FROM msg.ManualHandoff WHERE RecipientId=@Id",Sql.P("@Id",manualPending))==0 &&
+                Sql.Count("SELECT OpenCount FROM msg.ManualHandoff WHERE RecipientId=@Id",Sql.P("@Id",manualOpened))==1,
+                "Refused manual recovery leaves opening history unchanged.");
+            Sql.Proc("msg.MarkManualHandoff",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualOpened),Sql.P("@Outcome","ReportedSent"),Sql.P("@RecoveredReport",true));
+            r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND State='ReportedSent'",Sql.P("@Id",manualOpened))==1,
+                "An explicit checked operator report records only self-reported sending, without provider delivery claims.");
+            Sql.Proc("msg.HoldScheduledBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationScheduled)));
+            object? dueBefore=Sql.Scalar("SELECT DueUtc FROM msg.BatchSchedule WHERE BatchId=@Id",Sql.P("@Id",Batch(communicationScheduled)));
+            await r.Refused("A restored approval cannot be rescheduled to clear its recovery hold",()=>{
+                Sql.Proc("msg.ScheduleReviewedBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationScheduled)),
+                    Sql.P("@DueUtc",DateTime.UtcNow.AddHours(1)),Sql.P("@ExpiresUtc",DateTime.UtcNow.AddHours(2)),Sql.P("@Priority","Normal"));return Task.CompletedTask;
+            },51341);
+            await r.Refused("A restored approval cannot be released through schedule resumption",()=>{
+                Sql.Proc("msg.ReleaseScheduledHold",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationScheduled)));return Task.CompletedTask;
+            },51341);
+            using(var takeoverChoices=Sql.Proc("msg.ReadTakeoverCandidates",Sql.P("@UserId",f.Admin)))
+                r.Check(!takeoverChoices.AsEnumerable().Any(row=>(Guid)row["BatchId"]==Batch(communicationScheduled)),
+                    "Takeover offers only resumable work and keeps restored approvals in the recovery Queue.");
+            int takeovers=Sql.Count("SELECT COUNT(*) FROM msg.BatchTakeover");
+            await r.Refused("Administrator takeover cannot release a restored approval or record a misleading resumption",()=>{
+                Sql.Proc("msg.TakeOverScheduledBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationScheduled)),
+                    Sql.P("@Reason","Synthetic recovery review"));return Task.CompletedTask;
+            },51341);
+            r.Check(Sql.Count("SELECT COUNT(*) FROM msg.BatchTakeover")==takeovers &&
+                Sql.Count("SELECT COUNT(*) FROM msg.BatchSchedule WHERE BatchId=@Id AND HoldForReview=1",Sql.P("@Id",Batch(communicationScheduled)))==1 &&
+                Equals(Sql.Scalar("SELECT DueUtc FROM msg.BatchSchedule WHERE BatchId=@Id",Sql.P("@Id",Batch(communicationScheduled))),dueBefore),
+                "Refused recovery actions preserve the due time, hold and original responsibility audit.");
+            long fresh=await ConfirmCommunicationRecovery();
+            using var claimed=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",fresh),
+                Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));
+            r.Check(Convert.ToBoolean(claimed.Rows[0]["Claimed"]),"An explicitly reviewed new request after restore can proceed through the normal safeguards.");
+        }
+        finally{DatabaseHelper.ConnectionString=original;}
     }
     private Task Backup()
     {

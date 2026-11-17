@@ -1,0 +1,551 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "RecurringRule",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "PlannedWork",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "AcademicSessionToken",
+      "type": "FN"
+    },
+    {
+      "schema": "msg",
+      "name": "CanViewAudience",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "RecurringEligible",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "PlanBatchEligible",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "VerifyPlanWorker",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "RegisterRecurrence",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadDueRecurrences",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "CreateRecurringOccurrence",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ClaimPlannedWork",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "BindPlannedWork",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "HoldPlannedWork",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadRecurringRules",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "SetRecurringState",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadUnpreparedWork",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "HoldRecurringPreparation",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "PlannedFeeAllowed",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_RecurringIntentImmutable",
+      "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_PlannedWorkSourceImmutable",
+      "type": "TR"
+    }
+  ],
+  "columns": [
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "RuleId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "OriginBatchId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "CreatedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "CreatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "Frequency",
+      "type": "varchar",
+      "maxLength": 8,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "Every",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "FirstLocal",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "TimeZoneId",
+      "type": "sysname",
+      "maxLength": 256,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "NextDueUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "EndUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "ExpiryHours",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "MaxOccurrences",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "Occurrences",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "State",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "ReasonCode",
+      "type": "varchar",
+      "maxLength": 50,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "RestoreBoundaryHash",
+      "type": "binary",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "AcademicToken",
+      "type": "binary",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "UpdatedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "UpdatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "WorkId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "SourceKind",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "RuleId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "CandidateId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "AuthorizationId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "DueUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "ExpiresUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "State",
+      "type": "varchar",
+      "maxLength": 10,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "ReasonCode",
+      "type": "varchar",
+      "maxLength": 50,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "BatchId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "ClaimNonce",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "ClaimUntilUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "EnrollmentId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "CreatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "UpdatedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    }
+  ],
+  "checkConstraints": [
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "CK_MsgRecurringFrequency"
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "CK_MsgRecurringBounds"
+    },
+    {
+      "schema": "msg",
+      "objectName": "RecurringRule",
+      "name": "CK_MsgRecurringState"
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "CK_MsgWorkSource"
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "CK_MsgWorkState"
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "CK_MsgWorkExpiry"
+    },
+    {
+      "schema": "msg",
+      "objectName": "PlannedWork",
+      "name": "CK_MsgWorkBatch"
+    }
+  ]
+}

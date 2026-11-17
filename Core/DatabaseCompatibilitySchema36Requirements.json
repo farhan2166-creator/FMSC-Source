@@ -1,0 +1,42 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "AutomationSourceTombstone",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "PruneTerminalCommunication",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "TR_AutomationSourceTombstoneImmutable",
+      "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_AutomationCandidateNoReintake",
+      "type": "TR"
+    }
+  ],
+  "triggers": [
+    {
+      "schema": "msg",
+      "name": "TR_AutomationSourceTombstoneImmutable",
+      "parentSchema": "msg",
+      "parentName": "AutomationSourceTombstone",
+      "events": "DELETE,UPDATE",
+      "insteadOf": false
+    },
+    {
+      "schema": "msg",
+      "name": "TR_AutomationCandidateNoReintake",
+      "parentSchema": "msg",
+      "parentName": "AutomationCandidate",
+      "events": "INSERT",
+      "insteadOf": false
+    }
+  ]
+}

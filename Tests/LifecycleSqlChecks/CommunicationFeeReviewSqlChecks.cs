@@ -1,0 +1,149 @@
+using System.Data;
+
+// Synthetic, read-only finance-event acceptance: actual charge balances and
+// due dates are consulted; no payment, admission or fee row is modified.
+internal static class CommunicationFeeReviewSqlChecks
+{
+    internal static async Task Run(Fixture f,Report r)
+    {
+        int student=Sql.Count("""
+            SELECT TOP(1) S.AdmissionId
+            FROM dbo.Students S
+            OUTER APPLY msg.RecordGuardian(S.AdmissionId) G
+            WHERE S.Status=N'Active' AND G.HasConsent=1 AND G.PhoneE164 IS NOT NULL
+              AND EXISTS(SELECT 1 FROM dbo.Enrollments E
+                WHERE E.AdmissionId=S.AdmissionId AND E.Status=N'Active')
+              AND EXISTS(SELECT 1 FROM dbo.BillingCharges B
+                WHERE B.AdmissionId=S.AdmissionId AND B.Status<>N'Cancelled'
+                  AND B.DueDate IS NOT NULL AND dbo.GetFeeChargeBalance(B.BillingChargeId)>0)
+            ORDER BY S.AdmissionId;
+            """);
+        r.Check(student>0,"Disposable school has an active, consenting student with an unpaid posted charge.");
+        if(student<=0)return;
+        var date=Sql.Scalar("""
+            SELECT TOP(1) DueDate FROM dbo.BillingCharges
+            WHERE AdmissionId=@Id AND Status<>N'Cancelled'
+              AND DueDate IS NOT NULL AND dbo.GetFeeChargeBalance(BillingChargeId)>0
+            ORDER BY DueDate;
+            """,Sql.P("@Id",student));
+        r.Check(date is DateTime,"Fee-event testing is anchored to an actual posted due date.");
+        if(date is not DateTime due)return;
+        int Eligible(string code,DateTime on)=>Sql.Count(
+            "SELECT COUNT(*) FROM msg.LiveFeeEventEligible(@Id,@Event,@On);",
+            Sql.P("@Id",student),Sql.P("@Event",code),Sql.P("@On",on));
+        r.Check(Eligible("OutstandingFees",due)>0,
+            "Outstanding notices use an actual positive posted balance, independent of a past-due label.");
+        r.Check(Eligible("UpcomingDue",due.AddDays(-3))>0,
+            "Upcoming notices require a posted charge due within the next seven days.");
+        r.Check(Eligible("OverdueFollowUp",due.AddDays(1))>0,
+            "Overdue notices require a positive-balance charge with a past due date.");
+        r.Check(Eligible("UpcomingDue",new DateTime(2099,1,1))==0 &&
+                Eligible("OverdueFollowUp",new DateTime(1900,1,1))==0 &&
+                Eligible("OutstandingFees",DateTime.Today)>0,
+            "An unpaid balance remains outstanding without pretending it is due at unrelated dates.");
+        int initialBatches=Sql.Count("SELECT COUNT(*) FROM msg.Batch"),
+            initialAttempts=Sql.Count("SELECT COUNT(*) FROM msg.Attempt");
+        using(var before=Sql.Proc("msg.ReadFeeReviewCandidates",Sql.P("@UserId",f.Admin)))
+            r.Check(before.Rows.Count==0,
+                "A new school creates no fee-review candidates while every event rule is Off.");
+        using(var disabled=Sql.Proc("msg.ClaimAutomationReviewScan",Sql.P("@UserId",f.Admin)))
+            r.Check(disabled.Rows.Count==1 && !Convert.ToBoolean(disabled.Rows[0]["ShouldScan"]),
+                "No background event scan is scheduled when all event rules are Off.");
+
+        Sql.Proc("msg.SaveAutomationMode",
+            Sql.P("@UserId",f.Admin),Sql.P("@EventCode","OutstandingFees"),
+            Sql.P("@Mode","Review"),Sql.P("@CampusId",0),Sql.P("@ClassId",0));
+        await r.Refused("Only an administrator may configure fee reminder frequency",()=>{
+            Sql.Proc("msg.SaveFeeReminderPolicy",Sql.P("@UserId",f.Restricted),
+                Sql.P("@EventCode","OutstandingFees"),Sql.P("@GapDays",7),
+                Sql.P("@PerMonth",2),Sql.P("@PerDay",3));
+            return Task.CompletedTask;
+        },50003);
+        await r.Refused("Zero-day or unbounded reminder policies are rejected at SQL boundary",()=>{
+            Sql.Proc("msg.SaveFeeReminderPolicy",Sql.P("@UserId",f.Admin),
+                Sql.P("@EventCode","OutstandingFees"),Sql.P("@GapDays",0),
+                Sql.P("@PerMonth",2),Sql.P("@PerDay",3));
+            return Task.CompletedTask;
+        },51288);
+        Sql.Proc("msg.SaveFeeReminderPolicy",Sql.P("@UserId",f.Admin),
+            Sql.P("@EventCode","OutstandingFees"),Sql.P("@GapDays",7),
+            Sql.P("@PerMonth",2),Sql.P("@PerDay",3));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.FeeReminderEligible(@Id,'OutstandingFees',CONVERT(date,SYSUTCDATETIME()))",
+            Sql.P("@Id",student))==1 &&
+            Sql.Count("SELECT COUNT(*) FROM msg.AutomationRule WHERE EventCode='OutstandingFees' AND FeeReminderGapDays=7 AND FeeRemindersPerMonth=2")==1 &&
+            Sql.Count("SELECT COUNT(*) FROM msg.DispatchControl WHERE ControlId=1 AND RoutineFamilyDailyLimit=3")==1,
+            "Administrator-configured family limits begin with safe defaults and leave eligible unsent reviews visible.");
+        using(var first=Sql.Proc("msg.ClaimAutomationReviewScan",Sql.P("@UserId",f.Admin)))
+            r.Check(first.Rows.Count==1 && Convert.ToBoolean(first.Rows[0]["ShouldScan"]),
+                "Only one authorized background scan can claim the school review slot.");
+        using(var second=Sql.Proc("msg.ClaimAutomationReviewScan",Sql.P("@UserId",f.Admin)))
+            r.Check(second.Rows.Count==1 && !Convert.ToBoolean(second.Rows[0]["ShouldScan"]),
+                "The school coordinator prevents another full event scan within thirty minutes.");
+        var scan=Sql.Proc("msg.ScanFeeReviewCandidates",Sql.P("@UserId",f.Admin));
+        r.Check(scan.Rows.Count==1 && Convert.ToInt32(scan.Rows[0]["NewSuggestions"])>=1,
+            "Enabling fee review collects current outstanding balances without replaying paid charges.");
+        scan=Sql.Proc("msg.ScanFeeReviewCandidates",Sql.P("@UserId",f.Admin));
+        r.Check(scan.Rows.Count==1 && Convert.ToInt32(scan.Rows[0]["NewSuggestions"])==0,
+            "Repeated fee review scans produce no duplicate household suggestion.");
+        using(var current=Sql.Proc("msg.ReadFeeReviewCandidates",Sql.P("@UserId",f.Admin)))
+        {
+            r.Check(current.AsEnumerable().Any(row=>Convert.ToString(row["EventCode"])=="OutstandingFees") &&
+                    current.AsEnumerable().GroupBy(row=>Convert.ToInt64(row["CandidateId"])).All(g=>g.Count()==1),
+                "Outstanding reminders appear only in the finance review inbox, without duplicated ledger entries.");
+            var candidate=current.AsEnumerable().FirstOrDefault(row=>
+                Convert.ToString(row["EventCode"])=="OutstandingFees");
+            if(candidate is not null)
+            {
+                long candidateId=Convert.ToInt64(candidate["CandidateId"]);
+                int candidateStudent=Convert.ToInt32(candidate["AdmissionId"]);
+                // A transaction-local synthetic confirmed message stands in for
+                // an already reviewed family reminder. All fake batch and ledger
+                // changes are rolled back; only the policy predicate is observed.
+                int eligibleAfterPriorReview=Sql.Count("""
+                    SET NOCOUNT ON; SET XACT_ABORT ON;
+                    BEGIN TRANSACTION;
+                    DECLARE @Batch uniqueidentifier=NEWID();
+                    INSERT msg.Batch(BatchId,ClientRequestId,Channel,Purpose,Body,Audience,
+                        StudentId,State,CreatedBy,ConfirmedBy,ConfirmedUtc)
+                    VALUES(@Batch,NEWID(),'WhatsApp','FeeReminder',N'Synthetic review',
+                        'FeeStudent',@Student,'Confirmed',@Admin,@Admin,SYSUTCDATETIME());
+                    UPDATE msg.AutomationCandidate
+                    SET State='Prepared',ReviewedBy=@Admin,
+                        ReviewedUtc=SYSUTCDATETIME(),BatchId=@Batch
+                    WHERE CandidateId=@Candidate;
+                    IF @@ROWCOUNT<>1 THROW 51299,'Synthetic candidate was not prepared.',1;
+                    DECLARE @Result int=(SELECT COUNT(*) FROM msg.FeeReminderEligible(
+                        @Student,'OutstandingFees',CONVERT(date,SYSUTCDATETIME())));
+                    ROLLBACK TRANSACTION;
+                    SELECT @Result;
+                    """,Sql.P("@Student",candidateStudent),Sql.P("@Candidate",candidateId),
+                    Sql.P("@Admin",f.Admin));
+                r.Check(eligibleAfterPriorReview==0 &&
+                    Sql.Count("SELECT COUNT(*) FROM msg.AutomationCandidate WHERE CandidateId=@Candidate AND State='Pending'",
+                        Sql.P("@Candidate",candidateId))==1,
+                    "A confirmed fee reminder suppresses duplicate family proposals within the gap; test state rolls back.");
+                await r.Refused("A fee suggestion cannot be resolved with an invented communication batch",()=>{
+                    Sql.Proc("msg.MarkAutomationCandidatePrepared",
+                        Sql.P("@UserId",f.Admin),Sql.P("@CandidateId",candidateId),
+                        Sql.P("@BatchId",Guid.NewGuid()));
+                    return Task.CompletedTask;
+                },51284);
+            }
+        }
+        await r.Refused("Automatic fee dispatch remains disabled even for a valid review-only event",()=>{
+            Sql.Proc("msg.SaveAutomationMode",
+                Sql.P("@UserId",f.Admin),Sql.P("@EventCode","OutstandingFees"),
+                Sql.P("@Mode","Automatic"),Sql.P("@CampusId",0),Sql.P("@ClassId",0));
+            return Task.CompletedTask;
+        },51247);
+        Sql.Proc("msg.SaveAutomationMode",
+            Sql.P("@UserId",f.Admin),Sql.P("@EventCode","OutstandingFees"),
+            Sql.P("@Mode","Off"),Sql.P("@CampusId",0),Sql.P("@ClassId",0));
+        using(var hidden=Sql.Proc("msg.ReadFeeReviewCandidates",Sql.P("@UserId",f.Admin)))
+            r.Check(hidden.Rows.Count==0,
+                "Disabling a fee review rule immediately hides its unapproved pending work.");
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Batch")==initialBatches &&
+                Sql.Count("SELECT COUNT(*) FROM msg.Attempt")==initialAttempts,
+            "Review-only fee intake creates neither provider attempts nor communication batches.");
+    }
+}

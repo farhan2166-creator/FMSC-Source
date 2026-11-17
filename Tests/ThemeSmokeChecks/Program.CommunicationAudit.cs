@@ -3,6 +3,7 @@ using FMSC_SMS.Core;
 using FMSC_SMS.Pages.Communication;
 using FMSC_SMS.Pages.Security;
 using FMSC_SMS.Pages.Finance.Collection;
+using FMSC_SMS.Pages.Reports.Finance;
 using FMSC_SMS.Pages.Students.Admissions;
 
 internal static partial class Program
@@ -14,6 +15,10 @@ internal static partial class Program
         {
             CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
                 new[] { "Communication.Send", "Students.View", "Fees.View" });
+            bool unauthorizedCorrection=false;
+            try { using var correctionDialog=new CommunicationCorrectionReasonDialog(); }
+            catch(UnauthorizedAccessException) { unauthorizedCorrection=true; }
+            Check(unauthorizedCorrection,"Send-only staff cannot prepare a correction without History access.");
             Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission) && !CurrentUser.HasPermission("Communication.View"),
                 "A sender can open messaging without being granted history access");
             foreach (string bad in new[] { "Hello [Typo]", "Hello [StudentName", "Hello StudentName]", "Hello {{StudentName}}" })
@@ -60,10 +65,104 @@ internal static partial class Program
             Check(Uri.UnescapeDataString(link.Query).Contains(rendered) && link.Host == "wa.me", "Unicode, quotes, ampersands and newlines survive official WhatsApp handoff encoding");
             using (var template = new CommunicationTemplateDialog("Saved email template", "Email", "Announcement", "School notice"))
                 Check(template.Channel == "Email", "Editing a saved email template preserves its channel rather than silently converting it to SMS");
+            using (var urduTemplate = new CommunicationTemplateDialog(
+                "Bilingual school notice", "WhatsApp", "Announcement",
+                "محترم والدین", true, "ur"))
+                Check(urduTemplate.LanguageCode == "ur" && urduTemplate.Channel == "WhatsApp",
+                    "Saved Urdu templates preserve both language and sending channel independently.");
+            Check(CommunicationPreparedMessages.BuiltInChoices.Any(item =>
+                    item.LanguageCode == "ur" && item.Channel == "WhatsApp")
+                && CommunicationPreparedMessages.BuiltInChoices.Any(item =>
+                    item.LanguageCode == "en" && item.Name == "New admission welcome"),
+                "English and Urdu prepared messages are separate curated versions.");
+            bool unauthorisedVersionsBlocked = false;
+            try { using var forbidden = new CommunicationTemplateVersionsDialog(1, "Synthetic template"); }
+            catch (UnauthorizedAccessException) { unauthorisedVersionsBlocked = true; }
+            Check(unauthorisedVersionsBlocked,
+                "A communication sender without administrator permission cannot inspect template version history.");
+            using (var languageComposer = new CommunicationCenterPage(false))
+            {
+                var languageInput = Field<ModernComboBox>(languageComposer, "languageChoice");
+                var draft = Field<ModernTextBox>(languageComposer, "message");
+                draft.Text = "Original approved English draft";
+                languageInput.SelectedIndex = 1;
+                Check(draft.Text == "Original approved English draft",
+                    "Changing the compose language never translates or overwrites an existing draft.");
+            }
+
+            Check(CommunicationCenterPage.QueueAttentionCaption(0, 0) == "Queue"
+                && CommunicationCenterPage.QueueAttentionCaption(0, 4) == "Queue (4)"
+                && CommunicationCenterPage.QueueAttentionCaption(2, 4).Contains("2 attention"),
+                "The composer home navigation surfaces actionable Queue counts without exposing guardian content.");
+            Check(CommunicationHistoryDialog.OutcomeExplanation("MetaCloud", "Accepted")
+                    .Contains("not yet confirmed", StringComparison.OrdinalIgnoreCase)
+                && CommunicationHistoryDialog.OutcomeExplanation("Twilio", "Delivered")
+                    .Contains("Provider-confirmed", StringComparison.Ordinal)
+                && CommunicationHistoryDialog.OutcomeExplanation("WhatsAppBusinessManual", "ReportedSent")
+                    .Contains("not provider-verified", StringComparison.Ordinal)
+                && CommunicationHistoryDialog.OutcomeExplanation("Twilio", "Unknown")
+                    .Contains("do not resend", StringComparison.OrdinalIgnoreCase),
+                "History distinguishes provider acceptance, independently verified delivery, uncertain attempts and manually reported sends.");
+            using (var browser = new CommunicationComposerTemplateBrowser(
+                CommunicationPreparedMessages.BuiltInChoices.Where(option =>
+                    option.Matches(new CommunicationTarget(CommunicationAudience.Student,0,0,42,0,"Sms")))))
+            {
+                var matching = (DataGridView)browser.Controls.Find("communicationComposerTemplateResults", true).Single();
+                var templateSearch = (ModernTextBox)browser.Controls.Find("communicationComposerTemplateSearch", true).Single();
+                Check(matching.Rows.Count > 0 && matching.Rows.Cast<DataGridViewRow>().All(row =>
+                    !Convert.ToString(row.Cells["Name"].Value)!.Contains("(Urdu)", StringComparison.Ordinal)),
+                    "Sender template browser keeps Urdu manual-WhatsApp drafts out of SMS.");
+                templateSearch.Text = "new admission welcome";
+                Check(matching.Rows.Count == 1
+                    && Convert.ToString(matching.Rows[0].Cells["Name"].Value) == "New admission welcome",
+                    "Sender template browser searches context-compatible templates without selecting a recipient or sending.");
+            }
+            Check(CommunicationHistoryDialog.CanCheckProviderDelivery("Twilio","Accepted",91)
+                && CommunicationHistoryDialog.CanCheckProviderDelivery("Twilio","Unknown",91)
+                && !CommunicationHistoryDialog.CanCheckProviderDelivery("MetaCloud","Accepted",91)
+                && !CommunicationHistoryDialog.CanCheckProviderDelivery("Twilio","Delivered",91)
+                && !CommunicationHistoryDialog.CanCheckProviderDelivery("WhatsAppBusinessManual","ReportedSent",91)
+                && !CommunicationHistoryDialog.CanCheckProviderDelivery("Twilio","Accepted",null),
+                "Only an identified Twilio provider attempt can be checked without resending; manual handoffs and delivered messages cannot.");
+            string familyUrdu = CommunicationAutomationInboxStore.SuggestedBody(
+                "OutstandingFees","ur",familyFinancial:true);
+            string familyEnglish = CommunicationAutomationInboxStore.SuggestedBody(
+                "OutstandingFees","en",familyFinancial:true);
+            Check(familyUrdu.Contains("خاندان",StringComparison.Ordinal)
+                && familyUrdu.Contains("[OutstandingAmount]",StringComparison.Ordinal)
+                && !familyUrdu.Contains("[StudentName]",StringComparison.Ordinal)
+                && familyEnglish.Contains("family",StringComparison.OrdinalIgnoreCase)
+                && !familyEnglish.Contains("[StudentName]",StringComparison.Ordinal),
+                "Family fee suggestions avoid misrepresenting the household's amount as one student's bill.");
+            using (var allowedSessions = new DataTable("CommunicationSessionPermissions"))
+            {
+                allowedSessions.Columns.Add("Audience",typeof(string));
+                foreach (string audience in new[] { "Staff","Student","FeeFamily","School" })
+                    allowedSessions.Rows.Add(audience);
+                using var staffOnly = allowedSessions.Copy();
+                CommunicationManagementStore.LimitVisibleSessions(
+                    staffOnly, canSeeStudents:false, canSeeStaff:true, canSeeFees:false);
+                Check(staffOnly.Rows.Count==1
+                    && Convert.ToString(staffOnly.Rows[0]["Audience"])=="Staff",
+                    "A staff-only History viewer cannot see student, campus or financial session metadata.");
+                using var studentsOnly = allowedSessions.Copy();
+                CommunicationManagementStore.LimitVisibleSessions(
+                    studentsOnly, canSeeStudents:true, canSeeStaff:false, canSeeFees:false);
+                Check(studentsOnly.Rows.Count==2
+                    && studentsOnly.AsEnumerable().All(row =>
+                        Convert.ToString(row["Audience"]) is "Student" or "School"),
+                    "Student history without Fees.View excludes fee and staff metadata.");
+                using var none = allowedSessions.Copy();
+                CommunicationManagementStore.LimitVisibleSessions(
+                    none, canSeeStudents:false, canSeeStaff:false, canSeeFees:false);
+                Check(none.Rows.Count==0,
+                    "A history-only viewer without source-record grants sees no session metadata.");
+            }
             CheckProviderBodyDeadline();
             CheckCommunicationAsyncAndCancellation();
             CheckCommunicationSessionsAndOptions();
             CheckManualLaunchAndReporting();
+            CheckCommunicationRecoveryHolds();
             CheckCommunicationApiWorkflow();
             CheckOptionalCommunicationEntries();
             CheckRecordMessageDialog();
@@ -74,12 +173,34 @@ internal static partial class Program
                 && !Field<ModernButton>(reader, "unfinishedButton").Visible,
                 "History-only access does not expose a composing/sending action");
             CurrentUser.SignIn(7203, "Settings fixture", "Messaging configuration", false, new[] { "Communication.Configure" });
+            using var languageSettings = new CommunicationLanguageSettingsDialog();
+            Check(languageSettings.Controls.Find("communicationDefaultMessageLanguage", true).Length==1,
+                "A configuration-only administrator can edit the school language preference.");
             using var settings = new CommunicationCenterPage(false);
             Check(CommunicationAccess.CanOpen(CurrentUser.HasPermission)
                 && Field<ModernButton>(settings, "configureButton").Visible
                 && Field<ModernButton>(settings, "templatesButton").Visible
                 && !Field<ModernButton>(settings, "historyButton").Visible,
                 "A configuration-only operator can open both administration dialogs without history access");
+            CurrentUser.SignIn(7204, "Administrator fixture", "Messaging administrator", false,
+                new[] { "Communication.Configure", "Communication.Send", "Communication.View",
+                    "Students.View", "Staff.View", "Fees.View" });
+            using (var versions = new CommunicationTemplateVersionsDialog(1, "Synthetic template"))
+                Check(versions.Controls.Find("communicationTemplateVersionGrid", true).Length == 1
+                    && versions.Controls.Find("communicationRestoreTemplateVersion", true).Length == 1,
+                    "Administrators can open the separate audited template version and restore screen.");
+            using (var reason = new CommunicationCorrectionReasonDialog())
+                Check(reason.Controls.Find("communicationCorrectionReason",true).Length==1
+                    && reason.Controls.Find("communicationSaveCorrectionReason",true).Length==1,
+                    "Preparing a correction requires an explicit operator reason.");
+            using (var correctionHistory = new CommunicationHistoryDialog(
+                new CommunicationSessionRow(Guid.NewGuid(),"Twilio","Accepted","Student")))
+                Check(correctionHistory.Controls.Find("communicationPrepareCorrection",true).Length==1,
+                    "History contains a separate correction action without changing the original.");
+            using var takeover = new CommunicationTakeoverDialog();
+            Check(takeover.Controls.Find("communicationTakeoverQueue", true).Length == 1
+                && takeover.Controls.Find("communicationTakeoverReason", true).Length == 1,
+                "Held communication takeover has a dedicated reasoned administrator review rather than silently reassigning the batch.");
         }
         finally { CurrentUser.SignIn(previous.UserId, previous.Username, previous.RoleName, previous.MustChangePassword, previous.Item5); }
     }
@@ -385,6 +506,42 @@ internal static partial class Program
             acceptedHistory.Close();
         }
 
+        using var actorRows=acceptedMetaRows.Copy();
+        foreach(string field in new[]{"AttemptActorName","ClaimKind","ProviderMessageId","TakeoverReason"})actorRows.Columns.Add(field);
+        actorRows.Columns.Add("AttemptId",typeof(long));actorRows.Columns.Add("RequestUtc",typeof(DateTime));
+        foreach(DataRow row in actorRows.Rows)
+        {
+            row["Channel"]="Sms";row["ProviderCode"]="Twilio";row["Outcome"]="Unknown";row["TemplateJson"]=DBNull.Value;
+            row["RequestUtc"]=new DateTime(2030,1,1,10,20,0,DateTimeKind.Utc);
+        }
+        actorRows.Rows[0]["TakeoverReason"]=new string('x',180)+" Retained reason ending";
+        actorRows.Rows[0]["AttemptActorName"]="Enrolled administrator";actorRows.Rows[0]["ClaimKind"]="Worker";actorRows.Rows[0]["AttemptId"]=91L;
+        actorRows.Rows[1]["AttemptActorName"]="Actual operator";actorRows.Rows[1]["ClaimKind"]="Interactive";actorRows.Rows[1]["AttemptId"]=92L;
+        int recoveryPolls=0;
+        using(var actorHistory=new CommunicationHistoryDialog(new(completed,"Twilio","Unknown","School"),
+            _=>Task.FromResult(actorRows.Copy()),id=>{
+                Check(id==91,"History reconciles the selected attempt identity even when its SQL provider reference is missing.");
+                recoveryPolls++;actorRows.Rows[0]["Outcome"]="Accepted";return Task.FromResult("Accepted");
+            }))
+        {
+            actorHistory.Show();Application.DoEvents();
+            Check(Field<ModernTextBox>(actorHistory,"evidence").Text.Contains("Enrolled administrator",StringComparison.Ordinal)
+                && Field<ModernButton>(actorHistory,"checkDelivery").Enabled && actorHistory.Draft is null,
+                "History identifies worker authority and offers only explicit reconciliation for an uncertain attempt.");
+            Check(Field<ModernTextBox>(actorHistory,"evidence").ReadOnly
+                && Field<ModernTextBox>(actorHistory,"evidence").ScrollBars==ScrollBars.Vertical
+                && Field<ModernTextBox>(actorHistory,"evidence").Text.Contains("Retained reason ending",StringComparison.Ordinal),
+                "Long immutable actor and takeover evidence remains fully readable and scrollable without editing.");
+            Field<ModernButton>(actorHistory,"checkDelivery").PerformClick();Application.DoEvents();
+            Check(recoveryPolls==1 && Convert.ToString(((DataTable)Field<DataGridView>(actorHistory,"recipients").DataSource!).Rows[0]["Outcome"])=="Accepted",
+                "Recovering a retained provider reference updates acceptance without claiming delivery or sending another message.");
+            var actorRecipients=Field<DataGridView>(actorHistory,"recipients");actorRecipients.CurrentCell=actorRecipients.Rows[1].Cells[0];
+            Check(Field<ModernTextBox>(actorHistory,"evidence").Text.Contains("Actual operator",StringComparison.Ordinal)
+                && Convert.ToString(((DataTable)actorRecipients.DataSource!).Rows[1]["Outcome"])=="Unknown",
+                "History follows the actual interactive operator and preserves the other recipient's uncertainty.");
+            actorHistory.Close();
+        }
+
         using var settings = new CommunicationSendingOptionsDialog(() =>
         {
             var rows = new DataTable();
@@ -439,9 +596,64 @@ internal static partial class Program
         Application.DoEvents();
         Check(templateGrid.Rows.Count == CommunicationPreparedMessages.BuiltIns.Count + 1,
             "Clearing search restores built-in and school templates");
+        var templateCategory = (ModernComboBox)templates.Controls
+            .Find("communicationTemplateCategory", true).Single();
+        templateCategory.SelectedItem = "Fees & Payments";
+        Application.DoEvents();
+        Check(templateGrid.Rows.Count > 0 &&
+            templateGrid.Rows.Cast<DataGridViewRow>().All(row =>
+                row.DataBoundItem is DataRowView item &&
+                item.Row.Field<string>("DisplayCategory") == "Fees & Payments"),
+            "Selecting Fees & Payments shows only templates classified in that category");
+        templateCategory.SelectedItem = "All Categories";
+        Application.DoEvents();
+        Check(templateGrid.Rows.Count == CommunicationPreparedMessages.BuiltIns.Count + 1,
+            "Clearing category restores built-in and school templates");
         templates.Close();
         CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
             new[] { "Communication.Send", "Students.View", "Fees.View" });
+    }
+
+    private static void CheckCommunicationRecoveryHolds()
+    {
+        int opens=0, previews=0, ordinaryReports=0,recoveredReports=0;
+        bool verified=false;
+        string state="Pending";
+        var operations=new CommunicationManualHandoff.Operations(
+            _=>Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(new[]{
+                new CommunicationManualRecipient(9001,"Synthetic recovery child","4567",state,
+                    ShellHandoffRecorded:state=="Opened",RecoveryBlocked:true,RetainedBody:"Retained historical message & اطلاع")}),
+            (_,_)=>{previews++;return Task.FromResult("Today's recalculated balance");},
+            _=>{opens++;throw new Exception("A restored approval cannot open WhatsApp");},
+            (_,_)=>{ordinaryReports++;return Task.CompletedTask;},
+            _=>throw new Exception("No external launch in synthetic recovery"),
+            _=>{},ConfirmRecoveredSend:()=>verified,
+            MarkRecovered:_=>{recoveredReports++;state="ReportedSent";return Task.CompletedTask;});
+        using(var pending=new CommunicationManualHandoffDialog(Guid.NewGuid(),operations,openFirstChat:true))
+        {
+            pending.Show();Application.DoEvents();
+            Check(!Field<ModernButton>(pending.Handoff,"open").Enabled &&
+                !Field<ModernButton>(pending.Handoff,"reported").Enabled && opens==0 && previews==0,
+                "A restored Pending manual batch cannot auto-open, request a live preview or offer a sent claim.");
+            ((Task)pending.Handoff.GetType().GetMethod("OpenAsync",BindingFlags.Instance|BindingFlags.NonPublic)!
+                .Invoke(pending.Handoff,null)!).GetAwaiter().GetResult();
+            Check(opens==0,"Direct manual handler invocation also preserves the restore hold.");
+            pending.Close();
+        }
+        state="Opened";
+        using(var opened=new CommunicationManualHandoffDialog(Guid.NewGuid(),operations))
+        {
+            opened.Show();Application.DoEvents();
+            Check(!Field<ModernButton>(opened.Handoff,"open").Enabled &&
+                Field<ModernTextBox>(opened.Handoff,"preparedMessage").Text=="Retained historical message & اطلاع" && previews==0,
+                "Restored Opened handoff displays only retained evidence and cannot reopen a chat.");
+            var report=Field<ModernButton>(opened.Handoff,"reported");
+            report.PerformClick();Application.DoEvents();
+            Check(recoveredReports==0 && ordinaryReports==0,"Declining a recovery verification records no send, even with old shell evidence.");
+            verified=true;report.PerformClick();Application.DoEvents();
+            Check(recoveredReports==1 && ordinaryReports==0 && opens==0,"A checked earlier send uses only explicit recovery reporting and never opens the next restored chat.");
+            opened.Close();
+        }
     }
 
     private static void CheckManualLaunchAndReporting()
@@ -451,13 +663,19 @@ internal static partial class Program
         int marks = 0, launches = 0, warnings = 0;
         bool failLaunch = true;
         string message = "Current prepared message & اطلاع";
+        var evidence=new List<bool>();
         var operations = new CommunicationManualHandoff.Operations(
             _ => Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(new[] { new CommunicationManualRecipient(1,"Synthetic child","4567",state) }),
             (_, _) => Task.FromResult(message),
             _ => { state = "Opened"; return Task.FromResult(new CommunicationManualOpen(true, new Uri("https://wa.me/923001234567?text=fixture"), null, message)); },
             (_, result) => { marks++; state = result; return Task.CompletedTask; },
             _ => { if (failLaunch) throw new System.ComponentModel.Win32Exception("Synthetic missing browser"); launches++; },
-            _ => warnings++);
+            _ => warnings++,
+            (_,opened,launched)=>{
+                Check(opened.Message==message,"Manual evidence records the exact reviewed Unicode text.");
+                evidence.Add(launched);
+                return Task.CompletedTask;
+            });
         using var dialog = new CommunicationManualHandoffDialog(batchId, operations);
         dialog.Show(); Application.DoEvents();
         Check(Field<ProgressBar>(dialog.Handoff, "processedProgress").Value == 0,
@@ -473,6 +691,8 @@ internal static partial class Program
         failLaunch = false; open.PerformClick(); Application.DoEvents();
         Check(launches == 1 && report.Enabled && Field<ModernTextBox>(dialog.Handoff,"preparedMessage").Text == message,
             "Successful reopening exposes the exact handed-off message and permits explicit reporting");
+        Check(evidence.SequenceEqual(new[]{false,false,true}),
+            "Text evidence persists before each shell attempt; a failed launch never records a successful handoff.");
         Check(Field<ProgressBar>(dialog.Handoff, "processedProgress").Value == 0,
             "Opening a chat alone does not advance completed processing or imply sending");
         Field<ModernButton>(dialog.Handoff, "close").PerformClick();
@@ -627,6 +847,11 @@ internal static partial class Program
 
     private static void CheckOptionalCommunicationEntries()
     {
+        // Report messaging requires the source report grant in addition to
+        // student, fee and communication permissions. Keep the synthetic
+        // happy-path actor authorized rather than weakening the real gate.
+        CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
+            new[] { "Communication.Send", "Students.View", "Fees.View", "Reports.View" });
         int opens = 0;
         CommunicationTarget? captured = null;
         bool fromFees = false;
@@ -648,10 +873,17 @@ internal static partial class Program
         Check(opens == 2 && fromFees && captured?.StudentId == 42 && captured.Audience == CommunicationAudience.FeeStudent
             && reference.Text == "Unsaved payment reference" && remarks.Text == "Unsaved payment remarks",
             "Optional Collection messaging scopes current fees to the main student and never reloads or clears the payment draft");
+        Check(OutstandingAgingReportPage.CanComposeReportFeeMessage,
+            "A fee-report sender may open a student-scoped optional message without changing the report.");
+        CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
+            new[] { "Communication.Send", "Students.View", "Fees.View" });
+        Check(!OutstandingAgingReportPage.CanComposeReportFeeMessage,
+            "Report messaging also requires report access, even when Fee Collection messaging is permitted.");
         CurrentUser.SignIn(7204, "Viewer", "Read-only fixture", false, new[] { "Students.View", "Fees.View" });
         admission.OpenStudentMessage(Cancel); fees.OpenStudentMessage(Cancel);
-        Check(opens == 2 && !CommunicationAccess.CanOpen(CurrentUser.HasPermission),
-            "Opening either integration is independently refused after sender permission is removed");
+        Check(opens == 2 && !CommunicationAccess.CanOpen(CurrentUser.HasPermission)
+            && !OutstandingAgingReportPage.CanComposeReportFeeMessage,
+            "Admission, Fee Collection and a fee report all hide messaging without sender permission.");
     }
 
     private static void CheckRecordMessageDialog()
@@ -660,7 +892,7 @@ internal static partial class Program
             new[] { "Communication.Send", "Students.View", "Fees.View" });
         CommunicationTarget? captured = null;
         int confirms = 0, dispatches = 0, renders = 0, copies = 0, documentRevision = 0;
-        int launches = 0, reports = 0, warnings = 0;
+        int launches = 0, reports = 0, warnings = 0, paidApprovals = 0;
         bool changeAtHandoff = false;
         string handoffState = "Pending";
         const int studentId = 42;
@@ -718,7 +950,15 @@ internal static partial class Program
                     if (outcome == "ReportedSent") reports++;
                     return Task.CompletedTask;
                 },
-                _ => launches++, _ => warnings++));
+                _ => launches++, _ => warnings++),
+            (option, reviewed, body) =>
+            {
+                Check(option.Provider is not null && reviewed.Included == 1 &&
+                    !string.IsNullOrWhiteSpace(body),
+                    "Paid message approval is bound to the reviewed recipient and body.");
+                paidApprovals++;
+                return true;
+            });
 
         using (var admission = new CommunicationRecordMessageDialog(studentId, "Synthetic student", false, operations))
         {
@@ -726,6 +966,15 @@ internal static partial class Program
             var action = Field<ModernButton>(admission, "action");
             var templates = Field<ModernComboBox>(admission, "templates");
             var scope = Field<ModernComboBox>(admission, "scope");
+            var recordLanguage = Field<ModernComboBox>(admission, "language");
+            var originalDraft = Field<ModernTextBox>(admission, "message");
+            originalDraft.Text = "This record draft must not translate";
+            recordLanguage.SelectedIndex = 1;
+            Check(originalDraft.Text == "This record draft must not translate"
+                && templates.Items.OfType<CommunicationPreparedMessages.ComposeTemplate>()
+                    .All(item => item.LanguageCode == "ur"),
+                "Admission context language switching preserves the draft and shows only independently approved Urdu formats.");
+            recordLanguage.SelectedIndex = 0;
             var formats = templates.Items.OfType<CommunicationPreparedMessages.ComposeTemplate>().ToArray();
             Check(scope.Visible && scope.Items.Count == 2 && templates.Visible && action.Visible && action.Enabled
                 && !Descendants(admission).OfType<CommunicationCenterPage>().Any()
@@ -754,6 +1003,14 @@ internal static partial class Program
         var feeFormats = Field<ModernComboBox>(fees, "templates").Items.OfType<CommunicationPreparedMessages.ComposeTemplate>().ToArray();
         var feeScope = Field<ModernComboBox>(fees, "scope");
         var feeContent = Field<ModernComboBox>(fees, "feeContent");
+        var feeLanguage = Field<ModernComboBox>(fees, "language");
+        feeLanguage.SelectedIndex = 1;
+        var urduFees = Field<ModernComboBox>(fees, "templates")
+            .Items.OfType<CommunicationPreparedMessages.ComposeTemplate>().ToArray();
+        Check(urduFees.Any(item => item.LanguageCode == "ur")
+            && urduFees.All(item => item.LanguageCode == "ur"),
+            "Fee context can offer a separately written Urdu fee notice without changing the ledger or sending.");
+        feeLanguage.SelectedIndex = 0;
         Check(feeFormats.Length > 0 && feeFormats.All(item => item.Purpose == "FeeReminder") && feeScope.Items.Count == 2,
             "Fee Collection offers relevant fee templates and only the current student or linked family scopes");
         Field<ModernButton>(fees, "action").PerformClick(); Application.DoEvents();
@@ -891,8 +1148,26 @@ internal static partial class Program
             int previousRenders = renders;
             Field<ModernButton>(sms, "action").PerformClick(); Application.DoEvents();
             Field<ModernButton>(sms, "action").PerformClick(); Application.DoEvents();
-            Check(confirms == 5 && dispatches == 2 && launches == 2 && renders == previousRenders && copies == 1,
-                "API messaging keeps its existing confirmation path without image rendering or clipboard access");
+            Check(confirms == 5 && dispatches == 2 && launches == 2 && renders == previousRenders && copies == 1
+                && paidApprovals == 1,
+                "Paid API messaging requires explicit approval before confirming, without image rendering or clipboard access");
+        }
+        using (var declined = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true,
+            operations with
+            {
+                IsReady = _ => Task.FromResult(true),
+                AuthorizePaidSend = (_, _, _) => false
+            }))
+        {
+            declined.Show(); Application.DoEvents();
+            var methods = Field<ModernComboBox>(declined, "method");
+            methods.SelectedItem = methods.Items.OfType<CommunicationRecordMessageDialog.Method>()
+                .Single(item => item.Channel == "Sms");
+            Field<ModernButton>(declined, "action").PerformClick(); Application.DoEvents();
+            Field<ModernButton>(declined, "action").PerformClick(); Application.DoEvents();
+            Check(confirms == 5 && dispatches == 2 && paidApprovals == 1
+                && declined.Visible,
+                "Declining paid-message approval creates no confirmed batch and does not dispatch.");
         }
         using (var staleText = new CommunicationRecordMessageDialog(studentId, "Synthetic student", true, operations))
         {
@@ -909,6 +1184,79 @@ internal static partial class Program
                 "Text-only fee messages also reject changed financial data before launching or allowing a sent report");
             staleText.Close();
             changeAtHandoff = false;
+        }
+        int sourceConfirms=0,sourceDispatches=0;
+        bool rejectSource=true;
+        var financialRequests=new List<Guid>();
+        var financialOperations=operations with {
+            IsReady=_=>Task.FromResult(true),
+            ReadFeeDocument=(id,family,receipt)=>{
+                var rows=new DataTable("Synthetic financial source");rows.Columns.Add("ReceiptNumber");rows.Columns.Add("PaymentDateText");rows.Rows.Add("R-42","");
+                var source=new CommunicationFinancialReview(receipt ? "Receipt" : "Bill",receipt ? "R-42" : "",receipt ? Guid.Parse("00000000-0000-0000-0000-000000000042") : null,id,family,new string(rejectSource ? 'A' : 'B',64));
+                return Task.FromResult(new FeeMessageDocument(rows,id,new[]{id},new[]{id},family,receipt,500m,"R-42",financialReview:source));
+            },
+            ReserveFinancialReview=(request,source)=>{
+                financialRequests.Add(request);
+                if(rejectSource)throw new CommunicationValidationException("Synthetic changed financial source.");
+                Check(source.SourceHash==new string('B',64),"The new financial review retains its own source fingerprint.");
+                return Task.CompletedTask;
+            },
+            Confirm=(_,target,result,body,request,_)=>{
+                Check(target.FinancialReviewRequired && financialRequests.Last()==request,
+                    "Financial document intent and the reserved proof reach the common confirmation with the same request identity.");
+                sourceConfirms++;return Task.FromResult(new CommunicationConfirmation(request,result.Included,false));
+            },
+            Dispatch=(_,_)=>sourceDispatches++
+        };
+        foreach(bool useReceipt in new[]{false,true})
+        foreach(bool reject in new[]{true,false})
+        {
+            rejectSource=reject;
+            int priorSourceConfirms=sourceConfirms,priorSourceDispatches=sourceDispatches;
+            using var financialDialog=new CommunicationRecordMessageDialog(studentId,"Synthetic student",true,financialOperations);
+            financialDialog.Show();Application.DoEvents();
+            var methods=Field<ModernComboBox>(financialDialog,"method");
+            methods.SelectedItem=methods.Items.OfType<CommunicationRecordMessageDialog.Method>().Single(item=>item.Channel=="Sms");
+            Field<ModernComboBox>(financialDialog,"feeContent").SelectedIndex=useReceipt ? 1 : 0;
+            Field<ModernTextBox>(financialDialog,"message").Text=useReceipt ? "Payment [PaymentAmount], receipt [ReceiptNumber]." : "Outstanding [OutstandingAmount].";
+            Field<ModernButton>(financialDialog,"action").PerformClick();Application.DoEvents();
+            Field<ModernButton>(financialDialog,"action").PerformClick();Application.DoEvents();
+            Check(reject ? sourceConfirms==priorSourceConfirms && sourceDispatches==priorSourceDispatches && financialDialog.Visible
+                : sourceConfirms==priorSourceConfirms+1 && sourceDispatches==priorSourceDispatches+1 && !financialDialog.Visible,
+                "A changed source cannot confirm or dispatch; a fresh reviewed bill or receipt can use the existing sending path.");
+            financialDialog.Close();
+        }
+        Check(financialRequests.Count==4 && financialRequests.Distinct().Count()==4,
+            "Re-reviewing a changed financial document creates a new approval reference rather than overwriting the rejected review.");
+        string? reviewedCreditBody=null;
+        int creditDispatches=0;
+        using(var creditOnly=new CommunicationRecordMessageDialog(studentId,"Synthetic credit settlement",true,financialOperations with {
+            ReadFeeDocument=(id,family,receipt)=>{
+                var rows=new DataTable("Synthetic credit receipt");rows.Columns.Add("ReceiptNumber");rows.Rows.Add("R-CREDIT-42");
+                var source=new CommunicationFinancialReview("Receipt","R-CREDIT-42",Guid.Parse("00000000-0000-0000-0000-000000000043"),id,family,new string('C',64));
+                return Task.FromResult(new FeeMessageDocument(rows,id,new[]{id},Array.Empty<int>(),family,true,0m,"R-CREDIT-42",
+                    financialReview:source,creditApplied:250m));
+            },
+            ReserveFinancialReview=(_,_)=>Task.CompletedTask,
+            Confirm=(_,target,result,body,request,_)=>{
+                reviewedCreditBody=body;
+                return Task.FromResult(new CommunicationConfirmation(request,result.Included,false));
+            },
+            Dispatch=(_,_)=>creditDispatches++
+        }))
+        {
+            creditOnly.Show();Application.DoEvents();
+            var methods=Field<ModernComboBox>(creditOnly,"method");
+            methods.SelectedItem=methods.Items.OfType<CommunicationRecordMessageDialog.Method>().Single(item=>item.Channel=="Sms");
+            Field<ModernComboBox>(creditOnly,"feeContent").SelectedIndex=1;
+            Field<ModernButton>(creditOnly,"action").PerformClick();Application.DoEvents();
+            Field<ModernButton>(creditOnly,"action").PerformClick();Application.DoEvents();
+            var amounts=System.Text.RegularExpressions.Regex.Matches(reviewedCreditBody ?? "",@"\b\d[\d,]*\.\d{2}\b")
+                .Select(match=>match.Value).ToArray();
+            Check(creditDispatches==1 && reviewedCreditBody?.Contains("R-CREDIT-42")==true &&
+                amounts.SequenceEqual(new[]{"250.00"}) && !reviewedCreditBody.Contains("[PaymentDetails]"),
+                "The default credit-only receipt message resolves the actual Credit amount and receipt without inventing a zero cash payment.");
+            creditOnly.Close();
         }
     }
 }

@@ -29,13 +29,17 @@ internal static class Sql
         using var connection = DatabaseHelper.GetConnection(); connection.Open();
         using var command = new SqlCommand(text, connection) { CommandTimeout = 90 };
         command.Parameters.AddRange(args);
-        var result = new DataTable(); using var adapter = new SqlDataAdapter(command); adapter.Fill(result); return result;
+        var result = new DataTable(); using var adapter = new SqlDataAdapter(command);
+        try { adapter.Fill(result); }
+        catch (SqlException ex) { ex.Data["FMSC_TestOperation"] = "Query"; throw; }
+        return result;
     }
     internal static object? Scalar(string text, params SqlParameter[] args)
     {
         using var connection = DatabaseHelper.GetConnection(); connection.Open();
         using var command = new SqlCommand(text, connection) { CommandTimeout = 90 }; command.Parameters.AddRange(args);
-        return command.ExecuteScalar();
+        try { return command.ExecuteScalar(); }
+        catch (SqlException ex) { ex.Data["FMSC_TestOperation"] = "Scalar"; throw; }
     }
     internal static int Count(string text, params SqlParameter[] args) => Convert.ToInt32(Scalar(text, args));
     internal static decimal Money(string text, params SqlParameter[] args) => Convert.ToDecimal(Scalar(text, args));
@@ -44,7 +48,16 @@ internal static class Sql
         using var connection = DatabaseHelper.GetConnection(); connection.Open();
         using var command = new SqlCommand(name, connection) { CommandType = CommandType.StoredProcedure, CommandTimeout = 90 };
         command.Parameters.AddRange(args);
-        using var result = new DataSet(); using var adapter = new SqlDataAdapter(command); adapter.Fill(result);
+        using var result = new DataSet(); using var adapter = new SqlDataAdapter(command);
+        try { adapter.Fill(result); }
+        catch (SqlException ex)
+        {
+            // The synthetic runner never logs parameters or school records.
+            // The stable procedure identifier is enough to locate a failing
+            // authorization, constraint or transactional invariant.
+            ex.Data["FMSC_TestOperation"] = "Procedure " + name;
+            throw;
+        }
         // Admission with a family link emits nested family results before the
         // final authoritative admission result. Never treat that first row as
         // the newly saved student's identity.

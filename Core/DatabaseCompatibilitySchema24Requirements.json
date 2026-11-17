@@ -1,0 +1,104 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "BackgroundWorkerEnrollment",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "BackgroundWorkerLease",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "NonWorkingWeekday",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "SchoolHoliday",
+      "type": "U"
+    },
+    {
+      "schema": "msg",
+      "name": "RegisterBackgroundWorker",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "VerifyBackgroundWorker",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "AcquireBackgroundLease",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "RenewBackgroundLease",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReleaseBackgroundLease",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadNextScheduledRecipient",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "HoldScheduledBatch",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReportWorkerStateDivergence",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SetUnattendedSending",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReleaseScheduledHold",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadSchoolWeekdays",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SetSchoolWeekday",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadSchoolHolidays",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SetSchoolHoliday",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadPreferredMethod",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "SavePreferredMethod",
+      "type": "P"
+    }
+  ]
+}

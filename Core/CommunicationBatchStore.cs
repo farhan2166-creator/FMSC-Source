@@ -16,7 +16,7 @@ internal static class CommunicationBatchStore
     internal static async Task<CommunicationConfirmation> ConfirmPreviewAsync(
         CommunicationTarget target, CommunicationPreview preview,
         string message, Guid clientRequestId, bool manualWhatsApp = false,
-        string? apiProvider = null, string? profileHash = null, string? reviewJson = null, string? templateJson = null)
+        string? apiProvider = null, string? profileHash = null, string? reviewJson = null, string? templateJson = null, CommunicationPlannedWorkStore.Claim? plannedWork = null)
     {
         CommunicationRecipientResolver.Validate(target);
         if (manualWhatsApp && target.Channel != "WhatsApp")
@@ -61,6 +61,10 @@ internal static class CommunicationBatchStore
             if (target.Audience == CommunicationAudience.OutstandingFees)
                 foreach (var item in preview.Entries.Where(item => item.EligiblePhone is not null))
                     reviewedFees.Rows.Add(item.Kind, item.RecordId, item.EligiblePhone);
+            if (target.Audience == CommunicationAudience.FeeFamily)
+                foreach(var item in preview.Entries.Where(item=>item.Included))
+                    foreach(var member in item.FamilyFees)
+                        reviewedFees.Rows.Add("Student",member.RecordId,item.PhoneE164);
             parameters.Add(new("@ReviewedFees", SqlDbType.Structured)
                 { TypeName = "msg.RecipientSelection", Value = reviewedFees });
         }
@@ -71,6 +75,16 @@ internal static class CommunicationBatchStore
                 DatabaseHelper.P("@ProviderCode",apiProvider), DatabaseHelper.P("@ProfileHash",profileHash),
                 DatabaseHelper.P("@ReviewJson",reviewJson), DatabaseHelper.P("@TemplateJson",templateJson)
             });
+        }
+        if(manualWhatsApp || apiProvider is not null)
+            parameters.Add(DatabaseHelper.Bit("@FinancialReviewRequired",target.FinancialReviewRequired));
+        else if(target.FinancialReviewRequired)
+            throw new CommunicationValidationException("Financial document messages require the reviewed sending workflow.");
+        if(plannedWork is not null)
+        {
+            if(apiProvider is null || manualWhatsApp || clientRequestId!=plannedWork.WorkId)
+                throw new CommunicationValidationException("Planned work requires its original API confirmation identity.");
+            parameters.AddRange(CommunicationPlannedWorkStore.Parameters(plannedWork));
         }
         int actor = CurrentUser.UserId;
         using DataTable result = await DatabaseHelper.QueryUserAsync(

@@ -1,0 +1,65 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "ReadDispatchEvidence",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_Attempt_RestoreGuard",
+      "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadAttemptForReconciliation",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "RestoreBoundary",
+      "type": "FN"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_Batch_RestoreBoundaryImmutable",
+      "type": "TR"
+    }
+  ],
+  "parameters": [
+    {
+      "schema": "msg",
+      "objectName": "ReadDispatchEvidence",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadDispatchEvidence",
+      "name": "@RecipientId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isOutput": false
+    }
+  ],
+  "columns": [
+    {
+      "schema": "msg",
+      "objectName": "Batch",
+      "name": "RestoreBoundaryHash",
+      "type": "binary",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    }
+  ]
+}
