@@ -291,7 +291,7 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
         using var saved=Sql.Proc(manual ? "msg.ConfirmReviewedManualBatch" : "msg.ConfirmReviewedApiBatch",args.ToArray());
         return Convert.ToInt64(Sql.Scalar("SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Id",Sql.P("@Id",saved.Rows[0]["BatchId"])));
     }
-    private Task ClaimCommunicationRecovery()
+    private async Task ClaimCommunicationRecovery()
     {
         using var claimed=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",communicationRecipient),
             Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));
