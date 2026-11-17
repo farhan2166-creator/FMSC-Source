@@ -22,6 +22,7 @@ $checks = @(
     '--class-sheet-buttons',
     '--collection-counter-layout',
     '--grid-alignment',
+    '--staff-certificates-workspace',
     '--report-ordering',
     '--new-reports',
     '--family-confirmation'

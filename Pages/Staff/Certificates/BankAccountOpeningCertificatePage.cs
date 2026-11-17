@@ -2,8 +2,65 @@ using Microsoft.Data.SqlClient;
 using FMSC_SMS.Core;
 using static FMSC_SMS.Core.CertificateUi;
 namespace FMSC_SMS.Pages.Staff.Certificates;
-public sealed class BankAccountOpeningCertificatePage : V2Page, IUnsavedChanges, IBusyPage
+public sealed class BankAccountOpeningCertificatePage : V2Page, IUnsavedChanges, IBusyPage, IStaffCertificateWorkspaceEditor
 {
+    private HumanCard workspaceDetails = null!;
+    private Action<int>? workspaceSaved;
+    private bool inWorkspace;
+    HumanCard IStaffCertificateWorkspaceEditor.DetailsCard => workspaceDetails;
+    Label IStaffCertificateWorkspaceEditor.Feedback => StatusLabel;
+    int IStaffCertificateWorkspaceEditor.SelectedRecordId => selectedBankAccountOpeningCertificateId;
+    Action<int>? IStaffCertificateWorkspaceEditor.Saved { set => workspaceSaved = value; }
+
+    void IStaffCertificateWorkspaceEditor.ConfigureWorkspaceDetails(DataRow selectedStaff, bool editing)
+    {
+        inWorkspace = true;
+        StaffCertificateWorkspaceEditorUi.LockStaff(staff, selectedStaff);
+        clearButton.Visible = false;
+        createCertificateButton.Visible = !editing;
+        updateCertificateButton.Visible = editing;
+        // Pending saves must remain recoverable from the compact editor,
+        // not only from the original page's hidden history action row.
+        checkOutcome.Parent?.Controls.Remove(checkOutcome);
+        checkOutcome.Dock = DockStyle.Bottom;
+        workspaceDetails.Content.Controls.Add(checkOutcome);
+        checkOutcome.BringToFront();
+        checkOutcome.Visible = recoveryBlocked;
+    }
+
+    void IStaffCertificateWorkspaceEditor.LoadWorkspaceSelection(DataRow selectedStaff, int recordId)
+    {
+        staff.SetStaff(selectedStaff);
+        StaffChanged();
+        ReadCertificateRecovery();
+        if (recoveryBlocked)
+        {
+            checkOutcome.Visible = true;
+            return;
+        }
+        if (recordId > 0)
+        {
+            if (CertificateCollectionFlow.Find(certificateResults, "BankAccountOpeningCertificateId", recordId) is null)
+                throw new InvalidOperationException("The selected bank certificate is no longer available. Refresh the workspace.");
+            SelectCertificateById(recordId);
+        }
+        else
+        {
+            ClearCertificateSelection();
+            ClearCertificateFields();
+            Grid.ClearSelection();
+            try { Grid.CurrentCell = null; } catch (InvalidOperationException) { }
+            ApplyWorkflowState();
+        }
+    }
+
+    bool IStaffCertificateWorkspaceEditor.CanPrintFromWorkspace => printButton.Enabled && !IsBusy && !recoveryBlocked;
+    bool IStaffCertificateWorkspaceEditor.CanCollectFromWorkspace => copyFlow.Collect.Enabled && !IsBusy && !recoveryBlocked;
+    bool IStaffCertificateWorkspaceEditor.CanIssueAgainFromWorkspace => copyFlow.IssueAgain.Enabled && !IsBusy && !recoveryBlocked;
+    void IStaffCertificateWorkspaceEditor.PrintFromWorkspace() => printButton.PerformClick();
+    void IStaffCertificateWorkspaceEditor.CollectFromWorkspace() => copyFlow.CollectFromWorkspace();
+    void IStaffCertificateWorkspaceEditor.IssueAgainFromWorkspace() => copyFlow.IssueAgainFromWorkspace();
+
     internal override bool FocusEntryField() => CertificateUi.FocusEntry(staff, Grid, certificateDate);
     private readonly StaffPicker staff = new();
     private readonly CertificateCollectionFlow copyFlow = new("Bank");
@@ -116,7 +173,7 @@ public sealed class BankAccountOpeningCertificatePage : V2Page, IUnsavedChanges,
                 BindStaff();
                 ReadCertificateRecovery();
             });
-        var details =
+        var details = workspaceDetails =
             HumanUi.Card(
                 UiText.Certificates.Details,
                 "Select staff; enter bank details and designation to create. Names and CNIC come from the staff record; select a saved row to edit other details.");
@@ -403,6 +460,7 @@ public sealed class BankAccountOpeningCertificatePage : V2Page, IUnsavedChanges,
         staff.Enabled = !recoveryBlocked;
         Grid.Enabled = !recoveryBlocked;
         checkOutcome.Enabled=recoveryBlocked&&!IsBusy;
+        if (inWorkspace) checkOutcome.Visible = recoveryBlocked;
         bankName.Enabled = hasStaff&&!recoveryBlocked;
         branchName.Enabled = hasStaff&&!recoveryBlocked;
         designation.Enabled = hasStaff&&!recoveryBlocked;
@@ -456,6 +514,7 @@ public sealed class BankAccountOpeningCertificatePage : V2Page, IUnsavedChanges,
         string? successMessage =
             null;
         bool historyRefreshed=true;
+        int confirmedRecord = 0;
         try
         {
             if (staff.SelectedId <= 0)
@@ -480,6 +539,7 @@ public sealed class BankAccountOpeningCertificatePage : V2Page, IUnsavedChanges,
             if(saved is null)return;
             successMessage =
                 $"Certificate {saved.RecordId} created successfully.";
+            confirmedRecord = saved.RecordId;
             /* (D-H2) - reload only while the staff member this certificate was created for is still the selected one, or the list would be shown under a different member's name and… */
             if (IsDisposed ||
                 staff.SelectedId != staffId)
@@ -502,7 +562,7 @@ public sealed class BankAccountOpeningCertificatePage : V2Page, IUnsavedChanges,
             if(!IsDisposed)ApplyWorkflowState();
             if (successMessage is not null)
             {
-                if(historyRefreshed)Info(successMessage);
+                if(historyRefreshed) { Info(successMessage); if (confirmedRecord > 0) workspaceSaved?.Invoke(confirmedRecord); }
                 else Warn(successMessage+" History could not be refreshed or verified. Reload before acting further; do not repeat the save because this read failed.");
             }
         }
@@ -630,7 +690,7 @@ public sealed class BankAccountOpeningCertificatePage : V2Page, IUnsavedChanges,
             ApplyWorkflowState();
             if (successMessage is not null)
             {
-                if(historyRefreshed)Info(successMessage);
+                if(historyRefreshed) { Info(successMessage); workspaceSaved?.Invoke(savedCertificateId); }
                 else Warn(successMessage+" History could not be refreshed or verified. Reload before acting further; do not repeat the save because this read failed.");
             }
         }
