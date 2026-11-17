@@ -1383,11 +1383,11 @@ public sealed class MainDashboardForm : ApplicationWindowForm
         menu.Items.Add(new ToolStripMenuItem("Check for Updates", null, (_, _) => {
             var existingUpdate = Application.OpenForms.OfType<UpdateConnectionForm>().FirstOrDefault();
             if (existingUpdate is not null) { existingUpdate.Activate(); return; }
-            var updateDialog = new UpdateConnectionForm();
+            var updateDialog = UpdateConnectionForm.ForMenuUpdateCheck();
             updateDialog.InstallRequested += RequestUpdateInstallation;
             updateDialog.Show(this); // Keep the application usable during download/preparation.
         }) {
-            ToolTipText = "Authorize this computer and check the private FMSC update feed manually."
+            ToolTipText = "Check published FMSC updates automatically after verifying this computer's access."
         });
         menu.Items.Add(
             new ToolStripMenuItem(
