@@ -949,7 +949,7 @@ AS BEGIN
         AND B.Body COLLATE Latin1_General_100_BIN2=
          REPLACE(REPLACE(Approval.Body,N''[NoticeTitle]'',N.Title),N''[NoticeText]'',N.NoticeText) COLLATE Latin1_General_100_BIN2))
      OR (@Code NOT IN(''Announcement'',''ExaminationResult'')
-        AND B.Body COLLATE Latin1_General_100_BIN2=Approval.Body COLLATE Latin1_General_100_BIN2))
+        AND B.Body COLLATE Latin1_General_100_BIN2=Approval.Body COLLATE Latin1_General_100_BIN2)))
     THROW 51431,''Prepared content or audience differs from the approved automatic rule.'',1;
   EXEC msg.MarkAutomationCandidatePrepared @UserId,@Candidate,@BatchId;
   UPDATE msg.PlannedWork SET State=''Prepared'',BatchId=@BatchId,UpdatedUtc=SYSUTCDATETIME() WHERE WorkId=@WorkId;
