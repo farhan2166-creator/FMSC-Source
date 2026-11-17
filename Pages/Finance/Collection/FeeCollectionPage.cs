@@ -3160,6 +3160,11 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         balance.ForeColor = remaining > 0 ? AppTheme.Danger : AppTheme.Text;
         decimal credit = SelectedAvailableCredit();
         decimal usedCredit = GetCreditAllocations(discountMap).Values.Sum();
+        // Keep the checkbox singular/plural and the scope explanation in step
+        // with ticked siblings. Backdated collections retain their restriction.
+        useAvailableCredit.Text=CreditAllowedOnSelectedDate()
+            ?(IncludedCreditStudentIds().Length>1?"Use advances":"Use advance")
+            :"Today only";
         // Usable credit and unused advance are strictly scoped to the selected
         // students, never a pooled family balance or an unselected sibling.
         availableCredit.Text = (CreditAllowedOnSelectedDate()
