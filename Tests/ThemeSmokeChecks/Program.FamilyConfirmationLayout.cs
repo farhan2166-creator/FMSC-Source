@@ -60,8 +60,11 @@ internal static partial class Program
         UiHelper.FitColumnsToWidth(grid);
         Check(grid.Columns.Cast<DataGridViewColumn>()
                   .Where(c=>c.Visible && c.ValueType==typeof(decimal))
-                  .All(c=>c.DefaultCellStyle.Alignment==DataGridViewContentAlignment.MiddleRight),
-            "Shared fitting retains right-aligned financial amounts");
+                  .All(c=>c.DefaultCellStyle.Alignment==DataGridViewContentAlignment.MiddleCenter &&
+                          c.HeaderCell.InheritedStyle.Alignment==DataGridViewContentAlignment.MiddleCenter) &&
+              admissionColumn.DefaultCellStyle.Alignment==DataGridViewContentAlignment.MiddleCenter &&
+              studentColumn.DefaultCellStyle.Alignment==DataGridViewContentAlignment.MiddleLeft,
+            "Shared fitting retains centered headings and money/identifier values with left-aligned student names");
         var students=grid.Rows.Cast<DataGridViewRow>().Where(r=>!r.IsNewRow).Take(4).ToArray();
         var total=grid.Rows[4];
         Check(total.Cells["Student"].Value?.ToString()=="Total" &&
