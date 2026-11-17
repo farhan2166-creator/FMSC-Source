@@ -640,14 +640,24 @@ public sealed class StudentProfilePage : V2Page
             if (column is not null)
                 column.DisplayIndex = order++;
         }
+        // Some detail versions expose both names for the same academic year.
+        // Show one year column, with a fallback for older records.
+        bool yearNamePresent = display.Columns.Contains("YearName") &&
+            display.AsEnumerable().Any(row => !string.IsNullOrWhiteSpace(CellText(row, "YearName")));
+        bool legacyYearPresent = display.Columns.Contains("AcademicYearName");
         foreach (DataGridViewColumn column in contextGrid.Columns)
-            column.Visible = Array.IndexOf(ContextColumns, column.DataPropertyName) >= 0;
+        {
+            bool requested = Array.IndexOf(ContextColumns, column.DataPropertyName) >= 0;
+            column.Visible = requested &&
+                (column.DataPropertyName != "YearName" || yearNamePresent || !legacyYearPresent) &&
+                (column.DataPropertyName != "AcademicYearName" || !yearNamePresent);
+        }
         SetHeader("CurrentCampusName", "Campus");
-        SetHeader("AdmissionCampusName", "Admission Campus");
         SetHeader("EnrollmentStatus", "Status");
         SetHeader("TransportText", "Transport");
         SetHeader("ClassSection", "Class");
         SetHeader("YearName", "Academic Year");
+        SetHeader("AcademicYearName", "Academic Year");
         contextGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
         foreach (DataGridViewColumn column in contextGrid.Columns)
         {
