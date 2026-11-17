@@ -862,7 +862,7 @@
           <Paragraph>
             <TextRuns>
               <TextRun>
-                <Value>=&quot;Class in which &quot; &amp; LCase(IIF(First(Fields!Gender.Value, &quot;LeaveCertificateData&quot;) = &quot;Female&quot;, &quot;She&quot;, IIF(First(Fields!Gender.Value, &quot;LeaveCertificateData&quot;) = &quot;Male&quot;, &quot;He&quot;, &quot;He/She&quot;))) &amp; &quot; was studying&quot;</Value>
+                <Value>="Class in which " &amp; LCase(IIF(First(Fields!Gender.Value, "LeaveCertificateData") = "Female", "She", IIF(First(Fields!Gender.Value, "LeaveCertificateData") = "Male", "He", "He/She"))) &amp; " was studying"</Value>
                 <Style>
                   <FontFamily>Segoe UI</FontFamily>
                   <FontSize>12pt</FontSize>
@@ -933,7 +933,7 @@
           <Paragraph>
             <TextRuns>
               <TextRun>
-                <Value>=&quot;Class in which &quot; &amp; LCase(IIF(First(Fields!Gender.Value, &quot;LeaveCertificateData&quot;) = &quot;Female&quot;, &quot;She&quot;, IIF(First(Fields!Gender.Value, &quot;LeaveCertificateData&quot;) = &quot;Male&quot;, &quot;He&quot;, &quot;He/She&quot;))) &amp; &quot; was promoted/failed&quot;</Value>
+                <Value>="Class in which " &amp; LCase(IIF(First(Fields!Gender.Value, "LeaveCertificateData") = "Female", "She", IIF(First(Fields!Gender.Value, "LeaveCertificateData") = "Male", "He", "He/She"))) &amp; " was promoted/failed"</Value>
                 <Style>
                   <FontFamily>Segoe UI</FontFamily>
                   <FontSize>12pt</FontSize>
@@ -1081,25 +1081,40 @@
           <Paragraph>
             <TextRuns>
               <TextRun>
+                <Value>(</Value>
+                <Style>
+                  <FontFamily>Segoe UI</FontFamily>
+                  <FontWeight>Bold</FontWeight>
+                  <Color>Red</Color>
+                </Style>
+              </TextRun>
+              <TextRun>
                 <Value>=IIF(First(Fields!CopyType.Value, "LeaveCertificateData") = "Duplicate", "DUPLICATE COPY", "")</Value>
                 <Style>
                   <FontFamily>Segoe UI</FontFamily>
-                  <FontSize>12pt</FontSize>
+                  <FontWeight>Bold</FontWeight>
+                  <Color>Red</Color>
+                </Style>
+              </TextRun>
+              <TextRun>
+                <Value>)</Value>
+                <Style>
+                  <FontFamily>Segoe UI</FontFamily>
                   <FontWeight>Bold</FontWeight>
                   <Color>Red</Color>
                 </Style>
               </TextRun>
             </TextRuns>
             <Style>
-              <TextAlign>Right</TextAlign>
+              <TextAlign>Center</TextAlign>
             </Style>
           </Paragraph>
         </Paragraphs>
         <rd:DefaultName>txtCopyType</rd:DefaultName>
-        <Top>0.1in</Top>
-        <Left>5.45in</Left>
-        <Height>0.3in</Height>
-        <Width>2in</Width>
+        <Top>0.82044in</Top>
+        <Left>1.78in</Left>
+        <Height>0.23581in</Height>
+        <Width>4.01375in</Width>
         <ZIndex>45</ZIndex>
         <Style>
           <Border>
@@ -1195,7 +1210,11 @@
           <DataField>DateofAdmission</DataField>
           <rd:TypeName>System.DateTime</rd:TypeName>
         </Field>
-      <Field Name="Gender"><DataField>Gender</DataField><rd:TypeName>System.String</rd:TypeName></Field></Fields>
+        <Field Name="Gender">
+          <DataField>Gender</DataField>
+          <rd:TypeName>System.String</rd:TypeName>
+        </Field>
+      </Fields>
     </DataSet>
   </DataSets>
   <rd:ReportUnitType>Inch</rd:ReportUnitType>
