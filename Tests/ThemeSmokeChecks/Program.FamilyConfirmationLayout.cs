@@ -41,6 +41,27 @@ internal static partial class Program
         Check(grid.Columns.Count==5 && grid.Columns.Cast<DataGridViewColumn>().Any(c=>c.HeaderText.Contains("Advance Used")) &&
               grid.Rows.Cast<DataGridViewRow>().Count(row=>!row.IsNewRow)==5,
             "Family breakdown includes a separate advance column and a visible total row");
+        // Dialogs follow the same content-aware fitter as form grids. These
+        // tests intentionally avoid brittle pixel widths or FillWeight values.
+        Check(grid.AutoSizeColumnsMode==DataGridViewAutoSizeColumnsMode.None &&
+              grid.Columns.Cast<DataGridViewColumn>().All(c=>c.AutoSizeMode==DataGridViewAutoSizeColumnMode.None),
+            "Family confirmation delegates column sizing to the shared form-grid policy");
+        var studentColumn=grid.Columns["Student"]!;
+        var admissionColumn=grid.Columns["Adm. No."]!;
+        Check(studentColumn.Width>admissionColumn.Width,
+            "Student names receive more space than short admission numbers based on their content");
+        int originalStudentWidth=studentColumn.Width;
+        string originalStudentName=Convert.ToString(rows.Rows[3]["Student"])!;
+        rows.Rows[3]["Student"]=new string('W',110);
+        UiHelper.FitColumnsToWidth(grid);
+        Check(studentColumn.Width>originalStudentWidth,
+            "A longer student name grows its dialog column through the shared width fitter");
+        rows.Rows[3]["Student"]=originalStudentName;
+        UiHelper.FitColumnsToWidth(grid);
+        Check(grid.Columns.Cast<DataGridViewColumn>()
+                  .Where(c=>c.Visible && c.ValueType==typeof(decimal))
+                  .All(c=>c.DefaultCellStyle.Alignment==DataGridViewContentAlignment.MiddleRight),
+            "Shared fitting retains right-aligned financial amounts");
         var students=grid.Rows.Cast<DataGridViewRow>().Where(r=>!r.IsNewRow).Take(4).ToArray();
         var total=grid.Rows[4];
         Check(total.Cells["Student"].Value?.ToString()=="Total" &&
