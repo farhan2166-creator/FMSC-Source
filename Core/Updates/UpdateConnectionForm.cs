@@ -39,6 +39,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
     private readonly Func<string> _generateEnrollment;
     private readonly Func<CancellationToken, Task> _verifyAuthorization;
     private readonly bool _autoVerifyOnOpen;
+    private readonly bool _hadSavedKeyWhenOpened;
     // Startup incompatibility recovery is automatic only up to release discovery.
     // Installation and download remain explicit user actions.
     private bool _autoCheckPending;
@@ -183,6 +184,9 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         FormClosed += (_, _) => { _transferTimer.Stop(); _lifetime.Cancel(); };
         Disposed += (_, _) => { _lifetime.Cancel(); _transferTimer.Dispose(); };
         RefreshAuthorization();
+        // A key generated after construction must not be mistaken for an
+        // existing approved key by the deferred OnShown event.
+        _hadSavedKeyWhenOpened = _hasKey;
     }
 
     // Keep the download option completely out of the layout until checking the
@@ -214,7 +218,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         CenterOnOwnerScreen();
         // Recheck an existing key when the update dialog opens, not on app
         // startup. Local key existence is NOT proof of GitHub approval.
-        if (_autoVerifyOnOpen && _hasKey)
+        if (_autoVerifyOnOpen && _hadSavedKeyWhenOpened && _hasKey)
             BeginInvoke(new Action(async () => await VerifyAccessAsync()));
     }
 
