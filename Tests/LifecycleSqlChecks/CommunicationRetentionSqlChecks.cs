@@ -17,8 +17,8 @@ internal static class CommunicationRetentionSqlChecks
         {
             return Convert.ToInt64(Sql.Scalar("""
                 INSERT msg.AutomationCandidate(EventCode,SourceKey,AdmissionId,SourceRecordId,State,CreatedUtc)
-                OUTPUT inserted.CandidateId
                 VALUES('Birthday',@Key,@Student,@Student,@State,DATEADD(day,-@Age,SYSUTCDATETIME()));
+                SELECT CONVERT(bigint,SCOPE_IDENTITY());
                 """,Sql.P("@Key",key),Sql.P("@Student",pupil),
                      Sql.P("@State",state),Sql.P("@Age",ageDays)));
         }
