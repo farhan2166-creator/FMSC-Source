@@ -10,6 +10,7 @@ namespace FMSC_SMS.Pages.Staff.Certificates;
 internal interface IStaffCertificateWorkspaceEditor
 {
     HumanCard DetailsCard { get; }
+    int SelectedRecordId { get; }
     Label Feedback { get; }
     Action<int>? Saved { set; }
     void ConfigureWorkspaceDetails(DataRow staff, bool editing);
