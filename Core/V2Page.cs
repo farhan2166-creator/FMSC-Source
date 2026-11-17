@@ -67,6 +67,8 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
     private Label? _titleLabel;
     private TableLayoutPanel? _headerTextLayout;
     private TableLayoutPanel? _headerTitleLine;
+    private Control? _inlineHeaderContent;
+    private int _inlineHeaderMinHeight;
     private TableLayoutPanel? _externalStatusHeader;
     private Label? _headerGuidanceLabel;
     private string _headerGuidance = string.Empty;
@@ -276,6 +278,23 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
         _statusToolTip.SetToolTip(ContextLabel, context);
         return header;
     }
+    /// <summary>Replace the optional page-heading subtitle with a compact inline
+    /// control, such as a record picker. The surrounding heading and status area
+    /// remain owned by V2Page.</summary>
+    protected void SetInlineHeaderContent(Control content, int minimumHeight)
+    {
+        if (_headerTitleLine is null)
+            throw new InvalidOperationException("Page header has not been initialized.");
+        if (_inlineHeaderContent is not null)
+            _headerTitleLine.Controls.Remove(_inlineHeaderContent);
+        _headerTitleLine.Controls.Remove(ContextLabel);
+        content.Dock = DockStyle.Fill;
+        content.Margin = Padding.Empty;
+        _headerTitleLine.Controls.Add(content, 1, 0);
+        _inlineHeaderContent = content;
+        _inlineHeaderMinHeight = Math.Max(0, minimumHeight);
+        ScheduleHeaderFit();
+    }
     protected void SetHeaderGuidance(string? guidance)
     {
         _headerGuidance = guidance?.Trim() ?? string.Empty;
@@ -317,7 +336,9 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
             _pageHeader is null || !_pageHeader.Visible ||
             _headerTextLayout.ClientSize.Width <= 0)
             return;
-        int titleHeight = Math.Max(20, AppMetrics.TextHeight(AppTheme.PageTitleFont));
+        int titleHeight = Math.Max(
+            Math.Max(20, AppMetrics.TextHeight(AppTheme.PageTitleFont)),
+            _inlineHeaderMinHeight);
         if(StatusLabel is not null && StatusLabel.Parent==_headerTitleLine)
             titleHeight=Math.Max(titleHeight,FitHeaderStatus(_headerTitleLine!,2));
         int guidanceHeight = 0;
