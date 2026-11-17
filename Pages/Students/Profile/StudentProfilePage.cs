@@ -465,7 +465,6 @@ public sealed class StudentProfilePage : V2Page
             return;
         }
         string name = CellText(row, "StudentName");
-        string father = CellText(row, "FatherName");
         string className = CellText(row, "ClassName");
         string sectionName = CellText(row, "SectionName");
         string status = CellText(row, "Status");
