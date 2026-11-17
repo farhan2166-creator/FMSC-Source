@@ -2176,11 +2176,19 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         return CollectionCreditAllocation.Build(SettlementRows(discounts).Select(row=>(
             GetLong(row.Cells["BillingChargeId"].Value),GetInt(row.Cells["AdmissionId"].Value),
             GetDecimal(row.Cells["Balance"].Value)-discounts.GetValueOrDefault(GetLong(row.Cells["BillingChargeId"].Value)))),
-            availableCreditByStudent,counterIds is null?admissionId:null);
+            availableCreditByStudent);
     }
-    private decimal SelectedAvailableCredit() => counterIds is null
-        ?Math.Max(0m,availableCreditByStudent.GetValueOrDefault(admissionId))
-        :SelectedBillStudents().Sum(id=>Math.Max(0m,availableCreditByStudent.GetValueOrDefault(id)));
+    // The ordinary sibling checkbox commits after ItemCheck. Use the loaded charge
+    // owners instead so deselecting a sibling removes their advance immediately,
+    // while the main student's account always stays in scope.
+    private int[] IncludedCreditStudentIds() => counterIds is not null
+        ?counterIds
+        :new[]{admissionId}.Concat(charges.Rows.Cast<DataGridViewRow>()
+            .Where(row=>!row.IsNewRow)
+            .Select(row=>GetInt(row.Cells["AdmissionId"].Value))
+            .Where(id=>id>0)).Where(id=>id>0).Distinct().ToArray();
+    private decimal SelectedAvailableCredit() =>
+        IncludedCreditStudentIds().Sum(id=>Math.Max(0m,availableCreditByStudent.GetValueOrDefault(id)));
     private void FitAdvanceScopeHint()
     {
         if(creditSummary is not TableLayoutPanel field||field.Parent is not TableLayoutPanel summary)return;
@@ -2204,7 +2212,18 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
     /// <summary>Refresh allocation from the entered amount without assuming full payment.</summary>
     private void RefreshEnteredPaymentAllocation()
     {
-        FillFromReceivedAmount(GetAmount(paymentAmount));
+        decimal entered=GetAmount(paymentAmount);
+        // A fully advance-covered selection requires no new money. Clear a
+        // previously entered cash figure rather than leaving a stale invalid
+        // amount when the family or credit checkbox changes.
+        if(entered>0m && CurrentPayableAfterDiscount()==0m)
+        {
+            suppressPaymentEvents=true;
+            try{paymentAmount.Text="0";}
+            finally{suppressPaymentEvents=false;}
+            entered=0m;
+        }
+        FillFromReceivedAmount(entered);
         UpdateCollectionTotals();
     }
     /// <summary>True while the Paid field still holds the figure the summary last offered - the untouched default.</summary>
@@ -3131,15 +3150,19 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         balance.ForeColor = remaining > 0 ? AppTheme.Danger : AppTheme.Text;
         decimal credit = SelectedAvailableCredit();
         decimal usedCredit = GetCreditAllocations(discountMap).Values.Sum();
-        // The checkbox shows what can pay the listed fees, not a pooled family balance.
+        // Usable credit and unused advance are strictly scoped to the selected
+        // students, never a pooled family balance or an unselected sibling.
         availableCredit.Text = (CreditAllowedOnSelectedDate()
             ? GetUsableCreditAllocations(discountMap).Values.Sum() : 0m).ToString("N0");
         remainingCredit.Text = (credit - usedCredit).ToString("N0");
-        advanceScopeHint.Text=credit>0m&&!CreditAllowedOnSelectedDate()
-            ?"Advance cannot be used for a backdated collection. Select today's date to apply advance."
-            :counterIds is null&&credit>0m&&SettlementRows().Any(row=>
-                GetInt(row.Cells["AdmissionId"].Value)!=admissionId&&GetRowNetDue(row,discountMap)>0m)
-                ?"Main student only; transfer advance for siblings.":"";
+        advanceScopeHint.Text=credit<=0m?""
+            :!CreditAllowedOnSelectedDate()
+                ?"Advance cannot be used for a backdated collection. Select today's date to apply advance."
+            :!useAvailableCredit.Checked
+                ?"Advance is off; selected students' credit remains untouched."
+            :IncludedCreditStudentIds().Length>1
+                ?"Each selected student's own advance is applied. Unselected siblings are excluded."
+                :"Only this student's advance is applied. Unused credit stays in their account.";
         advanceScopeHint.Visible=advanceScopeHint.Text.Length>0;
         if (creditSummary?.Parent is TableLayoutPanel layout)
         {
