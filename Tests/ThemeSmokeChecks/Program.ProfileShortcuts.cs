@@ -52,6 +52,36 @@ internal static partial class Program
             "Family and placement are paired above the full-width student history");
         Check(ReferenceEquals(finder.Parent,overview.Parent),
             "Search and student identity are independent full-width profile sections");
+        // Keep the overview compact by placing contact and registration in the
+        // existing three-row facts area, not beneath the photo-side identity.
+        var profileLayout=(TableLayoutPanel)overview.Parent!;
+        int overviewRow=profileLayout.GetPositionFromControl(overview).Row;
+        var overviewTables=Descendants(overview.Content).OfType<TableLayoutPanel>().ToArray();
+        var identity=overviewTables.Single(table=>table.RowCount==3&&table.ColumnCount==1);
+        var facts=overviewTables.Single(table=>table.RowCount==3&&table.ColumnCount==2);
+        Label ProfileLabel(string field) =>
+            (Label)typeof(StudentProfilePage).GetField(field,flags)!.GetValue(page)!;
+        Check(identity.Controls.Contains(ProfileLabel("nameLabel")) &&
+            identity.Controls.Contains(ProfileLabel("fatherLabel")) &&
+            identity.Controls.Contains(ProfileLabel("placementLabel")) &&
+            facts.GetPositionFromControl(ProfileLabel("contactLabel")).Row==1 &&
+            facts.GetPositionFromControl(ProfileLabel("registrationLabel")).Row==2 &&
+            facts.GetPositionFromControl(ProfileLabel("balanceLabel")).Row==2,
+            "Student Profile keeps contact and registration visible in a compact three-row facts layout");
+        float requiredIdentityHeight=identity.RowStyles.Cast<RowStyle>().Sum(style=>style.Height);
+        float availableIdentityHeight=profileLayout.RowStyles[overviewRow].Height
+            -overview.Margin.Vertical-overview.Padding.Vertical
+            -overview.Header.Height-overview.Content.Padding.Vertical;
+        // Compare against the content-derived compact minimum, rather than
+        // a frozen pixel value: different fonts and DPI settings can legitimately
+        // need slightly more than the historical 154-scaled-pixel baseline.
+        float contentHeight=overview.Margin.Vertical+overview.Padding.Vertical+
+            overview.Header.Height+overview.Content.Padding.Vertical+
+            requiredIdentityHeight+AppScale.Scale(4);
+        float compactHeight=Math.Max(AppScale.Scale(154),contentHeight);
+        Check(availableIdentityHeight>=requiredIdentityHeight &&
+            profileLayout.RowStyles[overviewRow].Height<=compactHeight+AppScale.Scale(2),
+            "Student Profile overview fits identity rows without excessive unused height");
 
         // Verify identity facts without querying a school database. The same
         // original admission record continues to supply the placement summary.

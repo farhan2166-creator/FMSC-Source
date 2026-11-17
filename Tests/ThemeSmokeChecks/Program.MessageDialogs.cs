@@ -94,10 +94,23 @@ internal static partial class Program
                     Check(notice.Top < explanation.Top, "Important consequences appear before long explanations or record lists");
                     Check(grid.ReadOnly && !grid.AllowUserToAddRows && !grid.AllowUserToDeleteRows && grid.Rows.Count == 25,
                         "All fictional database rows remain in a read-only table");
+                    Check(grid.AutoSizeColumnsMode==DataGridViewAutoSizeColumnsMode.None &&
+                          grid.Columns.Cast<DataGridViewColumn>().All(c=>c.AutoSizeMode==DataGridViewAutoSizeColumnMode.None),
+                        "Generic message-dialog tables also use the shared content-aware form-grid sizing");
+                    int initialStudentWidth=grid.Columns["Student"].Width;
+                    rows.Rows[0]["Student"]=new string('W',110);
+                    UiHelper.FitColumnsToWidth(grid);
+                    Check(grid.Columns["Student"].Width>initialStudentWidth,
+                        "Generic dialog grid widths grow when displayed data becomes longer");
+                    rows.Rows[0]["Student"]="Fictional student 0";
+                    UiHelper.FitColumnsToWidth(grid);
                     Check(ReferenceEquals(grid.DataSource, rows) && (decimal)grid.Rows[0].Cells[2].Value == 1000.25m,
                         "Record presentation preserves exact source values");
-                    Check(grid.Columns[2].DefaultCellStyle.Alignment == DataGridViewContentAlignment.MiddleRight,
-                        "Amounts align to the right for comparison");
+                    Check(grid.Columns[2].DefaultCellStyle.Alignment == DataGridViewContentAlignment.MiddleCenter &&
+                          grid.Columns[2].HeaderCell.InheritedStyle.Alignment == DataGridViewContentAlignment.MiddleCenter &&
+                          grid.Columns["Admission No."].DefaultCellStyle.Alignment == DataGridViewContentAlignment.MiddleCenter &&
+                          grid.Columns["Student"].DefaultCellStyle.Alignment == DataGridViewContentAlignment.MiddleLeft,
+                        "Dialog tables center amounts and short identifiers while keeping student names left aligned");
                     Check(grid.Columns[2].DefaultCellStyle.Format == "#,##0.##",
                         "Presentation retains decimal precision without changing stored amounts");
                     dialog.Close();

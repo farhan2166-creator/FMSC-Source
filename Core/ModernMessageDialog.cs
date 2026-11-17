@@ -59,11 +59,13 @@ public static class ModernMessageDialog
     internal static ApplicationWindowForm CreateDialog(IWin32Window? owner, MessageDialogContent content, string title,
         MessageBoxButtons buttons, MessageBoxIcon icon, MessageBoxDefaultButton defaultButton)
     {
+        bool family=content.Style==MessageDialogStyle.FamilyCollection && content.Records is not null;
         bool blocked=icon==MessageBoxIcon.Error || icon==MessageBoxIcon.Warning &&
             buttons is MessageBoxButtons.OK or MessageBoxButtons.RetryCancel or MessageBoxButtons.AbortRetryIgnore;
         Rectangle work = (owner is Control control ? Screen.FromControl(control) : Screen.PrimaryScreen)?.WorkingArea
             ?? new Rectangle(0, 0, 1280, 720);
-        int width = Math.Min(AppScale.Scale(content.Records is null ? 560 : 800), Math.Max(1, work.Width - AppScale.Scale(32)));
+        int width = Math.Min(AppScale.Scale(family ? 900 : content.Records is null ? 560 : 800),
+            Math.Max(1, work.Width - AppScale.Scale(32)));
         var form = new ApplicationWindowForm {
             Text = title, StartPosition = owner is null ? FormStartPosition.CenterScreen : FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog, MinimizeBox = false, MaximizeBox = false,
@@ -71,10 +73,10 @@ public static class ModernMessageDialog
         };
         var root = new TableLayoutPanel {
             Name = "MessageRoot", Dock = DockStyle.Fill, AutoScroll = true,
-            Padding = new Padding(AppScale.Scale(22)), ColumnCount = 2, RowCount = 2,
+            Padding = new Padding(AppScale.Scale(family ? 16 : 22)), ColumnCount = 2, RowCount = 2,
             Margin = Padding.Empty, BackColor = AppTheme.Surface
         };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(48)));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(family ? 34 : 48)));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonHeight + AppScale.Scale(20)));
@@ -106,15 +108,23 @@ public static class ModernMessageDialog
         };
         var summary=TextBlock(content.Summary, content.Summary.Length <= 180, "MessageSummary");
         if(blocked)OperationFeedback.Apply(summary,true);
+        if(family) summary.Margin = new Padding(0,0,0,AppScale.Scale(7));
         Add(summary);
-        if (!string.IsNullOrWhiteSpace(content.Notice))
+        void AddNotice()
         {
-            var notice = TextBlock(content.Notice, true, "MessageNotice");
-            notice.Padding = new Padding(AppScale.Scale(10));
+            if (string.IsNullOrWhiteSpace(content.Notice)) return;
+            var notice = TextBlock(content.Notice, !family, "MessageNotice");
+            notice.Padding = new Padding(AppScale.Scale(family ? 7 : 10));
             notice.BackColor = AppTheme.SurfaceSecondary;
+            if(family)
+            {
+                notice.ForeColor=AppTheme.MutedText;
+                notice.Margin=new Padding(0,AppScale.Scale(4),0,AppScale.Scale(5));
+            }
             if(blocked){OperationFeedback.Apply(notice,true);notice.BackColor=AppTheme.Tint(AppTheme.Danger,0.94f);}
             Add(notice);
         }
+        if(!family) AddNotice();
         if (!string.IsNullOrWhiteSpace(content.Explanation))
         {
             var explanation=TextBlock(content.Explanation, false, "MessageExplanation");
@@ -125,21 +135,34 @@ public static class ModernMessageDialog
         if (content.Facts is { Count: > 0 })
         {
             facts = new TableLayoutPanel {
-                Name = "MessageFacts", Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, RowCount = 0,
-                Margin = new Padding(0, 0, 0, AppScale.Scale(12)), Padding = Padding.Empty
+                Name = "MessageFacts", Dock = DockStyle.Fill, AutoSize = true,
+                ColumnCount = family ? 4 : 2, RowCount = 0,
+                Margin = new Padding(0, 0, 0, AppScale.Scale(family ? 8 : 12)), Padding = Padding.Empty
             };
-            facts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(140)));
-            facts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            foreach (var fact in content.Facts)
+            if(family)
             {
-                int row = facts.RowCount++;
-                facts.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                for(int col=0;col<4;col++) facts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(120)));
+            }
+            else
+            {
+                facts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(140)));
+                facts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            }
+            for(int i=0;i<content.Facts.Count;i++)
+            {
+                var fact=content.Facts[i];
+                int row=family?i/2:i, col=family?(i%2)*2:0;
+                if(row>=facts.RowCount)
+                {
+                    facts.RowCount++;
+                    facts.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                }
                 var label = TextBlock(fact.Label, false, "DetailLabel");
                 label.ForeColor = AppTheme.MutedText;
-                label.Margin = new Padding(0, 0, AppScale.Scale(12), AppScale.Scale(8));
+                label.Margin = new Padding(0, 0, AppScale.Scale(family ? 6 : 12), AppScale.Scale(family ? 5 : 8));
                 var value = TextBlock(fact.Value, true, "DetailValue");
-                value.Margin = new Padding(0, 0, 0, AppScale.Scale(8));
-                facts.Controls.Add(label, 0, row); facts.Controls.Add(value, 1, row);
+                value.Margin = new Padding(0, 0, AppScale.Scale(family && col==1 ? 12 : 0), AppScale.Scale(family ? 5 : 8));
+                facts.Controls.Add(label, col, row); facts.Controls.Add(value, col+1, row);
             }
             Add(facts);
         }
@@ -149,20 +172,35 @@ public static class ModernMessageDialog
         {
             var grid = HumanUi.Grid(false);
             grid.Name = "MessageRecords"; grid.Dock = DockStyle.Fill; grid.Margin = new Padding(0, 0, 0, AppScale.Scale(12));
+            // Use the same content-aware minimum widths and available-space
+            // distribution as application form grids. Do not pin dialog
+            // columns to a separate set of FillWeight proportions.
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
             void FormatColumn(DataGridViewColumn column)
             {
-                column.MinimumWidth = AppScale.Scale(90);
+                if(family)
+                    column.SortMode=DataGridViewColumnSortMode.NotSortable; // Keep the totals row last.
                 if (column.ValueType == typeof(decimal))
-                {
                     column.DefaultCellStyle.Format = "#,##0.##";
-                    column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
-                }
+            }
+            void StyleTotalsRow()
+            {
+                if(!family || grid.Rows.Count!=records.Rows.Count || records.Rows.Count<2)return;
+                var total=grid.Rows[records.Rows.Count-1];
+                total.DefaultCellStyle.Font=AppTheme.BodyBoldFont;
+                total.DefaultCellStyle.BackColor=AppTheme.SurfaceSecondary;
+                total.DefaultCellStyle.SelectionBackColor=AppTheme.SurfaceSecondary;
+                total.DefaultCellStyle.SelectionForeColor=AppTheme.Text;
             }
             grid.ColumnAdded += (_, e) => FormatColumn(e.Column);
             grid.DataBindingComplete += (_, _) => {
                 foreach (DataGridViewColumn column in grid.Columns) FormatColumn(column);
+                UiHelper.AlignDialogGrid(grid);
+                StyleTotalsRow();
             };
-            grid.DataSource = records; grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            grid.DataSource = records;
+            UiHelper.AlignDialogGrid(grid);
+            if(family){grid.ShowCellToolTips=false;StyleTotalsRow();}
             grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCellsExceptHeaders;
             grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
             grid.Height = grid.ColumnHeadersHeight + Math.Min(8, Math.Max(1, records.Rows.Count)) * AppMetrics.GridRowHeight + AppScale.Scale(8);
@@ -172,6 +210,7 @@ public static class ModernMessageDialog
             body.RowStyles[recordsRow].SizeType = SizeType.Absolute;
             body.RowStyles[recordsRow].Height = grid.Height + grid.Margin.Vertical;
         }
+        if(family) AddNotice();
         bool fittingBody = false;
         void FitBody()
         {
@@ -185,17 +224,38 @@ public static class ModernMessageDialog
                 label.MaximumSize = new Size(Math.Max(1, available - label.Margin.Horizontal), 0);
             if (facts is not null)
             {
-                int caption = Math.Min(AppScale.Scale(140), available / 3);
-                facts.ColumnStyles[0].Width = caption;
-                foreach (Label label in facts.Controls)
-                    label.MaximumSize = new Size(Math.Max(1, (facts.GetColumn(label) == 0 ? caption : available - caption) - label.Margin.Horizontal), 0);
+                if(family)
+                {
+                    int caption=Math.Min(AppScale.Scale(120),Math.Max(1,available/5));
+                    int valueSpace=Math.Max(2,available-2*caption);
+                    int firstValue=Math.Max(1,valueSpace*39/100);
+                    int[] widths={caption,firstValue,caption,Math.Max(1,valueSpace-firstValue)};
+                    for(int c=0;c<4;c++) facts.ColumnStyles[c].Width=widths[c];
+                    foreach(Label label in facts.Controls)
+                        label.MaximumSize=new Size(Math.Max(1,widths[facts.GetColumn(label)]-label.Margin.Horizontal),0);
+                }
+                else
+                {
+                    int caption = Math.Min(AppScale.Scale(140), available / 3);
+                    facts.ColumnStyles[0].Width = caption;
+                    foreach (Label label in facts.Controls)
+                        label.MaximumSize = new Size(Math.Max(1, (facts.GetColumn(label) == 0 ? caption : available - caption) - label.Margin.Horizontal), 0);
+                }
             }
             if (recordsGrid is not null)
             {
                 recordsGrid.Width = available;
+                // Shared sizing measures headings and row values, then distributes
+                // any spare width. It also allows horizontal scrolling when text
+                // requires more space than a small dialog can provide.
+                UiHelper.FitColumnsToWidth(recordsGrid);
                 recordsGrid.AutoResizeRows(DataGridViewAutoSizeRowsMode.AllCellsExceptHeaders);
                 int rowsHeight = recordsGrid.Rows.Cast<DataGridViewRow>().Take(8).Sum(row => row.Height);
-                int height = recordsGrid.ColumnHeadersHeight + Math.Max(AppMetrics.GridRowHeight, rowsHeight) + AppScale.Scale(8);
+                int columnsWidth=recordsGrid.Columns.GetColumnsWidth(DataGridViewElementStates.Visible);
+                int scrollHeight=columnsWidth>recordsGrid.DisplayRectangle.Width
+                    ?SystemInformation.HorizontalScrollBarHeight:0;
+                int height = recordsGrid.ColumnHeadersHeight + Math.Max(AppMetrics.GridRowHeight, rowsHeight)
+                    + scrollHeight + AppScale.Scale(8);
                 recordsGrid.Height = height;
                 body.RowStyles[recordsRow].Height = height + recordsGrid.Margin.Vertical;
             }
@@ -223,7 +283,7 @@ public static class ModernMessageDialog
         }
         if (buttons == MessageBoxButtons.YesNo)
         {
-            var yes = MakeButton("Yes", DialogResult.Yes, true);
+            var yes = MakeButton(family ? "Yes, Record Payment" : "Yes", DialogResult.Yes, true);
             var no = MakeButton("No", DialogResult.No, false);
             buttonsPanel.Controls.Add(yes); buttonsPanel.Controls.Add(no);
             form.AcceptButton = defaultButton == MessageBoxDefaultButton.Button2 ? no : yes;
@@ -237,7 +297,7 @@ public static class ModernMessageDialog
         }
         root.Controls.Add(buttonsPanel, 0, 1); root.SetColumnSpan(buttonsPanel, 2);
         form.Controls.Add(root);
-        int bodyWidth = Math.Max(1, width - root.Padding.Horizontal - AppScale.Scale(48) - SystemInformation.VerticalScrollBarWidth);
+        int bodyWidth = Math.Max(1, width - root.Padding.Horizontal - AppScale.Scale(family ? 34 : 48) - SystemInformation.VerticalScrollBarWidth);
         form.ClientSize = new Size(width, AppScale.Scale(300));
         form.PerformLayout();
         viewport.Size = new Size(bodyWidth, AppScale.Scale(300)); FitBody();

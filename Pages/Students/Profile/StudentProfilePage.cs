@@ -152,6 +152,9 @@ public sealed class StudentProfilePage : V2Page
         var selector = HumanUi.Card("Find Student");
         selector.Content.Controls.Add(HumanUi.Field("Student", student, true));
         var header = BuildHeaderCard();
+        // Keep only three identity lines beside the photo; contact and
+        // registration fit into the facts grid without enlarging the card.
+        header.Margin = new Padding(0, AppScale.Scale(4), 0, AppScale.Scale(4));
         var sections = BuildSectionsGrid();
         var footer = BuildQuickActionsFooter();
         // Profile information follows the student selector in reading order.
@@ -164,13 +167,16 @@ public sealed class StudentProfilePage : V2Page
             Margin = Padding.Empty
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1, hasSubtitle: false)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(154)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute,
+            Math.Max(AppScale.Scale(154),
+                header.Margin.Vertical + header.Padding.Vertical +
+                header.Header.Height + header.Content.Padding.Vertical +
+                OverviewIdentityHeight() + AppScale.Scale(4))));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,
             Math.Max(AppScale.Scale(94), 2 * (AppTheme.CompactButtonHeight + UiDesignSystem.Spacing.Sm)
                 + UiDesignSystem.Spacing.Md)));
         selector.Margin = new Padding(0, 0, 0, AppScale.Scale(4));
-        header.Margin = new Padding(0, AppScale.Scale(4), 0, AppScale.Scale(4));
         root.Controls.Add(selector, 0, 0);
         root.Controls.Add(header, 0, 1);
         root.Controls.Add(sections, 0, 2);
@@ -178,6 +184,10 @@ public sealed class StudentProfilePage : V2Page
         SetContent(root);
         ClearProfile();
     }
+    private int OverviewIdentityHeight() =>
+        new[] { nameLabel, fatherLabel, placementLabel }
+            .Sum(label => Math.Max(label.Height, AppMetrics.TextHeight(label.Font) + AppScale.Scale(2)));
+
     private HumanCard BuildHeaderCard()
     {
         var card = HumanUi.Card("Student Overview");
@@ -199,11 +209,11 @@ public sealed class StudentProfilePage : V2Page
         var identity = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 3,
             Margin = new Padding(0, 0, UiDesignSystem.Spacing.Md, 0)
         };
         identity.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        foreach (var label in new[] { nameLabel, fatherLabel, placementLabel, contactLabel, registrationLabel })
+        foreach (var label in new[] { nameLabel, fatherLabel, placementLabel })
         {
             label.Margin = Padding.Empty;
             identity.RowStyles.Add(new RowStyle(SizeType.Absolute,
@@ -212,26 +222,42 @@ public sealed class StudentProfilePage : V2Page
         identity.Controls.Add(nameLabel, 0, 0);
         identity.Controls.Add(fatherLabel, 0, 1);
         identity.Controls.Add(placementLabel, 0, 2);
-        identity.Controls.Add(contactLabel, 0, 3);
-        identity.Controls.Add(registrationLabel, 0, 4);
         var facts = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 3,
             Margin = Padding.Empty
         };
-        facts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        facts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        facts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+        facts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
         for (int row = 0; row < 3; row++)
             facts.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / 3));
-        facts.Controls.Add(dateOfBirthLabel, 0, 0);
-        facts.Controls.Add(genderLabel, 1, 0);
-        facts.Controls.Add(admissionDateLabel, 0, 1);
-        facts.Controls.Add(admissionCampusLabel, 1, 1);
+        // Birth and gender share one compact cell, leaving two rows for
+        // contact, registration and balance. No details are hidden or dropped.
+        var birthGender = new TableLayoutPanel {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        birthGender.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 65));
+        birthGender.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+        birthGender.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        birthGender.Controls.Add(dateOfBirthLabel, 0, 0);
+        birthGender.Controls.Add(genderLabel, 1, 0);
+        facts.Controls.Add(birthGender, 0, 0);
+        facts.Controls.Add(admissionDateLabel, 1, 0);
+        facts.Controls.Add(admissionCampusLabel, 0, 1);
+        contactLabel.Dock = DockStyle.Fill;
+        contactLabel.Margin = Padding.Empty;
+        facts.Controls.Add(contactLabel, 1, 1);
+        registrationLabel.Dock = DockStyle.Fill;
+        registrationLabel.Margin = Padding.Empty;
+        facts.Controls.Add(registrationLabel, 0, 2);
         balanceLabel.Dock = DockStyle.Fill;
         balanceLabel.Margin = Padding.Empty;
-        facts.Controls.Add(balanceLabel, 0, 2);
-        facts.SetColumnSpan(balanceLabel, 2);
+        facts.Controls.Add(balanceLabel, 1, 2);
         layout.Controls.Add(photoHost, 0, 0);
         layout.Controls.Add(identity, 1, 0);
         layout.Controls.Add(facts, 2, 0);

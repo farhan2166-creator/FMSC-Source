@@ -42,9 +42,10 @@ public sealed class CertificateIssueRegisterPage : V2Page
         print=AddBusyAction(UiText.Actions.Print,PrintAsync,"Secondary"); export=AddExportAction("FMSC_Certificate_Issue_Register");
         columns=AddColumnsAction();columns.Enabled=false;
         RelocateFromActions(run,print,export,columns);
-        var content=ReportUi.CompactLayout(ReportUi.Bar(("Certificate Type",type),("Recipient Type",recipient),
-            ("From Recorded Date (optional)",from),("To Recorded Date (optional)",to),("Entry",entry),("Collection",collection),("Find",search),("Order by",orderBy)),
-            Grid,"Certificate Issue Register",ClearReport,run,print,export,columns);
+        // One short filter band. Result-specific tools sit beside the records heading.
+        var content=ReportUi.CompactRegisterLayout(ReportUi.Bar(("Certificate",type),("Recipient",recipient),
+            ("Recorded from",from),("Recorded to",to),("Entry",entry),("Collection",collection),
+            ("Find",search),("Sort",orderBy)),Grid,ClearReport,run,print,export,columns);
         savedViews=new ReportSavedViewsBar("certificates.issue-register",CaptureSavedView,RestoreSavedView,(message,warning)=>SetStatus(message,warning),()=>!running && CanRead,from,to);
         SetContent(savedViews.Wrap(content));
         Grid.Parent?.Controls.Add(summary); Grid.BringToFront();
@@ -60,6 +61,12 @@ public sealed class CertificateIssueRegisterPage : V2Page
     protected override string ReportExportSubtitle() => subtitle;
     protected override string ReportLayoutKey => "certificates.issue-register.columns";
     protected override IReadOnlyList<ReportColumnDef>? ReportColumnCatalog => availableColumns;
+    // Less horizontal scrolling for new users; existing column choices and saved views win.
+    protected override IReadOnlyList<string>? ReportDefaultColumnKeys => new[] {
+        "Recorded On", "Certificate Type", "Certificate No.", "Recipient",
+        "Student / Staff No.", "Certificate Date", "Entry", "Issue Type",
+        "Collection", "Collected On"
+    };
     protected override void OnReportPageBound()
     {
         availableColumns=ReportAvailableColumns.FromGrid(Grid);RefreshReportColumnLayout();base.OnReportPageBound();
@@ -127,7 +134,9 @@ public sealed class CertificateIssueRegisterPage : V2Page
             if (!ReportLanded || rows is null) { summary.Text="Run the report again to see current totals."; return; }
             var totals=CertificateIssueRegisterData.Totals(rows);
             printMetrics=ReportPrintSummary.FromTotals(totals);
-            summary.Text=string.Join("     ",totals.Columns.Cast<DataColumn>().Select(c => $"{c.ColumnName}: {totals.Rows[0][c]}"));
+            summary.Text=$"Logged issues: {totals.Rows[0]["Logged issues"]:N0}    " +
+                $"Saved only: {totals.Rows[0]["Saved records only"]:N0}    " +
+                $"Awaiting collection: {totals.Rows[0]["Awaiting collection"]:N0}";
             subtitle=captured+" | "+summary.Text+" | Saved record only does not confirm printing or collection.";
             applied=requested; hasRows=rows.Rows.Count>0;
             bool current=CanRead && ReportMatchesCurrentFilters(requested); print.Enabled=export.Enabled=current && hasRows;

@@ -81,6 +81,28 @@ namespace FMSC_SMS.Core
             column.DefaultCellStyle.Alignment=alignment;
             column.HeaderCell.Style.Alignment=alignment;
         }
+        /// <summary>
+        /// Use the same centered heading/value axis in read-only dialog tables as
+        /// in form grids. Longer descriptions stay left aligned; these are only
+        /// presentation changes and never affect the underlying cell values.
+        /// </summary>
+        internal static void AlignDialogGrid(DataGridView grid)
+        {
+            foreach(DataGridViewColumn column in grid.Columns)
+            {
+                if(!column.Visible)continue;
+                string name=string.IsNullOrEmpty(column.DataPropertyName)
+                    ?column.Name:column.DataPropertyName;
+                bool centered=IsCenteredGridValue(column)||IsStatusColumn(column)||
+                    name is "ReceiptNumber" or "TransactionType" or "PaymentMethod" or
+                        "Adjusted" or "NetPaid" or "Original" or "Net" or
+                        "ReceiptTotal" or "BalanceThen";
+                if(centered)
+                    SetGridColumnAlignment(column,DataGridViewContentAlignment.MiddleCenter);
+                else if(name is "Student" or "StudentName" or "ChargeType" or "Description" or "Details")
+                    SetGridColumnAlignment(column,DataGridViewContentAlignment.MiddleLeft);
+            }
+        }
         internal static void UseCompactMoneyHeaders(DataGridView grid)
         {
             GridLooks.GetOrCreateValue(grid).CompactMoneyHeaders = true;
