@@ -52,6 +52,18 @@ internal static partial class Program
             "Family and placement are paired above the full-width student history");
         Check(ReferenceEquals(finder.Parent,overview.Parent),
             "Search and student identity are independent full-width profile sections");
+        // All five identity lines must fit inside the overview's actual card
+        // chrome at the active UI scale, even when registration is populated.
+        var profileLayout=(TableLayoutPanel)overview.Parent!;
+        int overviewRow=profileLayout.GetPositionFromControl(overview).Row;
+        var identity=Descendants(overview.Content).OfType<TableLayoutPanel>()
+            .Single(table=>table.RowCount==5&&table.ColumnCount==1);
+        float requiredIdentityHeight=identity.RowStyles.Cast<RowStyle>().Sum(style=>style.Height);
+        float availableIdentityHeight=profileLayout.RowStyles[overviewRow].Height
+            -overview.Margin.Vertical-overview.Padding.Vertical
+            -overview.Header.Height-overview.Content.Padding.Vertical;
+        Check(availableIdentityHeight>=requiredIdentityHeight,
+            "Student Profile overview leaves enough vertical space for contact and registration lines");
 
         // Verify identity facts without querying a school database. The same
         // original admission record continues to supply the placement summary.
