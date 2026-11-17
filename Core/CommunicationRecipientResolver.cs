@@ -17,6 +17,7 @@ internal sealed record CommunicationTarget(
     CommunicationAudience Audience, int CampusId, int ClassId,
     int StudentId, int StaffId, string Channel)
 {
+    internal bool FinancialReviewRequired { get; init; }
     internal string Purpose => Audience switch {
         CommunicationAudience.OutstandingFees or CommunicationAudience.FeeStudent or CommunicationAudience.FeeFamily => "FeeReminder",
         CommunicationAudience.Staff => "Staff",

@@ -21,7 +21,8 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         Func<FeeMessageDocument, Task<Bitmap>>? RenderImage = null,
         Action<Image>? CopyImage = null,
         CommunicationManualHandoff.Operations? FeeHandoff = null,
-        Func<Method, CommunicationPreview, string, bool>? AuthorizePaidSend = null);
+        Func<Method, CommunicationPreview, string, bool>? AuthorizePaidSend = null,
+        Func<Guid,CommunicationFinancialReview,Task>? ReserveFinancialReview = null);
 
     private sealed record ReviewedMessage(CommunicationTarget Target, CommunicationPreview Preview, string Body, Guid RequestId,
         FeeMessageDocument? Document);
@@ -41,6 +42,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     private readonly CommunicationTarget studentTarget;
     private readonly bool fees;
     private readonly Operations operations;
+    private CommunicationFinancialReview? metaFinancialSelectionSource;
     private readonly ModernComboBox scope = HumanUi.Combo();
     private readonly ModernComboBox feeContent = HumanUi.Combo();
     private readonly CheckBox attachImage = new() { Text = "Share as image in WhatsApp", Checked = true, Dock = DockStyle.Fill };
@@ -251,6 +253,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     private void ClearDraft()
     {
         metaSelection = null;
+        metaFinancialSelectionSource = null;
         message.Clear();
         status.Text = "";
     }
@@ -297,9 +300,20 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
     {
         var approved = await CommunicationApiBatchStore.ReadMetaTemplatesAsync();
         EnsureAccess();
-        using var dialog = new CommunicationMetaTemplateDialog(approved, "Individual", allowStudentFields: !IsFamily);
+        using var financialDocument=fees ? await ReadFeeDocumentAsync() : null;
+        EnsureAccess();
+        IReadOnlyDictionary<string,string>? financialFields=financialDocument is null ? null
+            : IsReceipt ? new Dictionary<string,string> {
+                ["[PaymentAmount]"]=financialDocument.Amount.ToString("N2",System.Globalization.CultureInfo.InvariantCulture),
+                ["[ReceiptNumber]"]=financialDocument.ReceiptNumber
+            } : new Dictionary<string,string> {
+                ["[OutstandingAmount]"]=financialDocument.Amount.ToString("N2",System.Globalization.CultureInfo.InvariantCulture)
+            };
+        using var dialog = new CommunicationMetaTemplateDialog(approved,
+            fees && !IsReceipt ? "FeeReminder" : "Individual",allowStudentFields:!IsFamily,contextFields:financialFields);
         if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Selection is null) return;
         metaSelection = dialog.Selection;
+        metaFinancialSelectionSource = financialDocument?.FinancialReview;
         message.Text = metaSelection.Format();
     }
 
@@ -320,6 +334,10 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
             {
                 document = await ReadFeeDocumentAsync();
                 EnsureAccess();
+                if(option.IsMeta && metaFinancialSelectionSource!=document.FinancialReview)
+                    throw new CommunicationValidationException("The financial document changed after choosing its Meta fields. Choose the template again for the current document.");
+                if(document.FinancialReview is not null)
+                    target=target with {FinancialReviewRequired=true};
                 if (!option.IsMeta)
                 {
                     // Resolve composer-only fields before saving the exact reviewed batch text.
@@ -397,6 +415,11 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
                 image = await PrepareImageAsync(imageDocument);
             if (reviewed.Document is { } document)
                 await VerifyDocumentAsync(document);
+            if(reviewed.Document?.FinancialReview is { } financialSource)
+            {
+                await (operations.ReserveFinancialReview ?? CommunicationFinancialReviewStore.ReserveAsync)(reviewed.RequestId,financialSource);
+                EnsureAccess();
+            }
             var batch = await operations.Confirm(option, reviewed.Target, reviewed.Preview, reviewed.Body, reviewed.RequestId, metaSelection);
             EnsureAccess();
             if (fees && option.Provider is null)

@@ -33,6 +33,7 @@
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema23Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema23Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema24Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema24Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema25Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema25Requirements.json" />
+    <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema28Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema28Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema27Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema27Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema26Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema26Requirements.json" />
     <EmbeddedResource Include="../../Core/DatabaseCompatibilitySchema17Requirements.json" LogicalName="FMSC_SMS.Core.DatabaseCompatibilitySchema17Requirements.json" />

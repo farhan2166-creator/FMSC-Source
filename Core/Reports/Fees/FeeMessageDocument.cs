@@ -19,9 +19,11 @@ internal sealed class FeeMessageDocument : IDisposable
         receipt ? $"{(family ? "Family" : "Student")} Receipt {ReceiptNumber}" : family ? "Family Fee Bill" : "Student Fee Bill");
     internal string ReviewKey { get; }
     internal string OutstandingDetails { get; }
+    internal CommunicationFinancialReview? FinancialReview { get; }
 
     internal FeeMessageDocument(DataTable data, int admissionId, int[] members, int[] billedStudents,
-        bool family, bool receipt, decimal amount, string receiptNumber = "", string outstandingDetails = "")
+        bool family, bool receipt, decimal amount, string receiptNumber = "", string outstandingDetails = "",
+        CommunicationFinancialReview? financialReview = null)
     {
         this.data = data;
         this.admissionId = admissionId;
@@ -30,6 +32,7 @@ internal sealed class FeeMessageDocument : IDisposable
         this.receipt = receipt;
         Amount = amount;
         ReceiptNumber = receiptNumber;
+        FinancialReview = financialReview;
         OutstandingDetails = outstandingDetails;
         string content;
         if (receipt)
@@ -46,6 +49,7 @@ internal sealed class FeeMessageDocument : IDisposable
     {
         if (!CommunicationAccess.CanMessageStudent(CurrentUser.HasPermission, fees: true))
             throw new UnauthorizedAccessException("School-message, student-view and fee-view permissions are required.");
+        var billSource = receipt ? null : await CommunicationFinancialReviewStore.ReadAsync(admissionId,family);
         using var members = await FeeBillPreview.ReadMembersAsync(admissionId, "Fees.View");
         var anchor = members.AsEnumerable().SingleOrDefault(row => row.Field<int>("AdmissionId") == admissionId)
             ?? throw new CommunicationValidationException("The selected student is no longer available.");
@@ -72,8 +76,14 @@ internal sealed class FeeMessageDocument : IDisposable
                 Convert.ToString(group.First()["StudentName"]) ?? "", Convert.ToString(group.First()["Reference"]) ?? "",
                 string.Join(" / ", group.Select(FeeBillDataBuilder.PlacementText).Where(value => value.Length > 0)
                     .Distinct(StringComparer.OrdinalIgnoreCase)), group.Sum(row => Convert.ToDecimal(row["Due"])))).ToArray();
-        return new(data, admissionId, ids, billed, family, false, total,
-            outstandingDetails: CommunicationFeeDetails.Format(DateTime.Today, students, total, family));
+        try
+        {
+            if(billSource!=await CommunicationFinancialReviewStore.ReadAsync(admissionId,family))
+                throw new CommunicationValidationException("The bill changed while preparing its preview. Review it again before sending.");
+            return new(data, admissionId, ids, billed, family, false, total,
+                outstandingDetails: CommunicationFeeDetails.Format(DateTime.Today, students, total, family),financialReview:billSource);
+        }
+        catch { data.Dispose(); throw; }
     }
 
     private static async Task<FeeMessageDocument> ReadReceiptAsync(InstitutionProfile.PrintIdentity institution,
@@ -100,6 +110,7 @@ internal sealed class FeeMessageDocument : IDisposable
         if (latest.Rows.Count != 1)
             throw new CommunicationValidationException("No saved payment receipt is available for this selection.");
         string number = latest.Rows[0].Field<string>("ReceiptNumber")!;
+        var sourceReview=await CommunicationFinancialReviewStore.ReadAsync(admissionId,family,number);
         using var saved = await DatabaseHelper.QueryUserSetAsync("GetCollectionReceipt", DatabaseHelper.P("@ReceiptNumber", number));
         if (saved.Tables.Count < 3 || saved.Tables[0].Rows.Count != 1)
             throw new CommunicationValidationException("The saved receipt could not be read. Review it in Recent Payments.");
@@ -114,8 +125,15 @@ internal sealed class FeeMessageDocument : IDisposable
         using var lines = source.Tables[2].Copy();
         await FeeCarryForwardLabels.ApplyAsync(lines, number);
         var data = FeeReceiptDocuments.BuildData(institution, source.Tables[0].Rows[0], source.Tables[1], lines);
-        return new(data, admissionId, familyIds, Array.Empty<int>(), family, true,
-            Convert.ToDecimal(source.Tables[0].Rows[0]["CashReceived"]), number);
+        try
+        {
+            var currentSource=await CommunicationFinancialReviewStore.ReadAsync(admissionId,family,number);
+            if(currentSource!=sourceReview)
+                throw new CommunicationValidationException("The receipt changed while preparing its preview. Review it again before sending.");
+            return new(data, admissionId, familyIds, Array.Empty<int>(), family, true,
+                Convert.ToDecimal(source.Tables[0].Rows[0]["CashReceived"]), number,financialReview:sourceReview);
+        }
+        catch { data.Dispose(); throw; }
     }
 
     private async Task<DataTable> PrepareAsync()

@@ -5,6 +5,29 @@ internal static partial class Program
 {
     private static void CheckCommunicationApiWorkflow()
     {
+        var balanceTemplate=new CommunicationMetaTransport.Template("synthetic_balance","en","Balance {{1}}.","","");
+        using(var mapping=new CommunicationMetaTemplateDialog(new[]{balanceTemplate},"FeeReminder",allowStudentFields:false))
+        {
+            mapping.Show();Application.DoEvents();
+            Field<List<ModernComboBox>>(mapping,"mappings")[0].Text="[OutstandingAmount]";
+            ((ModernButton)mapping.Controls.Find("communicationUseMetaTemplate",true).Single()).PerformClick();
+            Check(mapping.Selection?.Fields.SequenceEqual(new[]{"[OutstandingAmount]"})==true,
+                "A family fee Meta template can map its current balance without using one child's personal fields");
+            mapping.Close();
+        }
+        var receiptTemplate=new CommunicationMetaTransport.Template("synthetic_receipt","en","Payment {{1}}, receipt {{2}}.","","");
+        using(var mapping=new CommunicationMetaTemplateDialog(new[]{receiptTemplate},"Individual",allowStudentFields:false,
+            contextFields:new Dictionary<string,string>{["[PaymentAmount]"]="500.00",["[ReceiptNumber]"]="R-42"}))
+        {
+            mapping.Show();Application.DoEvents();
+            var fields=Field<List<ModernComboBox>>(mapping,"mappings");
+            fields[0].Text="[PaymentAmount]";fields[1].Text="[ReceiptNumber]";
+            ((ModernButton)mapping.Controls.Find("communicationUseMetaTemplate",true).Single()).PerformClick();
+            Check(mapping.Selection?.Fields.SequenceEqual(new[]{"500.00","R-42"})==true
+                && !CommunicationPreparedMessages.HasFields(mapping.Selection.Format()),
+                "Receipt Meta fields retain the reviewed transaction values as constants instead of substituting a current fee balance");
+            mapping.Close();
+        }
         var schoolZone=TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time");
         using(var schedule=new CommunicationScheduleDialog(schoolZone))
         {

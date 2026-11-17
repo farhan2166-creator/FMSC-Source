@@ -1106,5 +1106,48 @@ internal static partial class Program
             staleText.Close();
             changeAtHandoff = false;
         }
+        int sourceConfirms=0,sourceDispatches=0;
+        bool rejectSource=true;
+        var financialRequests=new List<Guid>();
+        var financialOperations=operations with {
+            IsReady=_=>Task.FromResult(true),
+            ReadFeeDocument=(id,family,receipt)=>{
+                var rows=new DataTable("Synthetic financial source");rows.Columns.Add("ReceiptNumber");rows.Columns.Add("PaymentDateText");rows.Rows.Add("R-42","");
+                var source=new CommunicationFinancialReview(receipt ? "Receipt" : "Bill",receipt ? "R-42" : "",receipt ? Guid.Parse("00000000-0000-0000-0000-000000000042") : null,id,family,new string(rejectSource ? 'A' : 'B',64));
+                return Task.FromResult(new FeeMessageDocument(rows,id,new[]{id},new[]{id},family,receipt,500m,"R-42",financialReview:source));
+            },
+            ReserveFinancialReview=(request,source)=>{
+                financialRequests.Add(request);
+                if(rejectSource)throw new CommunicationValidationException("Synthetic changed financial source.");
+                Check(source.SourceHash==new string('B',64),"The new financial review retains its own source fingerprint.");
+                return Task.CompletedTask;
+            },
+            Confirm=(_,target,result,body,request,_)=>{
+                Check(target.FinancialReviewRequired && financialRequests.Last()==request,
+                    "Financial document intent and the reserved proof reach the common confirmation with the same request identity.");
+                sourceConfirms++;return Task.FromResult(new CommunicationConfirmation(request,result.Included,false));
+            },
+            Dispatch=(_,_)=>sourceDispatches++
+        };
+        foreach(bool useReceipt in new[]{false,true})
+        foreach(bool reject in new[]{true,false})
+        {
+            rejectSource=reject;
+            int priorSourceConfirms=sourceConfirms,priorSourceDispatches=sourceDispatches;
+            using var financialDialog=new CommunicationRecordMessageDialog(studentId,"Synthetic student",true,financialOperations);
+            financialDialog.Show();Application.DoEvents();
+            var methods=Field<ModernComboBox>(financialDialog,"method");
+            methods.SelectedItem=methods.Items.OfType<CommunicationRecordMessageDialog.Method>().Single(item=>item.Channel=="Sms");
+            Field<ModernComboBox>(financialDialog,"feeContent").SelectedIndex=useReceipt ? 1 : 0;
+            Field<ModernTextBox>(financialDialog,"message").Text=useReceipt ? "Payment [PaymentAmount], receipt [ReceiptNumber]." : "Outstanding [OutstandingAmount].";
+            Field<ModernButton>(financialDialog,"action").PerformClick();Application.DoEvents();
+            Field<ModernButton>(financialDialog,"action").PerformClick();Application.DoEvents();
+            Check(reject ? sourceConfirms==priorSourceConfirms && sourceDispatches==priorSourceDispatches && financialDialog.Visible
+                : sourceConfirms==priorSourceConfirms+1 && sourceDispatches==priorSourceDispatches+1 && !financialDialog.Visible,
+                "A changed source cannot confirm or dispatch; a fresh reviewed bill or receipt can use the existing sending path.");
+            financialDialog.Close();
+        }
+        Check(financialRequests.Count==4 && financialRequests.Distinct().Count()==4,
+            "Re-reviewing a changed financial document creates a new approval reference rather than overwriting the rejected review.");
     }
 }

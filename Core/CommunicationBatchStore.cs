@@ -76,6 +76,10 @@ internal static class CommunicationBatchStore
                 DatabaseHelper.P("@ReviewJson",reviewJson), DatabaseHelper.P("@TemplateJson",templateJson)
             });
         }
+        if(manualWhatsApp || apiProvider is not null)
+            parameters.Add(DatabaseHelper.Bit("@FinancialReviewRequired",target.FinancialReviewRequired));
+        else if(target.FinancialReviewRequired)
+            throw new CommunicationValidationException("Financial document messages require the reviewed sending workflow.");
         int actor = CurrentUser.UserId;
         using DataTable result = await DatabaseHelper.QueryUserAsync(
             manualWhatsApp ? "msg.ConfirmReviewedManualBatch" : apiProvider is not null ? "msg.ConfirmReviewedApiBatch" : "msg.ConfirmBatch", parameters.ToArray());
