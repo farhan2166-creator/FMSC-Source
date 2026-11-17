@@ -42,6 +42,27 @@ public sealed class StudentProfilePage : V2Page
         TextAlign = ContentAlignment.MiddleLeft,
         AutoEllipsis = true
     };
+    private readonly Label fatherLabel = new() {
+        Dock = DockStyle.Top,
+        Height = AppScale.Scale(20),
+        Font = AppTheme.NormalFont,
+        ForeColor = AppTheme.MutedText,
+        TextAlign = ContentAlignment.MiddleLeft,
+        AutoEllipsis = true
+    };
+    private readonly Label admissionDateLabel = FactLabel();
+    private readonly Label admissionCampusLabel = FactLabel();
+    private readonly Label dateOfBirthLabel = FactLabel();
+    private readonly Label genderLabel = FactLabel();
+    private static Label FactLabel() => new() {
+        Dock = DockStyle.Fill,
+        Height = AppScale.Scale(23),
+        Font = AppTheme.NormalFont,
+        ForeColor = AppTheme.MutedText,
+        TextAlign = ContentAlignment.MiddleLeft,
+        AutoEllipsis = true,
+        Margin = Padding.Empty
+    };
     private readonly Label placementLabel = new() {
         Dock = DockStyle.Top,
         Height = AppScale.Scale(20),
@@ -124,85 +145,96 @@ public sealed class StudentProfilePage : V2Page
         UiHelper.SetGridPlaceholderMessage(contextGrid, UiText.EmptyGrid.SelectStudent);
         UiHelper.SetGridPlaceholderMessage(familyGrid, UiText.EmptyGrid.SelectStudent);
         UiHelper.SetGridPlaceholderMessage(timelineGrid, UiText.EmptyGrid.SelectStudent);
-        var selector = HumanUi.Card("Student", "Search by name or admission number.");
+        // A loaded profile is an overview, not three preselected records.
+        // Keep row highlights only when the operator deliberately selects a grid row.
+        foreach (var grid in new[] { familyGrid, contextGrid, timelineGrid })
+            grid.DataBindingComplete += (_, _) => { if (!grid.IsDisposed) grid.ClearSelection(); };
+        var selector = HumanUi.Card("Find Student");
         selector.Content.Controls.Add(HumanUi.Field("Student", student, true));
         var header = BuildHeaderCard();
         var sections = BuildSectionsGrid();
         var footer = BuildQuickActionsFooter();
-        /* The finder and the identity card share one row (finder left, photo and name right), so the vertical space the finder used to take goes to the three sections below. */
-        var topRow = new TableLayoutPanel {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
-            Margin = new Padding(0)
-        };
-        topRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        topRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        topRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        selector.Margin = new Padding(0, 0, AppScale.Scale(4), 0);
-        header.Margin = new Padding(AppScale.Scale(4), 0, 0, 0);
-        topRow.Controls.Add(selector, 0, 0);
-        topRow.Controls.Add(header, 1, 0);
+        // Profile information follows the student selector in reading order.
+        // The related family and placement summaries share one compact row;
+        // full-width history has the remaining space for readable descriptions.
         var root = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
-            Margin = new Padding(0)
+            RowCount = 4,
+            Margin = Padding.Empty
         };
-        root.RowStyles.Add(new RowStyle(
-            SizeType.Absolute,
-            Math.Max(AppMetrics.FieldCardHeight(1),
-                header.Header.Height + header.Padding.Vertical + header.Content.Padding.Vertical +
-                IdentityContentHeight)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1, hasSubtitle: false)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(154)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(
-            SizeType.Absolute,
-            Math.Max(AppScale.Scale(96), 2 * (AppTheme.CompactButtonHeight + UiDesignSystem.Spacing.Sm) + UiDesignSystem.Spacing.Md)));
-        root.Controls.Add(topRow, 0, 0);
-        root.Controls.Add(sections, 0, 1);
-        root.Controls.Add(footer, 0, 2);
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute,
+            Math.Max(AppScale.Scale(94), 2 * (AppTheme.CompactButtonHeight + UiDesignSystem.Spacing.Sm)
+                + UiDesignSystem.Spacing.Md)));
+        selector.Margin = new Padding(0, 0, 0, AppScale.Scale(4));
+        header.Margin = new Padding(0, AppScale.Scale(4), 0, AppScale.Scale(4));
+        root.Controls.Add(selector, 0, 0);
+        root.Controls.Add(header, 0, 1);
+        root.Controls.Add(sections, 0, 2);
+        root.Controls.Add(footer, 0, 3);
         SetContent(root);
         ClearProfile();
     }
-    private int IdentityContentHeight => new[] { nameLabel, placementLabel, contactLabel, balanceLabel }
-        .Sum(label => Math.Max(label.Height, AppMetrics.TextHeight(label.Font) + AppScale.Scale(4)));
     private HumanCard BuildHeaderCard()
     {
-        var card = HumanUi.Card("Identity & Standing", "Current admission details.");
+        var card = HumanUi.Card("Student Overview");
         var layout = new TableLayoutPanel {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
-            Margin = new Padding(0)
+            Margin = Padding.Empty
         };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(96)));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(104)));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 49));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 51));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var photoHost = new Panel {
             Dock = DockStyle.Fill,
             Margin = new Padding(0, 0, UiDesignSystem.Spacing.Md, 0)
         };
         photoHost.Controls.Add(photo);
-        var textHost = new TableLayoutPanel {
+        var identity = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
-            Margin = new Padding(0)
+            RowCount = 5,
+            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Md, 0)
         };
-        textHost.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        foreach (var label in new[] { nameLabel, placementLabel, contactLabel, balanceLabel })
+        identity.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        foreach (var label in new[] { nameLabel, fatherLabel, placementLabel, contactLabel, registrationLabel })
         {
             label.Margin = Padding.Empty;
-            textHost.RowStyles.Add(new RowStyle(SizeType.Absolute,
-                Math.Max(label.Height, AppMetrics.TextHeight(label.Font) + AppScale.Scale(4))));
+            identity.RowStyles.Add(new RowStyle(SizeType.Absolute,
+                Math.Max(label.Height, AppMetrics.TextHeight(label.Font) + AppScale.Scale(2))));
         }
-        /* Identified by Admission Number (the first part of the name line). */
-        textHost.Controls.Add(nameLabel, 0, 0);
-        textHost.Controls.Add(placementLabel, 0, 1);
-        textHost.Controls.Add(contactLabel, 0, 2);
-        textHost.Controls.Add(balanceLabel, 0, 3);
+        identity.Controls.Add(nameLabel, 0, 0);
+        identity.Controls.Add(fatherLabel, 0, 1);
+        identity.Controls.Add(placementLabel, 0, 2);
+        identity.Controls.Add(contactLabel, 0, 3);
+        identity.Controls.Add(registrationLabel, 0, 4);
+        var facts = new TableLayoutPanel {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 3,
+            Margin = Padding.Empty
+        };
+        facts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        facts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        for (int row = 0; row < 3; row++)
+            facts.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / 3));
+        facts.Controls.Add(dateOfBirthLabel, 0, 0);
+        facts.Controls.Add(genderLabel, 1, 0);
+        facts.Controls.Add(admissionDateLabel, 0, 1);
+        facts.Controls.Add(admissionCampusLabel, 1, 1);
+        balanceLabel.Dock = DockStyle.Fill;
+        balanceLabel.Margin = Padding.Empty;
+        facts.Controls.Add(balanceLabel, 0, 2);
+        facts.SetColumnSpan(balanceLabel, 2);
         layout.Controls.Add(photoHost, 0, 0);
-        layout.Controls.Add(textHost, 1, 0);
+        layout.Controls.Add(identity, 1, 0);
+        layout.Controls.Add(facts, 2, 0);
         card.Content.Controls.Add(layout);
         return card;
     }
@@ -212,39 +244,29 @@ public sealed class StudentProfilePage : V2Page
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 2,
-            Margin = new Padding(0)
+            Margin = Padding.Empty
         };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        // TOP LEFT: Family / Siblings
-        var familyCard = HumanUi.Card("Family / Siblings", "Admitted siblings linked to this family.");
+        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
+        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
+        var familyCard = HumanUi.Card("Family / Siblings", "Other children linked to this family.");
         familyCard.Margin = new Padding(0, AppScale.Scale(4), AppScale.Scale(4), AppScale.Scale(4));
-        var familyHost = new Panel {
-            Dock = DockStyle.Fill
-        };
+        var familyHost = new Panel { Dock = DockStyle.Fill };
         familyHost.Controls.Add(familyGrid);
         familyHost.Controls.Add(familyEmptyLabel);
         familyEmptyLabel.BringToFront();
         familyCard.Content.Controls.Add(familyHost);
-        // TOP RIGHT: Lifecycle Timeline
-        var timelineCard = HumanUi.Card("Lifecycle Timeline", "Admission, transfers, promotions and status history.");
-        timelineCard.Margin = new Padding(AppScale.Scale(4), AppScale.Scale(4), 0, AppScale.Scale(4));
-        timelineCard.Content.Controls.Add(timelineGrid);
-        var feeHistoryActions=HumanUi.ButtonRow(feeHistoryButton);
-        feeHistoryActions.Dock=DockStyle.Bottom;
-        timelineCard.Content.Controls.Add(feeHistoryActions);
-        // BOTTOM: Enrollment & Academic Context Full width
-        var contextCard = HumanUi.Card("Academic Placement", "Current campus, class, section and status.");
-        contextCard.Margin = new Padding(0, AppScale.Scale(4), 0, 0);
+        var contextCard = HumanUi.Card("Academic Placement", "Academic year, campus, class and status.");
+        contextCard.Margin = new Padding(AppScale.Scale(4), AppScale.Scale(4), 0, AppScale.Scale(4));
         contextCard.Content.Controls.Add(contextGrid);
-        // Layout
+        var timelineCard = HumanUi.Card("Student History", "Enrollment, certificates and status changes.");
+        timelineCard.Margin = new Padding(0, AppScale.Scale(4), 0, 0);
+        timelineCard.Content.Controls.Add(timelineGrid);
         grid.Controls.Add(familyCard, 0, 0);
-        grid.Controls.Add(timelineCard, 1, 0);
-        grid.Controls.Add(contextCard, 0, 1);
-        // Make Enrollment & Academic Context span both columns.
-        grid.SetColumnSpan(contextCard, 2);
+        grid.Controls.Add(contextCard, 1, 0);
+        grid.Controls.Add(timelineCard, 0, 1);
+        grid.SetColumnSpan(timelineCard, 2);
         return grid;
     }
     /* The six jump buttons were one long strip that scrolled sideways on a narrow window. */
@@ -293,6 +315,7 @@ public sealed class StudentProfilePage : V2Page
                 "Open " + PageTitles.AnnualFeeReceipts,
                 id => new FMSC_SMS.Pages.Reports.Finance.AnnualFeeReceiptsPage(id),
                 module: "Finance", permissions: new[] { "Fees.Statement.View" }));
+        lifecycleRow.Controls.Add(feeHistoryButton);
         feeHistoryButton.Height=AppTheme.CompactButtonHeight;
         feeHistoryButton.Margin=new Padding(0,0,UiDesignSystem.Spacing.Sm,0);
         AppMetrics.FitButtonWidth(feeHistoryButton,minWidth:150);
@@ -307,7 +330,7 @@ public sealed class StudentProfilePage : V2Page
         };
         table.Controls.Add(GroupLabel("Student record"), 0, 0);
         table.Controls.Add(recordRow, 1, 0);
-        table.Controls.Add(GroupLabel("Lifecycle & fees"), 0, 1);
+        table.Controls.Add(GroupLabel("History & fees"), 0, 1);
         table.Controls.Add(lifecycleRow, 1, 1);
         return table;
     }
@@ -431,6 +454,11 @@ public sealed class StudentProfilePage : V2Page
         if (row is null)
         {
             nameLabel.Text = "Student not found.";
+            fatherLabel.Text = string.Empty;
+            admissionDateLabel.Text = string.Empty;
+            dateOfBirthLabel.Text = string.Empty;
+            genderLabel.Text = string.Empty;
+            admissionCampusLabel.Text = string.Empty;
             placementLabel.Text = string.Empty;
             registrationLabel.Text = string.Empty;
             contactLabel.Text = string.Empty;
@@ -443,10 +471,12 @@ public sealed class StudentProfilePage : V2Page
         string status = CellText(row, "Status");
         string registration = CellText(row, "RegistrationNumber");
         string contact = CellText(row, "ContactNumber");
-        nameLabel.Text =
-            string.IsNullOrWhiteSpace(father)
-                ? $"{AdmissionNumbers.ForId(admissionId)} - {name}"
-                : $"{AdmissionNumbers.ForId(admissionId)} - {name} (Father: {father})";
+        nameLabel.Text = $"{AdmissionNumbers.ForId(admissionId)} - {name}";
+        fatherLabel.Text = string.IsNullOrWhiteSpace(father) ? "" : $"Father: {father}";
+        admissionDateLabel.Text = "Admitted: " + FactDate(row, "AdmissionDate");
+        dateOfBirthLabel.Text = "Born: " + FactDate(row, "DateOfBirth");
+        genderLabel.Text = "Gender: " + FactText(row, "Gender");
+        admissionCampusLabel.Text = "Admission campus: " + FactText(row, "AdmissionCampusName");
         string placement =
             string.IsNullOrWhiteSpace(className)
                 ? "Not currently enrolled"
@@ -456,7 +486,7 @@ public sealed class StudentProfilePage : V2Page
         placementLabel.Text =
             string.IsNullOrWhiteSpace(status)
                 ? placement
-                : $"{placement} - {status}";
+                : $"{placement} · {status}";
         registrationLabel.Text =
             string.IsNullOrWhiteSpace(registration)
                 ? string.Empty
@@ -541,7 +571,21 @@ public sealed class StudentProfilePage : V2Page
             }
         foreach (DataGridViewColumn column in familyGrid.Columns)
             column.Visible = visible.Contains(column.DataPropertyName);
-        familyGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+        familyGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+        foreach (DataGridViewColumn column in familyGrid.Columns)
+        {
+            column.MinimumWidth = AppScale.Scale(55);
+            column.FillWeight = column.DataPropertyName switch
+            {
+                "AdmissionNumber" => 15,
+                "StudentName" => 25,
+                "ClassSection" => 20,
+                "CampusName" => 22,
+                "Status" => 18,
+                _ => 15
+            };
+        }
+        familyGrid.ClearSelection();
     }
     private static async Task<(bool Available, decimal Amount, Exception? Error)> ReadBalanceAsync(int admissionId, CancellationToken token)
     {
@@ -575,8 +619,7 @@ public sealed class StudentProfilePage : V2Page
     private static readonly string[] ContextColumns =
     {
         "AcademicYearName", "YearName", "CurrentCampusName", "ClassSection",
-        "EnrollmentStatus", "EnrollmentDate", "TransportText",
-        "AdmissionDate", "AdmissionCampusName", "DateOfBirth", "Gender"
+        "EnrollmentStatus", "EnrollmentDate", "TransportText"
     };
     private void BindContextGrid(DataTable table)
     {
@@ -605,6 +648,22 @@ public sealed class StudentProfilePage : V2Page
         SetHeader("TransportText", "Transport");
         SetHeader("ClassSection", "Class");
         SetHeader("YearName", "Academic Year");
+        contextGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+        foreach (DataGridViewColumn column in contextGrid.Columns)
+        {
+            column.MinimumWidth = AppScale.Scale(55);
+            column.FillWeight = column.DataPropertyName switch
+            {
+                "AcademicYearName" or "YearName" => 23,
+                "CurrentCampusName" => 24,
+                "ClassSection" => 20,
+                "EnrollmentStatus" => 16,
+                "EnrollmentDate" => 21,
+                "TransportText" => 12,
+                _ => 15
+            };
+        }
+        contextGrid.ClearSelection();
     }
     private static string PlacementText(DataRow row)
     {
@@ -628,7 +687,7 @@ public sealed class StudentProfilePage : V2Page
     }
     private void ConfigureTimelineGrid()
     {
-        timelineGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+        timelineGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
         timelineGrid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
         timelineGrid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
         timelineGrid.DefaultCellStyle.Alignment = DataGridViewContentAlignment.TopLeft;
@@ -645,6 +704,17 @@ public sealed class StudentProfilePage : V2Page
                 _ => 30
             };
         }
+        timelineGrid.ClearSelection();
+    }
+    private static string FactText(DataRow row, string name)
+    {
+        var text = CellText(row, name);
+        return string.IsNullOrWhiteSpace(text) ? "—" : text;
+    }
+    private static string FactDate(DataRow row, string name)
+    {
+        if (!row.Table.Columns.Contains(name) || row[name] is DBNull) return "—";
+        return row[name] is DateTime date ? date.ToString("dd-MMM-yyyy") : FactText(row, name);
     }
     private static string CellText(
         DataRow row,
@@ -660,6 +730,11 @@ public sealed class StudentProfilePage : V2Page
         profileReads.Cancel();
         nameLabel.Text =
             "Select a student to see their full profile.";
+        fatherLabel.Text = string.Empty;
+        admissionDateLabel.Text = string.Empty;
+        admissionCampusLabel.Text = string.Empty;
+        dateOfBirthLabel.Text = string.Empty;
+        genderLabel.Text = string.Empty;
         placementLabel.Text = string.Empty;
         registrationLabel.Text = string.Empty;
         contactLabel.Text = string.Empty;
