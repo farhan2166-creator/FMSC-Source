@@ -138,6 +138,13 @@ internal static class ReportUi
         => BuildLayout(filters, grid, resultTitle, true, actionButtons);
     public static Control CompactLayout(Control filters, DataGridView grid, string resultTitle, Action filtersCleared, params Control[] actionButtons)
         => BuildLayout(filters, grid, resultTitle, true, actionButtons, filtersCleared);
+    // Keeps dense register filters on one compact band; only Run/Reset belong beneath filters.
+    // Print, Export and Columns are actions on the results, not additional filter controls.
+    internal static Control CompactRegisterLayout(Control filters, DataGridView grid, Action filtersCleared,
+        Control run, params Control[] resultActions)
+        => BuildLayout(filters, grid, "Certificate records", true, new[] { run }, filtersCleared,
+            filterTitle: "Filters", filterGuidance: "", resultGuidance: "",
+            resultActions: resultActions, showHeaderClear: false);
     internal static Control WorkflowLayout(Control filters, DataGridView grid, string filterTitle, string filterGuidance,
         string resultTitle, string resultGuidance, params Control[] actionButtons)
         => BuildLayout(filters, grid, resultTitle, true, actionButtons, filterTitle: filterTitle,
@@ -174,7 +181,8 @@ internal static class ReportUi
     }
     private static Control BuildLayout(Control filters, DataGridView grid, string resultTitle, bool compact, Control[] actionButtons, Action? filtersCleared = null,
         string filterTitle = "Report Filters", string filterGuidance = "Choose the scope below, then run the report. All and unchecked optional dates include every value.",
-        string resultGuidance = "Review the generated report below.", bool includeReset = true)
+        string resultGuidance = "Review the generated report below.", bool includeReset = true,
+        Control[]? resultActions = null, bool showHeaderClear = true)
     {
         var clear = new ModernButton {
             Text = "Clear Filters",
@@ -203,7 +211,7 @@ internal static class ReportUi
             BackColor = Color.Transparent
         };
         accessory.Controls.Add(active);
-        accessory.Controls.Add(clear);
+        if (showHeaderClear) accessory.Controls.Add(clear);
         var filterCard = HumanUi.Card(filterTitle, filterGuidance, accessory: accessory);
         filterCard.Content.Controls.Add(filters);
         /* each date picker's value as the page built it. Captured here, at construction, because this is the one moment those defaults are on screen. */
@@ -330,7 +338,21 @@ internal static class ReportUi
             else filterCard.Content.Controls.Add(buttonRow);
             buttonRowHeight = AppMetrics.ButtonRowHeight;
         }
-        var resultCard = HumanUi.Card(resultTitle, resultGuidance);
+        FlowLayoutPanel? resultTools = null;
+        if (resultActions is { Length: > 0 })
+        {
+            resultTools = new FlowLayoutPanel {
+                AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight, WrapContents = false,
+                Margin = Padding.Empty, Padding = Padding.Empty
+            };
+            foreach (Control action in resultActions)
+            {
+                action.Margin = new Padding(UiDesignSystem.Spacing.Xs, 0, UiDesignSystem.Spacing.Xs, 0);
+                resultTools.Controls.Add(action);
+            }
+        }
+        var resultCard = HumanUi.Card(resultTitle, resultGuidance, accessory: resultTools);
         resultCard.Content.Controls.Add(grid);
         var root = new TableLayoutPanel {
             Dock = DockStyle.Fill,
