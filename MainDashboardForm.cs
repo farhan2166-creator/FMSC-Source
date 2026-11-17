@@ -763,19 +763,13 @@ public sealed class MainDashboardForm : ApplicationWindowForm
                 "Staff Management",
                 "Staff.View"),
             Section("CERTIFICATES"),
-            // BUSINESS RULE: staff certificates belong with staff work. Do not duplicate
-            // this route in the student Certificates Center.
+            // Staff certificate types share one workspace and one selected staff
+            // member; their existing editors continue to own writes and printing.
             new(
-                "Teacher Certificate",
-                () => new RegularLecturerCertificatePage(),
+                "Teacher / Staff Certificates",
+                () => new StaffCertificatesWorkspacePage(),
                 "Staff",
-                "Regular Lecturer/Teacher Certificate",
-                "Certificates.Create"),
-            new(
-                "Bank Account Certificate",
-                () => new BankAccountOpeningCertificatePage(),
-                "Staff",
-                "Bank Account Opening Certificate",
+                "Teacher / Staff Certificates",
                 "Certificates.Create")
             });
         // Reports opens a single hub, like Certificates Center.
