@@ -66,13 +66,12 @@ internal static partial class Program
                 if(System.Text.RegularExpressions.Regex.Match(boxName,@"^Value\d+_(\d+)$") is {Success:true} match)
                 {
                     var column=columns[int.Parse(match.Groups[1].Value)];
-                    if(column.Numeric&&(layout is not null||ManagementReportPrintLayout.Applies(title)))Check(Align(box)=="Right","Financial register amounts align by their final digit");
-                    else if(column.Numeric || column.Caption.StartsWith("Receipt") || column.Caption.StartsWith("Adm.") || column.Caption.StartsWith("Oldest Due"))
+                    if(column.Numeric || column.Caption.StartsWith("Receipt") || column.Caption.StartsWith("Adm.") || column.Caption.StartsWith("Oldest Due"))
                         Check(Align(box)=="Center","Amounts, counts, references and due dates have centered data");
                     if(column.Caption.StartsWith("Student"))Check(Align(box)=="Left","Student names remain readable and left aligned");
                 }
                 if(boxName.StartsWith("ReceiptTotal") && box.Descendants(ns+"Value").First().Value.StartsWith("=Format(Sum("))
-                    Check(Align(box)=="Right","Receipt subtotals and grand totals align with their amount columns");
+                    Check(Align(box)=="Center","Receipt subtotals and grand totals center monetary values like their detail columns");
             }
             Check(definition.Descendants(ns+"FontSize").Any(element=>element.Value=="9pt"),"Table text remains readable");
             Check(definition.Descendants(ns+"PageHeader").Any() && definition.Descendants(ns+"PageFooter").Any(),
