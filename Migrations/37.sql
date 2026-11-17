@@ -144,6 +144,48 @@ AS BEGIN
  SELECT @NewSuggestions NewSuggestions;
  COMMIT;
 END');
+ -- Search and page permission-scoped history before applying row limits.
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadHistory @UserId int,@Limit int=100,@Search nvarchar(120)=NULL,@Offset int=0
+AS
+BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.View'';
+ IF @Limit IS NULL OR @Limit<1 OR @Limit>200 OR @Offset IS NULL OR @Offset<0 OR @Offset>1000000
+   THROW 51087,''History page or offset is outside safe limits.'',1;
+ SELECT B.BatchId,B.Channel,B.Purpose,B.State,B.CreatedUtc,B.ConfirmedUtc,B.CreatedBy,B.Audience,
+  COALESCE(U.Username,CONVERT(nvarchar(30),B.CreatedBy)) OperatorName,COUNT(R.RecipientId) Destinations,
+  SUM(CASE WHEN M.BatchId IS NULL AND R.State=''Delivered'' THEN 1 ELSE 0 END) Delivered,
+  SUM(CASE WHEN M.BatchId IS NULL AND R.State=''Failed'' THEN 1 ELSE 0 END) Failed,
+  SUM(CASE WHEN M.BatchId IS NULL AND R.State=''Unknown'' THEN 1 ELSE 0 END) Unknown,
+  SUM(CASE WHEN M.BatchId IS NULL AND R.State IN (''Submitted'',''Accepted'') THEN 1 ELSE 0 END) Accepted,
+  SUM(CASE WHEN M.BatchId IS NULL AND R.State IN (''Pending'',''Submitted'',''Unknown'')
+      OR M.BatchId IS NOT NULL AND H.State IN (''Pending'',''Opened'') THEN 1 ELSE 0 END) InProgress,
+  CASE WHEN M.BatchId IS NOT NULL THEN ''WhatsApp Business (manual)'' ELSE COALESCE(A.ProviderCode,''Direct provider'') END Method,
+  SUM(CASE WHEN H.State=''ReportedSent'' THEN 1 ELSE 0 END) ManualReported,
+  SUM(CASE WHEN H.State=''Opened'' THEN 1 ELSE 0 END) ManualOpened,
+  SUM(CASE WHEN H.State IN (''Skipped'',''Excluded'') THEN 1 ELSE 0 END) ManualSkipped
+ FROM msg.Batch B LEFT JOIN dbo.Users U ON U.UserId=B.CreatedBy
+ LEFT JOIN msg.Recipient R ON R.BatchId=B.BatchId
+ LEFT JOIN msg.ManualBatch M ON M.BatchId=B.BatchId
+ LEFT JOIN msg.ManualHandoff H ON H.RecipientId=R.RecipientId
+ LEFT JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
+ WHERE EXISTS(SELECT 1 FROM msg.CanViewAudience(@UserId,B.Audience))
+ AND (@Search IS NULL OR LTRIM(RTRIM(@Search))=N''''
+ OR CHARINDEX(@Search,CONCAT(B.Channel,N'' '',B.Purpose,N'' '',B.Audience,N'' '',B.State,
+          N'' '',COALESCE(U.Username,N''''),N'' '',COALESCE(A.ProviderCode,N''''),
+          N'' '',CONVERT(nvarchar(23),B.CreatedUtc,120)))>0
+ OR EXISTS(SELECT 1 FROM msg.Recipient SearchRecipient
+ LEFT JOIN dbo.Students SearchStudent ON SearchStudent.AdmissionId=SearchRecipient.AdmissionId
+ LEFT JOIN dbo.Staff SearchStaff ON SearchStaff.StaffId=SearchRecipient.StaffId
+ WHERE SearchRecipient.BatchId=B.BatchId
+ AND CHARINDEX(@Search,CONCAT(COALESCE(SearchStudent.StudentName,SearchStaff.StaffName,N''''),N'' '',
+     COALESCE(SearchStudent.AdmissionNumber,SearchStaff.StaffNumber,N''''),N'' '',
+     COALESCE(SearchStudent.FatherName,SearchStaff.FatherName,N''''),N'' '',
+     COALESCE(SearchStudent.GuardianName,N'''')))>0))
+ GROUP BY B.BatchId,B.Channel,B.Purpose,B.State,B.CreatedUtc,B.ConfirmedUtc,B.CreatedBy,B.Audience,U.Username,M.BatchId,A.ProviderCode
+ ORDER BY B.CreatedUtc DESC,B.BatchId DESC
+ OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+END');
  INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
  VALUES(N'37',SYSDATETIME(),SUSER_SNAME(),N'Communication archived-event starvation guard');
  COMMIT;
