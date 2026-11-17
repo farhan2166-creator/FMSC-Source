@@ -53,8 +53,12 @@ internal static partial class Program
         use.Checked=true; grid.Rows.Clear(); credit.Clear();
         Bill(16,6594,300); Bill(17,6589,400); credit[6594]=400; credit[6589]=100;
         Allocate(300);
+        type.GetMethod("UpdateCollectionTotals", flags)!.Invoke(page,null);
         Check(Cash(0)==0 && Cash(1)==300 && Plan()[17]==100m && Payable()==300m,
             "Selecting a sibling applies only their own 100 advance before cash allocation");
+        Check(use.Text=="Use advances" &&
+              ((Label)Field("advanceScopeHint")).Text.Contains("selected student",StringComparison.OrdinalIgnoreCase),
+            "Included siblings switch the advance checkbox and explanation to family scope");
         grid.Rows.Clear(); credit.Clear();
         Bill(1,6594,400); Bill(2,6594,2500); Bill(3,6589,400);
         credit[6594]=8750; credit[6589]=100;
@@ -145,8 +149,8 @@ internal static partial class Program
         grid.Rows.Clear();
         type.GetMethod("RefreshEnteredPaymentAllocation",flags)!.Invoke(page,null);
         Check(Plan().Count==0 && ((Label)Field("availableCredit")).Text=="0" &&
-              ((Label)Field("remainingCredit")).Text=="5,000",
-            "Deselecting a sibling removes their own credit from the active payment, without touching their ledger");
+              ((Label)Field("remainingCredit")).Text=="5,000" && use.Text=="Use advance",
+            "Deselecting a sibling removes their own credit and restores single-student wording without touching the ledger");
         received.Text="0";grid.Rows.Clear();credit.Clear();Bill(4,6594,8700);credit[6594]=8750;RefreshTotals();
         Check(((Label)Field("availableCredit")).Font.Bold && ((Label)Field("availableCredit")).ForeColor==Color.ForestGreen,
             "Available credit is bold green");
