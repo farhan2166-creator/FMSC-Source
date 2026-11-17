@@ -44,6 +44,9 @@ internal static partial class Program
             Check(ReleaseReportControls(resultCard.Header).Contains(export) &&
                   ReleaseReportControls(resultCard.Header).Contains(columns),
                 "Certificate print, export and column actions share the results heading");
+            Check(print.Parent is FlowLayoutPanel resultsToolbar &&
+                  resultCard.Header.Controls.GetChildIndex(resultsToolbar)==resultCard.Header.Controls.Count-1,
+                "Certificate result tools dock before the title so the header does not clip actions");
             Check(!monthly.IsHandleCreated && !certificates.IsHandleCreated,"Constructing report controls performs no database initialization");
             CurrentUser.SignIn(3,"General certificates","Viewer",false,new[]{"Reports.View","Certificates.Create"});
             using var general=new CertificateIssueRegisterPage();
