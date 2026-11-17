@@ -353,6 +353,13 @@ internal static class ReportUi
             }
         }
         var resultCard = HumanUi.Card(resultTitle, resultGuidance, accessory: resultTools);
+        if (resultTools is not null)
+        {
+            // WinForms docks in reverse z-order. Let the right-hand buttons claim the
+            // full header height before the top-docked title consumes any space.
+            // This is the same header accessory ordering used by other FMSC pages.
+            resultCard.Header.Controls.SetChildIndex(resultTools, resultCard.Header.Controls.Count - 1);
+        }
         resultCard.Content.Controls.Add(grid);
         var root = new TableLayoutPanel {
             Dock = DockStyle.Fill,
