@@ -403,19 +403,27 @@ public sealed class StaffCertificatesWorkspacePage : V2Page, IBusyPage, IUnsaved
                 TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true,
                 ForeColor = AppTheme.HeadingText, Font = AppTheme.NormalFont
             };
-            var footer = new Panel { Dock = DockStyle.Bottom, Height = AppScale.Scale(95) };
+            var footer = new TableLayoutPanel
+            {
+                Dock = DockStyle.Bottom, Height = AppScale.Scale(66),
+                ColumnCount = 2, RowCount = 1,
+                Margin = Padding.Empty, Padding = Padding.Empty
+            };
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(205)));
+            footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             var back = new ModernButton
             {
-                Text = "Back to Certificates", Dock = DockStyle.Right,
-                Width = AppScale.Scale(190), Height = AppMetrics.ButtonHeight
+                Text = "Back to Certificates", Dock = DockStyle.Fill,
+                Margin = new Padding(AppMetrics.SpacingSm), Height = AppMetrics.ButtonHeight
             };
             back.Click += (_, _) => CloseEditor(saved: false);
-            footer.Controls.Add(back);
             Label feedback = bridge.Feedback;
             feedback.Parent?.Controls.Remove(feedback);
             feedback.Dock = DockStyle.Fill;
             feedback.AutoEllipsis = true;
-            footer.Controls.Add(feedback);
+            footer.Controls.Add(feedback, 0, 0);
+            footer.Controls.Add(back, 1, 0);
             host.Controls.Add(card);
             host.Controls.Add(footer);
             host.Controls.Add(header);
