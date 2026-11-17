@@ -1,0 +1,9 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "BatchRecoveryBlocked",
+      "type": "FN"
+    }
+  ]
+}

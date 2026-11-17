@@ -8,7 +8,8 @@ namespace FMSC_SMS.Core;
 /// Opening a link is never submission or proof of delivery.
 /// </summary>
 internal sealed record CommunicationManualRecipient(
-    long RecipientId, string RecordName, string LastFour, string State, bool ShellHandoffRecorded = false);
+    long RecipientId, string RecordName, string LastFour, string State, bool ShellHandoffRecorded = false,
+    bool RecoveryBlocked = false, string? RetainedBody = null);
 
 internal sealed record CommunicationManualOpen(
     bool Allowed, Uri? Link, string? ExclusionCode, string? Message = null, int OpenCount = 0);
@@ -32,7 +33,8 @@ internal static class CommunicationManualHandoffStore
             Convert.ToString(row["RecipientName"])??"School record",
             Convert.ToString(row["PhoneLast4"])??"",
             Convert.ToString(row["State"])??"Pending",
-            !row.IsNull("ShellHandoffUtc"))).ToArray();
+            !row.IsNull("ShellHandoffUtc"), Convert.ToBoolean(row["RecoveryBlocked"]),
+            row.IsNull("RetainedBody") ? null : Convert.ToString(row["RetainedBody"]))).ToArray();
     }
 
     /// <summary>Server marks Opened before any external shell launch.</summary>

@@ -162,6 +162,7 @@ internal static partial class Program
             CheckCommunicationAsyncAndCancellation();
             CheckCommunicationSessionsAndOptions();
             CheckManualLaunchAndReporting();
+            CheckCommunicationRecoveryHolds();
             CheckCommunicationApiWorkflow();
             CheckOptionalCommunicationEntries();
             CheckRecordMessageDialog();
@@ -611,6 +612,48 @@ internal static partial class Program
         templates.Close();
         CurrentUser.SignIn(7201, "Synthetic sender", "Messaging fixture", false,
             new[] { "Communication.Send", "Students.View", "Fees.View" });
+    }
+
+    private static void CheckCommunicationRecoveryHolds()
+    {
+        int opens=0, previews=0, ordinaryReports=0,recoveredReports=0;
+        bool verified=false;
+        string state="Pending";
+        var operations=new CommunicationManualHandoff.Operations(
+            _=>Task.FromResult<IReadOnlyList<CommunicationManualRecipient>>(new[]{
+                new CommunicationManualRecipient(9001,"Synthetic recovery child","4567",state,
+                    ShellHandoffRecorded:state=="Opened",RecoveryBlocked:true,RetainedBody:"Retained historical message & اطلاع")}),
+            (_,_)=>{previews++;return Task.FromResult("Today's recalculated balance");},
+            _=>{opens++;throw new Exception("A restored approval cannot open WhatsApp");},
+            (_,_)=>{ordinaryReports++;return Task.CompletedTask;},
+            _=>throw new Exception("No external launch in synthetic recovery"),
+            _=>{},ConfirmRecoveredSend:()=>verified,
+            MarkRecovered:_=>{recoveredReports++;state="ReportedSent";return Task.CompletedTask;});
+        using(var pending=new CommunicationManualHandoffDialog(Guid.NewGuid(),operations,openFirstChat:true))
+        {
+            pending.Show();Application.DoEvents();
+            Check(!Field<ModernButton>(pending.Handoff,"open").Enabled &&
+                !Field<ModernButton>(pending.Handoff,"reported").Enabled && opens==0 && previews==0,
+                "A restored Pending manual batch cannot auto-open, request a live preview or offer a sent claim.");
+            ((Task)pending.Handoff.GetType().GetMethod("OpenAsync",BindingFlags.Instance|BindingFlags.NonPublic)!
+                .Invoke(pending.Handoff,null)!).GetAwaiter().GetResult();
+            Check(opens==0,"Direct manual handler invocation also preserves the restore hold.");
+            pending.Close();
+        }
+        state="Opened";
+        using(var opened=new CommunicationManualHandoffDialog(Guid.NewGuid(),operations))
+        {
+            opened.Show();Application.DoEvents();
+            Check(!Field<ModernButton>(opened.Handoff,"open").Enabled &&
+                Field<ModernTextBox>(opened.Handoff,"preparedMessage").Text=="Retained historical message & اطلاع" && previews==0,
+                "Restored Opened handoff displays only retained evidence and cannot reopen a chat.");
+            var report=Field<ModernButton>(opened.Handoff,"reported");
+            report.PerformClick();Application.DoEvents();
+            Check(recoveredReports==0 && ordinaryReports==0,"Declining a recovery verification records no send, even with old shell evidence.");
+            verified=true;report.PerformClick();Application.DoEvents();
+            Check(recoveredReports==1 && ordinaryReports==0 && opens==0,"A checked earlier send uses only explicit recovery reporting and never opens the next restored chat.");
+            opened.Close();
+        }
     }
 
     private static void CheckManualLaunchAndReporting()

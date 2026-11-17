@@ -64,8 +64,9 @@ Provide backward-compatible migrations and strict rollback/compatibility checks.
   scheduled announcements initially expire after 24 hours where applicable.
 - Queue views: Needs Attention / Upcoming / All Active; completed entries in History.
   Detailed per-batch recipients and outcomes behind expandable details.
-- Administrator-only persistent Pause All. A pause does not retract an already
-  submitted or in-flight message. No auto retry of unknown-outcome attempts. Safe
+- Administrator-only persistent Pause All applies to API and automatic sending;
+  manual WhatsApp remains available by owner decision. A pause does not retract an
+  already submitted or in-flight message. No auto retry of unknown-outcome attempts. Safe
   retry only of provably unsent / provider-confirmed retry-safe attempts.
 - Detect outages and catch up: confirmations only for valid events missed since
   activation; recalculate current unpaid balances; do not flood overdue reminders;

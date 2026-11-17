@@ -86,6 +86,9 @@ internal static class CommunicationWorkerClaimSqlChecks
         r.Check(Convert.ToBoolean(interactiveClaim.Rows[0]["Claimed"]) && Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE AttemptId=@Id AND ClaimedBy=@User AND ClaimKind='Interactive' AND WorkerEnrollmentId IS NULL",
             Sql.P("@Id",interactiveClaim.Rows[0]["AttemptId"]),Sql.P("@User",secondary))==1,
             "Interactive history records the actual authorized operator rather than copying the batch approver.");
+        using(var sessions=Sql.Proc("msg.ReadMyUnfinishedBatches",Sql.P("@UserId",secondary)))
+            r.Check(sessions.AsEnumerable().Any(row=>(Guid)row["BatchId"]==(Guid)Sql.Scalar("SELECT BatchId FROM msg.Recipient WHERE RecipientId=@Id",Sql.P("@Id",interactive))!),
+                "An administrator through secondary role membership can discover the reviewed batch they are authorized to manage.");
         Sql.Query("DELETE UR FROM dbo.UserRoles UR JOIN dbo.Roles R ON R.RoleId=UR.RoleId WHERE UR.UserId=@User AND R.RoleName=N'Administrator'",Sql.P("@User",secondary));
         await r.Refused("Revoked secondary administrator authority cannot keep an enrolled processor alive",()=>{
             Sql.Proc("msg.VerifyBackgroundWorker",Sql.P("@UserId",secondary),Sql.P("@EnrollmentId",secondaryEnrollment),

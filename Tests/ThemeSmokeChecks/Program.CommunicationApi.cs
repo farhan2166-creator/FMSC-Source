@@ -95,6 +95,38 @@ internal static partial class Program
             rows.Rows.Add("Synthetic second","+923011234567","Pending","Sms","Twilio",DBNull.Value,"Hello Synthetic second",2L,DBNull.Value);
             return rows;
         }
+        int blockedSends=0;
+        DataTable RecoveryRows()
+        {
+            var rows=Read();rows.Columns.Add("RecoveryBlocked",typeof(bool));
+            rows.Columns.Add("HoldForReview",typeof(bool));
+            foreach(DataRow row in rows.Rows){row["RecoveryBlocked"]=true;row["HoldForReview"]=true;}
+            return rows;
+        }
+        var blockedOperations=new CommunicationApiDispatchDialog.Operations(_=>Task.FromResult(RecoveryRows()),
+            (_,_,_)=>{blockedSends++;throw new Exception("No restored provider request");},
+            (_,_)=>throw new Exception("No automatic reconciliation"),(_,_)=>throw new Exception("No recovery retry"));
+        using(var restored=new CommunicationApiDispatchDialog(Guid.NewGuid(),startConfirmed:true,operations:blockedOperations))
+        {
+            restored.Show();PumpUntil(()=>Field<DataGridView>(restored,"grid").DataSource is DataTable && !Field<bool>(restored,"busy"),"Read restored API hold");
+            Check(blockedSends==0 && !Field<ModernButton>(restored,"send").Enabled &&
+                !Field<ModernButton>(restored,"releaseHold").Enabled && Field<ModernButton>(restored,"cancelPending").Enabled,
+                "Restored approvals cannot auto-send or resume; cancellation of unsent recipients remains available.");
+            restored.Close();
+        }
+        var schoolDue=new DateTime(2035,2,3,17,45,0);
+        using(var scheduled=new CommunicationApiDispatchDialog(Guid.NewGuid(),operations:blockedOperations with {Read=_=>{
+            var rows=Read();rows.Columns.Add("DueUtc",typeof(DateTime));rows.Columns.Add("DueSchool",typeof(DateTime));rows.Columns.Add("SchoolTimeZone");
+            foreach(DataRow row in rows.Rows){row["DueUtc"]=new DateTime(2035,2,3,12,45,0);row["DueSchool"]=schoolDue;row["SchoolTimeZone"]="Pakistan Standard Time";}
+            return Task.FromResult(rows);
+        }}))
+        {
+            scheduled.Show();PumpUntil(()=>Field<DataGridView>(scheduled,"grid").DataSource is DataTable && !Field<bool>(scheduled,"busy"),"Read school-time schedule");
+            Check(Field<Label>(scheduled,"status").Text.Contains(schoolDue.ToString("dd MMM yyyy h:mm tt")) &&
+                !Field<ModernButton>(scheduled,"send").Enabled && blockedSends==0,
+                "A future API schedule displays the authoritative school time and cannot send early.");
+            scheduled.Close();
+        }
         var completion=new TaskCompletionSource<CommunicationDispatchStore.DispatchResult>();
         var operations=new CommunicationApiDispatchDialog.Operations(_=>Task.FromResult(Read()),(_,_,token)=>{
             sends++;
