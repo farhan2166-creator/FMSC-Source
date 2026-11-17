@@ -33,9 +33,8 @@ internal static class StudentPickerMatchBuilder
         int highlight = -1;
         if (term.Length > 0)
         {
-            string number = AdmissionNumbers.TryNormalize(term, out string normalized) ? normalized : term;
             var exact = entries.Select((entry, index) => (entry, index)).Where(item =>
-                (item.entry.Cells.Length > 0 && string.Equals(item.entry.Cells[0], number, StringComparison.OrdinalIgnoreCase)) ||
+                (item.entry.Cells.Length > 0 && StudentSearchMatcher.IsExactReference(item.entry.Cells[0], term)) ||
                 (item.entry.Cells.Length > 6 && string.Equals(item.entry.Cells[6], term, StringComparison.OrdinalIgnoreCase))).ToList();
             if (exact.Count == 1) highlight = exact[0].index;
         }
