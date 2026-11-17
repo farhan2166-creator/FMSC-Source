@@ -35,12 +35,14 @@ internal static partial class Program
             var certificateCards=ReleaseReportControls(certificates).OfType<HumanCard>().ToArray();
             var filterCard=certificateCards.Single(card=>ReleaseReportControls(card.Content).Contains(type));
             var resultCard=certificateCards.Single(card=>ReleaseReportControls(card.Header).Contains(print));
-            Check(!ReleaseReportControls(filterCard).Contains(print)
-                  && ReleaseReportControls(filterCard).OfType<ModernButton>().Any(button=>button.Text=="Run Report")
-                  && ReleaseReportControls(filterCard).OfType<ModernButton>().Any(button=>button.Text=="Reset Filters"),
-                "Certificate filtering keeps its own compact run/reset actions");
-            Check(ReleaseReportControls(resultCard.Header).OfType<ModernButton>().Any(button=>button.Text=="Export")
-                  && ReleaseReportControls(resultCard.Header).OfType<ModernButton>().Any(button=>button.Text=="Columns"),
+            var export=(ModernButton)typeof(CertificateIssueRegisterPage).GetField("export",flags)!.GetValue(certificates)!;
+            var columns=(ModernButton)typeof(CertificateIssueRegisterPage).GetField("columns",flags)!.GetValue(certificates)!;
+            var filterButtons=ReleaseReportControls(filterCard).OfType<ModernButton>().ToArray();
+            Check(filterButtons.Length==2 && !filterButtons.Contains(print) &&
+                  !filterButtons.Contains(export) && !filterButtons.Contains(columns),
+                "Certificate filtering keeps separate compact run/reset actions");
+            Check(ReleaseReportControls(resultCard.Header).Contains(export) &&
+                  ReleaseReportControls(resultCard.Header).Contains(columns),
                 "Certificate print, export and column actions share the results heading");
             Check(!monthly.IsHandleCreated && !certificates.IsHandleCreated,"Constructing report controls performs no database initialization");
             CurrentUser.SignIn(3,"General certificates","Viewer",false,new[]{"Reports.View","Certificates.Create"});
