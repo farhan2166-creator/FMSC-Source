@@ -33,8 +33,11 @@ internal static class CommunicationApiBatchStore
         using var client=new HttpClient(handler) {Timeout=TimeSpan.FromSeconds(25)};
         return await CommunicationMetaTransport.ReadTemplatesAsync(c,client,token);
     }
+    internal static Task<CommunicationConfirmation> ConfirmAsync(CommunicationTarget target,
+        CommunicationPreview preview,string body,Guid request,string provider,CommunicationMetaTransport.Selection? template)=>
+        ConfirmAsync(target,preview,body,request,provider,template,null);
     internal static async Task<CommunicationConfirmation> ConfirmAsync(CommunicationTarget target,
-        CommunicationPreview preview,string body,Guid request,string provider,CommunicationMetaTransport.Selection? template)
+        CommunicationPreview preview,string body,Guid request,string provider,CommunicationMetaTransport.Selection? template,CommunicationPlannedWorkStore.Claim? plannedWork)
     {
         int actor=CurrentUser.UserId;
         if(!await IsReadyAsync(target.Channel,provider))
@@ -54,7 +57,7 @@ internal static class CommunicationApiBatchStore
             throw new CommunicationValidationException("Recipients or message values changed. Review the message again; nothing was sent.");
         return await CommunicationBatchStore.ConfirmPreviewAsync(target,preview,body,request,
             apiProvider:provider,profileHash:CommunicationProviderCredentialStore.IdentityHash(credential),
-            reviewJson:reviewed,templateJson:template is null ? null : JsonSerializer.Serialize(template));
+            reviewJson:reviewed,templateJson:template is null ? null : JsonSerializer.Serialize(template),plannedWork:plannedWork);
     }
     internal static Task<DataTable> ReadAsync(Guid batch) => DatabaseHelper.QueryUserAsync(
         "msg.ReadApiBatch",DatabaseHelper.P("@BatchId",batch));

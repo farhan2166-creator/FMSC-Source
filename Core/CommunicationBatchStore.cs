@@ -16,7 +16,7 @@ internal static class CommunicationBatchStore
     internal static async Task<CommunicationConfirmation> ConfirmPreviewAsync(
         CommunicationTarget target, CommunicationPreview preview,
         string message, Guid clientRequestId, bool manualWhatsApp = false,
-        string? apiProvider = null, string? profileHash = null, string? reviewJson = null, string? templateJson = null)
+        string? apiProvider = null, string? profileHash = null, string? reviewJson = null, string? templateJson = null, CommunicationPlannedWorkStore.Claim? plannedWork = null)
     {
         CommunicationRecipientResolver.Validate(target);
         if (manualWhatsApp && target.Channel != "WhatsApp")
@@ -80,6 +80,12 @@ internal static class CommunicationBatchStore
             parameters.Add(DatabaseHelper.Bit("@FinancialReviewRequired",target.FinancialReviewRequired));
         else if(target.FinancialReviewRequired)
             throw new CommunicationValidationException("Financial document messages require the reviewed sending workflow.");
+        if(plannedWork is not null)
+        {
+            if(apiProvider is null || manualWhatsApp || clientRequestId!=plannedWork.WorkId)
+                throw new CommunicationValidationException("Planned work requires its original API confirmation identity.");
+            parameters.AddRange(CommunicationPlannedWorkStore.Parameters(plannedWork));
+        }
         int actor = CurrentUser.UserId;
         using DataTable result = await DatabaseHelper.QueryUserAsync(
             manualWhatsApp ? "msg.ConfirmReviewedManualBatch" : apiProvider is not null ? "msg.ConfirmReviewedApiBatch" : "msg.ConfirmBatch", parameters.ToArray());

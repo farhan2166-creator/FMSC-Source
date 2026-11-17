@@ -36,6 +36,9 @@ internal static class CommunicationHistoryStore
                 Correction.OriginalBatchId CorrectionOfBatchId,
                 Correction.Reason CorrectionReason,
                 Correction.LinkedUtc CorrectionLinkedUtc,
+                Planned.SourceKind PlanSourceKind,Planned.DueUtc OccurrenceDueUtc,Recurring.RuleId RecurringRuleId,
+                Recurring.Frequency RecurringFrequency,Recurring.Every RecurringEvery,
+                COALESCE(RuleAuthor.Username,CONVERT(nvarchar(30),Recurring.CreatedBy)) RecurringAuthorizedBy,
                 COALESCE(TakeoverActor.Username,CONVERT(nvarchar(30),Takeover.ApprovedBy)) TakeoverApprovedBy,
                 H.LastOpenedUtc,H.ReportedUtc,
                 COALESCE(Reporter.Username,CONVERT(nvarchar(30),H.ChangedBy)) ManualReportedByName,
@@ -59,6 +62,9 @@ internal static class CommunicationHistoryStore
                 ORDER BY T.TakeoverId DESC
             ) Takeover
             LEFT JOIN dbo.Users TakeoverActor ON TakeoverActor.UserId=Takeover.ApprovedBy
+            LEFT JOIN msg.PlannedWork Planned ON Planned.BatchId=B.BatchId
+            LEFT JOIN msg.RecurringRule Recurring ON Recurring.RuleId=Planned.RuleId
+            LEFT JOIN dbo.Users RuleAuthor ON RuleAuthor.UserId=Recurring.CreatedBy
             LEFT JOIN msg.BatchCorrection Correction ON Correction.CorrectionBatchId=B.BatchId
             OUTER APPLY (
                 SELECT TOP(1) X.AttemptId,X.RequestUtc,X.ResponseUtc,X.ProviderMessageId,X.FailureCode,X.ClaimedBy,X.ClaimKind,X.WorkerEnrollmentId

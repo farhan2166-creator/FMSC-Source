@@ -305,6 +305,9 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
             if (row.Table.Columns.Contains("ResponseUtc") && row["ResponseUtc"] != DBNull.Value)
                 narrative += $" · Response recorded {LocalWhen(row, "ResponseUtc")}";
         }
+        if(DisplayValue(row,"PlanSourceKind")=="Recurrence")
+            narrative+=" · Recurring schedule: every "+DisplayValue(row,"RecurringEvery")+" "+DisplayValue(row,"RecurringFrequency")+
+                " · Authorized by "+DisplayValue(row,"RecurringAuthorizedBy")+" · Occurrence "+LocalWhen(row,"OccurrenceDueUtc");
         string takeoverReason = DisplayValue(row, "TakeoverReason");
         if (takeoverReason.Length > 0)
             narrative += " · Administrator takeover reason: " + takeoverReason;

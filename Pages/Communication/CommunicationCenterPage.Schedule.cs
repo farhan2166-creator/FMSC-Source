@@ -30,7 +30,7 @@ public sealed partial class CommunicationCenterPage
                 return;
             if (!Confirm($"Schedule {reviewed.Included:N0} reviewed API message(s) for " +
                 dialog.SchoolTimeLabel +
-                "? Provider charges may apply when the approved messages are sent.",
+                "? " + (IsMeta ? "WhatsApp API charges may apply." : "SMS may use multiple separately billed segments, especially long or Urdu messages.") + dialog.RepeatDisclosure,
                 "Confirm Schedule", false))
                 return;
             int actor = CurrentUser.UserId;
@@ -47,6 +47,8 @@ public sealed partial class CommunicationCenterPage
             await LinkPendingCorrectionAsync(saved.BatchId);
             await CommunicationQueuePolicyStore.ScheduleReviewedBatchAsync(
                 saved.BatchId, dialog.Due, dialog.Expires, dialog.Priority);
+            if(dialog.Recurrence is { } recurrence)
+                await CommunicationPlannedWorkStore.RegisterAsync(saved.BatchId,recurrence,dialog.Due);
             await MarkAutomationSuggestionPreparedAsync(target,saved.BatchId);
             if (!IsDisposed && actor == CurrentUser.UserId)
             {

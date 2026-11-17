@@ -142,6 +142,16 @@ public sealed partial class CommunicationCenterPage
             eventSuggestionsButton.Dock=DockStyle.Fill;
             toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,AppScale.Scale(190)));
             toolbar.Controls.Add(eventSuggestionsButton,3,0);
+            var recurring=PageButton("communicationRecurringSchedules","Recurring Schedules…",185);
+            recurring.Click+=async(_,_)=>{
+                using var schedules=new CommunicationRecurringSchedulesDialog();
+                if(schedules.ShowDialog(FindForm())==DialogResult.OK && schedules.Draft is { } draft)
+                    await CopyHistoryDraftAsync(draft);
+            };
+            toolbar.RowCount=2;toolbar.Height=2*(AppMetrics.ButtonHeight+AppScale.Scale(10));
+            toolbar.RowStyles.Add(new RowStyle(SizeType.Percent,50));toolbar.RowStyles.Add(new RowStyle(SizeType.Percent,50));
+            toolbar.Controls.Add(recurring,0,1);toolbar.SetColumnSpan(recurring,2);
+
             eventSuggestionsButton.Click+=(_,_)=>OpenAutomationInbox();
         }
         card.Content.Controls.Add(grid);
@@ -357,6 +367,14 @@ public sealed partial class CommunicationCenterPage
     private async Task OpenSessionAsync(DataGridViewRow? selected, bool unfinished)
     {
         if (IsBusy || selected?.DataBoundItem is not DataRowView row) return;
+        if(unfinished && row.Row.Table.Columns.Contains("SourceRowKind") && Convert.ToString(row["SourceRowKind"])=="Recurrence")
+        {
+            using var schedules=new CommunicationRecurringSchedulesDialog((Guid)row["PlanRuleId"]);
+            if(schedules.ShowDialog(FindForm())==DialogResult.OK && schedules.Draft is { } draft)
+                await CopyHistoryDraftAsync(draft);
+            await ShowSessionsAsync(true);
+            return;
+        }
         var session = new CommunicationSessionRow((Guid)row["BatchId"],
             Convert.ToString(row["Method"]) ?? "", Convert.ToString(row["StateText"]) ?? "",
             Convert.ToString(row["AudienceText"]) ?? "");

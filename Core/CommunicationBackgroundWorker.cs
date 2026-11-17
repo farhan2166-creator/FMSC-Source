@@ -128,8 +128,14 @@ internal static class CommunicationBackgroundWorker
                     "Communication event review scan needs renewed school permissions");
             }
 
+            // Current computer authorization is also required before preparing
+            // unattended approvals; enrollment alone is not machine approval.
+            var planAuthorization=await Updates.UpdateGitReader.CheckAsync(token);
+            if(!planAuthorization.Authorized)return 22;
+            await CommunicationPlannedWorkStore.PrepareDueAsync(enrollment,leaseNonce,token);
+
             var started=DateTime.UtcNow;
-            bool computerAuthorizationChecked=false;
+            bool computerAuthorizationChecked=true; // Verified before unattended preparation above.
             bool skipSms=false, skipWhatsApp=false;
             var deferredBatches=new HashSet<Guid>();
             // Bounded processor invocation: other logon-bound task invocations
@@ -212,7 +218,7 @@ internal static class CommunicationBackgroundWorker
                     // No failed or uncertain attempt is returned to Pending.
                     if(channel=="Sms") skipSms=true; else skipWhatsApp=true;
                 }
-                catch(SqlException ex) when(ex.Number is 51293 or 51294)
+                catch(SqlException ex) when(ex.Number is 51293 or 51294 or 51420)
                 {
                     deferredBatches.Add(batchId);
                 }

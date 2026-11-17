@@ -45,6 +45,22 @@ internal static class CommunicationManagementStore
             sessions.Columns.Add(new DataColumn("RecipientText", typeof(string)) { DefaultValue = "Restricted" });
             // Search only identities from already permission-filtered saved batches.
             sessions.Columns.Add(new DataColumn("RecipientSearchText", typeof(string)) { DefaultValue = "" });
+            sessions.Columns.Add("SourceRowKind",typeof(string));
+            sessions.Columns.Add("PlanRuleId",typeof(Guid));
+            foreach(DataRow session in sessions.Rows)session["SourceRowKind"]="Batch";
+            if(unfinished)
+            {
+                using var planned=await DatabaseHelper.QueryUserAsync("msg.ReadUnpreparedWork");
+                if(actor!=CurrentUser.UserId)throw new UnauthorizedAccessException("The school sender changed.");
+                foreach(DataRow plan in planned.Rows)
+                {
+                    var entry=sessions.NewRow();
+                    foreach(DataColumn column in planned.Columns)
+                        if(sessions.Columns.Contains(column.ColumnName))entry[column.ColumnName]=plan[column];
+                    entry["BatchId"]=plan["QueueId"];
+                    sessions.Rows.Add(entry);
+                }
+            }
             if (sessions.Rows.Count == 0 || actor != CurrentUser.UserId || (!students && !staff)) return sessions;
 
             // Keep the queue and outcome rules in their existing procedures.
@@ -65,7 +81,9 @@ internal static class CommunicationManagementStore
                     LEFT JOIN msg.Recipient R ON R.BatchId=B.BatchId
                     WHERE (@Unfinished=0 OR B.CreatedBy=@UserId OR EXISTS(
                         SELECT 1 FROM dbo.Users U JOIN dbo.Roles Role ON Role.RoleId=U.RoleId
-                        WHERE U.UserId=@UserId AND Role.RoleName=N'Administrator'))
+                        WHERE U.UserId=@UserId AND Role.RoleName=N'Administrator') OR EXISTS(
+                        SELECT 1 FROM dbo.UserRoles UR JOIN dbo.Roles Role ON Role.RoleId=UR.RoleId
+                        WHERE UR.UserId=@UserId AND Role.RoleName=N'Administrator'))
                       AND ((B.Audience='Staff' AND @Staff=1) OR
                            (B.Audience<>'Staff' AND @Students=1 AND
                             (@Fees=1 OR B.Audience NOT IN ('OutstandingFees','FeeStudent','FeeFamily'))))
@@ -93,7 +111,7 @@ internal static class CommunicationManagementStore
                 ) Q;
                 """, DatabaseHelper.Int("@UserId", actor), DatabaseHelper.Bit("@Unfinished", unfinished),
                 DatabaseHelper.Bit("@Students", students), DatabaseHelper.Bit("@Fees", fees), DatabaseHelper.Bit("@Staff", staff),
-                DatabaseHelper.P("@BatchIds", JsonSerializer.Serialize(sessions.AsEnumerable().Select(row => row.Field<Guid>("BatchId")))));
+                DatabaseHelper.P("@BatchIds", JsonSerializer.Serialize(sessions.AsEnumerable().Where(row=>Convert.ToString(row["SourceRowKind"])=="Batch").Select(row => row.Field<Guid>("BatchId")))));
             if (actor != CurrentUser.UserId) return sessions;
 
             var labels = recipients.AsEnumerable().ToDictionary(row => row.Field<Guid>("BatchId"), FormatSessionRecipient);
