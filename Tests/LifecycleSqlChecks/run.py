@@ -215,7 +215,7 @@ def main():
             # line number is safe diagnostic metadata; never surface SQL text,
             # the server name, statement or the following error message.
             sql_lines = re.findall(
-                r"Msg [0-9]{1,8}, Level [0-9]{1,3}, State [0-9]{1,3},[^\\r\\n]{0,160}\\bLine ([0-9]{1,8})",
+                r"Msg [0-9]{1,8}, Level [0-9]{1,3}, State [0-9]{1,3},[^\r\n]{0,160}\bLine ([0-9]{1,8})",
                 result.stdout + result.stderr)
             sql_location = ["SQL batch source line " + sql_lines[-1]] if sql_lines else []
             # Only labels emitted by the owned synthetic mutation test's Check()
