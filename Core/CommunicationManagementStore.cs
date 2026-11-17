@@ -10,12 +10,14 @@ namespace FMSC_SMS.Core;
 /// </summary>
 internal static class CommunicationManagementStore
 {
-    internal static Task<DataTable> ReadHistoryAsync(int limit = 100)
+    internal static Task<DataTable> ReadHistoryAsync(int limit = 100, string? search = null, int offset = 0)
     {
         if (limit < 1 || limit > 200) throw new ArgumentOutOfRangeException(nameof(limit));
+        if (offset < 0 || offset > 1_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
+        if (search?.Length > 120) throw new ArgumentOutOfRangeException(nameof(search));
         if (!CurrentUser.HasPermission("Communication.View"))
             throw new UnauthorizedAccessException("Communication History permission is required.");
-        return ReadSessionsAsync(unfinished: false, limit);
+        return ReadSessionsAsync(false, limit, search, offset);
     }
 
     internal static async Task<DataTable> ReadSettingsAsync()
@@ -28,7 +30,7 @@ internal static class CommunicationManagementStore
     internal static Task<DataTable> ReadMyUnfinishedBatchesAsync() =>
         ReadSessionsAsync(unfinished: true);
 
-    private static async Task<DataTable> ReadSessionsAsync(bool unfinished, int limit = 100)
+    private static async Task<DataTable> ReadSessionsAsync(bool unfinished, int limit = 100, string? search = null, int offset = 0)
     {
         int actor = CurrentUser.UserId;
         bool students = CurrentUser.HasPermission("Students.View");
@@ -36,7 +38,10 @@ internal static class CommunicationManagementStore
         bool staff = CurrentUser.HasPermission("Staff.View");
         DataTable sessions = await (unfinished
             ? DatabaseHelper.QueryUserAsync("msg.ReadMyUnfinishedBatches")
-            : DatabaseHelper.QueryUserAsync("msg.ReadHistory", DatabaseHelper.Int("@Limit", limit)));
+            : DatabaseHelper.QueryUserAsync("msg.ReadHistory",
+                DatabaseHelper.Int("@Limit", limit),
+                DatabaseHelper.P("@Search", string.IsNullOrWhiteSpace(search) ? null : search.Trim()),
+                DatabaseHelper.Int("@Offset", offset)));
         try
         {
             if (actor != CurrentUser.UserId)
