@@ -146,6 +146,28 @@ internal static class CommunicationRetentionSqlChecks
         r.Check(discovered==2,
             "Archived histories larger than the bounded intake window cannot conceal newly eligible admissions.");
 
+        // History is searched before pagination in SQL, not restricted to
+        // the first hundred in-memory rows. Search is permission-scoped.
+        using (var none = Sql.Proc("msg.ReadHistory",
+            Sql.P("@UserId",f.Admin),Sql.P("@Limit",101),
+            Sql.P("@Search","no-synthetic-message-can-match-"+Guid.NewGuid().ToString("N")),
+            Sql.P("@Offset",0)))
+            r.Check(none.Rows.Count==0,
+                "History queries with no school-record match do not return unrelated sessions.");
+        using (var firstPage = Sql.Proc("msg.ReadHistory",
+            Sql.P("@UserId",f.Admin),Sql.P("@Limit",1),Sql.P("@Offset",0)))
+        using (var secondPage = Sql.Proc("msg.ReadHistory",
+            Sql.P("@UserId",f.Admin),Sql.P("@Limit",1),Sql.P("@Offset",1)))
+            r.Check(firstPage.Rows.Count<=1 && secondPage.Rows.Count<=1 &&
+                (firstPage.Rows.Count==0 || secondPage.Rows.Count==0 ||
+                (Guid)firstPage.Rows[0]["BatchId"]!=(Guid)secondPage.Rows[0]["BatchId"]),
+                "Communication history pages do not repeat batches at adjacent offsets.");
+        await r.Refused("History pagination cannot bypass Communication.View authorization",()=>{
+            Sql.Proc("msg.ReadHistory",Sql.P("@UserId",f.Restricted),
+                Sql.P("@Limit",101),Sql.P("@Search","student"),Sql.P("@Offset",0));
+            return Task.CompletedTask;
+        },50003);
+
         r.Check(schoolBefore==Sql.Count("SELECT COUNT(*) FROM dbo.Students") &&
             feesBefore==Sql.Count("SELECT COUNT(*) FROM dbo.FeePayments") &&
             batchesBefore==Sql.Count("SELECT COUNT(*) FROM msg.Batch") &&
