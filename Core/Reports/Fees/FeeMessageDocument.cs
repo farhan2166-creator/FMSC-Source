@@ -14,6 +14,7 @@ internal sealed class FeeMessageDocument : IDisposable
     private readonly bool family;
     private readonly bool receipt;
     internal decimal Amount { get; }
+    internal decimal CreditApplied { get; }
     internal string ReceiptNumber { get; }
     internal string SuggestedFileName => ReportDocumentNaming.ExportFileName(
         receipt ? $"{(family ? "Family" : "Student")} Receipt {ReceiptNumber}" : family ? "Family Fee Bill" : "Student Fee Bill");
@@ -23,7 +24,7 @@ internal sealed class FeeMessageDocument : IDisposable
 
     internal FeeMessageDocument(DataTable data, int admissionId, int[] members, int[] billedStudents,
         bool family, bool receipt, decimal amount, string receiptNumber = "", string outstandingDetails = "",
-        CommunicationFinancialReview? financialReview = null)
+        CommunicationFinancialReview? financialReview = null, decimal creditApplied = 0m)
     {
         this.data = data;
         this.admissionId = admissionId;
@@ -31,6 +32,7 @@ internal sealed class FeeMessageDocument : IDisposable
         this.family = family;
         this.receipt = receipt;
         Amount = amount;
+        CreditApplied = creditApplied;
         ReceiptNumber = receiptNumber;
         FinancialReview = financialReview;
         OutstandingDetails = outstandingDetails;
@@ -91,21 +93,8 @@ internal sealed class FeeMessageDocument : IDisposable
     {
         // A whole receipt may be shared only when every saved child is still in this family.
         // For one student, the existing child-copy builder removes all other children and totals.
-        using var latest = await DatabaseHelper.QuerySqlAsync("""
-            EXEC dbo.RequirePermission @UserId,N'Fees.View';
-            SELECT TOP(1) R.ReceiptNumber
-            FROM dbo.CollectionReceipts R
-            WHERE R.PaymentMethod<>N'Fee changes'
-                AND EXISTS(SELECT 1 FROM dbo.CollectionReceiptPayments L JOIN dbo.FeePayments P ON P.FeePaymentId=L.FeePaymentId
-                    WHERE L.CollectionReceiptId=R.CollectionReceiptId AND P.Status=N'Completed' AND P.TotalAmount>0
-                        AND P.IsCreditApplication=0 AND (@Family=1 OR P.AdmissionId=@AdmissionId))
-                AND ((@Family=0 AND EXISTS(SELECT 1 FROM OPENJSON(R.SnapshotJson,'$.Students') WITH(AdmissionId int) S
-                            WHERE S.AdmissionId=@AdmissionId))
-                    OR (@Family=1 AND (SELECT COUNT(*) FROM OPENJSON(R.SnapshotJson,'$.Students'))>1
-                        AND NOT EXISTS(SELECT AdmissionId FROM OPENJSON(R.SnapshotJson,'$.Students') WITH(AdmissionId int)
-                            EXCEPT SELECT CONVERT(int,[value]) FROM OPENJSON(@FamilyIds))))
-            ORDER BY R.VisitSequence DESC,R.ReceiptNumber DESC;
-            """, DatabaseHelper.Int("@UserId", CurrentUser.UserId), DatabaseHelper.Int("@AdmissionId", admissionId),
+        using var latest = await DatabaseHelper.QuerySqlAsync(FeeMessageReceiptSource.LatestReceiptSql,
+            DatabaseHelper.Int("@UserId", CurrentUser.UserId), DatabaseHelper.Int("@AdmissionId", admissionId),
             DatabaseHelper.Bit("@Family", family), DatabaseHelper.P("@FamilyIds", JsonSerializer.Serialize(familyIds)));
         if (latest.Rows.Count != 1)
             throw new CommunicationValidationException("No saved payment receipt is available for this selection.");
@@ -131,7 +120,8 @@ internal sealed class FeeMessageDocument : IDisposable
             if(currentSource!=sourceReview)
                 throw new CommunicationValidationException("The receipt changed while preparing its preview. Review it again before sending.");
             return new(data, admissionId, familyIds, Array.Empty<int>(), family, true,
-                Convert.ToDecimal(source.Tables[0].Rows[0]["CashReceived"]), number,financialReview:sourceReview);
+                Convert.ToDecimal(source.Tables[0].Rows[0]["CashReceived"]), number,financialReview:sourceReview,
+                creditApplied:Convert.ToDecimal(source.Tables[0].Rows[0]["CreditApplied"]));
         }
         catch { data.Dispose(); throw; }
     }

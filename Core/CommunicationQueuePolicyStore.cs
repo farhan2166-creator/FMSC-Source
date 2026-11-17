@@ -83,7 +83,7 @@ internal static class CommunicationQueuePolicyStore
     }
 
     internal static Task SaveAutomationModeAsync(
-        string eventCode, string mode, int campusId = 0, int classId = 0)
+        string eventCode, string mode, int? campusId = null, int? classId = null)
     {
         RequireAdministrator();
         if (!new[] { "Off", "Review", "Automatic" }.Contains(mode, StringComparer.Ordinal) ||
@@ -93,8 +93,8 @@ internal static class CommunicationQueuePolicyStore
         return DatabaseHelper.ExecuteUserAsync("msg.SaveAutomationMode",
             DatabaseHelper.P("@EventCode", eventCode),
             DatabaseHelper.P("@Mode", mode),
-            DatabaseHelper.Int("@CampusId", campusId),
-            DatabaseHelper.Int("@ClassId", classId));
+            DatabaseHelper.P("@CampusId", campusId),
+            DatabaseHelper.P("@ClassId", classId));
     }
 
     internal static Task SaveFeeReminderPolicyAsync(

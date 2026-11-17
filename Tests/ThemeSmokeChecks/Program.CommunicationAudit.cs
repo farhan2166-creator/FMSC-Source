@@ -1228,5 +1228,35 @@ internal static partial class Program
         }
         Check(financialRequests.Count==4 && financialRequests.Distinct().Count()==4,
             "Re-reviewing a changed financial document creates a new approval reference rather than overwriting the rejected review.");
+        string? reviewedCreditBody=null;
+        int creditDispatches=0;
+        using(var creditOnly=new CommunicationRecordMessageDialog(studentId,"Synthetic credit settlement",true,financialOperations with {
+            ReadFeeDocument=(id,family,receipt)=>{
+                var rows=new DataTable("Synthetic credit receipt");rows.Columns.Add("ReceiptNumber");rows.Rows.Add("R-CREDIT-42");
+                var source=new CommunicationFinancialReview("Receipt","R-CREDIT-42",Guid.Parse("00000000-0000-0000-0000-000000000043"),id,family,new string('C',64));
+                return Task.FromResult(new FeeMessageDocument(rows,id,new[]{id},Array.Empty<int>(),family,true,0m,"R-CREDIT-42",
+                    financialReview:source,creditApplied:250m));
+            },
+            ReserveFinancialReview=(_,_)=>Task.CompletedTask,
+            Confirm=(_,target,result,body,request,_)=>{
+                reviewedCreditBody=body;
+                return Task.FromResult(new CommunicationConfirmation(request,result.Included,false));
+            },
+            Dispatch=(_,_)=>creditDispatches++
+        }))
+        {
+            creditOnly.Show();Application.DoEvents();
+            var methods=Field<ModernComboBox>(creditOnly,"method");
+            methods.SelectedItem=methods.Items.OfType<CommunicationRecordMessageDialog.Method>().Single(item=>item.Channel=="Sms");
+            Field<ModernComboBox>(creditOnly,"feeContent").SelectedIndex=1;
+            Field<ModernButton>(creditOnly,"action").PerformClick();Application.DoEvents();
+            Field<ModernButton>(creditOnly,"action").PerformClick();Application.DoEvents();
+            var amounts=System.Text.RegularExpressions.Regex.Matches(reviewedCreditBody ?? "",@"\b\d[\d,]*\.\d{2}\b")
+                .Select(match=>match.Value).ToArray();
+            Check(creditDispatches==1 && reviewedCreditBody?.Contains("R-CREDIT-42")==true &&
+                amounts.SequenceEqual(new[]{"250.00"}) && !reviewedCreditBody.Contains("[PaymentDetails]"),
+                "The default credit-only receipt message resolves the actual Credit amount and receipt without inventing a zero cash payment.");
+            creditOnly.Close();
+        }
     }
 }

@@ -268,9 +268,9 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
             if (fees && IsReceipt)
                 options = SelectedLanguage == "ur"
                     ? new[] { new ComposeTemplate("Payment recorded (Urdu)", "Individual",
-                        "محترم والدین/سرپرست، اسکول میں PKR [PaymentAmount] کی ادائیگی درج ہو گئی ہے۔ رسید نمبر: [ReceiptNumber]۔ شکریہ۔", LanguageCode: "ur") }
+                        "محترم والدین/سرپرست، [PaymentDetails] رسید نمبر: [ReceiptNumber]۔ شکریہ۔", LanguageCode: "ur") }
                     : new[] { new ComposeTemplate("Payment recorded", "Individual",
-                        "Dear parent/guardian, the school recorded a payment of PKR [PaymentAmount]. Receipt: [ReceiptNumber]. Thank you.") };
+                        "Dear parent/guardian, [PaymentDetails] Receipt: [ReceiptNumber]. Thank you.") };
             else if (fees && IsFamily)
                 options = SelectedLanguage == "ur"
                     ? new[] { new ComposeTemplate("Family outstanding balance (Urdu)", "FeeReminder",
@@ -305,6 +305,7 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
         IReadOnlyDictionary<string,string>? financialFields=financialDocument is null ? null
             : IsReceipt ? new Dictionary<string,string> {
                 ["[PaymentAmount]"]=financialDocument.Amount.ToString("N2",System.Globalization.CultureInfo.InvariantCulture),
+                ["[CreditApplied]"]=financialDocument.CreditApplied.ToString("N2",System.Globalization.CultureInfo.InvariantCulture),
                 ["[ReceiptNumber]"]=financialDocument.ReceiptNumber
             } : new Dictionary<string,string> {
                 ["[OutstandingAmount]"]=financialDocument.Amount.ToString("N2",System.Globalization.CultureInfo.InvariantCulture)
@@ -344,6 +345,8 @@ internal sealed class CommunicationRecordMessageDialog : ApplicationWindowForm
                     string amount = document.Amount.ToString("N2", System.Globalization.CultureInfo.InvariantCulture);
                     body = IsReceipt ? body.Replace("[PaymentAmount]", amount, StringComparison.Ordinal)
                             .Replace("[ReceiptNumber]", document.ReceiptNumber, StringComparison.Ordinal)
+                            .Replace("[CreditApplied]",document.CreditApplied.ToString("N2",System.Globalization.CultureInfo.InvariantCulture),StringComparison.Ordinal)
+                            .Replace("[PaymentDetails]",FeeMessageReceiptSource.PaymentDetails(document.Amount,document.CreditApplied,SelectedLanguage),StringComparison.Ordinal)
                         : CommunicationFeeDetails.Expand(body, document.OutstandingDetails)
                             .Replace("[OutstandingAmount]", amount, StringComparison.Ordinal);
                 }

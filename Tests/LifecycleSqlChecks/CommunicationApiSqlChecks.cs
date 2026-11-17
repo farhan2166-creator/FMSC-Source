@@ -352,6 +352,7 @@ internal static class CommunicationApiSqlChecks
         await CommunicationFamilyFeeSqlChecks.Run(f,r);
         await CommunicationFinancialSourceSqlChecks.Run(f,r);
         await CommunicationFeeReviewSqlChecks.Run(f,r);
+        await CommunicationEventScopeSqlChecks.Run(f,r);
 
     }
 }

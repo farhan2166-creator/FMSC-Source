@@ -56,6 +56,13 @@ internal static class CollectionCreditChecks
                 DateTime.Today,"Cash","Synthetic receipt",received,lines.Sum(line=>line.Discount),lines);
             return CollectionDiscountWriter.CollectWithReceiptAsync(procedure,Array.Empty<CollectionDiscountWriter.Edit>(),credits,DateTime.Today,"Synthetic credit settlement",receipt,args);
         }
+        string? LatestReceipt(int owner,bool wholeFamily=false,int[]? members=null)
+        {
+            using var selected=Sql.Query(FeeMessageReceiptSource.LatestReceiptSql,Sql.P("@UserId",f.Admin),
+                Sql.P("@AdmissionId",owner),Sql.P("@Family",wholeFamily),
+                Sql.P("@FamilyIds",System.Text.Json.JsonSerializer.Serialize(members ?? new[]{owner})));
+            return selected.Rows.Count==0 ? null : Convert.ToString(selected.Rows[0]["ReceiptNumber"]);
+        }
         SqlParameter[] Cash(long bill,decimal received,decimal discount=0) => new[] {
             Sql.P("@AdmissionId",admission),Sql.P("@EnrollmentId",enrollment),Sql.P("@TransactionType","Collection"),
             Sql.P("@Amount",received),Sql.P("@TransactionDate",DateTime.Today),Sql.P("@PaymentMethod","Cash"),
@@ -104,7 +111,9 @@ internal static class CollectionCreditChecks
         catch(SqlException) { refused=true; }
         report.Check(refused && Credit(admission)==beforeCredit && Due(tuition)==beforeDue && Sql.Count("SELECT COUNT(*) FROM dbo.FeePayments")==payments,
             "A rejected cash payment rolls back its preceding credit application and ledger entries");
-        await Save("ProcessFeeTransaction",new[] {Plan(tuition,admission,enrollment,1000)},Cash(tuition,3500,500));
+        using var mixedReceipt=await Save("ProcessFeeTransaction",new[] {Plan(tuition,admission,enrollment,1000)},Cash(tuition,3500,500));
+        report.Check(LatestReceipt(admission)==Convert.ToString(mixedReceipt.Rows[0]["ReceiptNumber"]),
+            "The communication receipt source selects the actual latest cash-plus-credit settlement.");
         report.Check(Due(tuition)==0 && Credit(admission)==7750,"Cash 3500, credit 1000 and discount 500 settle a 5000 bill exactly");
         report.Check(Sql.Money("SELECT SUM(TotalAmount) FROM dbo.FeePayments WHERE AdmissionId=@Id AND IsCreditApplication=0 AND FeePaymentId NOT IN(SELECT FeePaymentId FROM dbo.StudentCreditEntries WHERE FeePaymentId IS NOT NULL)",Sql.P("@Id",admission))==3500,
             "Using credit and discount does not inflate collected cash");
@@ -122,6 +131,8 @@ internal static class CollectionCreditChecks
         report.Check(Due(annual)==0 && Due(siblingAnnual)==0 && Credit(siblingId)==500,"Family save uses each child's own credit and settles both bills");
         report.Check(family.Rows.Count==2 && family.AsEnumerable().Select(row=>Convert.ToString(row["ReceiptNumber"])).Distinct().Count()==1,"Family cash still has one shared receipt; credit remains a separate noncash movement");
         string savedReceipt=Convert.ToString(family.Rows[0]["ReceiptNumber"])!;
+        report.Check(LatestReceipt(admission,true,new[]{admission,siblingId})==savedReceipt,
+            "A saved family receipt is available only within the selected current family.");
         string snapshot=Convert.ToString(Sql.Scalar("SELECT SnapshotJson FROM dbo.CollectionReceipts WHERE ReceiptNumber=@Receipt",Sql.P("@Receipt",savedReceipt)))!;
         var month=DateTime.Today.AddMonths(1); month=new DateTime(month.Year,month.Month,1);
         if (month.Year==DateTime.Today.Year)
@@ -138,6 +149,50 @@ internal static class CollectionCreditChecks
             "Credit applications are linked to their printable settlement instead of being orphan print references");
         report.Check(snapshot==Convert.ToString(Sql.Scalar("SELECT SnapshotJson FROM dbo.CollectionReceipts WHERE ReceiptNumber=@Receipt",Sql.P("@Receipt",savedReceipt))),
             "Later credit use does not rewrite an earlier receipt's issue-time balances");
+        // Always exercise credit-only receipt discovery, including December when
+        // the future-month scenario above correctly avoids a different year.
+        using var creditStudent=Sql.Proc("AdmitStudent",f.AdmissionArgs("Fictional credit-only receipt"));
+        int creditStudentId=Convert.ToInt32(creditStudent.Rows[0]["AdmissionId"]),creditEnrollment=Convert.ToInt32(creditStudent.Rows[0]["EnrollmentId"]);
+        long creditCharge=Bill(creditEnrollment,f.Tuition);
+        Deposit(creditStudentId,100m);
+        string? originalFamilyReceipt=LatestReceipt(admission,true,new[]{admission,siblingId});
+        var creditDraft=new CollectionDiscountWriter.ReceiptDraft(creditStudentId,new[]{creditStudentId},DateTime.Today,"Cash","Synthetic credit-only receipt",0m,0m,
+            new[]{new CollectionDiscountWriter.ReceiptLine(creditCharge,creditStudentId,creditEnrollment,Due(creditCharge),0m,0m,100m)});
+        using var creditReceipt=await CollectionDiscountWriter.CollectWithReceiptAsync(null,Array.Empty<CollectionDiscountWriter.Edit>(),
+            new[]{Plan(creditCharge,creditStudentId,creditEnrollment,100m)},DateTime.Today,"Synthetic credit-only receipt",creditDraft);
+        string creditNumber=Convert.ToString(creditReceipt.Rows[0]["ReceiptNumber"])!;
+        int paymentsBeforeRead=Sql.Count("SELECT COUNT(*) FROM dbo.FeePayments");
+        report.Check(LatestReceipt(creditStudentId)==creditNumber && LatestReceipt(siblingId)!=creditNumber &&
+            LatestReceipt(admission,true,new[]{admission,siblingId})==originalFamilyReceipt,
+            "A real credit-only receipt is discoverable without substituting another child's or unrelated family's receipt.");
+        report.Check(LatestReceipt(creditStudentId,true,new[]{admission,siblingId})!=creditNumber,
+            "An individual receipt cannot silently become a whole-family receipt.");
+        int receiptViewerWithoutFees=Sql.Count("""
+            INSERT dbo.Roles(RoleName) VALUES(N'msg_receipt_no_fees_fixture');
+            DECLARE @Role int=CONVERT(int,SCOPE_IDENTITY());
+            INSERT dbo.RolePermissions(RoleId,PermissionId)
+             SELECT @Role,PermissionId FROM dbo.Permissions WHERE PermissionCode IN(N'Communication.Send',N'Students.View');
+            INSERT dbo.Users(Username,PasswordHash,PasswordSalt,RoleId,MustChangePassword)
+             SELECT N'msg_receipt_no_fees_fixture',PasswordHash,PasswordSalt,@Role,0 FROM dbo.Users WHERE UserId=@Admin;
+            DECLARE @User int=CONVERT(int,SCOPE_IDENTITY());
+            INSERT dbo.UserRoles(UserId,RoleId) VALUES(@User,@Role);
+            SELECT @User;
+            """,Sql.P("@Admin",f.Admin));
+        await report.Refused("The receipt lookup retains fee-view authorization",()=>{
+            Sql.Query(FeeMessageReceiptSource.LatestReceiptSql,Sql.P("@UserId",receiptViewerWithoutFees),Sql.P("@AdmissionId",creditStudentId),
+                Sql.P("@Family",false),Sql.P("@FamilyIds","[]"));return Task.CompletedTask;
+        },50003);
+        report.Check(Sql.Count("SELECT COUNT(*) FROM dbo.FeePayments")==paymentsBeforeRead && Credit(creditStudentId)==0m,
+            "Communication receipt discovery never consumes advance or writes another financial transaction.");
+        foreach(string language in new[]{"en","ur"})
+        {
+            string cashOnly=FeeMessageReceiptSource.PaymentDetails(125m,0m,language),creditOnly=FeeMessageReceiptSource.PaymentDetails(0m,75m,language),
+                cashAndCredit=FeeMessageReceiptSource.PaymentDetails(125m,75m,language);
+            report.Check(cashOnly.Contains("125.00") && !cashOnly.Contains("75.00") &&
+                creditOnly.Contains("75.00") && !creditOnly.Contains("125.00") &&
+                cashAndCredit.Contains("125.00") && cashAndCredit.Contains("75.00") && !cashAndCredit.Contains("200.00"),
+                "English and Urdu payment details preserve separate applicable cash and advance amounts without inventing extra cash.");
+        }
         decimal siblingCreditBefore=Credit(siblingId);
         int paymentsBeforeCheck=Sql.Count("SELECT COUNT(*) FROM dbo.FeePayments");
         Sql.Query("BEGIN TRAN;EXEC dbo.ApplyStudentCredit_Internal @Student,@UserId;COMMIT;",Sql.P("@Student",siblingId),Sql.P("@UserId",f.Admin));
