@@ -281,9 +281,11 @@ AS BEGIN
    OR EXISTS(SELECT 1 FROM dbo.UserRoles UR WHERE UR.UserId=@UserId AND UR.RoleId=O.RoleId)))
   THROW 51430,''An active administrator must authorize automatic provider charges.'',1;
  IF @PaidApproval IS NULL OR @PaidApproval<>1 OR @AuthorizationId IS NULL OR @AuthorizationId=''00000000-0000-0000-0000-000000000000''
- OR @EventCode IS NULL OR @EventCode NOT IN(''Admission'',''PaymentReceived'',''Birthday'',''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'')
+ OR @EventCode IS NULL OR @EventCode NOT IN(''Admission'',''PaymentReceived'',''Birthday'',''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'',''Announcement'',''ExaminationResult'')
  OR @DailyFamilyLimit IS NULL OR @DailyFamilyLimit NOT BETWEEN 1 AND 20 OR @ExpiryHours IS NULL OR @ExpiryHours NOT BETWEEN 1 AND 168
  OR @Body IS NULL OR LEN(LTRIM(RTRIM(@Body)))=0 OR LEN(@Body)>1600
+ OR (@EventCode IN(''Announcement'',''ExaminationResult'')
+ AND (CHARINDEX(N''[NoticeTitle]'',@Body)=0 OR CHARINDEX(N''[NoticeText]'',@Body)=0))
  OR @ProfileHash IS NULL OR LEN(@ProfileHash)<>64 OR @ProfileHash LIKE ''%[^0-9A-F]%'' COLLATE Latin1_General_100_BIN2
   THROW 51430,''Explicit paid approval and a complete supported event/template are required.'',1;
  BEGIN TRANSACTION;
@@ -352,7 +354,7 @@ AS BEGIN
  JOIN msg.AutomaticAuthorization A ON A.AuthorizationId=R.AuthorizationId
  CROSS APPLY msg.EventSourceEligible(C.CandidateId) Source
  WHERE C.State=''Pending'' AND C.ReviewOnly=0
- AND (C.EventCode NOT IN(''Admission'',''PaymentReceived'') OR C.CreatedUtc>=A.ApprovedUtc)
+ AND (C.EventCode NOT IN(''Admission'',''PaymentReceived'',''Announcement'',''ExaminationResult'') OR C.CreatedUtc>=A.ApprovedUtc)
  AND NOT EXISTS(SELECT 1 FROM msg.PlannedWork W WITH(UPDLOCK,HOLDLOCK) WHERE W.CandidateId=C.CandidateId)
  ORDER BY C.CreatedUtc,C.CandidateId;
  COMMIT;
@@ -875,18 +877,21 @@ AS BEGIN
   JOIN msg.BatchSchedule S ON S.BatchId=B.BatchId WHERE W.WorkId=@Work;
   END
   ELSE BEGIN
-   UPDATE W SET EventDataHash=P.SourceHash,FamilyToken=msg.FamilyBoundary(C.AdmissionId)
+   UPDATE W SET EventDataHash=COALESCE(P.SourceHash,N.SourceHash),FamilyToken=msg.FamilyBoundary(C.AdmissionId)
    FROM msg.PlannedWork W JOIN msg.AutomationCandidate C ON C.CandidateId=W.CandidateId
-   OUTER APPLY msg.PaymentEventSource(C.SourceRecordId) P WHERE W.WorkId=@Work;
+   OUTER APPLY msg.PaymentEventSource(C.SourceRecordId) P
+   LEFT JOIN msg.SchoolNotice N ON N.NoticeId=C.SourceRecordId AND N.EventCode=C.EventCode WHERE W.WorkId=@Work;
    SELECT W.WorkId,W.ClaimNonce,W.DueUtc,W.ExpiresUtc,W.SourceKind,W.RuleId,
     CASE WHEN C.EventCode IN(''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'') THEN ''FeeFamily''
          WHEN C.EventCode=''PaymentReceived'' THEN ''FeeStudent'' ELSE ''Student'' END Audience,
     CONVERT(int,0) CampusId,CONVERT(int,0) ClassId,C.AdmissionId StudentId,CONVERT(int,0) StaffId,A.Channel,A.Body,A.ApprovedBy AuthorizedBy,
     A.ProviderCode,A.ProfileHash,A.TemplateJson,A.Priority,A.LanguageCode,C.EventCode,
-    P.TotalAmount PaymentAmount,P.IsCreditApplication,P.ReceiptNumber
+    P.TotalAmount PaymentAmount,P.IsCreditApplication,P.ReceiptNumber,
+    N.Title NoticeTitle,N.NoticeText NoticeText
    FROM msg.PlannedWork W JOIN msg.AutomationCandidate C ON C.CandidateId=W.CandidateId
    JOIN msg.AutomaticAuthorization A ON A.AuthorizationId=W.AuthorizationId
-   OUTER APPLY msg.PaymentEventSource(C.SourceRecordId) P WHERE W.WorkId=@Work;
+   OUTER APPLY msg.PaymentEventSource(C.SourceRecordId) P
+   LEFT JOIN msg.SchoolNotice N ON N.NoticeId=C.SourceRecordId AND N.EventCode=C.EventCode WHERE W.WorkId=@Work;
   END;
  END;
  COMMIT;
@@ -911,7 +916,9 @@ AS BEGIN
   WHERE W.WorkId=@WorkId AND W.State=''Preparing'' AND W.ClaimNonce=@ClaimNonce AND W.EnrollmentId=@EnrollmentId
    AND A.EventCode=C.EventCode AND W.ClaimUntilUtc>SYSUTCDATETIME() AND W.ExpiresUtc>SYSUTCDATETIME() AND C.State=''Pending'' AND C.ReviewOnly=0
    AND W.FamilyToken=msg.FamilyBoundary(C.AdmissionId)
-   AND (C.EventCode<>''PaymentReceived'' OR EXISTS(SELECT 1 FROM msg.PaymentEventSource(C.SourceRecordId) P WHERE P.SourceHash=W.EventDataHash));
+   AND (C.EventCode<>''PaymentReceived'' OR EXISTS(SELECT 1 FROM msg.PaymentEventSource(C.SourceRecordId) P WHERE P.SourceHash=W.EventDataHash))
+   AND (C.EventCode NOT IN(''Announcement'',''ExaminationResult'') OR EXISTS(SELECT 1 FROM msg.SchoolNotice N
+     WHERE N.NoticeId=C.SourceRecordId AND N.EventCode=C.EventCode AND N.SourceHash=W.EventDataHash));
   IF @Candidate IS NULL OR NOT EXISTS(SELECT 1 FROM msg.AutomaticAuthorized(@Auth)) OR NOT EXISTS(SELECT 1 FROM msg.EventSourceEligible(@Candidate))
     THROW 51431,''The event, family, template or automatic authorization changed. Review the source.'',1;
   EXEC dbo.RequirePermission @Author,N''Communication.Configure'';EXEC dbo.RequirePermission @Author,N''Communication.Send'';
@@ -921,7 +928,14 @@ AS BEGIN
       AND B.Channel=Approval.Channel AND A.ProviderCode=Approval.ProviderCode AND A.ProfileHash=Approval.ProfileHash
       AND B.Audience=CASE WHEN @Code IN(''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'') THEN ''FeeFamily''
           WHEN @Code=''PaymentReceived'' THEN ''FeeStudent'' ELSE ''Student'' END
-      AND (@Code=''PaymentReceived'' OR (B.Body COLLATE Latin1_General_100_BIN2=Approval.Body COLLATE Latin1_General_100_BIN2)))
+      AND (@Code=''PaymentReceived''
+     OR (@Code IN(''Announcement'',''ExaminationResult'') AND EXISTS(SELECT 1 FROM msg.SchoolNotice N
+        JOIN msg.AutomationCandidate Source ON Source.SourceRecordId=N.NoticeId
+        WHERE Source.CandidateId=@Candidate AND N.EventCode=@Code
+        AND B.Body COLLATE Latin1_General_100_BIN2=
+         REPLACE(REPLACE(Approval.Body,N''[NoticeTitle]'',N.Title),N''[NoticeText]'',N.NoticeText) COLLATE Latin1_General_100_BIN2))
+     OR (@Code NOT IN(''Announcement'',''ExaminationResult'')
+        AND B.Body COLLATE Latin1_General_100_BIN2=Approval.Body COLLATE Latin1_General_100_BIN2))
     THROW 51431,''Prepared content or audience differs from the approved automatic rule.'',1;
   EXEC msg.MarkAutomationCandidatePrepared @UserId,@Candidate,@BatchId;
   UPDATE msg.PlannedWork SET State=''Prepared'',BatchId=@BatchId,UpdatedUtc=SYSUTCDATETIME() WHERE WorkId=@WorkId;
@@ -962,7 +976,9 @@ RETURNS TABLE AS RETURN
   OR (W.SourceKind=''Event'' AND (NOT EXISTS(SELECT 1 FROM msg.AutomaticAuthorized(W.AuthorizationId))
     OR NOT EXISTS(SELECT 1 FROM msg.EventSourceEligible(W.CandidateId))
     OR W.FamilyToken IS NULL OR W.FamilyToken<>msg.FamilyBoundary(C.AdmissionId)
-    OR (C.EventCode=''PaymentReceived'' AND NOT EXISTS(SELECT 1 FROM msg.PaymentEventSource(C.SourceRecordId) P WHERE P.SourceHash=W.EventDataHash))))))
+    OR (C.EventCode=''PaymentReceived'' AND NOT EXISTS(SELECT 1 FROM msg.PaymentEventSource(C.SourceRecordId) P WHERE P.SourceHash=W.EventDataHash))
+    OR (C.EventCode IN(''Announcement'',''ExaminationResult'') AND NOT EXISTS(SELECT 1 FROM msg.SchoolNotice N
+      WHERE N.NoticeId=C.SourceRecordId AND N.EventCode=C.EventCode AND N.SourceHash=W.EventDataHash))))))
 );');
 
 EXEC(N'CREATE OR ALTER FUNCTION msg.RecurringEligible(@RuleId uniqueidentifier)
@@ -1174,6 +1190,9 @@ BEGIN
     END;
 
     SET @Exclusion=CASE
+        WHEN EXISTS(SELECT 1 FROM msg.AutomationCandidate Notice WITH(HOLDLOCK)
+          WHERE Notice.BatchId=@BatchId AND Notice.EventCode IN(''Announcement'',''ExaminationResult'')
+           AND NOT EXISTS(SELECT 1 FROM msg.NoticeCandidateEligible(Notice.CandidateId))) THEN ''SourceChanged''
         WHEN NOT EXISTS(SELECT 1 FROM msg.PreparedEventEligible(@BatchId)) THEN ''SourceChanged''
         WHEN @CurrentPhone IS NULL THEN ''NoLongerEligible''
         WHEN @CurrentPhone<>@SnapshotPhone THEN ''DestinationChanged''
