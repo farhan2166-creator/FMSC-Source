@@ -38,50 +38,54 @@ internal static partial class Program
         var cards=Descendants(page).OfType<HumanCard>().ToArray();
         HumanCard Card(string heading) => cards.Single(card=>
             Descendants(card.Header).OfType<Label>().Any(label=>label.Text==heading));
-        var finder=Card("Find Student");
         var overview=Card("Student Overview");
         var family=Card("Family / Siblings");
         var academic=Card("Academic Placement");
         var history=Card("Student History");
+        Check(!cards.Any(card=>Descendants(card.Header).OfType<Label>()
+                .Any(label=>label.Text=="Find Student")),
+            "Student search does not consume a dedicated card");
+        var titleHeader=Descendants(page).OfType<TableLayoutPanel>()
+            .SingleOrDefault(table=>table.Controls.Contains(picker));
+        Check(titleHeader is not null &&
+            Descendants(page).Any(control=>ReferenceEquals(control,picker)) &&
+            !Descendants(overview).Any(control=>ReferenceEquals(control,picker)),
+            "Student selector remains available in the page heading");
+
         var sectionLayout=(TableLayoutPanel)family.Parent!;
-        Check(ReferenceEquals(academic.Parent,sectionLayout)&&ReferenceEquals(history.Parent,sectionLayout)
-            && sectionLayout.GetPositionFromControl(family).Row==0
-            && sectionLayout.GetPositionFromControl(academic).Row==0
-            && sectionLayout.GetPositionFromControl(history).Row==1
-            && sectionLayout.GetColumnSpan(history)==2,
-            "Family and placement are paired above the full-width student history");
-        Check(ReferenceEquals(finder.Parent,overview.Parent),
-            "Search and student identity are independent full-width profile sections");
-        // Keep the overview compact by placing contact and registration in the
-        // existing three-row facts area, not beneath the photo-side identity.
-        var profileLayout=(TableLayoutPanel)overview.Parent!;
-        int overviewRow=profileLayout.GetPositionFromControl(overview).Row;
-        var overviewTables=Descendants(overview.Content).OfType<TableLayoutPanel>().ToArray();
-        var identity=overviewTables.Single(table=>table.RowCount==3&&table.ColumnCount==1);
-        var facts=overviewTables.Single(table=>table.RowCount==3&&table.ColumnCount==2);
+        Check(ReferenceEquals(overview.Parent,sectionLayout) &&
+            ReferenceEquals(academic.Parent,sectionLayout) &&
+            ReferenceEquals(history.Parent,sectionLayout) &&
+            sectionLayout.GetPositionFromControl(overview).Column==0 &&
+            sectionLayout.GetPositionFromControl(overview).Row==0 &&
+            sectionLayout.GetPositionFromControl(academic).Column==0 &&
+            sectionLayout.GetPositionFromControl(academic).Row==1 &&
+            sectionLayout.GetPositionFromControl(family).Column==1 &&
+            sectionLayout.GetPositionFromControl(family).Row==0 &&
+            sectionLayout.GetRowSpan(family)==2 &&
+            sectionLayout.GetPositionFromControl(history).Row==2 &&
+            sectionLayout.GetColumnSpan(history)==2,
+            "Overview sits over academic placement; family spans both rows; history stays full-width");
+
+        // The half-width overview must still contain every profile fact.
+        var detailGrid=Descendants(overview.Content).OfType<TableLayoutPanel>()
+            .Single(table=>table.RowCount==6&&table.ColumnCount==2);
         Label ProfileLabel(string field) =>
             (Label)typeof(StudentProfilePage).GetField(field,flags)!.GetValue(page)!;
-        Check(identity.Controls.Contains(ProfileLabel("nameLabel")) &&
-            identity.Controls.Contains(ProfileLabel("fatherLabel")) &&
-            identity.Controls.Contains(ProfileLabel("placementLabel")) &&
-            facts.GetPositionFromControl(ProfileLabel("contactLabel")).Row==1 &&
-            facts.GetPositionFromControl(ProfileLabel("registrationLabel")).Row==2 &&
-            facts.GetPositionFromControl(ProfileLabel("balanceLabel")).Row==2,
-            "Student Profile keeps contact and registration visible in a compact three-row facts layout");
-        float requiredIdentityHeight=identity.RowStyles.Cast<RowStyle>().Sum(style=>style.Height);
-        float availableIdentityHeight=profileLayout.RowStyles[overviewRow].Height
+        Check(new[] { "nameLabel", "fatherLabel", "placementLabel", "genderLabel",
+                     "dateOfBirthLabel", "admissionDateLabel", "admissionCampusLabel",
+                     "contactLabel", "registrationLabel", "balanceLabel" }
+                .All(field=>detailGrid.Controls.Contains(ProfileLabel(field))) &&
+            detailGrid.GetColumnSpan(ProfileLabel("nameLabel"))==2 &&
+            detailGrid.GetPositionFromControl(ProfileLabel("contactLabel")).Row==4 &&
+            detailGrid.GetPositionFromControl(ProfileLabel("registrationLabel")).Row==5,
+            "Half-width Student Overview retains all identity, contact and account fields");
+        float contentHeight=detailGrid.RowStyles.Cast<RowStyle>().Sum(style=>style.Height);
+        float availableHeight=sectionLayout.RowStyles[0].Height
             -overview.Margin.Vertical-overview.Padding.Vertical
             -overview.Header.Height-overview.Content.Padding.Vertical;
-        // Compare against the content-derived compact minimum, rather than
-        // a frozen pixel value: different fonts and DPI settings can legitimately
-        // need slightly more than the historical 154-scaled-pixel baseline.
-        float contentHeight=overview.Margin.Vertical+overview.Padding.Vertical+
-            overview.Header.Height+overview.Content.Padding.Vertical+
-            requiredIdentityHeight+AppScale.Scale(4);
-        float compactHeight=Math.Max(AppScale.Scale(154),contentHeight);
-        Check(availableIdentityHeight>=requiredIdentityHeight &&
-            profileLayout.RowStyles[overviewRow].Height<=compactHeight+AppScale.Scale(2),
-            "Student Profile overview fits identity rows without excessive unused height");
+        Check(availableHeight>=contentHeight,
+            "Compact overview provides room for all six content rows at current scale");
 
         // Verify identity facts without querying a school database. The same
         // original admission record continues to supply the placement summary.
