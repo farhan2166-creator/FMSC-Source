@@ -70,13 +70,17 @@ internal static partial class Program
         details.Columns.Add("AdmissionCampusName");
         details.Rows.Add(41,"Example Student","Example Father","Five","M","Left",
             "REG-41","03000000000",new DateTime(2018,4,7),new DateTime(2010,1,5),"Male","Campus Boys");
-        typeof(StudentProfilePage).GetMethod("RenderIdentity",flags)!.Invoke(page,new object[]{details,41});
+        // The production name header separately resolves the authoritative
+        // admission number. Verify the new fact mapper without opening SQL.
+        typeof(StudentProfilePage).GetMethod("RenderIdentityFacts",flags)!
+            .Invoke(page,new object[]{details.Rows[0]});
         string LabelText(string field) =>
             ((Label)typeof(StudentProfilePage).GetField(field,flags)!.GetValue(page)!).Text;
-        Check(LabelText("nameLabel").Contains("Example Student") &&
-            !LabelText("nameLabel").Contains("Example Father") &&
-            LabelText("fatherLabel")=="Father: Example Father",
-            "Main student and parent are clearly distinguished in the profile overview");
+        Check(!LabelText("nameLabel").Contains("Example Father") &&
+            LabelText("fatherLabel")=="Father: Example Father" &&
+            LabelText("contactLabel").Contains("03000000000") &&
+            LabelText("registrationLabel").Contains("REG-41"),
+            "Parent, contact and registration remain separate from the main student heading");
         Check(LabelText("admissionDateLabel").Contains("07-Apr-2018") &&
             LabelText("dateOfBirthLabel").Contains("05-Jan-2010") &&
             LabelText("genderLabel").Contains("Male") &&
