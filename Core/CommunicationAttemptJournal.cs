@@ -10,7 +10,8 @@ internal sealed class CommunicationAttemptJournal
 {
     internal sealed record Identity(string SchoolScope,Guid RequestId,string Kind,int RecordId,
         string DestinationHash,string Channel,string ProviderCode,string ProfileHash);
-    internal sealed record Attempt(long AttemptId,Guid AttemptKey,string Channel,string ProviderCode);
+    internal sealed record Attempt(long AttemptId,Guid AttemptKey,string Channel,string ProviderCode,
+        int? ClaimedBy=null,string? ClaimKind=null,Guid? WorkerEnrollmentId=null);
     internal sealed record Claim(Identity Identity,Attempt Attempt,DateTime RecordedUtc);
     internal sealed record Result(Guid AttemptKey,string State,string? ProviderMessageId,DateTime RecordedUtc);
     private readonly string root;
@@ -44,6 +45,12 @@ internal sealed class CommunicationAttemptJournal
             || claim.Attempt.Channel!=claim.Identity.Channel || claim.Attempt.ProviderCode!=claim.Identity.ProviderCode
             || claim.RecordedUtc.Kind!=DateTimeKind.Utc)
             throw new InvalidDataException("Invalid communication submission evidence.");
+        var attempt=claim.Attempt;
+        bool legacy=attempt.ClaimedBy is null && attempt.ClaimKind is null && attempt.WorkerEnrollmentId is null;
+        if(!legacy && !(attempt.ClaimedBy is >0 &&
+            ((attempt.ClaimKind=="Interactive" && attempt.WorkerEnrollmentId is null)
+                || (attempt.ClaimKind=="Worker" && attempt.WorkerEnrollmentId is { } worker && worker!=Guid.Empty))))
+            throw new InvalidDataException("The submission actor evidence is incomplete.");
     }
 
     internal void AssertConsistent(Identity identity,IReadOnlyCollection<Attempt> databaseAttempts)

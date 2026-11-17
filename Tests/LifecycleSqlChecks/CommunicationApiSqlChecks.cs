@@ -301,6 +301,7 @@ internal static class CommunicationApiSqlChecks
             Sql.P("@LeaseNonce",Guid.NewGuid()));
         r.Check(competed.Rows.Count==1 && !Convert.ToBoolean(competed.Rows[0]["Acquired"]),
             "A second worker cannot acquire an active school lease.");
+        await CommunicationWorkerClaimSqlChecks.Run(f,r,enrollment,nonce,syntheticSid,secretHash);
         Sql.Proc("msg.ReleaseBackgroundLease",
             Sql.P("@UserId",f.Admin),Sql.P("@EnrollmentId",enrollment),
             Sql.P("@LeaseNonce",nonce));

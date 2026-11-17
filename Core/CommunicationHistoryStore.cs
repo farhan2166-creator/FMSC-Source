@@ -40,7 +40,8 @@ internal static class CommunicationHistoryStore
                 H.LastOpenedUtc,H.ReportedUtc,
                 COALESCE(Reporter.Username,CONVERT(nvarchar(30),H.ChangedBy)) ManualReportedByName,
                 Evidence.AttemptId,Evidence.RequestUtc,Evidence.ResponseUtc,
-                Evidence.ProviderMessageId,Evidence.FailureCode,
+                Evidence.ProviderMessageId,Evidence.FailureCode,Evidence.ClaimKind,Evidence.WorkerEnrollmentId,
+                COALESCE(ClaimActor.Username,CONVERT(nvarchar(30),Evidence.ClaimedBy)) AttemptActorName,
                 COALESCE(S.StudentName,T.StaffName,N'School record') RecipientName,
                 COALESCE(S.AdmissionNumber,T.StaffNumber) RecordNumber,RIGHT(R.PhoneE164,4) LastFour,
                 COALESCE(J.RenderedBody,ManualEvidence.RenderedBody) RenderedBody
@@ -60,10 +61,11 @@ internal static class CommunicationHistoryStore
             LEFT JOIN dbo.Users TakeoverActor ON TakeoverActor.UserId=Takeover.ApprovedBy
             LEFT JOIN msg.BatchCorrection Correction ON Correction.CorrectionBatchId=B.BatchId
             OUTER APPLY (
-                SELECT TOP(1) X.AttemptId,X.RequestUtc,X.ResponseUtc,X.ProviderMessageId,X.FailureCode
+                SELECT TOP(1) X.AttemptId,X.RequestUtc,X.ResponseUtc,X.ProviderMessageId,X.FailureCode,X.ClaimedBy,X.ClaimKind,X.WorkerEnrollmentId
                 FROM msg.Attempt X WHERE X.RecipientId=R.RecipientId
                 ORDER BY X.AttemptId DESC
             ) Evidence
+            LEFT JOIN dbo.Users ClaimActor ON ClaimActor.UserId=Evidence.ClaimedBy
             LEFT JOIN dbo.Students S ON S.AdmissionId=R.AdmissionId
             LEFT JOIN dbo.Staff T ON T.StaffId=R.StaffId
             LEFT JOIN dbo.Students SelectedStudent ON SelectedStudent.AdmissionId=B.StudentId

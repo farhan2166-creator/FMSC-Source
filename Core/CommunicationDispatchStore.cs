@@ -15,17 +15,18 @@ internal static class CommunicationDispatchStore
 
     internal static Task<DispatchResult> SendOneReviewedAsync(
         long recipientId,string channel,CancellationToken token=default) =>
-        SendOneCoreAsync(recipientId,channel,null,token);
+        SendOneCoreAsync(recipientId,channel,null,null,token);
 
     /// <summary>For unattended dispatch only: durably journal the SQL attempt
     /// before the external POST. A journal failure leaves SQL Unknown without
     /// contacting the provider, never an unrecorded automatic retry.</summary>
     internal static Task<DispatchResult> SendOneWithClaimJournalAsync(
-        long recipientId,string channel,Action<long> journal,CancellationToken token=default) =>
-        SendOneCoreAsync(recipientId,channel,journal ?? throw new ArgumentNullException(nameof(journal)),token);
+        long recipientId,string channel,Action<long> journal,SqlParameter[] workerAuthorization,CancellationToken token=default) =>
+        SendOneCoreAsync(recipientId,channel,journal ?? throw new ArgumentNullException(nameof(journal)),
+            workerAuthorization ?? throw new ArgumentNullException(nameof(workerAuthorization)),token);
 
     private static async Task<DispatchResult> SendOneCoreAsync(
-        long recipientId,string channel,Action<long>? journal,CancellationToken token)
+        long recipientId,string channel,Action<long>? journal,SqlParameter[]? workerAuthorization,CancellationToken token)
     {
         if (recipientId<=0) throw new ArgumentOutOfRangeException(nameof(recipientId));
         if (channel is not ("Sms" or "WhatsApp"))
@@ -50,13 +51,16 @@ internal static class CommunicationDispatchStore
         token.ThrowIfCancellationRequested();
         Guid attemptKey=Guid.NewGuid();
         // A claim moves Pending to Unknown and records the attempt under lock.
+        var claimParameters=new List<SqlParameter> {
+            DatabaseHelper.P("@RecipientId",recipientId),DatabaseHelper.P("@AttemptKey",attemptKey),
+            DatabaseHelper.P("@ExpectedProviderCode",adapter.ProviderCode),DatabaseHelper.Bit("@IsWorker",workerAuthorization is not null)
+        };
+        if(workerAuthorization is not null)
+            claimParameters.AddRange(workerAuthorization.Select(parameter=>(SqlParameter)((ICloneable)parameter).Clone()));
         DataTable claim;
         try
         {
-            claim=await DatabaseHelper.QueryUserAsync("msg.ClaimRecipient",
-            DatabaseHelper.P("@RecipientId",recipientId),
-            DatabaseHelper.P("@AttemptKey",attemptKey),
-            DatabaseHelper.P("@ExpectedProviderCode",adapter.ProviderCode));
+            claim=await DatabaseHelper.QueryUserAsync("msg.ClaimRecipient",claimParameters.ToArray());
         }
         catch(SqlException ex) when(ex.Number is 51341 or 51342)
         {

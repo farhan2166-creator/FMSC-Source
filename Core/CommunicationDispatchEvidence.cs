@@ -33,7 +33,8 @@ internal static class CommunicationDispatchEvidence
             CommunicationAttemptJournal.Hash(Convert.ToString(row["PhoneE164"])!),Convert.ToString(row["Channel"])!,
             Convert.ToString(row["ProviderCode"])!,Convert.ToString(row["ProfileHash"])!);
         var attempts=data.Tables[1].AsEnumerable().Select(attempt=>new CommunicationAttemptJournal.Attempt(
-            Convert.ToInt64(attempt["AttemptId"]),(Guid)attempt["AttemptKey"],Convert.ToString(attempt["Channel"])!,Convert.ToString(attempt["ProviderCode"])!)).ToArray();
+            Convert.ToInt64(attempt["AttemptId"]),(Guid)attempt["AttemptKey"],Convert.ToString(attempt["Channel"])!,Convert.ToString(attempt["ProviderCode"])!,
+            attempt.Field<int?>("ClaimedBy"),attempt.Field<string?>("ClaimKind"),attempt.Field<Guid?>("WorkerEnrollmentId"))).ToArray();
         Open().AssertConsistent(identity,attempts);
         return new(identity,attempts);
     }
@@ -42,6 +43,8 @@ internal static class CommunicationDispatchEvidence
     {
         var attempt=context.Attempts.SingleOrDefault(item=>item.AttemptId==attemptId && item.AttemptKey==attemptKey)
             ?? throw new CommunicationValidationException("The claimed submission differs from this database. Keep it held for recovery; do not resend.");
+        if(attempt.ClaimedBy is not >0 || attempt.ClaimKind is not ("Interactive" or "Worker"))
+            throw new CommunicationValidationException("The claimed submission has no authenticated actor. Keep it held for recovery.");
         return Open().RecordClaim(context.Identity,attempt);
     }
     internal static CommunicationAttemptJournal.Result? ReadResult(Context context,Guid attemptKey)=>

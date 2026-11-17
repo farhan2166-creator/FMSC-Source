@@ -44,6 +44,14 @@ internal static class AttemptJournalChecks
                 "Reused numeric attempt IDs cannot conceal missing submission keys");
             Refused(()=>journal.AssertConsistent(identity,new[]{attempt with {AttemptId=18}}),
                 "A matching key with a different SQL attempt identity is held for review");
+            var actorIdentity=identity with {RequestId=Guid.NewGuid()};
+            var actorAttempt=attempt with {AttemptId=19,AttemptKey=Guid.NewGuid(),ClaimedBy=17,ClaimKind="Worker",WorkerEnrollmentId=Guid.NewGuid()};
+            journal.RecordClaim(actorIdentity,actorAttempt);
+            journal.AssertConsistent(actorIdentity,new[]{actorAttempt});
+            Refused(()=>journal.AssertConsistent(actorIdentity,new[]{actorAttempt with {ClaimedBy=18}}),
+                "Retained worker identity cannot be silently reassigned while keeping the same SQL attempt key");
+            Refused(()=>journal.AssertConsistent(actorIdentity,new[]{actorAttempt with {WorkerEnrollmentId=Guid.NewGuid()}}),
+                "Retained worker enrollment distinguishes the service invocation from a later authorization");
             var restarted=new CommunicationAttemptJournal(root,Seal,Open);
             restarted.AssertConsistent(identity,new[]{attempt});
             check(restarted.ReadResult(identity,attempt.AttemptKey) is null,
@@ -60,7 +68,7 @@ internal static class AttemptJournalChecks
             var retry=attempt with {AttemptId=18,AttemptKey=Guid.NewGuid()};
             journal.RecordClaim(identity,retry);
             restarted.AssertConsistent(identity,new[]{attempt,retry});
-            check(Directory.GetFiles(root,"*.claim.dpapi",SearchOption.AllDirectories).Length==2,
+            check(Directory.GetFiles(root,"*.claim.dpapi",SearchOption.AllDirectories).Length==3,
                 "An independently authorized SQL retry adds distinct evidence and preserves its predecessor");
             Refused(()=>restarted.AssertConsistent(identity,new[]{retry}),
                 "A larger SQL watermark cannot hide the disappearance of an earlier submission");
@@ -73,7 +81,7 @@ internal static class AttemptJournalChecks
             var inaccessible=new CommunicationAttemptJournal(root,Seal,_=>throw new CryptographicException("Synthetic different account"));
             Refused(()=>inaccessible.AssertConsistent(identity,new[]{attempt,retry}),
                 "Unreadable account-protected evidence fails closed instead of being treated as absent");
-            string proof=Directory.GetFiles(root,"*.claim.dpapi",SearchOption.AllDirectories).First();
+            string proof=Directory.GetFiles(root,attempt.AttemptKey.ToString("N")+".claim.dpapi",SearchOption.AllDirectories).Single();
             File.WriteAllBytes(proof,new byte[]{1,2,3});
             Refused(()=>journal.AssertConsistent(identity,new[]{attempt,retry}),
                 "Corrupted durable evidence cannot authorize a new provider request");

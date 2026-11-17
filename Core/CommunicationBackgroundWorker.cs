@@ -202,7 +202,8 @@ internal static class CommunicationBackgroundWorker
                 try
                 {
                     var result=await CommunicationDispatchStore.SendOneWithClaimJournalAsync(
-                        recipientId,channel,CommunicationBackgroundEnrollment.JournalClaim,token);
+                        recipientId,channel,CommunicationBackgroundEnrollment.JournalClaim,
+                        CommunicationBackgroundEnrollment.Proof(enrollment,leaseNonce),token);
                     if(result.State=="Unknown") break;
                 }
                 catch(SqlException ex) when(ex.Number is 51092 or 51249 or 51250)

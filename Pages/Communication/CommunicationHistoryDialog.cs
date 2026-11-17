@@ -7,10 +7,10 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
 {
     private readonly DataGridView recipients = HumanUi.Grid(false);
     private readonly ModernTextBox preview = HumanUi.TextBox(true, 1600);
-    private readonly Label evidence = new()
+    private readonly ModernTextBox evidence = new()
     {
-        Name = "communicationHistoryEvidence",
-        Dock = DockStyle.Fill, AutoEllipsis = false,
+        Name = "communicationHistoryEvidence",Dock=DockStyle.Fill,
+        Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,MaxLength=2000,
         ForeColor = AppTheme.MutedText
     };
     private readonly ModernButton checkDelivery = new()
@@ -206,8 +206,7 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         if (selected is null) return;
         long? attempt = selected.Table.Columns.Contains("AttemptId")
             && selected["AttemptId"] != DBNull.Value ? Convert.ToInt64(selected["AttemptId"]) : null;
-        if (DisplayValue(selected,"ProviderMessageId").Length==0 ||
-            !CanCheckProviderDelivery(DisplayValue(selected,"ProviderCode"),
+        if (!CanCheckProviderDelivery(DisplayValue(selected,"ProviderCode"),
                 DisplayValue(selected,"Outcome"),attempt)) return;
         int actor = CurrentUser.UserId;
         int rowIndex = recipients.CurrentRow?.Index ?? 0;
@@ -262,7 +261,6 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         long? attempt = selected is not null && selected.Table.Columns.Contains("AttemptId")
             && selected["AttemptId"] != DBNull.Value ? Convert.ToInt64(selected["AttemptId"]) : null;
         bool allowed = selected is not null &&
-            DisplayValue(selected,"ProviderMessageId").Length>0 &&
             CurrentUser.HasPermission("Communication.Send") &&
             CurrentUser.HasPermission("Communication.View") &&
             CanCheckProviderDelivery(DisplayValue(selected,"ProviderCode"),
@@ -294,13 +292,18 @@ internal sealed class CommunicationHistoryDialog : ApplicationWindowForm
         {
             string id = DisplayValue(row, "ProviderMessageId");
             string failure = DisplayValue(row, "FailureCode");
+            string actor=DisplayValue(row,"AttemptActorName");
+            if(actor.Length>0)
+                narrative+=DisplayValue(row,"ClaimKind")=="Worker"
+                    ? " · Background processor (authorized by "+actor+")"
+                    : " · Operator: "+actor;
             if (id.Length > 0)
                 narrative += " · Provider reference ending " + id.Substring(Math.Max(0, id.Length - 12));
             if (failure.Length > 0) narrative += " · Failure code " + failure;
             if (row.Table.Columns.Contains("RequestUtc") && row["RequestUtc"] != DBNull.Value)
-                narrative += $" · Sent {LocalWhen(row, "RequestUtc")}";
+                narrative += $" · Attempt started {LocalWhen(row, "RequestUtc")}";
             if (row.Table.Columns.Contains("ResponseUtc") && row["ResponseUtc"] != DBNull.Value)
-                narrative += $" · Updated {LocalWhen(row, "ResponseUtc")}";
+                narrative += $" · Response recorded {LocalWhen(row, "ResponseUtc")}";
         }
         string takeoverReason = DisplayValue(row, "TakeoverReason");
         if (takeoverReason.Length > 0)

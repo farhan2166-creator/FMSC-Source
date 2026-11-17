@@ -505,6 +505,42 @@ internal static partial class Program
             acceptedHistory.Close();
         }
 
+        using var actorRows=acceptedMetaRows.Copy();
+        foreach(string field in new[]{"AttemptActorName","ClaimKind","ProviderMessageId","TakeoverReason"})actorRows.Columns.Add(field);
+        actorRows.Columns.Add("AttemptId",typeof(long));actorRows.Columns.Add("RequestUtc",typeof(DateTime));
+        foreach(DataRow row in actorRows.Rows)
+        {
+            row["Channel"]="Sms";row["ProviderCode"]="Twilio";row["Outcome"]="Unknown";row["TemplateJson"]=DBNull.Value;
+            row["RequestUtc"]=new DateTime(2030,1,1,10,20,0,DateTimeKind.Utc);
+        }
+        actorRows.Rows[0]["TakeoverReason"]=new string('x',180)+" Retained reason ending";
+        actorRows.Rows[0]["AttemptActorName"]="Enrolled administrator";actorRows.Rows[0]["ClaimKind"]="Worker";actorRows.Rows[0]["AttemptId"]=91L;
+        actorRows.Rows[1]["AttemptActorName"]="Actual operator";actorRows.Rows[1]["ClaimKind"]="Interactive";actorRows.Rows[1]["AttemptId"]=92L;
+        int recoveryPolls=0;
+        using(var actorHistory=new CommunicationHistoryDialog(new(completed,"Twilio","Unknown","School"),
+            _=>Task.FromResult(actorRows.Copy()),id=>{
+                Check(id==91,"History reconciles the selected attempt identity even when its SQL provider reference is missing.");
+                recoveryPolls++;actorRows.Rows[0]["Outcome"]="Accepted";return Task.FromResult("Accepted");
+            }))
+        {
+            actorHistory.Show();Application.DoEvents();
+            Check(Field<ModernTextBox>(actorHistory,"evidence").Text.Contains("Enrolled administrator",StringComparison.Ordinal)
+                && Field<ModernButton>(actorHistory,"checkDelivery").Enabled && actorHistory.Draft is null,
+                "History identifies worker authority and offers only explicit reconciliation for an uncertain attempt.");
+            Check(Field<ModernTextBox>(actorHistory,"evidence").ReadOnly
+                && Field<ModernTextBox>(actorHistory,"evidence").ScrollBars==ScrollBars.Vertical
+                && Field<ModernTextBox>(actorHistory,"evidence").Text.Contains("Retained reason ending",StringComparison.Ordinal),
+                "Long immutable actor and takeover evidence remains fully readable and scrollable without editing.");
+            Field<ModernButton>(actorHistory,"checkDelivery").PerformClick();Application.DoEvents();
+            Check(recoveryPolls==1 && Convert.ToString(((DataTable)Field<DataGridView>(actorHistory,"recipients").DataSource!).Rows[0]["Outcome"])=="Accepted",
+                "Recovering a retained provider reference updates acceptance without claiming delivery or sending another message.");
+            var actorRecipients=Field<DataGridView>(actorHistory,"recipients");actorRecipients.CurrentCell=actorRecipients.Rows[1].Cells[0];
+            Check(Field<ModernTextBox>(actorHistory,"evidence").Text.Contains("Actual operator",StringComparison.Ordinal)
+                && Convert.ToString(((DataTable)actorRecipients.DataSource!).Rows[1]["Outcome"])=="Unknown",
+                "History follows the actual interactive operator and preserves the other recipient's uncertainty.");
+            actorHistory.Close();
+        }
+
         using var settings = new CommunicationSendingOptionsDialog(() =>
         {
             var rows = new DataTable();
