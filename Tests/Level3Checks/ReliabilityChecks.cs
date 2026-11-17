@@ -7,7 +7,8 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
 {
     private int student, enrollment;
     private long charge;
-    private long communicationRecipient,communicationScheduled,manualPending,manualOpened;
+    private long communicationRecipient,communicationScheduled,manualPending,manualOpened,postBackupLostRecipient;
+    private Guid postBackupLostBatch,postBackupLostAttempt,automaticRestoreAuthorization;
     private string? backup, restored, snapshot;
     private Guid Owner => Guid.Parse(Environment.GetEnvironmentVariable("FMSC_TEST_RUN_ID")!);
     private string Catalog => new SqlConnectionStringBuilder(DatabaseHelper.ConnectionString).InitialCatalog;
@@ -37,7 +38,7 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
         await r.Stage("L3-COM-02 | durable post-backup submission without HTTP",ClaimCommunicationRecovery,saved);
         bool loaded = await r.Stage("L3-DB-02 | restore to absent owned catalog and new files", Restore, saved);
         await r.Stage("L3-DB-03 | restored compatibility, complete ledger and CHECKDB", CheckRestore, loaded);
-        await r.Stage("L3-COM-03 | restored pending message cannot repeat submission",RestoredCommunicationRecovery,loaded);
+        await r.Stage("L3-COM-03 | restored pending and wholly lost post-backup message stay held",RestoredCommunicationRecovery,loaded);
         await r.Stage("L3-DB-04 | old, new and structurally incompatible schema refusal", Compatibility, ready);
         await r.Stage("L3 database target guards | wrong owner and non-test catalog refusal", TargetGuards, ready);
         await r.Stage("L3-PRF-01 | 1000 production admissions and repeated real searches", SearchWorkload, ready);
@@ -224,6 +225,30 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
         Sql.Proc("msg.RecordAdmissionConsent",Sql.P("@UserId",f.Admin),Sql.P("@AdmissionId",student),Sql.P("@Consent",true),Sql.P("@Authority","Students.Admit"));
         Sql.Proc("msg.ConfigureChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),Sql.P("@ProviderCode","Twilio"));
         Sql.Proc("msg.EnableApiChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),Sql.P("@ProviderCode","Twilio"));
+        // Real automatic authorization saved BEFORE the backup. A later
+        // restoration must invalidate it even when every newer batch and
+        // attempt was lost and the old SQL catalog has no corresponding row.
+        Sql.Proc("msg.SaveTemplate",Sql.P("@UserId",f.Admin),Sql.P("@TemplateId",0),
+            Sql.P("@Name","Synthetic restore-bound automatic message"),
+            Sql.P("@Channel","Sms"),Sql.P("@Purpose","Announcement"),
+            Sql.P("@Body","Synthetic restore-bound message."),Sql.P("@Active",true),
+            Sql.P("@LanguageCode","en"));
+        int approvedTemplate=Sql.Count("SELECT TemplateId FROM msg.Template WHERE Name=N'Synthetic restore-bound automatic message'");
+        int approvedRevision=Sql.Count("SELECT MAX(RevisionNumber) FROM msg.TemplateRevision WHERE TemplateId=@Id",Sql.P("@Id",approvedTemplate));
+        automaticRestoreAuthorization=Guid.NewGuid();
+        Sql.Query("""
+            INSERT msg.AutomaticAuthorization(AuthorizationId,EventCode,TemplateId,TemplateRevision,Body,
+              LanguageCode,Channel,ProviderCode,ProfileHash,TemplateJson,CampusId,ClassId,
+              DailyFamilyLimit,ExpiryHours,Priority,ApprovedBy,RestoreBoundaryHash,AcademicToken)
+            VALUES(@Authorization,'Birthday',@Template,@Revision,N'Synthetic restore-bound message.',
+              'en','Sms','Twilio',REPLICATE('A',64),NULL,0,0,3,24,'Normal',@Admin,msg.RestoreBoundary(),NULL);
+            UPDATE msg.AutomationRule SET Mode='Automatic',AuthorizationId=@Authorization,CampusId=0,ClassId=0
+              WHERE EventCode='Birthday';
+            """,Sql.P("@Authorization",automaticRestoreAuthorization),Sql.P("@Template",approvedTemplate),
+            Sql.P("@Revision",approvedRevision),Sql.P("@Admin",f.Admin));
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.AutomaticAuthorized(@Id)",Sql.P("@Id",automaticRestoreAuthorization))==1,
+            "A genuine pre-backup automatic authorization is eligible before SQL restore.");
+
         communicationRecipient=await ConfirmCommunicationRecovery();
         communicationScheduled=await ConfirmCommunicationRecovery();
         using(var scheduleBatch=Sql.Query("SELECT BatchId FROM msg.Recipient WHERE RecipientId=@Id",Sql.P("@Id",communicationScheduled)))
@@ -271,6 +296,15 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
         using var claimed=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",communicationRecipient),
             Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));
         r.Check(Convert.ToBoolean(claimed.Rows[0]["Claimed"]),"A real SQL attempt is persisted after the backup; no provider request is issued.");
+        postBackupLostRecipient=await ConfirmCommunicationRecovery();
+        postBackupLostBatch=(Guid)Sql.Scalar("SELECT BatchId FROM msg.Recipient WHERE RecipientId=@Id",
+            Sql.P("@Id",postBackupLostRecipient))!;
+        postBackupLostAttempt=Guid.NewGuid();
+        using(var lost=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),
+            Sql.P("@RecipientId",postBackupLostRecipient),Sql.P("@AttemptKey",postBackupLostAttempt),
+            Sql.P("@ExpectedProviderCode","Twilio")))
+            r.Check(Convert.ToBoolean(lost.Rows[0]["Claimed"]),
+                "A second reviewed batch and its uncertain attempt exist only after the backup; no HTTP is attempted.");
         return Task.CompletedTask;
     }
     private async Task RestoredCommunicationRecovery()
@@ -294,6 +328,14 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
             DatabaseHelper.ConnectionString=new SqlConnectionStringBuilder(original){InitialCatalog=restored!,Pooling=false}.ConnectionString;
             r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE RecipientId=@Id",Sql.P("@Id",communicationRecipient))==0,
                 "The restored-message refusal rolls back the attempted claim completely.");
+            r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Batch WHERE BatchId=@Id",Sql.P("@Id",postBackupLostBatch))==0
+                && Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE AttemptKey=@Id",Sql.P("@Id",postBackupLostAttempt))==0,
+                "A real SQL restore removed the entire later reviewed batch and the later uncertain attempt.");
+            r.Check(Sql.Count("SELECT COUNT(*) FROM msg.AutomationRule WHERE EventCode='Birthday' AND Mode='Automatic' AND AuthorizationId=@Id",
+                    Sql.P("@Id",automaticRestoreAuthorization))==1
+                && Sql.Count("SELECT COUNT(*) FROM msg.AutomaticAuthorized(@Id)",Sql.P("@Id",automaticRestoreAuthorization))==0,
+                "Automatic authorization from the older recovery epoch is held even when a newer batch and its attempt vanished completely.");
+
             await r.Refused("Restored approval evidence cannot be rewritten to bypass the restore hold",()=>{
                 Sql.Query("UPDATE B SET RestoreBoundaryHash=msg.RestoreBoundary() FROM msg.Batch B JOIN msg.Recipient R ON R.BatchId=B.BatchId WHERE R.RecipientId=@Id",
                     Sql.P("@Id",communicationRecipient));return Task.CompletedTask;
