@@ -170,9 +170,14 @@ internal static partial class Program
             startup.Show(parent);
             var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(startup)!;
             Find(startup, "Generate key").PerformClick(); Application.DoEvents();
-            Check(panel.Visible && Find(startup, "Copy public key").Enabled &&
-                  !Find(startup, "Check for Updates").Enabled,
-                "New startup enrollment keeps the public key visible until approval is verified");
+            var newKey=(TextBox)typeof(UpdateConnectionForm).GetField("_publicKey", fields)!.GetValue(startup)!;
+            Check(newKey.Text=="ssh-rsa newly-generated-startup-key",
+                "New startup enrollment stores and displays the generated public key");
+            Check(panel.Visible, "New startup enrollment keeps the public-key panel visible");
+            Check(Find(startup, "Copy public key").Enabled,
+                "New startup enrollment keeps the public key copyable");
+            Check(!Find(startup, "Check for Updates").Enabled,
+                "New startup enrollment does not enable update checking without verified approval");
             startup.Close();
         }
         var prepared = new PreparedUpdate("1.2.0", "unused-stage", "unused-metadata", UpdateDownloadChoice.Full, false);
