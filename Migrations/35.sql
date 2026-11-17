@@ -414,7 +414,7 @@ END;');
 EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadAutomaticScope @UserId int,@EventCode varchar(32)
 AS BEGIN
  SET NOCOUNT ON;EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';EXEC dbo.RequirePermission @UserId,N''Students.View'';
- SELECT R.CampusId,R.ClassId,CONCAT(COALESCE(C.CampusName,N''All campuses''),N'' / '',COALESCE(K.ClassName,N''All classes'')) ScopeLabel
+ SELECT R.CampusId,R.ClassId,R.Mode,CONCAT(COALESCE(C.CampusName,N''All campuses''),N'' / '',COALESCE(K.ClassName,N''All classes'')) ScopeLabel
  FROM msg.AutomationRule R LEFT JOIN dbo.Campuses C ON C.CampusId=R.CampusId LEFT JOIN dbo.Classes K ON K.ClassId=R.ClassId WHERE R.EventCode=@EventCode;
 END;');
 

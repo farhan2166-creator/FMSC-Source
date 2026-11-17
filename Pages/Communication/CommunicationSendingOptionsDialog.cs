@@ -343,11 +343,11 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         var page = new TabPage("Automation") { BackColor = AppTheme.PageBackground };
         var content = new TableLayoutPanel
         {
-            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 5,
+            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 6,
             Padding = new Padding(AppScale.Scale(15)), Margin = Padding.Empty
         };
         content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        foreach (int height in new[] { 50, 64, 64, 54, 80 })
+        foreach (int height in new[] { 50, 64, 64, 54, 45, 80 })
             content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(height)));
         content.Controls.Add(new Label
         {
@@ -380,7 +380,22 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         automationActions.Controls.Add(exceptions);
         automationActions.Controls.Add(feeLimits);
         content.Controls.Add(automationActions, 0, 3);
-        content.Controls.Add(automationFeedback, 0, 4);
+        var schoolNotices=new ModernButton
+        {
+            Name="communicationSchoolNotices",Text="School Notices…",
+            ThemeRole="Secondary",Width=AppScale.Scale(185),Height=AppMetrics.ButtonHeight
+        };
+        var noticeActions=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false,Margin=Padding.Empty};
+        noticeActions.Controls.Add(schoolNotices);
+        content.Controls.Add(noticeActions,0,4);
+        content.Controls.Add(automationFeedback, 0, 5);
+        schoolNotices.Click+=(_,_) =>
+        {
+            if(busy || !CurrentUser.HasPermission("Communication.Configure"))return;
+            using var dialog=new CommunicationSchoolNoticeDialog();
+            dialog.ShowDialog(this);
+            if(dialog.Changed)Changed=true;
+        };
         exceptions.Click += (_, _) =>
         {
             if (busy || !CurrentUser.HasPermission("Communication.Configure")) return;
