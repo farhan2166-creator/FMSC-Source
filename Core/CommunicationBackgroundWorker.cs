@@ -122,10 +122,19 @@ internal static class CommunicationBackgroundWorker
                         token, DatabaseHelper.Int("@UserId",enrollment.UserId));
                 }
             }
-            catch(SqlException ex) when(ex.Number==50003)
+            catch(SqlException ex)
+            {
+                // Source discovery is advisory and never authorizes dispatch.
+                // A malformed/locked source must not starve independently
+                // reviewed messages already in the durable Queue. Keep the
+                // failure visible for repair; SQL retains the bounded scan slot.
+                AppExceptionHandler.LogNonFatal(ex,
+                    "Communication event intake failed; reviewed dispatch continues");
+            }
+            catch(InvalidDataException ex)
             {
                 AppExceptionHandler.LogNonFatal(ex,
-                    "Communication event review scan needs renewed school permissions");
+                    "Communication event intake response invalid; reviewed dispatch continues");
             }
 
             // Current computer authorization is also required before preparing
