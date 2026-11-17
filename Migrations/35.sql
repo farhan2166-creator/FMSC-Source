@@ -264,7 +264,8 @@ RETURNS TABLE AS RETURN
     WHERE P.AdmissionId=C.AdmissionId AND SourcePayment.PaymentDate>=DATEADD(day,-2,Today.SchoolDate) AND SourcePayment.PaymentDate<DATEADD(day,1,Today.SchoolDate)))
  OR (C.EventCode=''Birthday'' AND C.SourceKey=CONCAT(''BD:'',YEAR(Today.SchoolDate),'':'',C.AdmissionId)
     AND MONTH(S.DateOfBirth)=MONTH(Today.SchoolDate) AND DAY(S.DateOfBirth)=DAY(Today.SchoolDate))
- OR (C.EventCode IN(''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'') AND EXISTS(SELECT 1 FROM msg.LiveFeeEventEligible(C.AdmissionId,C.EventCode,Today.SchoolDate))))
+ OR (C.EventCode IN(''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'') AND EXISTS(SELECT 1 FROM msg.LiveFeeEventEligible(C.AdmissionId,C.EventCode,Today.SchoolDate)))
+ OR (C.EventCode IN(''Announcement'',''ExaminationResult'') AND EXISTS(SELECT 1 FROM msg.NoticeCandidateEligible(C.CandidateId))))
 );');
 
 EXEC(N'CREATE OR ALTER PROCEDURE msg.SaveAutomaticAuthorization
@@ -402,9 +403,12 @@ AS BEGIN
  SET NOCOUNT ON;
  EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
  EXEC dbo.RequirePermission @UserId,N''Students.View'';EXEC dbo.RequirePermission @UserId,N''Fees.View'';
- SELECT C.CandidateId,C.EventCode,C.SourceRecordId,C.AdmissionId,S.StudentName,S.AdmissionNumber,C.CreatedUtc
+ SELECT C.CandidateId,C.EventCode,C.SourceRecordId,C.AdmissionId,S.StudentName,S.AdmissionNumber,C.CreatedUtc,
+ Notice.Title NoticeTitle,Notice.NoticeText,Notice.LanguageCode NoticeLanguageCode
  FROM msg.AutomationCandidate C JOIN dbo.Students S ON S.AdmissionId=C.AdmissionId
- WHERE C.CandidateId=@CandidateId AND C.State=''Pending'' AND C.ReviewOnly=1;
+ LEFT JOIN msg.SchoolNotice Notice ON Notice.NoticeId=C.SourceRecordId AND Notice.EventCode=C.EventCode
+ WHERE C.CandidateId=@CandidateId AND C.State=''Pending'' AND C.ReviewOnly=1
+ AND (C.EventCode NOT IN(''Announcement'',''ExaminationResult'') OR EXISTS(SELECT 1 FROM msg.NoticeCandidateEligible(C.CandidateId)));
 END;');
 
 EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadAutomaticScope @UserId int,@EventCode varchar(32)
@@ -509,7 +513,32 @@ AS BEGIN
  FROM @Candidate C
  WHERE NOT EXISTS(SELECT 1 FROM msg.AutomationCandidate Existing WITH(UPDLOCK,HOLDLOCK)
    WHERE Existing.EventCode=C.EventCode AND Existing.SourceKey=C.SourceKey);
- SELECT @@ROWCOUNT NewSuggestions;
+ DECLARE @NewSuggestions int=@@ROWCOUNT;
+ -- One candidate per published notice and approved roster student.
+ INSERT msg.AutomationCandidate(EventCode,SourceKey,AdmissionId,SourceRecordId)
+ SELECT TOP(300) N.EventCode,CONCAT(''NOTICE:'',N.NoticeId,'':'',M.AdmissionId),M.AdmissionId,N.NoticeId
+ FROM msg.SchoolNotice N WITH(HOLDLOCK)
+ JOIN msg.AutomationRule R ON R.EventCode=N.EventCode AND R.Mode IN(''Review'',''Automatic'')
+ JOIN msg.SchoolNoticeMember M WITH(HOLDLOCK) ON M.NoticeId=N.NoticeId
+ JOIN dbo.Students S WITH(HOLDLOCK) ON S.AdmissionId=M.AdmissionId AND S.Status=N''Active''
+ CROSS APPLY msg.AutomationRecordInScope(M.AdmissionId,N.EventCode) RuleScope
+ OUTER APPLY msg.RecordGuardian(M.AdmissionId) Guardian
+ LEFT JOIN dbo.FamilyMembers FM WITH(HOLDLOCK) ON FM.AdmissionId=M.AdmissionId
+ WHERE N.RevokedUtc IS NULL AND N.ExpiresUtc>SYSUTCDATETIME()
+ AND (R.ActivationBaselineUtc IS NULL OR N.ApprovedUtc>=R.ActivationBaselineUtc)
+ AND Guardian.HasConsent=1 AND Guardian.PhoneE164 IS NOT NULL
+ AND NOT EXISTS(SELECT 1 FROM msg.AutomationCandidate Existing WITH(UPDLOCK,HOLDLOCK)
+  WHERE Existing.EventCode=N.EventCode AND Existing.SourceKey=CONCAT(''NOTICE:'',N.NoticeId,'':'',M.AdmissionId))
+ AND NOT EXISTS(SELECT 1 FROM msg.AutomationException X WITH(HOLDLOCK)
+  WHERE X.EventCode=N.EventCode AND (X.AdmissionId=M.AdmissionId OR X.FamilyId=FM.FamilyId)
+  AND X.RevokedUtc IS NULL AND (X.UntilUtc IS NULL OR X.UntilUtc>SYSUTCDATETIME()))
+ ORDER BY N.NoticeId,M.AdmissionId;
+ SET @NewSuggestions+=@@ROWCOUNT;
+ UPDATE C SET State=''Expired'' FROM msg.AutomationCandidate C
+ JOIN msg.SchoolNotice N ON N.NoticeId=C.SourceRecordId AND N.EventCode=C.EventCode
+ WHERE C.EventCode IN(''Announcement'',''ExaminationResult'') AND C.State=''Pending''
+  AND (N.RevokedUtc IS NOT NULL OR N.ExpiresUtc<=SYSUTCDATETIME());
+ SELECT @NewSuggestions NewSuggestions;
  COMMIT;
 END');
 
@@ -621,15 +650,18 @@ AS BEGIN
   (SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE
   (SELECT TimeZoneId FROM msg.DispatchControl WHERE ControlId=1));
  SELECT TOP(200) C.CandidateId,C.EventCode,C.SourceRecordId,C.AdmissionId,
-   S.StudentName,S.AdmissionNumber,C.CreatedUtc
+   S.StudentName,S.AdmissionNumber,C.CreatedUtc,
+ Notice.Title NoticeTitle,Notice.NoticeText,Notice.LanguageCode NoticeLanguageCode
  FROM msg.AutomationCandidate C
  JOIN msg.AutomationRule R ON R.EventCode=C.EventCode AND (R.Mode=''Review'' OR C.ReviewOnly=1)
  JOIN dbo.Students S ON S.AdmissionId=C.AdmissionId AND S.Status=N''Active''
+ LEFT JOIN msg.SchoolNotice Notice ON Notice.NoticeId=C.SourceRecordId AND Notice.EventCode=C.EventCode
  OUTER APPLY msg.RecordGuardian(S.AdmissionId) G
  LEFT JOIN dbo.FamilyMembers FM ON FM.AdmissionId=S.AdmissionId
  WHERE C.State=''Pending''
    AND EXISTS(SELECT 1 FROM msg.AutomationRecordInScope(C.AdmissionId,C.EventCode))
    AND C.EventCode NOT IN (''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'')
+   AND (C.EventCode NOT IN(''Announcement'',''ExaminationResult'') OR EXISTS(SELECT 1 FROM msg.NoticeCandidateEligible(C.CandidateId)))
    AND G.HasConsent=1 AND G.PhoneE164 IS NOT NULL
    AND (C.EventCode<>''Birthday'' OR
        (C.SourceKey=CONCAT(''BD:'',YEAR(@Today),'':'',C.AdmissionId)
@@ -699,6 +731,9 @@ AS BEGIN
  WHERE CandidateId=@CandidateId AND State=''Pending'';
  IF @StudentId IS NULL
     THROW 51283,''This suggested event is already resolved.'',1;
+ IF @EventCode IN(''Announcement'',''ExaminationResult'')
+    AND NOT EXISTS(SELECT 1 FROM msg.NoticeCandidateEligible(@CandidateId))
+    THROW 51453,''The official notice expired, was revoked, or its audience changed.'',1;
  DECLARE @Today date=CONVERT(date,
   (SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE
   (SELECT TimeZoneId FROM msg.DispatchControl WHERE ControlId=1));
@@ -744,7 +779,9 @@ AS BEGIN
           AND B.Audience IN (''FeeStudent'',''FeeFamily''))
       OR (@EventCode NOT IN (''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'')
           AND (B.Audience IN (''Student'',''Family'') OR (@EventCode=''PaymentReceived'' AND B.Audience=''FeeStudent''))))
-   AND Recipient.AdmissionId=@StudentId)
+   AND Recipient.AdmissionId=@StudentId
+   AND (@EventCode NOT IN(''Announcement'',''ExaminationResult'') OR EXISTS(SELECT 1 FROM msg.SchoolNotice N
+     WHERE N.NoticeId=@SourceRecordId AND CHARINDEX(N.Title,B.Body)>0 AND CHARINDEX(N.NoticeText,B.Body)>0)))
     THROW 51284,''Only a confirmed message for the proposed school record can resolve this event.'',1;
  UPDATE msg.AutomationCandidate SET State=''Prepared'',ReviewedBy=@UserId,
   ReviewedUtc=SYSUTCDATETIME(),BatchId=@BatchId WHERE CandidateId=@CandidateId;
@@ -762,7 +799,7 @@ AS BEGIN
  -- Automatic sending remains disabled until full verified event dispatch.
  IF @Mode=''Automatic'' OR
    (@Mode=''Review'' AND @EventCode NOT IN
-      (''Admission'',''PaymentReceived'',''Birthday'',''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp''))
+      (''Admission'',''PaymentReceived'',''Birthday'',''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'',''Announcement'',''ExaminationResult''))
   THROW 51247,''This automatic event source is not yet available. Use manual messages for now.'',1;
  BEGIN TRANSACTION;
  IF NOT EXISTS(SELECT 1 FROM msg.AutomationRule WITH(UPDLOCK,HOLDLOCK)

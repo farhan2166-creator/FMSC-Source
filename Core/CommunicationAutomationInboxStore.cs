@@ -11,7 +11,8 @@ internal static class CommunicationAutomationInboxStore
 {
     internal sealed record Suggestion(
         long CandidateId,string EventCode,long SourceRecordId,
-        int AdmissionId,string StudentName,string? AdmissionNumber,DateTime CreatedUtc);
+        int AdmissionId,string StudentName,string? AdmissionNumber,DateTime CreatedUtc,
+        string? NoticeTitle=null,string? NoticeText=null,string? NoticeLanguageCode=null);
 
     private static void RequireReviewPermission()
     {
@@ -49,7 +50,10 @@ internal static class CommunicationAutomationInboxStore
             Convert.ToInt32(row["AdmissionId"]),
             Convert.ToString(row["StudentName"])??"",
             row.IsNull("AdmissionNumber") ? null : Convert.ToString(row["AdmissionNumber"]),
-            Convert.ToDateTime(row["CreatedUtc"])))
+            Convert.ToDateTime(row["CreatedUtc"]),
+            row.Table.Columns.Contains("NoticeTitle") ? Convert.ToString(row["NoticeTitle"]) : null,
+            row.Table.Columns.Contains("NoticeText") ? Convert.ToString(row["NoticeText"]) : null,
+            row.Table.Columns.Contains("NoticeLanguageCode") ? Convert.ToString(row["NoticeLanguageCode"]) : null))
             .OrderBy(suggestion=>suggestion.CreatedUtc).ThenBy(suggestion=>suggestion.CandidateId).ToArray();
     }
 
@@ -62,7 +66,8 @@ internal static class CommunicationAutomationInboxStore
         if(rows.Rows.Count!=1)return null;
         DataRow row=rows.Rows[0];
         return new(Convert.ToInt64(row["CandidateId"]),Convert.ToString(row["EventCode"])!,Convert.ToInt64(row["SourceRecordId"]),
-            Convert.ToInt32(row["AdmissionId"]),Convert.ToString(row["StudentName"])!,Convert.ToString(row["AdmissionNumber"]),Convert.ToDateTime(row["CreatedUtc"]));
+            Convert.ToInt32(row["AdmissionId"]),Convert.ToString(row["StudentName"])!,Convert.ToString(row["AdmissionNumber"]),Convert.ToDateTime(row["CreatedUtc"]),
+            Convert.ToString(row["NoticeTitle"]),Convert.ToString(row["NoticeText"]),Convert.ToString(row["NoticeLanguageCode"]));
     }
 
     internal static Task DismissAsync(long candidateId)
@@ -145,6 +150,7 @@ internal static class CommunicationAutomationInboxStore
                     .Single(t=>t.Name=="Outstanding fee reminder (Urdu)").Body,
                 "UpcomingDue" => "محترم والدین/سرپرست، [StudentName] کی فیس کی مقررہ تاریخ قریب ہے۔ درست تفصیل کے لیے اسکول کے اکاؤنٹس دفتر سے رابطہ کریں۔",
                 "OverdueFollowUp" => "محترم والدین/سرپرست، [StudentName] کی واجب الادا فیس کی مقررہ تاریخ گزر چکی ہے۔ تازہ بقایا رقم کے لیے اسکول اکاؤنٹس دفتر سے رابطہ کریں۔",
+                "Announcement" or "ExaminationResult" => "محترم والدین/سرپرست،\n[NoticeTitle]\n[NoticeText]\nRegards: FMSC",
                 _ => throw new ArgumentOutOfRangeException(nameof(eventCode),
                     "This event does not have an approved Urdu format.")
             };
@@ -160,6 +166,7 @@ internal static class CommunicationAutomationInboxStore
                 .Single(t=>t.Name=="Outstanding fee reminder").Body,
             "UpcomingDue" => "Dear parent/guardian, a fee for [StudentName] (admission [AdmissionNumber]) is approaching its due date. Please review the current school fee statement or contact the accounts office.",
             "OverdueFollowUp" => "Dear parent/guardian, a fee for [StudentName] (admission [AdmissionNumber]) is now past its due date. Please contact the accounts office to review the current balance.",
+            "Announcement" or "ExaminationResult" => "Dear parent/guardian,\n[NoticeTitle]\n[NoticeText]\nRegards: FMSC",
             _ => throw new ArgumentOutOfRangeException(nameof(eventCode),
                 "This event does not have an approved school message suggestion.")
         };
@@ -173,6 +180,8 @@ internal static class CommunicationAutomationInboxStore
         "OutstandingFees" => "Outstanding fees",
         "UpcomingDue" => "Upcoming fee due",
         "OverdueFollowUp" => "Overdue fee follow-up",
+        "Announcement" => "School announcement",
+        "ExaminationResult" => "Examination/result notice",
         _ => code
     };
 }

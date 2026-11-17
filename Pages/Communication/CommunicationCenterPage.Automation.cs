@@ -29,7 +29,16 @@ public sealed partial class CommunicationCenterPage
         student.SetStudent(eventSuggestion.AdmissionId,eventSuggestion.StudentName);
         if(!IsMeta)
         {
-            message.Text=CommunicationAutomationInboxStore.SuggestedBody(
+            if(eventSuggestion.EventCode is "Announcement" or "ExaminationResult")
+            {
+                if(eventSuggestion.NoticeTitle is null || eventSuggestion.NoticeText is null)
+                    throw new CommunicationValidationException("Refresh the approved notice before preparing it.");
+                languageChoice.SelectedIndex=eventSuggestion.NoticeLanguageCode=="ur" ? 1 : 0;
+                message.Text=CommunicationAutomationInboxStore.SuggestedBody(eventSuggestion.EventCode,CurrentLanguage)
+                    .Replace("[NoticeTitle]",eventSuggestion.NoticeTitle,StringComparison.Ordinal)
+                    .Replace("[NoticeText]",eventSuggestion.NoticeText,StringComparison.Ordinal);
+            }
+            else message.Text=CommunicationAutomationInboxStore.SuggestedBody(
                 eventSuggestion.EventCode,CurrentLanguage,financial);
         }
         else
