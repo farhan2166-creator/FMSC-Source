@@ -305,7 +305,7 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
             Sql.P("@ExpectedProviderCode","Twilio")))
             r.Check(Convert.ToBoolean(lost.Rows[0]["Claimed"]),
                 "A second reviewed batch and its uncertain attempt exist only after the backup; no HTTP is attempted.");
-        return Task.CompletedTask;
+        return;
     }
     private async Task RestoredCommunicationRecovery()
     {
