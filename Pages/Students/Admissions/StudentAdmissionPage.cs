@@ -1781,8 +1781,12 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         {
             foreach (var option in remaining)
             {
-                var item = addFeeMenu.Items.Add(
-                    $"{option.FeeTypeName}  (Rs. {option.Amount:N0})");
+                string label = option.IsTransportLinked
+                    ? currentAdmissionId > 0
+                        ? $"Start Transport — {option.FeeTypeName}  (Rs. {option.Amount:N0})"
+                        : $"Use Transport — {option.FeeTypeName}  (Rs. {option.Amount:N0})"
+                    : $"{option.FeeTypeName}  (Rs. {option.Amount:N0})";
+                var item = addFeeMenu.Items.Add(label);
                 item.Click += async (_, _) => await AddFeeRow(option);
             }
         }
@@ -1792,6 +1796,41 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
     }
     private async Task AddFeeRow(FeeConfigOption option)
     {
+        // Transport is a dated service, not an ordinary fee assignment.
+        if (option.IsTransportLinked)
+        {
+            if (currentAdmissionId > 0)
+            {
+                if (_editEnrollmentId <= 0)
+                {
+                    Warn("Complete the student's placement before starting transport.");
+                    return;
+                }
+                if (saveBusy || !CurrentUser.HasPermission("Fees.Adjust")) return;
+                int enrollmentId = _editEnrollmentId;
+                try
+                {
+                    using var dialog = new TransportServiceDialog(enrollmentId, true, option.FeeTypeId);
+                    if (dialog.ShowDialog(this) == DialogResult.OK &&
+                        !IsDisposed && _editEnrollmentId == enrollmentId)
+                        await LoadStudentFeeAssignmentsAsync(enrollmentId);
+                }
+                catch (Exception ex)
+                {
+                    Fail(ex);
+                }
+            }
+            else
+            {
+                // New admissions establish transport through Uses Transport and the
+                // admission submission, rather than the existing-student writer.
+                if (!UsesTransport) transport.SelectedIndex = 1;
+                TransportChanged();
+                RefreshFeeStatus();
+            }
+            return;
+        }
+
         if (_editEnrollmentId > 0 && currentAdmissionId > 0)
         {
             try
@@ -2453,7 +2492,10 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                         ? ""
                         : Convert.ToString(row["Frequency"]) ?? "",
                     IsMandatory = IsMandatoryFeeTypeCode(feeTypeCode),
-                    IsTransportLinked = IsTransportFeeType(feeTypeCode, feeTypeName),
+                    IsTransportLinked = table.Columns.Contains("IsTransportLinked") &&
+                        row["IsTransportLinked"] != DBNull.Value
+                        ? Convert.ToBoolean(row["IsTransportLinked"])
+                        : IsTransportFeeType(feeTypeCode, feeTypeName),
                     HasPayments = table.Columns.Contains("HasPayments") &&
                         row["HasPayments"] != DBNull.Value &&
                         Convert.ToBoolean(row["HasPayments"])
@@ -2525,6 +2567,10 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
             var feeTypes = await feeTypesTask;
             var feePositions = feeTypes.AsEnumerable().ToDictionary(r => Convert.ToInt32(r["FeeTypeId"]),
                 r => r.IsNull("DisplayOrder") ? int.MaxValue : Convert.ToInt32(r["DisplayOrder"]));
+            var transportFlags = feeTypes.AsEnumerable()
+                .Where(r => r.Table.Columns.Contains("IsTransportLinked"))
+                .ToDictionary(r => Convert.ToInt32(r["FeeTypeId"]),
+                    r => !r.IsNull("IsTransportLinked") && Convert.ToBoolean(r["IsTransportLinked"]));
             foreach (DataRow row in raw.AsEnumerable().OrderBy(r =>
                 feePositions.GetValueOrDefault(Convert.ToInt32(r["FeeTypeId"]), int.MaxValue)))
             {
@@ -2550,7 +2596,9 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                         ? ""
                         : Convert.ToString(row["Frequency"]) ?? "",
                     IsMandatory = IsMandatoryFeeTypeCode(feeTypeCode),
-                    IsTransportLinked = IsTransportFeeType(feeTypeCode, feeTypeName)
+                    IsTransportLinked = transportFlags.TryGetValue(Convert.ToInt32(row["FeeTypeId"]), out bool transportLinked)
+                        ? transportLinked
+                        : IsTransportFeeType(feeTypeCode, feeTypeName)
                 });
             }
         }
