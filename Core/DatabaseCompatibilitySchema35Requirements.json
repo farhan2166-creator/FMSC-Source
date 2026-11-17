@@ -109,6 +109,11 @@
       "schema": "msg",
       "name": "TR_SchoolNoticeMemberImmutable",
       "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "NoticeFamilyRepresentative",
+      "type": "IF"
     }
   ],
   "columns": [

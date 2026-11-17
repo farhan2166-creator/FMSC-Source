@@ -16,6 +16,11 @@ internal static class CommunicationSchoolNoticeSqlChecks
         Sql.Proc("msg.RecordAdmissionConsent",
             Sql.P("@UserId",f.Admin),Sql.P("@AdmissionId",student),
             Sql.P("@Consent",true),Sql.P("@Authority","Students.Admit"));
+        var familyArgs=f.AdmissionArgs("Fictional school notice linked sibling",student);
+        familyArgs.Single(x=>x.ParameterName=="@ContactNumber").Value="03008000984";
+        int sibling=Convert.ToInt32(Sql.Proc("AdmitStudent",familyArgs).Rows[0]["AdmissionId"]);
+        Sql.Proc("msg.RecordAdmissionConsent",Sql.P("@UserId",f.Admin),
+            Sql.P("@AdmissionId",sibling),Sql.P("@Consent",true),Sql.P("@Authority","Students.Admit"));
 
         foreach(string kind in modes)
         {
@@ -68,6 +73,11 @@ internal static class CommunicationSchoolNoticeSqlChecks
                     Sql.P("@Id",id),Sql.P("@Student",student));return Task.CompletedTask;
             },51452);
             Sql.Proc("msg.ScanAutomationCandidates",Sql.P("@UserId",f.Admin));
+            r.Check(Sql.Count("SELECT COUNT(*) FROM msg.SchoolNoticeMember WHERE NoticeId=@Id AND AdmissionId IN(@First,@Sibling)",
+                Sql.P("@Id",id),Sql.P("@First",student),Sql.P("@Sibling",sibling))==2 &&
+                Sql.Count("SELECT COUNT(*) FROM msg.AutomationCandidate WHERE EventCode=@Kind AND SourceRecordId=@Id AND AdmissionId IN(@First,@Sibling)",
+                Sql.P("@Kind",kind),Sql.P("@Id",id),Sql.P("@First",student),Sql.P("@Sibling",sibling))==1,
+                "Both siblings remain in the approved roster, but share one actionable family notice.");
             r.Check(Sql.Count("SELECT COUNT(*) FROM msg.AutomationCandidate WHERE EventCode=@Kind AND SourceRecordId=@Id AND AdmissionId=@Student",
                 Sql.P("@Kind",kind),Sql.P("@Id",id),Sql.P("@Student",student))==1,
                 "Approved official source produces one idempotent review suggestion per roster pupil.");

@@ -154,6 +154,40 @@ AS BEGIN
  FROM msg.SchoolNotice N ORDER BY N.ApprovedUtc DESC,N.NoticeId DESC;
 END');
 
+EXEC(N'CREATE OR ALTER FUNCTION msg.NoticeFamilyRepresentative(@NoticeId bigint,@AdmissionId int,@EventCode varchar(32))
+RETURNS TABLE AS RETURN
+(
+ SELECT CONVERT(bit,1) Allowed WHERE
+ NOT EXISTS(SELECT 1 FROM msg.AutomationCandidate Prior WITH(HOLDLOCK)
+  JOIN dbo.FamilyMembers PriorFamily WITH(HOLDLOCK) ON PriorFamily.AdmissionId=Prior.AdmissionId
+  JOIN dbo.FamilyMembers CurrentFamily WITH(HOLDLOCK) ON CurrentFamily.AdmissionId=@AdmissionId
+    AND CurrentFamily.FamilyId=PriorFamily.FamilyId
+  WHERE Prior.EventCode=@EventCode AND Prior.SourceRecordId=@NoticeId AND Prior.State=''Prepared''
+    AND Prior.AdmissionId<>@AdmissionId)
+ AND NOT EXISTS(
+  SELECT 1 FROM dbo.FamilyMembers CurrentFamily WITH(HOLDLOCK)
+  JOIN dbo.FamilyMembers EarlierFamily WITH(HOLDLOCK) ON EarlierFamily.FamilyId=CurrentFamily.FamilyId
+   AND EarlierFamily.AdmissionId<@AdmissionId
+  JOIN msg.SchoolNoticeMember MemberOfRoster WITH(HOLDLOCK) ON MemberOfRoster.NoticeId=@NoticeId
+   AND MemberOfRoster.AdmissionId=EarlierFamily.AdmissionId
+  JOIN msg.SchoolNotice N WITH(HOLDLOCK) ON N.NoticeId=@NoticeId AND N.EventCode=@EventCode
+  JOIN dbo.Students Peer WITH(HOLDLOCK) ON Peer.AdmissionId=EarlierFamily.AdmissionId AND Peer.Status=N''Active''
+  CROSS APPLY msg.AutomationRecordInScope(EarlierFamily.AdmissionId,@EventCode) PeerScope
+  OUTER APPLY msg.RecordGuardian(EarlierFamily.AdmissionId) Contact
+  WHERE CurrentFamily.AdmissionId=@AdmissionId
+   AND Contact.HasConsent=1 AND Contact.PhoneE164 IS NOT NULL
+   AND EXISTS(SELECT 1 FROM dbo.Enrollments E WITH(HOLDLOCK)
+     JOIN dbo.CampusClassSections CCS WITH(HOLDLOCK) ON CCS.ClassSectionId=E.ClassSectionId
+     WHERE E.AdmissionId=EarlierFamily.AdmissionId AND E.Status=N''Active''
+       AND (N.CampusId=0 OR CCS.CampusId=N.CampusId)
+       AND (N.ClassId=0 OR CCS.ClassId=N.ClassId))
+   AND NOT EXISTS(SELECT 1 FROM msg.AutomationException X WITH(HOLDLOCK)
+     WHERE X.EventCode=@EventCode AND
+       (X.AdmissionId=EarlierFamily.AdmissionId OR X.FamilyId=CurrentFamily.FamilyId)
+       AND X.RevokedUtc IS NULL AND (X.UntilUtc IS NULL OR X.UntilUtc>SYSUTCDATETIME()))
+ )
+);');
+
 EXEC(N'CREATE OR ALTER FUNCTION msg.NoticeCandidateEligible(@CandidateId bigint)
 RETURNS TABLE AS RETURN
 (
@@ -166,6 +200,7 @@ RETURNS TABLE AS RETURN
   JOIN dbo.CampusClassSections CCS WITH(HOLDLOCK) ON CCS.ClassSectionId=E.ClassSectionId
   WHERE E.AdmissionId=C.AdmissionId ORDER BY CASE WHEN E.Status=N''Active'' THEN 0 ELSE 1 END,E.EnrollmentId DESC) Placement
  CROSS APPLY msg.AutomationRecordInScope(C.AdmissionId,C.EventCode) RuleScope
+ CROSS APPLY msg.NoticeFamilyRepresentative(N.NoticeId,C.AdmissionId,C.EventCode) FamilyRepresentative
  OUTER APPLY msg.RecordGuardian(C.AdmissionId) Guardian
  LEFT JOIN dbo.FamilyMembers FM WITH(HOLDLOCK) ON FM.AdmissionId=C.AdmissionId
  WHERE C.CandidateId=@CandidateId AND C.State IN(''Pending'',''Prepared'')
@@ -538,6 +573,7 @@ AS BEGIN
  JOIN msg.SchoolNoticeMember M WITH(HOLDLOCK) ON M.NoticeId=N.NoticeId
  JOIN dbo.Students S WITH(HOLDLOCK) ON S.AdmissionId=M.AdmissionId AND S.Status=N''Active''
  CROSS APPLY msg.AutomationRecordInScope(M.AdmissionId,N.EventCode) RuleScope
+ CROSS APPLY msg.NoticeFamilyRepresentative(N.NoticeId,M.AdmissionId,N.EventCode) FamilyRepresentative
  OUTER APPLY msg.RecordGuardian(M.AdmissionId) Guardian
  LEFT JOIN dbo.FamilyMembers FM WITH(HOLDLOCK) ON FM.AdmissionId=M.AdmissionId
  WHERE N.RevokedUtc IS NULL AND N.ExpiresUtc>SYSUTCDATETIME()
