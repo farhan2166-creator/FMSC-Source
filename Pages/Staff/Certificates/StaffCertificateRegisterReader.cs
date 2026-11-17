@@ -9,12 +9,12 @@ namespace FMSC_SMS.Pages.Staff.Certificates;
 /// </summary>
 internal static class StaffCertificateRegisterReader
 {
-    internal sealed record Kind(string Key, string Caption, string Reader, string RecordKey);
+    internal sealed record Kind(string Key, string Caption, string Reader, string RecordKey, bool NeedsUserId = false);
 
     internal static readonly Kind[] Kinds =
     {
         new("Lecturer", "Regular Teacher / Lecturer", "GetRegularLecturerCertificateRecords", "RegularLecturerCertificateId"),
-        new("Bank", "Bank Account Opening", "GetBankAccountOpeningCertificateRecords", "BankAccountOpeningCertificateId")
+        new("Bank", "Bank Account Opening", "GetBankAccountOpeningCertificateRecords", "BankAccountOpeningCertificateId", NeedsUserId: true)
     };
 
     internal static DataTable CreateTable()
@@ -83,7 +83,9 @@ internal static class StaffCertificateRegisterReader
         var combined = CreateTable();
         foreach (Kind kind in Kinds)
         {
-            using var source = DatabaseHelper.QueryUser(kind.Reader, DatabaseHelper.Int("@StaffId", staffId));
+            using var source = kind.NeedsUserId
+                ? DatabaseHelper.QueryUser(kind.Reader, DatabaseHelper.Int("@UserId", CurrentUser.UserId), DatabaseHelper.Int("@StaffId", staffId))
+                : DatabaseHelper.QueryUser(kind.Reader, DatabaseHelper.Int("@StaffId", staffId));
             AppendRecords(combined, kind, source, staffId);
         }
         combined.DefaultView.Sort = "RecordedAt DESC, [Certificate Type] ASC, RecordId DESC";
