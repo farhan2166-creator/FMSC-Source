@@ -754,7 +754,15 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
             await OpenSiblingStudentAsync(SiblingAdmissionIdAt(index));
         };
         siblings.ItemCheck += (_, _) => {
-            if (IsHandleCreated && !IsDisposed) BeginInvoke(new Action(() => { if (!IsDisposed) SetSiblingHint(""); }));
+            if (suppressSiblingEvents || !IsHandleCreated || IsDisposed) return;
+            // ItemCheck fires before the checkbox is updated. Refresh after it
+            // commits so unchecking also removes that child's held credit from
+            // the summary, including when they have no outstanding charges.
+            BeginInvoke(new Action(() => {
+                if (IsDisposed) return;
+                SetSiblingHint("");
+                if (!siblingBusy && !transactionBusy) RefreshEnteredPaymentAllocation();
+            }));
         };
         enrollment.SelectedIndexChanged += (_, _) => {
             if (admissionId > 0) primaryPayer.Text = $"{AdmissionNumbers.ForId(admissionId)} - {StudentNameFor(admissionId)}\n{enrollment.Text}";
@@ -2178,15 +2186,17 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
             GetDecimal(row.Cells["Balance"].Value)-discounts.GetValueOrDefault(GetLong(row.Cells["BillingChargeId"].Value)))),
             availableCreditByStudent);
     }
-    // The ordinary sibling checkbox commits after ItemCheck. Use the loaded charge
-    // owners instead so deselecting a sibling removes their advance immediately,
-    // while the main student's account always stays in scope.
+    // Include both loaded charge owners and checked siblings with no charges.
+    // The post-ItemCheck refresh reconciles the checkbox with the loaded rows.
+    // Even when the primary owes nothing, their remaining credit stays visible.
     private int[] IncludedCreditStudentIds() => counterIds is not null
         ?counterIds
-        :new[]{admissionId}.Concat(charges.Rows.Cast<DataGridViewRow>()
-            .Where(row=>!row.IsNewRow)
-            .Select(row=>GetInt(row.Cells["AdmissionId"].Value))
-            .Where(id=>id>0)).Where(id=>id>0).Distinct().ToArray();
+        :new[]{admissionId}
+            .Concat(charges.Rows.Cast<DataGridViewRow>()
+                .Where(row=>!row.IsNewRow)
+                .Select(row=>GetInt(row.Cells["AdmissionId"].Value)))
+            .Concat(siblings.CheckedIndices.Cast<int>().Select(SiblingAdmissionIdAt))
+            .Where(id=>id>0).Distinct().ToArray();
     private decimal SelectedAvailableCredit() =>
         IncludedCreditStudentIds().Sum(id=>Math.Max(0m,availableCreditByStudent.GetValueOrDefault(id)));
     private void FitAdvanceScopeHint()
