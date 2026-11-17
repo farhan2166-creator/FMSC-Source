@@ -45,6 +45,15 @@ internal static class FinanceHelp
     }
     internal static string Tooltip(Control owner,Control target)=>Sessions.TryGetValue(owner,out var session)?session.Tips.GetToolTip(target)??"":"";
 
+    // A tooltip may outlive the mouse hover when a collection confirmation
+    // opens. Dismiss it so it cannot obscure a modal payment breakdown.
+    internal static void Dismiss(Control owner)
+    {
+        if(!Sessions.TryGetValue(owner,out var session))return;
+        session.Tips.Active=false;
+        session.Tips.Active=true;
+    }
+
     private static (string Effect,string Example) Content(Topic topic)=>topic switch
     {
         Topic.ReceiveMoney=>("Enter only the new money received in this transaction. Existing advance money is separate.",
