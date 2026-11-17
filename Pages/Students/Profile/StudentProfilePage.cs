@@ -125,7 +125,7 @@ public sealed class StudentProfilePage : V2Page
     internal StudentProfilePage(Action<Func<Control>, string, string>? navigate,bool initialize)
         : base(
             "Student Profile",
-            "View a student’s details, family, balance and history.")
+            "")
     {
         UiHelper.DisposePictureImageOnDispose(photo);
         StudentPhotoViewForm.EnableZoom(photo, () => nameLabel.Text);
@@ -149,149 +149,174 @@ public sealed class StudentProfilePage : V2Page
         // Keep row highlights only when the operator deliberately selects a grid row.
         foreach (var grid in new[] { familyGrid, contextGrid, timelineGrid })
             grid.DataBindingComplete += (_, _) => { if (!grid.IsDisposed) grid.ClearSelection(); };
-        var selector = HumanUi.Card("Find Student");
-        selector.Content.Controls.Add(HumanUi.Field("Student", student, true));
-        var header = BuildHeaderCard();
-        // Keep only three identity lines beside the photo; contact and
-        // registration fit into the facts grid without enlarging the card.
-        header.Margin = new Padding(0, AppScale.Scale(4), 0, AppScale.Scale(4));
-        var sections = BuildSectionsGrid();
+        PlaceStudentSearchInHeader();
+        var overview = BuildHeaderCard();
+        var sections = BuildSectionsGrid(overview);
         var footer = BuildQuickActionsFooter();
-        // Profile information follows the student selector in reading order.
-        // The related family and placement summaries share one compact row;
-        // full-width history has the remaining space for readable descriptions.
         var root = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 2,
             Margin = Padding.Empty
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.FieldCardHeight(1, hasSubtitle: false)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute,
-            Math.Max(AppScale.Scale(154),
-                header.Margin.Vertical + header.Padding.Vertical +
-                header.Header.Height + header.Content.Padding.Vertical +
-                OverviewIdentityHeight() + AppScale.Scale(4))));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,
             Math.Max(AppScale.Scale(94), 2 * (AppTheme.CompactButtonHeight + UiDesignSystem.Spacing.Sm)
                 + UiDesignSystem.Spacing.Md)));
-        selector.Margin = new Padding(0, 0, 0, AppScale.Scale(4));
-        root.Controls.Add(selector, 0, 0);
-        root.Controls.Add(header, 0, 1);
-        root.Controls.Add(sections, 0, 2);
-        root.Controls.Add(footer, 0, 3);
+        root.Controls.Add(sections, 0, 0);
+        root.Controls.Add(footer, 0, 1);
         SetContent(root);
         ClearProfile();
     }
-    private int OverviewIdentityHeight() =>
-        new[] { nameLabel, fatherLabel, placementLabel }
-            .Sum(label => Math.Max(label.Height, AppMetrics.TextHeight(label.Font) + AppScale.Scale(2)));
+    private void PlaceStudentSearchInHeader()
+    {
+        // Reuse the page heading's free horizontal area instead of reserving
+        // an entire card/row just for student selection.
+        // Keep the same accessible identity as the former Student field,
+        // including the stable Level 2 automation target on its inner textbox.
+        student.AccessibleName = "Student";
+        student.ApplyAccessibleInfo("Student", "Search by admission number, student or father name.");
+        var search = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+        var inputRow = new TableLayoutPanel {
+            Dock = DockStyle.Right,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(108)));
+        inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        inputRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var label = new Label {
+            Text = "Find student",
+            Font = AppTheme.NormalFont,
+            ForeColor = AppTheme.MutedText,
+            TextAlign = ContentAlignment.MiddleRight,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Sm, 0)
+        };
+        inputRow.Controls.Add(label, 0, 0);
+        inputRow.Controls.Add(student, 1, 0);
+        search.Controls.Add(inputRow);
+        search.Resize += (_, _) => {
+            int width = Math.Min(AppScale.Scale(590), search.ClientSize.Width);
+            inputRow.Width = width;
+            inputRow.ColumnStyles[0].Width = width >= AppScale.Scale(380) ? AppScale.Scale(108) : 0;
+        };
+        SetInlineHeaderContent(search, AppMetrics.InputControlHeight + AppScale.Scale(2));
+    }
+    private static int OverviewRowHeight(params Label[] labels) =>
+        labels.Max(label => Math.Max(label.Height,
+            AppMetrics.TextHeight(label.Font) + AppScale.Scale(2)));
+    private int[] OverviewRowHeights() => new[] {
+        OverviewRowHeight(nameLabel),
+        OverviewRowHeight(fatherLabel),
+        OverviewRowHeight(placementLabel, genderLabel),
+        OverviewRowHeight(dateOfBirthLabel, admissionDateLabel),
+        OverviewRowHeight(admissionCampusLabel, contactLabel),
+        OverviewRowHeight(registrationLabel, balanceLabel)
+    };
+    private int OverviewDetailsHeight() => OverviewRowHeights().Sum();
 
     private HumanCard BuildHeaderCard()
     {
         var card = HumanUi.Card("Student Overview");
         var layout = new TableLayoutPanel {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
+            ColumnCount = 2,
             RowCount = 1,
             Margin = Padding.Empty
         };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(104)));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 49));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 51));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(96)));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var photoHost = new Panel {
             Dock = DockStyle.Fill,
             Margin = new Padding(0, 0, UiDesignSystem.Spacing.Md, 0)
         };
         photoHost.Controls.Add(photo);
-        var identity = new TableLayoutPanel {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 3,
-            Margin = new Padding(0, 0, UiDesignSystem.Spacing.Md, 0)
-        };
-        identity.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        foreach (var label in new[] { nameLabel, fatherLabel, placementLabel })
-        {
-            label.Margin = Padding.Empty;
-            identity.RowStyles.Add(new RowStyle(SizeType.Absolute,
-                Math.Max(label.Height, AppMetrics.TextHeight(label.Font) + AppScale.Scale(2))));
-        }
-        identity.Controls.Add(nameLabel, 0, 0);
-        identity.Controls.Add(fatherLabel, 0, 1);
-        identity.Controls.Add(placementLabel, 0, 2);
-        var facts = new TableLayoutPanel {
+
+        // Two facts columns fit the half-width card; full-width name/father
+        // rows remain readable while preserving all admission and fee facts.
+        var details = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 3,
-            Margin = Padding.Empty
-        };
-        facts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
-        facts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
-        for (int row = 0; row < 3; row++)
-            facts.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / 3));
-        // Birth and gender share one compact cell, leaving two rows for
-        // contact, registration and balance. No details are hidden or dropped.
-        var birthGender = new TableLayoutPanel {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
+            RowCount = 6,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
-        birthGender.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 65));
-        birthGender.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
-        birthGender.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        birthGender.Controls.Add(dateOfBirthLabel, 0, 0);
-        birthGender.Controls.Add(genderLabel, 1, 0);
-        facts.Controls.Add(birthGender, 0, 0);
-        facts.Controls.Add(admissionDateLabel, 1, 0);
-        facts.Controls.Add(admissionCampusLabel, 0, 1);
-        contactLabel.Dock = DockStyle.Fill;
-        contactLabel.Margin = Padding.Empty;
-        facts.Controls.Add(contactLabel, 1, 1);
-        registrationLabel.Dock = DockStyle.Fill;
-        registrationLabel.Margin = Padding.Empty;
-        facts.Controls.Add(registrationLabel, 0, 2);
-        balanceLabel.Dock = DockStyle.Fill;
-        balanceLabel.Margin = Padding.Empty;
-        facts.Controls.Add(balanceLabel, 1, 2);
+        details.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 51));
+        details.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 49));
+        var rows = OverviewRowHeights();
+        foreach (int height in rows)
+            details.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+        foreach (var fact in new[] { nameLabel, fatherLabel, placementLabel,
+                     genderLabel, dateOfBirthLabel, admissionDateLabel,
+                     admissionCampusLabel, contactLabel, registrationLabel, balanceLabel })
+        {
+            fact.Dock = DockStyle.Fill;
+            fact.Margin = Padding.Empty;
+        }
+        details.Controls.Add(nameLabel, 0, 0);
+        details.SetColumnSpan(nameLabel, 2);
+        details.Controls.Add(fatherLabel, 0, 1);
+        details.SetColumnSpan(fatherLabel, 2);
+        details.Controls.Add(placementLabel, 0, 2);
+        details.Controls.Add(genderLabel, 1, 2);
+        details.Controls.Add(dateOfBirthLabel, 0, 3);
+        details.Controls.Add(admissionDateLabel, 1, 3);
+        details.Controls.Add(admissionCampusLabel, 0, 4);
+        details.Controls.Add(contactLabel, 1, 4);
+        details.Controls.Add(registrationLabel, 0, 5);
+        details.Controls.Add(balanceLabel, 1, 5);
+
         layout.Controls.Add(photoHost, 0, 0);
-        layout.Controls.Add(identity, 1, 0);
-        layout.Controls.Add(facts, 2, 0);
+        layout.Controls.Add(details, 1, 0);
         card.Content.Controls.Add(layout);
         return card;
     }
-    private Control BuildSectionsGrid()
+    private Control BuildSectionsGrid(HumanCard overview)
     {
         var grid = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 2,
-            Margin = Padding.Empty
+            RowCount = 3,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
         };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
         var familyCard = HumanUi.Card("Family / Siblings", "Other children linked to this family.");
-        familyCard.Margin = new Padding(0, AppScale.Scale(4), AppScale.Scale(4), AppScale.Scale(4));
+        familyCard.Margin = new Padding(AppScale.Scale(4), AppScale.Scale(4), 0, AppScale.Scale(4));
         var familyHost = new Panel { Dock = DockStyle.Fill };
         familyHost.Controls.Add(familyGrid);
         familyHost.Controls.Add(familyEmptyLabel);
         familyEmptyLabel.BringToFront();
         familyCard.Content.Controls.Add(familyHost);
         var contextCard = HumanUi.Card("Academic Placement", "Academic year, campus, class and status.");
-        contextCard.Margin = new Padding(AppScale.Scale(4), AppScale.Scale(4), 0, AppScale.Scale(4));
+        contextCard.Margin = new Padding(0, AppScale.Scale(4), AppScale.Scale(4), AppScale.Scale(4));
         contextCard.Content.Controls.Add(contextGrid);
         var timelineCard = HumanUi.Card("Student History", "Enrollment, certificates and status changes.");
         timelineCard.Margin = new Padding(0, AppScale.Scale(4), 0, 0);
         timelineCard.Content.Controls.Add(timelineGrid);
-        grid.Controls.Add(familyCard, 0, 0);
-        grid.Controls.Add(contextCard, 1, 0);
-        grid.Controls.Add(timelineCard, 0, 1);
+        overview.Margin = new Padding(0, AppScale.Scale(4), AppScale.Scale(4), AppScale.Scale(4));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute,
+            Math.Max(AppScale.Scale(190),
+                overview.Margin.Vertical + overview.Padding.Vertical +
+                overview.Header.Height + overview.Content.Padding.Vertical +
+                OverviewDetailsHeight() + AppScale.Scale(4))));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute,
+            Math.Max(AppScale.Scale(170),
+                contextCard.Margin.Vertical + contextCard.Padding.Vertical +
+                contextCard.Header.Height + contextCard.Content.Padding.Vertical +
+                AppMetrics.GridHeaderHeight + 2 * AppMetrics.GridRowHeight)));
+        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        grid.Controls.Add(overview, 0, 0);
+        grid.Controls.Add(contextCard, 0, 1);
+        grid.Controls.Add(familyCard, 1, 0);
+        grid.SetRowSpan(familyCard, 2);
+        grid.Controls.Add(timelineCard, 0, 2);
         grid.SetColumnSpan(timelineCard, 2);
         return grid;
     }
