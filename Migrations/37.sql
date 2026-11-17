@@ -186,6 +186,57 @@ BEGIN
  ORDER BY B.CreatedUtc DESC,B.BatchId DESC
  OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END');
+
+ -- Independent, bounded status-check scheduling. No provider submission,
+ -- batch mutation, retry authorization or delivery claim is created here.
+ CREATE TABLE msg.AttemptStatusPoll
+ (
+   AttemptId bigint NOT NULL CONSTRAINT PK_MsgAttemptStatusPoll PRIMARY KEY
+     CONSTRAINT FK_MsgAttemptStatusPollAttempt REFERENCES msg.Attempt(AttemptId),
+   PollCount smallint NOT NULL CONSTRAINT DF_MsgAttemptStatusPollCount DEFAULT(0),
+   LastPollUtc datetime2(3) NOT NULL,
+   NextPollUtc datetime2(3) NOT NULL,
+   CONSTRAINT CK_MsgAttemptStatusPollCount CHECK(PollCount BETWEEN 0 AND 24)
+ );
+ CREATE INDEX IX_MsgAttemptStatusPollNext ON msg.AttemptStatusPoll(NextPollUtc);
+
+ EXEC(N'CREATE OR ALTER PROCEDURE msg.ClaimDueTwilioReceipts
+  @UserId int,@EnrollmentId uniqueidentifier,@WindowsSid nvarchar(185),
+  @SecretHash varbinary(32),@LeaseNonce uniqueidentifier,@MaxRows int=5
+ AS BEGIN
+  SET NOCOUNT ON;SET XACT_ABORT ON;
+  IF @MaxRows IS NULL OR @MaxRows NOT BETWEEN 1 AND 5
+   THROW 51530,''Invalid bounded delivery-status check request.'',1;
+  BEGIN TRANSACTION;
+  EXEC msg.VerifyPlanWorker @UserId,@EnrollmentId,@WindowsSid,@SecretHash,@LeaseNonce;
+  DECLARE @Now datetime2(3)=SYSUTCDATETIME();
+  -- This is disposable polling metadata, not a provider attempt, receipt,
+  -- protected replay ledger or retained financial/history evidence.
+  DELETE TOP(200) P FROM msg.AttemptStatusPoll P
+   JOIN msg.Attempt A ON A.AttemptId=P.AttemptId
+   WHERE A.RequestUtc<DATEADD(day,-8,@Now) OR A.Outcome IN(''Delivered'',''Failed'');
+  DECLARE @Due TABLE(AttemptId bigint NOT NULL PRIMARY KEY);
+  INSERT @Due(AttemptId)
+  SELECT TOP(@MaxRows) A.AttemptId
+  FROM msg.Attempt A WITH(UPDLOCK,READPAST)
+  LEFT JOIN msg.AttemptStatusPoll P WITH(UPDLOCK) ON P.AttemptId=A.AttemptId
+  WHERE A.ProviderCode=''Twilio'' AND A.Outcome IN(''Submitted'',''Accepted'')
+   AND A.ProviderMessageId IS NOT NULL
+   AND A.RequestUtc>=DATEADD(day,-7,@Now)
+   AND A.RequestUtc<=DATEADD(minute,-2,@Now)
+   AND (P.AttemptId IS NULL OR (P.PollCount<24 AND P.NextPollUtc<=@Now))
+  ORDER BY A.RequestUtc,A.AttemptId;
+  UPDATE P SET PollCount=P.PollCount+1,LastPollUtc=@Now,
+   NextPollUtc=DATEADD(minute,CASE WHEN P.PollCount<5 THEN 5
+    WHEN P.PollCount<12 THEN 30 ELSE 180 END,@Now)
+  FROM msg.AttemptStatusPoll P JOIN @Due D ON D.AttemptId=P.AttemptId;
+  INSERT msg.AttemptStatusPoll(AttemptId,PollCount,LastPollUtc,NextPollUtc)
+  SELECT D.AttemptId,1,@Now,DATEADD(minute,5,@Now)
+  FROM @Due D
+  WHERE NOT EXISTS(SELECT 1 FROM msg.AttemptStatusPoll P WHERE P.AttemptId=D.AttemptId);
+  COMMIT;
+  SELECT AttemptId FROM @Due ORDER BY AttemptId;
+ END;');
  INSERT dbo.DatabaseVersion(VersionNumber,AppliedOn,AppliedBy,Notes)
  VALUES(N'37',SYSDATETIME(),SUSER_SNAME(),N'Communication archived-event starvation guard');
  COMMIT;
