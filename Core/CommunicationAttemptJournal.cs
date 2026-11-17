@@ -90,9 +90,11 @@ internal sealed class CommunicationAttemptJournal
             var prior=Read<Claim>(path);Validate(prior);
             if(prior.Identity!=identity || prior.Attempt!=attempt)
                 throw new InvalidDataException("The submission key already has different recovery evidence.");
+            CleanupAbandonedWrites(folder,DateTime.UtcNow);
             return prior;
         }
         WriteNew(path,claim);
+        CleanupAbandonedWrites(folder,DateTime.UtcNow);
         return claim;
     }
 
@@ -162,6 +164,40 @@ internal sealed class CommunicationAttemptJournal
             if(File.Exists(temp))File.Delete(temp);
         }
     }
+
+    /// <summary>
+    /// Remove only stale, incomplete atomic-write staging files for this
+    /// message. Never prune a claim, provider response or whole folder.
+    /// An API call cannot begin until its proof was durably renamed.
+    /// </summary>
+    private static void CleanupAbandonedWrites(string folder,DateTime nowUtc)
+    {
+        RejectLinks(folder);
+        DateTime threshold=nowUtc.AddDays(-3);
+        foreach(string path in Directory.EnumerateFiles(folder,"*.tmp").Take(16))
+        {
+            string[] parts=Path.GetFileName(path).Split('.');
+            if(parts.Length!=5 || parts[0].Length!=32 || parts[3].Length!=32
+                || parts[1] is not ("claim" or "result") || parts[2]!="dpapi" || parts[4]!="tmp"
+                || !parts[0].All(char.IsAsciiHexDigit) || !parts[3].All(char.IsAsciiHexDigit))
+                continue;
+            // Treat a redirected staging path as a recovery-integrity fault.
+            RejectLinks(path);
+            try
+            {
+                var file=new FileInfo(path);
+                if(!file.Exists || file.LastWriteTimeUtc>=threshold || file.Length>16384)continue;
+                using(var exclusive=new FileStream(path,FileMode.Open,FileAccess.ReadWrite,FileShare.None))
+                {
+                    if(exclusive.Length>16384)continue;
+                }
+                File.Delete(path);
+            }
+            catch(IOException){/* Contested or unreadable staging file: keep it. */}
+            catch(UnauthorizedAccessException){/* Cleanup never changes send authority. */}
+        }
+    }
+
     private static void RejectLinks(string path)
     {
         FileSystemInfo? entry=Directory.Exists(path) ? new DirectoryInfo(path) : new FileInfo(path);

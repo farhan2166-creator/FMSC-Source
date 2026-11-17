@@ -72,6 +72,27 @@ internal static class AttemptJournalChecks
                 "An independently authorized SQL retry adds distinct evidence and preserves its predecessor");
             Refused(()=>restarted.AssertConsistent(identity,new[]{retry}),
                 "A larger SQL watermark cannot hide the disappearance of an earlier submission");
+            // Only abandoned atomic writes are disposable. Durable claims,
+            // provider results and unrelated files must survive cleanup.
+            string evidenceFolder=Path.GetDirectoryName(
+                Directory.GetFiles(root,attempt.AttemptKey.ToString("N")+".claim.dpapi",SearchOption.AllDirectories).Single())!;
+            string temporaryKey=Guid.NewGuid().ToString("N");
+            string stale=Path.Combine(evidenceFolder,temporaryKey+".claim.dpapi."+Guid.NewGuid().ToString("N")+".tmp");
+            string recent=Path.Combine(evidenceFolder,temporaryKey+".result.dpapi."+Guid.NewGuid().ToString("N")+".tmp");
+            string unrelated=Path.Combine(evidenceFolder,"unrelated.tmp");
+            File.WriteAllBytes(stale,new byte[]{1,2,3});
+            File.WriteAllBytes(recent,new byte[]{4,5,6});
+            File.WriteAllBytes(unrelated,new byte[]{7});
+            File.SetLastWriteTimeUtc(stale,DateTime.UtcNow.AddDays(-4));
+            File.SetLastWriteTimeUtc(unrelated,DateTime.UtcNow.AddDays(-4));
+            journal.RecordClaim(identity,retry);
+            check(!File.Exists(stale) && File.Exists(recent) && File.Exists(unrelated),
+                "Cleanup removes only expired, correctly named atomic staging files");
+            journal.AssertConsistent(identity,new[]{attempt,retry});
+            check(journal.ReadResult(identity,attempt.AttemptKey)?.ProviderMessageId=="SM-synthetic-provider-reference",
+                "Cleanup cannot delete durable claims or protected provider responses");
+            File.Delete(recent);
+            File.Delete(unrelated);
             journal.AssertConsistent(identity with {RequestId=Guid.NewGuid()},Array.Empty<CommunicationAttemptJournal.Attempt>());
             journal.AssertConsistent(identity with {SchoolScope=new string('C',64)},Array.Empty<CommunicationAttemptJournal.Attempt>());
             check(true,"Separate reviewed messages and schools do not inherit one another's submission evidence");
