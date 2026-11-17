@@ -369,13 +369,13 @@ try {
         throw 'Disposable runner LocalDB did not start with a healthy SQL endpoint after three attempts; no database operations permitted.'
     }
     $instance='np:'+$pipe.Groups[1].Value
-    $engineMajor=(@(Sql 'master' "SET NOCOUNT ON; SELECT CONVERT(varchar(8),SERVERPROPERTY('ProductMajorVersion'));" ) -join '').Trim()
-    if ($engineMajor -notmatch '^[1-9][0-9]{0,2}$') { throw 'Cannot verify the disposable SQL engine major version.' }
-    Write-Host ('Disposable SQL engine major version: '+$engineMajor)
     $checks.Add('Actual LocalDB instance started using Microsoft-signed prerequisites')
 
     Stage 'Pinned SQL command and full installer publishing'
     & (Join-Path $project 'Tools/PrepareBundledSqlCmd.ps1') -DestinationFile $sqlcmd
+    $engineMajor=(@(Sql 'master' "SET NOCOUNT ON; SELECT CONVERT(varchar(8),SERVERPROPERTY('ProductMajorVersion'));" ) -join '').Trim()
+    if ($engineMajor -notmatch '^[1-9][0-9]{0,2}$') { throw 'Cannot verify the disposable SQL engine major version.' }
+    Write-Host ('Disposable SQL engine major version: '+$engineMajor)
     $transport = Join-Path $root 'MinGit'
     & (Join-Path $project 'Tools/PrepareBundledGit.ps1') -DestinationDirectory $transport
     & dotnet restore (Join-Path $project 'FMSC_SMS.sln')
