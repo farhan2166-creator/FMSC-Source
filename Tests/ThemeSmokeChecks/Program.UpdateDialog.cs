@@ -110,6 +110,66 @@ internal static partial class Program
             Check(!viewport.HorizontalScroll.Visible && !viewport.VerticalScroll.Visible,
                 "Generate-key and rejected-authorization states do not introduce scrollbars");
         }
+        // Exercise the exact factory used by the dashboard's Check for Updates
+        // menu item; merely verifying a key must not leave an extra check click.
+        {
+            int probes = 0, authorizations = 0;
+            using var parent = new Form();
+            using var menuCheck = UpdateConnectionForm.ForMenuUpdateCheck(
+                authorization: () => (true, "ssh-rsa saved-menu-key"),
+                networkAvailable: () => ++probes == 1,
+                verifyAuthorization: _ => { authorizations++; return Task.CompletedTask; });
+            parent.Show();
+            menuCheck.Show(parent);
+            var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(menuCheck)!;
+            Check(!panel.Visible && !Find(menuCheck, "Check for Updates").Visible,
+                "Menu update checks start compact, without flashing the saved key or requiring a manual click");
+            PumpUntil(() => probes >= 2, "Menu check automatically enters release discovery");
+            var status = (Label)typeof(UpdateConnectionForm).GetField("_status", fields)!.GetValue(menuCheck)!;
+            Check(authorizations == 1 && probes == 2 &&
+                  status.Text.Contains("offline", StringComparison.OrdinalIgnoreCase),
+                "The menu command verifies saved access once, then immediately attempts an update check");
+            Check(!panel.Visible && Find(menuCheck, "Computer Authorized").Visible &&
+                  Find(menuCheck, "Check for Updates").Enabled,
+                "Offline update discovery retains compact authorized view and provides retry");
+            menuCheck.Close();
+        }
+        {
+            int authorizations = 0;
+            using var parent = new Form();
+            using var pending = UpdateConnectionForm.ForMenuUpdateCheck(
+                authorization: () => (true, "ssh-rsa unapproved-menu-key"),
+                networkAvailable: () => true,
+                verifyAuthorization: _ => {
+                    authorizations++;
+                    return Task.FromException(new IOException("Approval pending"));
+                });
+            parent.Show();
+            pending.Show(parent);
+            var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(pending)!;
+            Check(!panel.Visible, "Menu key stays hidden while live verification is pending");
+            var status = (Label)typeof(UpdateConnectionForm).GetField("_status", fields)!.GetValue(pending)!;
+            PumpUntil(() => status.Text.Contains("not been verified"), "Unapproved menu access shows key recovery");
+            Check(authorizations == 1 && panel.Visible &&
+                  Find(pending, "Verify access").Enabled &&
+                  !Find(pending, "Check for Updates").Enabled,
+                "Unapproved menu access reveals key approval controls and never checks for releases");
+            pending.Close();
+        }
+        {
+            using var parent = new Form();
+            using var enrollment = UpdateConnectionForm.ForMenuUpdateCheck(
+                authorization: () => (false, ""),
+                networkAvailable: () => true,
+                verifyAuthorization: _ => Task.CompletedTask);
+            parent.Show();
+            enrollment.Show(parent); Application.DoEvents();
+            var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(enrollment)!;
+            Check(panel.Visible && Find(enrollment, "Generate key").Enabled &&
+                  !Find(enrollment, "Check for Updates").Enabled,
+                "Menu update check preserves enrollment when the computer has no key");
+            enrollment.Close();
+        }
         // A blocked startup with a saved key must not flash key enrollment.
         // Once live authorization succeeds, discover an update without another click.
         // The second offline probe prevents an actual Git operation in this test.
