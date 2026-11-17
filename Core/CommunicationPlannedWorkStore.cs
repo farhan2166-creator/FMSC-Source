@@ -17,6 +17,10 @@ internal static class CommunicationPlannedWorkStore
     internal static async Task PrepareDueAsync(CommunicationBackgroundEnrollment.Enrollment enrollment,Guid lease,CancellationToken token)
     {
         int actor=CurrentUser.UserId;
+        // Safe internal maintenance on the same authorized worker path. Never
+        // clear confirmed batches, attempts, source keys or unresolved evidence.
+        await DatabaseHelper.ExecuteUserAsync("msg.PruneTerminalCommunication",token,
+            DatabaseHelper.Int("@MaxRows",200));
         await DatabaseHelper.ExecuteUserAsync("msg.RefreshAutomaticSources",token,CommunicationBackgroundEnrollment.Proof(enrollment,lease));
         await DatabaseHelper.ExecuteUserAsync("msg.CreateAutomaticWork",token,CommunicationBackgroundEnrollment.Proof(enrollment,lease));
 
