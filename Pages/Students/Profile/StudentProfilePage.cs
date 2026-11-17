@@ -172,7 +172,10 @@ public sealed class StudentProfilePage : V2Page
     {
         // Reuse the page heading's free horizontal area instead of reserving
         // an entire card/row just for student selection.
-        student.AccessibleName = "Find student by admission number or name";
+        // Keep the same accessible identity as the former Student field,
+        // including the stable Level 2 automation target on its inner textbox.
+        student.AccessibleName = "Student";
+        student.ApplyAccessibleInfo("Student", "Search by admission number, student or father name.");
         var search = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
         var inputRow = new TableLayoutPanel {
             Dock = DockStyle.Right,
@@ -202,15 +205,18 @@ public sealed class StudentProfilePage : V2Page
         };
         SetInlineHeaderContent(search, AppMetrics.InputControlHeight + AppScale.Scale(2));
     }
-    private int OverviewDetailsHeight() =>
-        new[] {
-            nameLabel.Height,
-            fatherLabel.Height,
-            Math.Max(placementLabel.Height, genderLabel.Height),
-            Math.Max(dateOfBirthLabel.Height, admissionDateLabel.Height),
-            Math.Max(admissionCampusLabel.Height, contactLabel.Height),
-            Math.Max(registrationLabel.Height, balanceLabel.Height)
-        }.Sum();
+    private static int OverviewRowHeight(params Label[] labels) =>
+        labels.Max(label => Math.Max(label.Height,
+            AppMetrics.TextHeight(label.Font) + AppScale.Scale(2)));
+    private int[] OverviewRowHeights() => new[] {
+        OverviewRowHeight(nameLabel),
+        OverviewRowHeight(fatherLabel),
+        OverviewRowHeight(placementLabel, genderLabel),
+        OverviewRowHeight(dateOfBirthLabel, admissionDateLabel),
+        OverviewRowHeight(admissionCampusLabel, contactLabel),
+        OverviewRowHeight(registrationLabel, balanceLabel)
+    };
+    private int OverviewDetailsHeight() => OverviewRowHeights().Sum();
 
     private HumanCard BuildHeaderCard()
     {
@@ -241,14 +247,7 @@ public sealed class StudentProfilePage : V2Page
         };
         details.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 51));
         details.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 49));
-        var rows = new[] {
-            nameLabel.Height,
-            fatherLabel.Height,
-            Math.Max(placementLabel.Height, genderLabel.Height),
-            Math.Max(dateOfBirthLabel.Height, admissionDateLabel.Height),
-            Math.Max(admissionCampusLabel.Height, contactLabel.Height),
-            Math.Max(registrationLabel.Height, balanceLabel.Height)
-        };
+        var rows = OverviewRowHeights();
         foreach (int height in rows)
             details.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
         foreach (var fact in new[] { nameLabel, fatherLabel, placementLabel,
