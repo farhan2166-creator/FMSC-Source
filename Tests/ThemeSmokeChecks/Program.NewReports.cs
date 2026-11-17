@@ -31,6 +31,17 @@ internal static partial class Program
                 "Administrator can select every registered certificate category without a frozen type count");
             var print=(ModernButton)typeof(CertificateIssueRegisterPage).GetField("print",flags)!.GetValue(certificates)!;
             Check(!print.Enabled,"Certificate print requires generated results");
+            // Assert feature grouping, not pixel positions or caption wording.
+            var certificateCards=ReleaseReportControls(certificates).OfType<HumanCard>().ToArray();
+            var filterCard=certificateCards.Single(card=>ReleaseReportControls(card.Content).Contains(type));
+            var resultCard=certificateCards.Single(card=>ReleaseReportControls(card.Header).Contains(print));
+            Check(!ReleaseReportControls(filterCard).Contains(print)
+                  && ReleaseReportControls(filterCard).OfType<ModernButton>().Any(button=>button.Text=="Run Report")
+                  && ReleaseReportControls(filterCard).OfType<ModernButton>().Any(button=>button.Text=="Reset Filters"),
+                "Certificate filtering keeps its own compact run/reset actions");
+            Check(ReleaseReportControls(resultCard.Header).OfType<ModernButton>().Any(button=>button.Text=="Export")
+                  && ReleaseReportControls(resultCard.Header).OfType<ModernButton>().Any(button=>button.Text=="Columns"),
+                "Certificate print, export and column actions share the results heading");
             Check(!monthly.IsHandleCreated && !certificates.IsHandleCreated,"Constructing report controls performs no database initialization");
             CurrentUser.SignIn(3,"General certificates","Viewer",false,new[]{"Reports.View","Certificates.Create"});
             using var general=new CertificateIssueRegisterPage();
