@@ -65,6 +65,24 @@ if ($source.FullName -cne 'renamed-fmsc-owner/FMSC-Source' -or
     throw 'Simulated owner rename did not resolve all verified private/public repositories.'
 }
 Write-Host 'PASS: simulated account rename resolves Source, Sandbox and private Updates without redirect.'
+# Sandbox visibility can change independently of its permanent repository identity.
+# A public Sandbox still needs the same authenticated dispatch and acceptance.
+$script:privateOverride=$false
+$publicSandbox=Resolve-FmscGitHubRepository -Repository Sandbox -Token $script:expectedToken
+if ($publicSandbox.Id -ne 1449162585 -or
+    $publicSandbox.FullName -cne 'renamed-fmsc-owner/FMSC-Sandbox') {
+    throw 'Public Sandbox with matching immutable identity was not accepted.'
+}
+$script:privateOverride=$true
+$privateSandbox=Resolve-FmscGitHubRepository -Repository Sandbox -Token $script:expectedToken
+if ($privateSandbox.Id -ne 1449162585 -or
+    $privateSandbox.FullName -cne 'renamed-fmsc-owner/FMSC-Sandbox') {
+    throw 'Private Sandbox with matching immutable identity was not accepted.'
+}
+$script:privateOverride='public'
+Reject { Resolve-FmscGitHubRepository -Repository Sandbox -Token $script:expectedToken } 'malformed Sandbox visibility metadata'
+$script:privateOverride=$null
+Write-Host 'PASS: immutable Sandbox identity accepts public/private and rejects invalid visibility metadata.'
 $authenticatedSource=Resolve-FmscGitHubRepository -Repository Source -Token $script:expectedToken
 if ($authenticatedSource.Id -ne 1412760928 -or
     $script:ownerAuthSeen[-1] -cne "Bearer $script:expectedToken" -or

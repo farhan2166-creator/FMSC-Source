@@ -1,6 +1,7 @@
 # Fail-closed GitHub repository discovery for Source-owned release tooling.
-# No mutable username is an authorization boundary. Private repositories require
-# their existing, scope-limited fine-grained credential for metadata resolution.
+# No mutable username is an authorization boundary. Authenticated metadata
+# resolution retains scoped credentials. Sandbox may be public or private;
+# the update distribution repository must remain private.
 $script:FmscOwnerId = 316891609
 $script:FmscRepoIds = @{ Source = 1412760928; Sandbox = 1449162585; Updates = 1445675367 }
 $script:FmscRepoNames = @{ Source = 'FMSC-Source'; Sandbox = 'FMSC-Sandbox'; Updates = 'FMSC-Updates' }
@@ -60,7 +61,10 @@ function Resolve-FmscGitHubRepository {
         [string]$repo.owner.id -cne [string]$script:FmscOwnerId -or
         $repo.name -cne $name -or
         $repo.full_name -cne $full -or
-        (($Repository -ne 'Source') -and ($repo.private -cne $true))) {
+        (($Repository -eq 'Sandbox') -and ($repo.private -isnot [bool])) -or
+        (($Repository -eq 'Updates') -and ($repo.private -cne $true))) {
+        # Sandbox visibility is not an authorization boundary. Its immutable
+        # repository ID and owner remain mandatory in either visibility mode.
         throw 'GitHub repository lookup failed permanent-ID, owner or visibility verification.'
     }
     return [pscustomobject]@{
