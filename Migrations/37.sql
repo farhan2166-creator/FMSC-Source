@@ -218,7 +218,7 @@ END');
   DECLARE @Due TABLE(AttemptId bigint NOT NULL PRIMARY KEY);
   INSERT @Due(AttemptId)
   SELECT TOP(@MaxRows) A.AttemptId
-  FROM msg.Attempt A WITH(UPDLOCK,READPAST)
+  FROM msg.Attempt A WITH(UPDLOCK)
   LEFT JOIN msg.AttemptStatusPoll P WITH(UPDLOCK) ON P.AttemptId=A.AttemptId
   WHERE A.ProviderCode=''Twilio'' AND A.Outcome IN(''Submitted'',''Accepted'')
    AND A.ProviderMessageId IS NOT NULL
