@@ -174,7 +174,7 @@ internal sealed class CommunicationAttemptJournal
     {
         RejectLinks(folder);
         DateTime threshold=nowUtc.AddDays(-3);
-        foreach(string path in Directory.EnumerateFiles(folder,"*.tmp").Take(16))
+        foreach(string path in Directory.EnumerateFiles(folder,"*.tmp"))
         {
             string[] parts=Path.GetFileName(path).Split('.');
             if(parts.Length!=5 || parts[0].Length!=32 || parts[3].Length!=32

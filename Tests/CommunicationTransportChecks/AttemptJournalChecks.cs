@@ -84,9 +84,20 @@ internal static class AttemptJournalChecks
             File.WriteAllBytes(recent,new byte[]{4,5,6});
             File.WriteAllBytes(unrelated,new byte[]{7});
             File.SetLastWriteTimeUtc(stale,DateTime.UtcNow.AddDays(-4));
+            // More than sixteen abandoned writes must not strand old staging
+            // files forever when this recipient has no remaining retry slots.
+            var extraStale = new List<string>();
+            for(int index=0;index<20;index++)
+            {
+                string item=Path.Combine(evidenceFolder,Guid.NewGuid().ToString("N")+
+                    ".claim.dpapi."+Guid.NewGuid().ToString("N")+".tmp");
+                File.WriteAllBytes(item,new byte[]{1,2,3});
+                File.SetLastWriteTimeUtc(item,DateTime.UtcNow.AddDays(-4));
+                extraStale.Add(item);
+            }
             File.SetLastWriteTimeUtc(unrelated,DateTime.UtcNow.AddDays(-4));
             journal.RecordClaim(identity,retry);
-            check(!File.Exists(stale) && File.Exists(recent) && File.Exists(unrelated),
+            check(!File.Exists(stale) && extraStale.All(item=>!File.Exists(item)) && File.Exists(recent) && File.Exists(unrelated),
                 "Cleanup removes only expired, correctly named atomic staging files");
             journal.AssertConsistent(identity,new[]{attempt,retry});
             check(journal.ReadResult(identity,attempt.AttemptKey)?.ProviderMessageId=="SM-synthetic-provider-reference",
