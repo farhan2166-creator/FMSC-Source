@@ -74,7 +74,7 @@ internal static class GridReportPreview
             foreach(int index in indices)
             {
                 var column=columns[index];
-                string alignment=compactTable&&column.Numeric?"Right":GridReportColumns.Alignment(source,column);
+                string alignment=GridReportColumns.Alignment(source,column);
                 var heading=Text($"Heading{bandIndex}_{index}",column.Caption,true,"Center","8.5pt");
                 heading.Element(ns+"Style")!.Add(E("BottomBorder",E("Style","Solid"),E("Width","0.8pt"),E("Color","#000000")));
                 headings.Add(E("TablixCell",E("CellContents",heading)));

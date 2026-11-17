@@ -33,6 +33,15 @@ internal static partial class Program
             return GridReportPreview.Build("Fictional Meadow School & College","Student Advance Balance Register — Families","Campus: All   Class: All   Section: All",projected,"Fixture operator");
         }
         var compact=Build();
+        var definition=System.Xml.Linq.XDocument.Parse(compact.Definition);
+        var reportNamespace=definition.Root!.Name.Namespace;
+        foreach(string name in new[]{"AdvanceHeading0","AdvanceHeading1","AdvanceHeading2","AdvanceHeading3",
+            "AdvanceChildAmount","AdvanceFamilyTotal","AdvanceGrandValue"})
+        {
+            var box=definition.Descendants(reportNamespace+"Textbox").Single(item=>(string?)item.Attribute("Name")==name);
+            Check(box.Descendants(reportNamespace+"TextAlign").Single().Value=="Center",
+                "Family advance headings and amounts use the shared centered PDF alignment: "+name);
+        }
         using(compact.Data)
         {
             using var report=new LocalReport();report.LoadReportDefinition(new StringReader(compact.Definition));report.DataSources.Add(new ReportDataSource("ReportData",compact.Data));
