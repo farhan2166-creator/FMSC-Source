@@ -33,6 +33,7 @@ ALTER TABLE msg.AutomationCandidate ADD ReviewOnly bit NOT NULL CONSTRAINT DF_Ms
 -- join an old announcement.
 CREATE TABLE msg.SchoolNotice(
  NoticeId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_MsgSchoolNotice PRIMARY KEY,
+ ClientRequestId uniqueidentifier NOT NULL CONSTRAINT UQ_MsgSchoolNoticeRequest UNIQUE,
  EventCode varchar(32) NOT NULL CONSTRAINT FK_MsgSchoolNoticeEvent REFERENCES msg.AutomationRule(EventCode),
  Title nvarchar(120) NOT NULL,NoticeText nvarchar(1000) NOT NULL,
  LanguageCode varchar(2) NOT NULL,SourceReference nvarchar(160) NULL,
@@ -56,7 +57,7 @@ CREATE TABLE msg.SchoolNoticeMember(
 CREATE INDEX IX_MsgSchoolNoticeActive ON msg.SchoolNotice(EventCode,ApprovedUtc,ExpiresUtc);
 
 EXEC(N'CREATE OR ALTER PROCEDURE msg.ApproveSchoolNotice
- @UserId int,@EventCode varchar(32),@Title nvarchar(120),@NoticeText nvarchar(1000),
+ @UserId int,@ClientRequestId uniqueidentifier,@EventCode varchar(32),@Title nvarchar(120),@NoticeText nvarchar(1000),
  @LanguageCode varchar(2),@SourceReference nvarchar(160)=NULL,@ExpiresUtc datetime2(3),
  @ExpectedCampusId int,@ExpectedClassId int
 AS BEGIN
@@ -68,7 +69,8 @@ AS BEGIN
  (EXISTS(SELECT 1 FROM dbo.Users U WHERE U.UserId=@UserId AND U.RoleId=O.RoleId)
  OR EXISTS(SELECT 1 FROM dbo.UserRoles UR WHERE UR.UserId=@UserId AND UR.RoleId=O.RoleId)))
   THROW 51450,''Only an administrator may approve an official school notice.'',1;
- IF @EventCode NOT IN(''Announcement'',''ExaminationResult'') OR @LanguageCode NOT IN(''en'',''ur'')
+ IF @ClientRequestId IS NULL OR @ClientRequestId=''00000000-0000-0000-0000-000000000000''
+  OR @EventCode NOT IN(''Announcement'',''ExaminationResult'') OR @LanguageCode NOT IN(''en'',''ur'')
   OR LEN(LTRIM(RTRIM(ISNULL(@Title,N''''))))=0 OR LEN(LTRIM(RTRIM(ISNULL(@NoticeText,N''''))))=0
   OR LEN(@Title)>120 OR LEN(@NoticeText)>1000
   OR CHARINDEX(N''['',ISNULL(@Title,N''''))>0 OR CHARINDEX(N'']'',ISNULL(@Title,N''''))>0
@@ -83,10 +85,22 @@ AS BEGIN
  IF @Campus IS NULL OR @Mode=''Off'' OR @ExpectedCampusId IS NULL OR @ExpectedClassId IS NULL
   OR @Campus<>@ExpectedCampusId OR @Class<>@ExpectedClassId
   THROW 51450,''Enable notice review and refresh the approved audience before publishing.'',1;
+ SET @Title=LTRIM(RTRIM(@Title));
+ SET @NoticeText=LTRIM(RTRIM(@NoticeText));
+ SET @SourceReference=NULLIF(LTRIM(RTRIM(@SourceReference)),N'''');
  DECLARE @Hash binary(32)=CONVERT(binary(32),HASHBYTES(''SHA2_256'',CONCAT(@EventCode,N''|'',@Title,N''|'',@NoticeText,
   N''|'',@LanguageCode,N''|'',ISNULL(@SourceReference,N''''),N''|'',@Campus,N''|'',@Class,N''|'',CONVERT(varchar(33),@ExpiresUtc,126))));
- INSERT msg.SchoolNotice(EventCode,Title,NoticeText,LanguageCode,SourceReference,CampusId,ClassId,ExpiresUtc,SourceHash,ApprovedBy)
- VALUES(@EventCode,LTRIM(RTRIM(@Title)),LTRIM(RTRIM(@NoticeText)),@LanguageCode,NULLIF(LTRIM(RTRIM(@SourceReference)),N''''),
+ DECLARE @ExistingId bigint,@ExistingHash binary(32),@ExistingActor int;
+ SELECT @ExistingId=NoticeId,@ExistingHash=SourceHash,@ExistingActor=ApprovedBy
+ FROM msg.SchoolNotice WITH(UPDLOCK,HOLDLOCK) WHERE ClientRequestId=@ClientRequestId;
+ IF @ExistingId IS NOT NULL
+ BEGIN
+  IF @ExistingHash<>@Hash OR @ExistingActor<>@UserId
+   THROW 51450,''The approval request already belongs to another notice. Refresh before approving again.'',1;
+  COMMIT;SELECT @ExistingId NoticeId;RETURN;
+ END;
+ INSERT msg.SchoolNotice(ClientRequestId,EventCode,Title,NoticeText,LanguageCode,SourceReference,CampusId,ClassId,ExpiresUtc,SourceHash,ApprovedBy)
+ VALUES(@ClientRequestId,@EventCode,@Title,@NoticeText,@LanguageCode,@SourceReference,
   @Campus,@Class,@ExpiresUtc,@Hash,@UserId);
  DECLARE @NoticeId bigint=CONVERT(bigint,SCOPE_IDENTITY());
  INSERT msg.SchoolNoticeMember(NoticeId,AdmissionId)
@@ -173,7 +187,7 @@ BEGIN
  IF EXISTS(SELECT 1 FROM deleted D LEFT JOIN inserted I ON I.NoticeId=D.NoticeId WHERE I.NoticeId IS NULL)
   THROW 51452,''Approved school notices cannot be deleted.'',1;
  IF EXISTS(SELECT 1 FROM deleted D JOIN inserted I ON I.NoticeId=D.NoticeId
-  WHERE I.EventCode<>D.EventCode OR I.Title<>D.Title OR I.NoticeText<>D.NoticeText
+  WHERE I.ClientRequestId<>D.ClientRequestId OR I.EventCode<>D.EventCode OR I.Title<>D.Title OR I.NoticeText<>D.NoticeText
    OR I.LanguageCode<>D.LanguageCode OR ISNULL(I.SourceReference,N'''')<>ISNULL(D.SourceReference,N'''')
    OR I.CampusId<>D.CampusId OR I.ClassId<>D.ClassId OR I.ExpiresUtc<>D.ExpiresUtc
    OR I.SourceHash<>D.SourceHash OR I.ApprovedBy<>D.ApprovedBy OR I.ApprovedUtc<>D.ApprovedUtc

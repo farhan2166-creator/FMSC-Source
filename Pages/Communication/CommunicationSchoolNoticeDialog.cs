@@ -27,6 +27,8 @@ internal sealed class CommunicationSchoolNoticeDialog : ApplicationWindowForm
         Enabled=false
     };
     private bool busy;
+    private Guid approvalRequestId=Guid.NewGuid();
+    private DateTime? approvalExpiryUtc;
     private int actor,campusId,classId;
     private string currentMode="Off";
     private DataTable? results;
@@ -86,10 +88,16 @@ internal sealed class CommunicationSchoolNoticeDialog : ApplicationWindowForm
         root.Controls.Add(grid,0,8);
         Controls.Add(root);
         grid.CurrentCellChanged+=(_,_)=>UpdateActions();
-        kind.SelectedIndexChanged+=async(_,_)=>{UpdateActions();if(IsHandleCreated)await RunAsync(LoadScopeAsync);};
-        heading.TextChanged+=(_,_)=>UpdateActions();
-        noticeText.TextChanged+=(_,_)=>UpdateActions();
-        sourceReference.TextChanged+=(_,_)=>UpdateActions();
+        kind.SelectedIndexChanged+=async(_,_)=>{
+            approvalRequestId=Guid.NewGuid();approvalExpiryUtc=null;
+            UpdateActions();if(IsHandleCreated)await RunAsync(LoadScopeAsync);
+        };
+        void ResetRequest(){approvalRequestId=Guid.NewGuid();approvalExpiryUtc=null;UpdateActions();}
+        heading.TextChanged+=(_,_)=>ResetRequest();
+        noticeText.TextChanged+=(_,_)=>ResetRequest();
+        sourceReference.TextChanged+=(_,_)=>ResetRequest();
+        language.SelectedIndexChanged+=(_,_)=>ResetRequest();
+        expiryHours.ValueChanged+=(_,_)=>ResetRequest();
         approve.Click+=async(_,_)=>await RunAsync(ApproveAsync);
         revoke.Click+=async(_,_)=>await RunAsync(RevokeAsync);
         Shown+=async(_,_)=>await RunAsync(async()=>{await LoadScopeAsync();await RefreshAsync();});
@@ -156,15 +164,18 @@ internal sealed class CommunicationSchoolNoticeDialog : ApplicationWindowForm
             "No examination marks or grades are generated.";
         if(ModernMessageDialog.Show(this,warning,"Approve School Notice",MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
+        approvalExpiryUtc??=DateTime.UtcNow.AddHours((double)expiryHours.Value);
         using var result=await DatabaseHelper.QueryUserAsync("msg.ApproveSchoolNotice",
+            DatabaseHelper.P("@ClientRequestId",approvalRequestId),
             DatabaseHelper.P("@EventCode",Code),DatabaseHelper.P("@Title",title),
             DatabaseHelper.P("@NoticeText",text),DatabaseHelper.P("@LanguageCode",Language),
             DatabaseHelper.P("@SourceReference",reference.Length==0 ? null : reference),
-            DatabaseHelper.P("@ExpiresUtc",DateTime.UtcNow.AddHours((double)expiryHours.Value)),
+            DatabaseHelper.P("@ExpiresUtc",approvalExpiryUtc.Value),
             DatabaseHelper.Int("@ExpectedCampusId",campusId),DatabaseHelper.Int("@ExpectedClassId",classId));
         Guard();
         if(result.Rows.Count!=1)throw new InvalidOperationException("School notice approval is not confirmed.");
         Changed=true;heading.Clear();noticeText.Clear();sourceReference.Clear();
+        approvalRequestId=Guid.NewGuid();approvalExpiryUtc=null;
         feedback.Text="Notice approved. Current school recipients may appear under Queue → Event Suggestions.";
         await RefreshAsync();
     }

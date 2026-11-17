@@ -615,6 +615,18 @@
       "isNullable": false,
       "isIdentity": false,
       "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "ClientRequestId",
+      "type": "uniqueidentifier",
+      "maxLength": 16,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
     }
   ],
   "checkConstraints": [

@@ -29,8 +29,9 @@ internal static class CommunicationSchoolNoticeSqlChecks
             string body="School office approved this synthetic notice for the current eligible class roster.";
             string reference=kind=="ExaminationResult" ? "EXAM-SYNTHETIC-2026" : "SCHOOL-SYNTHETIC-2026";
             DateTime expiry=DateTime.UtcNow.AddHours(24);
+            Guid requestId=Guid.NewGuid();
             Microsoft.Data.SqlClient.SqlParameter[] Params(int actor,string? record= null,string? titleOverride=null)=>
-                new[]{Sql.P("@UserId",actor),Sql.P("@EventCode",kind),
+                new[]{Sql.P("@UserId",actor),Sql.P("@ClientRequestId",requestId),Sql.P("@EventCode",kind),
                     Sql.P("@Title",titleOverride??title),Sql.P("@NoticeText",body),
                     Sql.P("@LanguageCode","en"),Sql.P("@SourceReference",record??reference),
                     Sql.P("@ExpiresUtc",expiry),Sql.P("@ExpectedCampusId",0),Sql.P("@ExpectedClassId",0)};
@@ -45,6 +46,13 @@ internal static class CommunicationSchoolNoticeSqlChecks
                     Sql.Proc("msg.ApproveSchoolNotice",Params(f.Admin,record:" "));return Task.CompletedTask;
                 },51450);
             long id=Convert.ToInt64(Sql.Proc("msg.ApproveSchoolNotice",Params(f.Admin)).Rows[0]["NoticeId"]);
+            long repeated=Convert.ToInt64(Sql.Proc("msg.ApproveSchoolNotice",Params(f.Admin)).Rows[0]["NoticeId"]);
+            r.Check(repeated==id && Sql.Count("SELECT COUNT(*) FROM msg.SchoolNotice WHERE ClientRequestId=@Request",
+                Sql.P("@Request",requestId))==1,
+                "Retrying the same approval after a lost SQL response returns its original notice ID without replay.");
+            await r.Refused("Reusing the approval key for different content is forbidden",()=>{
+                Sql.Proc("msg.ApproveSchoolNotice",Params(f.Admin,titleOverride:"Different approved title"));return Task.CompletedTask;
+            },51450);
             r.Check(id>0 && Sql.Count("SELECT COUNT(*) FROM msg.SchoolNoticeMember WHERE NoticeId=@Notice AND AdmissionId=@Student",
                 Sql.P("@Notice",id),Sql.P("@Student",student))==1,
                 "Approval pins the real currently consenting roster before suggestions are discovered.");
