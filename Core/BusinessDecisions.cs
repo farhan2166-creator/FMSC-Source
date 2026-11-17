@@ -90,9 +90,11 @@ Do not make their defaults identical as a cosmetic consistency change.
 BD-12 Concessions and money: discount reduces the full fee; correcting a recorded
 payment is distinct from returning cash. Reductions consume unpaid dues first;
 paid differences become the explicitly selected advance or refund. Optional credit
-use follows the reviewed manual collection order, restricted to its owner unless
-transferred explicitly. Future posted fees may be prepaid deliberately only in
-collection; posting and automatic billing do not consume advance. Credit use is
+use follows the reviewed manual collection order: in family collection, every
+selected sibling's own advance applies only to their own dues; unselected siblings
+are excluded, and unused advance stays with its owner unless transferred explicitly.
+Future posted fees may be prepaid deliberately only in collection; posting and
+automatic billing do not consume advance. Credit use is
 settlement, never new cash, and confirmed collection saves a receipt snapshot.
 Advance is allowed only when the collection date is today; backdated
 collections may use cash, not advance, subject to existing enrollment-date
