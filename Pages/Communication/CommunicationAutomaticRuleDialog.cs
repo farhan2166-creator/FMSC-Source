@@ -61,7 +61,9 @@ internal sealed class CommunicationAutomaticRuleDialog : ApplicationWindowForm
         chooseMeta.Click+=async(_,_)=>await RunAsync(async()=>{
             var choices=await CommunicationApiBatchStore.ReadMetaTemplatesAsync();Guard();
             IReadOnlyDictionary<string,string>? context=code=="PaymentReceived" ? new Dictionary<string,string>{
-                ["Payment details"]="[PaymentDetails]",["Payment amount"]="[PaymentAmount]",["Credit applied"]="[CreditApplied]",["Receipt number"]="[ReceiptNumber]"}:null;
+                ["Payment details"]="[PaymentDetails]",["Payment amount"]="[PaymentAmount]",["Credit applied"]="[CreditApplied]",["Receipt number"]="[ReceiptNumber]"}
+                : code is "Announcement" or "ExaminationResult" ? new Dictionary<string,string>{
+                    ["Approved notice title"]="[NoticeTitle]",["Approved notice text"]="[NoticeText]"}:null;
             using var dialog=new CommunicationMetaTemplateDialog(choices.Where(item=>item.Language==Language || item.Language.StartsWith(Language+"_",StringComparison.Ordinal)).ToArray(),
                 CommunicationAutomaticMessages.IsFeeEvent(code) ? "FeeReminder" : "Individual",allowStudentFields:!CommunicationAutomaticMessages.IsFeeEvent(code),contextFields:context,allowEventContext:true);
             if(dialog.ShowDialog(this)==DialogResult.OK && dialog.Selection is { } selection)

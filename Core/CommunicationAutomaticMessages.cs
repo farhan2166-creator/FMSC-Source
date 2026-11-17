@@ -8,7 +8,10 @@ namespace FMSC_SMS.Core;
 internal static class CommunicationAutomaticMessages
 {
     internal static bool IsFeeEvent(string code)=>code is "OutstandingFees" or "UpcomingDue" or "OverdueFollowUp";
-    internal static string DefaultBody(string code,string language)=>code=="PaymentReceived"
+    internal static string DefaultBody(string code,string language)=>code is "Announcement" or "ExaminationResult"
+        ? language=="ur" ? "محترم والدین/سرپرست،\n[NoticeTitle]\n[NoticeText]\nRegards: FMSC"
+          : "Dear parent/guardian,\n[NoticeTitle]\n[NoticeText]\nRegards: FMSC"
+        : code=="PaymentReceived"
         ? language=="ur" ? "محترم والدین/سرپرست،\n[PaymentDetails]\nرسید نمبر: [ReceiptNumber]\nRegards: FMSC"
           : "Dear parent/guardian,\n[PaymentDetails]\nReceipt: [ReceiptNumber]\nRegards: FMSC"
         : CommunicationAutomationInboxStore.SuggestedBody(code,language,IsFeeEvent(code));
@@ -19,10 +22,28 @@ internal static class CommunicationAutomaticMessages
             throw new CommunicationValidationException("Payment context is available only for a payment event.");
         if(code is not ("Announcement" or "ExaminationResult") && new[]{"[NoticeTitle]","[NoticeText]"}.Any(body.Contains))
             throw new CommunicationValidationException("Notice context requires an approved school notice.");
+        if(code is "Announcement" or "ExaminationResult" &&
+            (!body.Contains("[NoticeTitle]",StringComparison.Ordinal) || !body.Contains("[NoticeText]",StringComparison.Ordinal)))
+            throw new CommunicationValidationException("The official notice title and exact text are required.");
         CommunicationPreparedMessages.ValidateFormat(body,IsFeeEvent(code) ? "FeeReminder" : "Individual",allowEventContext:true);
     }
     internal static (string Body,CommunicationMetaTransport.Selection? Meta) Expand(DataRow row,string body,CommunicationMetaTransport.Selection? meta)
     {
+        if(Convert.ToString(row["EventCode"]) is "Announcement" or "ExaminationResult")
+        {
+            string title=Convert.ToString(row["NoticeTitle"])??"";
+            string notice=Convert.ToString(row["NoticeText"])??"";
+            if(title.Length==0 || notice.Length==0 || title.Contains('[') || notice.Contains('['))
+                throw new CommunicationValidationException("The official notice source is unavailable.");
+            string ReplaceNotice(string value)=>value.Replace("[NoticeTitle]",title,StringComparison.Ordinal)
+                .Replace("[NoticeText]",notice,StringComparison.Ordinal);
+            if(meta is not null)
+            {
+                meta=meta with {Fields=meta.Fields.Select(ReplaceNotice).ToArray()};
+                return(meta.Format(),meta);
+            }
+            return(ReplaceNotice(body),null);
+        }
         if(Convert.ToString(row["EventCode"])!="PaymentReceived")return(body,meta);
         decimal total=Convert.ToDecimal(row["PaymentAmount"]);
         bool credit=Convert.ToBoolean(row["IsCreditApplication"]);

@@ -416,7 +416,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             if (automationEvent.SelectedItem is not AutomationChoice selected)
                 throw new InvalidOperationException("Choose an automation event.");
             bool review=automationMode.SelectedIndex==1;
-            if(automationMode.SelectedIndex==2 && selected.Code is ("Admission" or "PaymentReceived" or "Birthday" or "OutstandingFees" or "UpcomingDue" or "OverdueFollowUp"))
+            if(automationMode.SelectedIndex==2 && selected.Code is ("Admission" or "PaymentReceived" or "Birthday" or "OutstandingFees" or "UpcomingDue" or "OverdueFollowUp" or "Announcement" or "ExaminationResult"))
             {
                 using var authorization=new CommunicationAutomaticRuleDialog(selected.Code);
                 if(authorization.ShowDialog(this)==DialogResult.OK && authorization.Changed)
@@ -428,7 +428,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             }
             if(automationMode.SelectedIndex==2 ||
                (review && selected.Code is not ("Admission" or "PaymentReceived" or "Birthday"
-                    or "OutstandingFees" or "UpcomingDue" or "OverdueFollowUp")))
+                    or "OutstandingFees" or "UpcomingDue" or "OverdueFollowUp" or "Announcement" or "ExaminationResult")))
             {
                 automationFeedback.Text="The selected event needs an approved school notice source before it can be enabled.";
                 return;

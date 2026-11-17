@@ -86,7 +86,10 @@ internal sealed class CommunicationSchoolNoticeDialog : ApplicationWindowForm
         root.Controls.Add(grid,0,8);
         Controls.Add(root);
         grid.CurrentCellChanged+=(_,_)=>UpdateActions();
-        kind.SelectedIndexChanged+=async(_,_)=>await RunAsync(LoadScopeAsync);
+        kind.SelectedIndexChanged+=async(_,_)=>{UpdateActions();if(IsHandleCreated)await RunAsync(LoadScopeAsync);};
+        heading.TextChanged+=(_,_)=>UpdateActions();
+        noticeText.TextChanged+=(_,_)=>UpdateActions();
+        sourceReference.TextChanged+=(_,_)=>UpdateActions();
         approve.Click+=async(_,_)=>await RunAsync(ApproveAsync);
         revoke.Click+=async(_,_)=>await RunAsync(RevokeAsync);
         Shown+=async(_,_)=>await RunAsync(async()=>{await LoadScopeAsync();await RefreshAsync();});
