@@ -15,6 +15,40 @@ public sealed partial class CommunicationCenterPage
             : total > 0 ? $"Queue ({total:N0})" : "Queue";
     }
 
+    private readonly CommunicationQueueAlertPolicy queueAlertPolicy = new();
+    private NotifyIcon? queueAlertIcon;
+
+    private void ShowQueueAttentionNotification(int attention)
+    {
+        if(!queueAlertPolicy.ShouldAlert(attention,DateTime.UtcNow) || IsDisposed) return;
+        try
+        {
+            if(queueAlertIcon is null)
+            {
+                queueAlertIcon=new NotifyIcon
+                {
+                    Icon=System.Drawing.SystemIcons.Information,
+                    Text="FMSC Communication Queue",Visible=true
+                };
+                queueAlertIcon.BalloonTipClicked+=(_,_)=>
+                {
+                    if(IsDisposed || !IsHandleCreated)return;
+                    BeginInvoke((Action)(() => { if(!IsDisposed) _=NavigateSessionsAsync(true); }));
+                };
+            }
+            // Never expose student, guardian, payment, or message content on
+            // the Windows desktop or lock screen.
+            queueAlertIcon.BalloonTipTitle="Communication Queue needs attention";
+            queueAlertIcon.BalloonTipText=$"{attention:N0} communication item(s) need review. Open FMSC Queue for details.";
+            queueAlertIcon.ShowBalloonTip(8000);
+        }
+        catch(Exception ex)
+        {
+            // Desktop notifications are optional; Queue remains available.
+            AppExceptionHandler.LogNonFatal(ex,"Communication desktop notification unavailable");
+        }
+    }
+
     private async Task RefreshQueueAttentionAsync()
     {
         if (!CurrentUser.HasPermission("Communication.Send")) return;
@@ -30,6 +64,7 @@ public sealed partial class CommunicationCenterPage
                 : 0;
             unfinishedButton.Text=QueueAttentionCaption(attention,rows.Rows.Count);
             AppMetrics.FitButtonWidth(unfinishedButton,minWidth:AppScale.Scale(140));
+            ShowQueueAttentionNotification(attention);
         }
         catch(Exception ex)
         {

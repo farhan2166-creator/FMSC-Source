@@ -8,6 +8,14 @@ int count=0;
 void Check(bool value,string description){if(!value)throw new Exception(description);count++;}
 void Refuse(Action action,string description){try{action();}catch(InvalidOperationException){count++;return;}throw new Exception(description);}
 AttemptJournalChecks.Run(Check);
+var alerts=new CommunicationQueueAlertPolicy();
+var alertStart=new DateTime(2030,1,1,9,0,0,DateTimeKind.Utc);
+Check(!alerts.ShouldAlert(0,alertStart) && alerts.ShouldAlert(3,alertStart.AddMinutes(1)),
+    "New Queue attention produces one grouped notification");
+Check(!alerts.ShouldAlert(3,alertStart.AddMinutes(2)) && !alerts.ShouldAlert(5,alertStart.AddMinutes(3)),
+    "Existing backlog and rapidly growing attention do not produce repeated desktop alerts");
+Check(!alerts.ShouldAlert(0,alertStart.AddMinutes(5)) && alerts.ShouldAlert(1,alertStart.AddMinutes(18)),
+    "A resolved backlog may alert again after the quiet interval");
 // School scheduling must not depend on the operator computer's timezone.
 var schoolZone=TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time");
 var schoolInstant=CommunicationSchoolTime.ToInstant(new DateTime(2030,1,15,10,30,0,DateTimeKind.Local),schoolZone);

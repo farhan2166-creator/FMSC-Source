@@ -3,6 +3,7 @@
   <ItemGroup>
     <Compile Include="../../Core/CommunicationAttemptJournal.cs" Link="CommunicationAttemptJournal.cs" />
     <Compile Include="../../Core/CommunicationSchoolTime.cs" Link="CommunicationSchoolTime.cs" />
+    <Compile Include="../../Core/CommunicationQueueAlertPolicy.cs" Link="CommunicationQueueAlertPolicy.cs" />
     <Compile Include="../../Core/CommunicationMetaTransport.cs" Link="CommunicationMetaTransport.cs" />
     <Compile Include="../../Core/CommunicationProviderProfile.cs" Link="CommunicationProviderProfile.cs" />
     <Compile Include="../../Core/CommunicationTwilioTransport.cs" Link="CommunicationTwilioTransport.cs" />

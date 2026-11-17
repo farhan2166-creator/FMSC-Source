@@ -270,6 +270,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         Disposed += (_, _) =>
         {
             previewTable?.Dispose();
+            queueAlertIcon?.Dispose();
             (historyGrid.DataSource as DataTable)?.Dispose();
             (unfinishedGrid.DataSource as DataTable)?.Dispose();
         };
