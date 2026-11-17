@@ -81,8 +81,8 @@ internal static partial class Program
             LabelText("contactLabel").Contains("03000000000") &&
             LabelText("registrationLabel").Contains("REG-41"),
             "Parent, contact and registration remain separate from the main student heading");
-        Check(LabelText("admissionDateLabel").Contains("07-Apr-2018") &&
-            LabelText("dateOfBirthLabel").Contains("05-Jan-2010") &&
+        Check(LabelText("admissionDateLabel").Contains(new DateTime(2018,4,7).ToString("dd-MMM-yyyy")) &&
+            LabelText("dateOfBirthLabel").Contains(new DateTime(2010,1,5).ToString("dd-MMM-yyyy")) &&
             LabelText("genderLabel").Contains("Male") &&
             LabelText("admissionCampusLabel").Contains("Campus Boys"),
             "Admission and identity facts are shown in the overview rather than the placement table");
