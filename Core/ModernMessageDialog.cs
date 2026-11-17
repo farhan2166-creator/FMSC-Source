@@ -172,15 +172,14 @@ public static class ModernMessageDialog
         {
             var grid = HumanUi.Grid(false);
             grid.Name = "MessageRecords"; grid.Dock = DockStyle.Fill; grid.Margin = new Padding(0, 0, 0, AppScale.Scale(12));
+            // Use the same content-aware minimum widths and available-space
+            // distribution as application form grids. Do not pin dialog
+            // columns to a separate set of FillWeight proportions.
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
             void FormatColumn(DataGridViewColumn column)
             {
-                bool student=column.Name=="Student", admission=column.Name=="Adm. No.";
-                column.MinimumWidth = AppScale.Scale(family ? student ? 180 : admission ? 65 : 92 : 90);
                 if(family)
-                {
-                    column.FillWeight=student?260:admission?75:110;
                     column.SortMode=DataGridViewColumnSortMode.NotSortable; // Keep the totals row last.
-                }
                 if (column.ValueType == typeof(decimal))
                 {
                     column.DefaultCellStyle.Format = "#,##0.##";
@@ -201,7 +200,7 @@ public static class ModernMessageDialog
                 foreach (DataGridViewColumn column in grid.Columns) FormatColumn(column);
                 StyleTotalsRow();
             };
-            grid.DataSource = records; grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            grid.DataSource = records;
             if(family){grid.ShowCellToolTips=false;StyleTotalsRow();}
             grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCellsExceptHeaders;
             grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
@@ -247,9 +246,17 @@ public static class ModernMessageDialog
             if (recordsGrid is not null)
             {
                 recordsGrid.Width = available;
+                // Shared sizing measures headings and row values, then distributes
+                // any spare width. It also allows horizontal scrolling when text
+                // requires more space than a small dialog can provide.
+                UiHelper.FitColumnsToWidth(recordsGrid);
                 recordsGrid.AutoResizeRows(DataGridViewAutoSizeRowsMode.AllCellsExceptHeaders);
                 int rowsHeight = recordsGrid.Rows.Cast<DataGridViewRow>().Take(8).Sum(row => row.Height);
-                int height = recordsGrid.ColumnHeadersHeight + Math.Max(AppMetrics.GridRowHeight, rowsHeight) + AppScale.Scale(8);
+                int columnsWidth=recordsGrid.Columns.GetColumnsWidth(DataGridViewElementStates.Visible);
+                int scrollHeight=columnsWidth>recordsGrid.DisplayRectangle.Width
+                    ?SystemInformation.HorizontalScrollBarHeight:0;
+                int height = recordsGrid.ColumnHeadersHeight + Math.Max(AppMetrics.GridRowHeight, rowsHeight)
+                    + scrollHeight + AppScale.Scale(8);
                 recordsGrid.Height = height;
                 body.RowStyles[recordsRow].Height = height + recordsGrid.Margin.Vertical;
             }
