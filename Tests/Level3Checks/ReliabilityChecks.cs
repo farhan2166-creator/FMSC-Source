@@ -7,7 +7,7 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
 {
     private int student, enrollment;
     private long charge;
-    private long communicationRecipient,manualPending,manualOpened;
+    private long communicationRecipient,communicationScheduled,manualPending,manualOpened;
     private string? backup, restored, snapshot;
     private Guid Owner => Guid.Parse(Environment.GetEnvironmentVariable("FMSC_TEST_RUN_ID")!);
     private string Catalog => new SqlConnectionStringBuilder(DatabaseHelper.ConnectionString).InitialCatalog;
@@ -225,6 +225,10 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
         Sql.Proc("msg.ConfigureChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),Sql.P("@ProviderCode","Twilio"));
         Sql.Proc("msg.EnableApiChannel",Sql.P("@UserId",f.Admin),Sql.P("@Channel","Sms"),Sql.P("@ProviderCode","Twilio"));
         communicationRecipient=await ConfirmCommunicationRecovery();
+        communicationScheduled=await ConfirmCommunicationRecovery();
+        using(var scheduleBatch=Sql.Query("SELECT BatchId FROM msg.Recipient WHERE RecipientId=@Id",Sql.P("@Id",communicationScheduled)))
+            Sql.Proc("msg.ScheduleReviewedBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",scheduleBatch.Rows[0]["BatchId"]),
+                Sql.P("@DueUtc",DateTime.UtcNow.AddDays(1)),Sql.P("@ExpiresUtc",DateTime.UtcNow.AddDays(2)),Sql.P("@Priority","Normal"));
         Sql.Proc("msg.EnableManualWhatsApp",Sql.P("@UserId",f.Admin));
         manualPending=await ConfirmCommunicationRecovery(manual:true);
         manualOpened=await ConfirmCommunicationRecovery(manual:true);
@@ -296,7 +300,7 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
             },51343);
             Guid Batch(long recipient)=>(Guid)Sql.Scalar("SELECT BatchId FROM msg.Recipient WHERE RecipientId=@Id",Sql.P("@Id",recipient))!;
             using var queue=Sql.Proc("msg.ReadMyUnfinishedBatches",Sql.P("@UserId",f.Admin));
-            r.Check(new[]{communicationRecipient,manualPending,manualOpened}.All(id=>queue.AsEnumerable().Any(row=>
+            r.Check(new[]{communicationRecipient,communicationScheduled,manualPending,manualOpened}.All(id=>queue.AsEnumerable().Any(row=>
                 (Guid)row["BatchId"]==Batch(id) && Convert.ToBoolean(row["RecoveryBlocked"]) && Convert.ToString(row["QueueStatus"])=="Needs Attention")),
                 "Restored API and manual batches are visible in Needs Attention before any external operation.");
             using var api=Sql.Proc("msg.ReadApiBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationRecipient)));
@@ -325,11 +329,27 @@ internal sealed class ReliabilityChecks(Fixture f, Report r)
             Sql.Proc("msg.MarkManualHandoff",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",manualOpened),Sql.P("@Outcome","ReportedSent"),Sql.P("@RecoveredReport",true));
             r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ManualHandoff WHERE RecipientId=@Id AND State='ReportedSent'",Sql.P("@Id",manualOpened))==1,
                 "An explicit checked operator report records only self-reported sending, without provider delivery claims.");
-            await r.Refused("A restored approval cannot be released through schedule resumption",()=>{
-                Sql.Proc("msg.ScheduleReviewedBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationRecipient)),
-                    Sql.P("@DueUtc",DateTime.UtcNow.AddHours(1)),Sql.P("@ExpiresUtc",DateTime.UtcNow.AddHours(2)),Sql.P("@Priority","Normal"));
-                Sql.Proc("msg.ReleaseScheduledHold",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationRecipient)));return Task.CompletedTask;
+            Sql.Proc("msg.HoldScheduledBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationScheduled)));
+            object? dueBefore=Sql.Scalar("SELECT DueUtc FROM msg.BatchSchedule WHERE BatchId=@Id",Sql.P("@Id",Batch(communicationScheduled)));
+            await r.Refused("A restored approval cannot be rescheduled to clear its recovery hold",()=>{
+                Sql.Proc("msg.ScheduleReviewedBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationScheduled)),
+                    Sql.P("@DueUtc",DateTime.UtcNow.AddHours(1)),Sql.P("@ExpiresUtc",DateTime.UtcNow.AddHours(2)),Sql.P("@Priority","Normal"));return Task.CompletedTask;
             },51341);
+            await r.Refused("A restored approval cannot be released through schedule resumption",()=>{
+                Sql.Proc("msg.ReleaseScheduledHold",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationScheduled)));return Task.CompletedTask;
+            },51341);
+            using(var takeoverChoices=Sql.Proc("msg.ReadTakeoverCandidates",Sql.P("@UserId",f.Admin)))
+                r.Check(!takeoverChoices.AsEnumerable().Any(row=>(Guid)row["BatchId"]==Batch(communicationScheduled)),
+                    "Takeover offers only resumable work and keeps restored approvals in the recovery Queue.");
+            int takeovers=Sql.Count("SELECT COUNT(*) FROM msg.BatchTakeover");
+            await r.Refused("Administrator takeover cannot release a restored approval or record a misleading resumption",()=>{
+                Sql.Proc("msg.TakeOverScheduledBatch",Sql.P("@UserId",f.Admin),Sql.P("@BatchId",Batch(communicationScheduled)),
+                    Sql.P("@Reason","Synthetic recovery review"));return Task.CompletedTask;
+            },51341);
+            r.Check(Sql.Count("SELECT COUNT(*) FROM msg.BatchTakeover")==takeovers &&
+                Sql.Count("SELECT COUNT(*) FROM msg.BatchSchedule WHERE BatchId=@Id AND HoldForReview=1",Sql.P("@Id",Batch(communicationScheduled)))==1 &&
+                Equals(Sql.Scalar("SELECT DueUtc FROM msg.BatchSchedule WHERE BatchId=@Id",Sql.P("@Id",Batch(communicationScheduled))),dueBefore),
+                "Refused recovery actions preserve the due time, hold and original responsibility audit.");
             long fresh=await ConfirmCommunicationRecovery();
             using var claimed=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",fresh),
                 Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));
