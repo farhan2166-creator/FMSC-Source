@@ -113,6 +113,13 @@ function LocalDbExe {
     if (Test-Path -LiteralPath $known -PathType Leaf) { return $known }
     return $null
 }
+function Get-FmscSafeSqlFailureCodes {
+    param([string]$Text)
+    # SQL parser/compatibility errors include three-digit identifiers (e.g.
+    # 102, 156 and 195). Return numbers only, never accompanying SQL text.
+    return @([regex]::Matches($Text,'(?i)\b(?:Msg\s+|SQL error\s*:?\s*)(?<code>[1-9][0-9]{0,5})\b') |
+        ForEach-Object { $_.Groups['code'].Value } | Sort-Object -Unique)
+}
 function Invoke-ActualInstaller {
     $installer=Join-Path $release 'core.ps1'
     $psi=[Diagnostics.ProcessStartInfo]::new('powershell.exe')
@@ -161,11 +168,13 @@ function Invoke-ActualInstaller {
         if (Test-Path -LiteralPath $sourceLog -PathType Leaf) {
             $sourceText+="\n"+(Get-Content -LiteralPath $sourceLog -Raw -ErrorAction SilentlyContinue)
         }
-        $codes=@([regex]::Matches($sourceText,'(?i)\b(?:Msg\s+|SQL error\s*:?\s*)(?<code>[0-9]{4,6})\b') |
-            ForEach-Object { $_.Groups['code'].Value } | Sort-Object -Unique)
+        $codes=@(Get-FmscSafeSqlFailureCodes $sourceText)
         if ($codes.Count) {
             Write-Host ('Installer SQL diagnostics: error codes '+($codes -join ', '))
         }
+        $migration=[regex]::Match($sourceText,'(?i)\bMigration\s+(?<version>[1-9][0-9]{0,5})\s+failed\b')
+        if ($migration.Success) { Write-Host ('Installer migration number: '+$migration.Groups['version'].Value) }
+
         foreach ($item in @(
             @{ Pattern='(?i)Migration\s+16\s+failed'; Label='Migration 16 rejected' },
             @{ Pattern='(?i)Migration\s+15\s+failed'; Label='Migration 15 rejected' },
@@ -360,6 +369,9 @@ try {
         throw 'Disposable runner LocalDB did not start with a healthy SQL endpoint after three attempts; no database operations permitted.'
     }
     $instance='np:'+$pipe.Groups[1].Value
+    $engineMajor=(@(Sql 'master' "SET NOCOUNT ON; SELECT CONVERT(varchar(8),SERVERPROPERTY('ProductMajorVersion'));" ) -join '').Trim()
+    if ($engineMajor -notmatch '^[1-9][0-9]{0,2}$') { throw 'Cannot verify the disposable SQL engine major version.' }
+    Write-Host ('Disposable SQL engine major version: '+$engineMajor)
     $checks.Add('Actual LocalDB instance started using Microsoft-signed prerequisites')
 
     Stage 'Pinned SQL command and full installer publishing'
