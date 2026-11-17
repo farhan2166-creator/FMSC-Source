@@ -3523,6 +3523,7 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
                 confirmationFacts.Add(("Advance used", $"Rs. {creditUsed:N0}"));
                 confirmationFacts.Add(("Advance left", $"Rs. {SelectedAvailableCredit() - creditUsed:N0}"));
             }
+            var changedFeeFacts = new List<(string, string)>();
             foreach (DataGridViewRow row in charges.Rows)
             {
                 if (row.Cells["GrossAmount"].Tag is decimal oldDiscount &&
@@ -3530,7 +3531,7 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
                 {
                     description += $"\r\n{GetText(row.Cells["FeeTypeName"].Value)} ({GetText(row.Cells["BillingMonth"].Value)}): " +
                         $"bill discount Rs. {oldDiscount:0.##} to Rs. {GetDecimal(row.Cells["AppliedDiscount"].Value):0.##}.";
-                    confirmationFacts.Add(($"{GetText(row.Cells["FeeTypeName"].Value)} · {GetText(row.Cells["BillingMonth"].Value)}",
+                    changedFeeFacts.Add(($"{GetText(row.Cells["FeeTypeName"].Value)} · {GetText(row.Cells["BillingMonth"].Value)}",
                         $"Bill discount: Rs. {oldDiscount:0.##} → Rs. {GetDecimal(row.Cells["AppliedDiscount"].Value):0.##}"));
                 }
             }
@@ -3552,11 +3553,11 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
                 .Concat(creditEdits.Select(edit => edit.AdmissionId)).Distinct().OrderBy(id => id).ToArray();
             int payingStudentCount = settlingStudents.Length;
             using var confirmationRows = new DataTable();
-            confirmationRows.Columns.Add("Admission No.");
+            confirmationRows.Columns.Add("Adm. No.");
             confirmationRows.Columns.Add("Student");
-            confirmationRows.Columns.Add("Payment (Rs.)", typeof(decimal));
+            confirmationRows.Columns.Add("Cash (Rs.)", typeof(decimal));
             confirmationRows.Columns.Add("Discount (Rs.)", typeof(decimal));
-            if (creditUsed > 0m) confirmationRows.Columns.Add("Credit (Rs.)", typeof(decimal));
+            confirmationRows.Columns.Add("Advance Used (Rs.)", typeof(decimal));
             if (payingStudentCount > 1)
             {
                 description +=
@@ -3573,15 +3574,30 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
                         .Where(r => r.amount < 0m)
                         .Sum(r => r.amount);
                     string who = WhoIs(settlingStudent);
-                    var facts = new List<object> { AdmissionNumbers.ForId(settlingStudent), who, studentTotal, studentDiscount };
-                    if (creditUsed > 0m) facts.Add(creditEdits.Where(edit => edit.AdmissionId == settlingStudent).Sum(edit => edit.Amount));
-                    confirmationRows.Rows.Add(facts.ToArray());
+                    decimal studentAdvance = creditEdits.Where(edit => edit.AdmissionId == settlingStudent).Sum(edit => edit.Amount);
+                    // The loaded student's full identity is already in the summary.
+                    // Avoid repeating their admission number and "(this student)" in the table.
+                    confirmationRows.Rows.Add(AdmissionNumbers.ForId(settlingStudent),
+                        StudentNameFor(settlingStudent), studentTotal, studentDiscount, studentAdvance);
                     /* What is left is each child's own payment, with the discount that goes with it so the figures on the receipt are recognisable. */
                     description += studentDiscount > 0m
                         ? $"\r\n    - {who}: Rs. {studentTotal:0.##} (discount Rs. {studentDiscount:0.##})"
                         : $"\r\n    - {who}: Rs. {studentTotal:0.##}";
                 }
+                // One visually distinct, non-editable total row makes the exact
+                // cash, discount and per-child advance amounts auditable at a glance.
+                confirmationRows.Rows.Add("", "Total", amount, discount, creditUsed);
+                confirmationFacts = new List<(string, string)> {
+                    ("Cash received", $"Rs. {amount:N0}"),
+                    ("Advance used", $"Rs. {creditUsed:N0}"),
+                    ("Discount", $"Rs. {discount:N0}"),
+                    ("Advance left", $"Rs. {Math.Max(0m,SelectedAvailableCredit()-creditUsed):N0}"),
+                    ("Payment date", paymentDate.Value.ToString("dd-MM-yyyy hh:mm tt")),
+                    ("Method", method.Text),
+                    ("Loaded student", student.Text.Trim())
+                };
             }
+            confirmationFacts.AddRange(changedFeeFacts);
             if (allocationsByStudent.Values.Any(group =>
                 group.Rows.Where(row => row.amount > 0m).Sum(row => row.amount) is decimal total &&
                 total != decimal.Truncate(total)))
@@ -3591,10 +3607,18 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
             }
             var confirmMessage = new MessageDialogContent(
                 payingStudentCount > 1 ? $"Record payment for {payingStudentCount} students?" : "Record this payment?",
-                Explanation: amount == 0m && creditUsed > 0m ? "Uses the student's existing advance balance. No new money is received." : payingStudentCount > 1 ? "One family receipt covers this payment. Each child's fees stay under their own record." : null,
+                Explanation: payingStudentCount > 1
+                    ? "One family receipt will be issued. Each student's fees and advance remain in their own account."
+                    : amount == 0m && creditUsed > 0m ? "Uses existing advance. No new money is received." : null,
                 Facts: confirmationFacts,
                 Records: payingStudentCount > 1 ? confirmationRows : null,
-                Notice: "This records the payment immediately and is final. Check every amount before choosing Yes.");
+                Notice: payingStudentCount > 1
+                    ? "This payment is saved immediately. Review the amounts before confirming."
+                    : "This records the payment immediately and is final. Check every amount before choosing Yes.",
+                Style: payingStudentCount > 1 ? MessageDialogStyle.FamilyCollection : MessageDialogStyle.Standard);
+            // A tooltip from the underlying payment fields must not remain floating
+            // over the modal breakdown while the operator is reviewing amounts.
+            FinanceHelp.Dismiss(this);
             if (ModernMessageDialog.Show(
                     FindForm(),
                     confirmMessage,
