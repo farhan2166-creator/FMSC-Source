@@ -67,11 +67,32 @@ internal static partial class Program
                 string signed=CertificateSignature.Apply(original,bytes.ToArray(),"image/png",true);
                 var xml=XDocument.Parse(signed);
                 XNamespace ns=xml.Root!.Name.Namespace;
+                var signatureImage=xml.Descendants(ns+"Image").Single(item=>(string?)item.Attribute("Name")==
+                    "PrincipalSignaturePrintImage");
+                var principalLine=xml.Descendants(ns+"Line").Single(item=>(string?)item.Attribute("Name")=="lnPrincipal");
+                var principalLabel=xml.Descendants(ns+"Textbox").Single(item=>(string?)item.Attribute("Name")=="lblPrincipal");
                 Check(xml.Descendants(ns+"Image").Count(item=>(string?)item.Attribute("Name")==
                     "PrincipalSignaturePrintImage")==1 &&
                     xml.Descendants(ns+"EmbeddedImage").Any(item=>(string?)item.Attribute("Name")==
                     "PrincipalSignaturePrintAsset"),
                     template+": enabled principal signature is embedded over the existing signing line");
+                double imageLeft=ReportInches(signatureImage.Element(ns+"Left")?.Value);
+                double imageWidth=ReportInches(signatureImage.Element(ns+"Width")?.Value);
+                double imageTop=ReportInches(signatureImage.Element(ns+"Top")?.Value);
+                double imageHeight=ReportInches(signatureImage.Element(ns+"Height")?.Value);
+                double lineLeft=ReportInches(principalLine.Element(ns+"Left")?.Value);
+                double lineWidth=ReportInches(principalLine.Element(ns+"Width")?.Value);
+                double lineTop=ReportInches(principalLine.Element(ns+"Top")?.Value);
+                double labelLeft=ReportInches(principalLabel.Element(ns+"Left")?.Value);
+                double labelWidth=ReportInches(principalLabel.Element(ns+"Width")?.Value);
+                Check(Math.Abs((imageLeft+imageWidth/2)-(lineLeft+lineWidth/2))<0.01 &&
+                      Math.Abs((imageLeft+imageWidth/2)-(labelLeft+labelWidth/2))<0.01 &&
+                      imageTop+imageHeight<=lineTop-0.01 &&
+                      imageLeft>=lineLeft && imageLeft+imageWidth<=lineLeft+lineWidth &&
+                      imageHeight<=0.381 && imageWidth<=lineWidth,
+                    template+": printed signature is centered on the existing Principal line and label without moving either");
+                Check(Math.Abs(imageWidth/imageHeight-220d/60)<0.02,
+                    template+": print image box matches the saved signature aspect ratio");
             }
         }
 
