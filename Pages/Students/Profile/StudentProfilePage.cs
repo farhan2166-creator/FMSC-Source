@@ -469,14 +469,8 @@ public sealed class StudentProfilePage : V2Page
         string className = CellText(row, "ClassName");
         string sectionName = CellText(row, "SectionName");
         string status = CellText(row, "Status");
-        string registration = CellText(row, "RegistrationNumber");
-        string contact = CellText(row, "ContactNumber");
         nameLabel.Text = $"{AdmissionNumbers.ForId(admissionId)} - {name}";
-        fatherLabel.Text = string.IsNullOrWhiteSpace(father) ? "" : $"Father: {father}";
-        admissionDateLabel.Text = "Admitted: " + FactDate(row, "AdmissionDate");
-        dateOfBirthLabel.Text = "Born: " + FactDate(row, "DateOfBirth");
-        genderLabel.Text = "Gender: " + FactText(row, "Gender");
-        admissionCampusLabel.Text = "Admission campus: " + FactText(row, "AdmissionCampusName");
+        RenderIdentityFacts(row);
         string placement =
             string.IsNullOrWhiteSpace(className)
                 ? "Not currently enrolled"
@@ -487,14 +481,21 @@ public sealed class StudentProfilePage : V2Page
             string.IsNullOrWhiteSpace(status)
                 ? placement
                 : $"{placement} · {status}";
-        registrationLabel.Text =
-            string.IsNullOrWhiteSpace(registration)
-                ? string.Empty
-                : $"Registration No.: {registration}";
-        contactLabel.Text =
-            string.IsNullOrWhiteSpace(contact)
-                ? string.Empty
-                : $"Contact: {contact}";
+    }
+    // Fact rendering is deliberately independent of the admission-number
+    // lookup so SQL-free UI contracts can verify it with synthetic records.
+    private void RenderIdentityFacts(DataRow row)
+    {
+        string father = CellText(row, "FatherName");
+        string registration = CellText(row, "RegistrationNumber");
+        string contact = CellText(row, "ContactNumber");
+        fatherLabel.Text = string.IsNullOrWhiteSpace(father) ? "" : $"Father: {father}";
+        admissionDateLabel.Text = "Admitted: " + FactDate(row, "AdmissionDate");
+        dateOfBirthLabel.Text = "Born: " + FactDate(row, "DateOfBirth");
+        genderLabel.Text = "Gender: " + FactText(row, "Gender");
+        admissionCampusLabel.Text = "Admission campus: " + FactText(row, "AdmissionCampusName");
+        registrationLabel.Text = string.IsNullOrWhiteSpace(registration) ? "" : $"Registration No.: {registration}";
+        contactLabel.Text = string.IsNullOrWhiteSpace(contact) ? "" : $"Contact: {contact}";
     }
     private void RenderPhoto(DataTable photoTable)
     {
