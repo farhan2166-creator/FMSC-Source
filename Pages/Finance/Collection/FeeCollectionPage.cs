@@ -1452,11 +1452,10 @@ public sealed partial class FeeCollectionPage : V2Page, IBusyPage, IUnsavedChang
         foreach (string name in new[] { "Amount", "Adjusted", "NetPaid", "ReceiptTotal" })
             recentPayments.Columns[name].DefaultCellStyle.Format = "#,0.##";
         recentPayments.Columns["ReceiptTotal"].DefaultCellStyle.NullValue = "—";
-        foreach (string name in new[] { "Amount", "Adjusted", "NetPaid", "ReceiptTotal" })
-        {
-            recentPayments.Columns[name].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            recentPayments.Columns[name].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
-        }
+        // Match the shared form-grid heading/value alignment in the modal
+        // history view: dates, receipt references, transaction types, methods
+        // and financial figures are centered; descriptions stay left aligned.
+        UiHelper.AlignDialogGrid(recentPayments);
         recentPayments.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
         recentPayments.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
         foreach (var sizing in new[] { ("PaymentDate",85f), ("ReceiptNumber",130f),

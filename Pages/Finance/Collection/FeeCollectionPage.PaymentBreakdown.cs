@@ -115,7 +115,9 @@ public sealed partial class FeeCollectionPage
         grid.Columns["Student"].MinimumWidth=AppScale.Scale(170);grid.Columns["Student"].FillWeight=44;
         foreach(DataGridViewColumn column in grid.Columns)column.SortMode=DataGridViewColumnSortMode.NotSortable;
         HumanUi.ApplyGridStyle(grid,AppTheme.Primary);
-        foreach(string name in new[]{"Original","Adjusted","Net"})grid.Columns[name].DefaultCellStyle.Alignment=DataGridViewContentAlignment.MiddleRight;
+        // The modal breakdown uses the same shared centered header/value
+        // alignment as the main fee grids. Student names remain left aligned.
+        UiHelper.AlignDialogGrid(grid);
         grid.ColumnHeadersHeight=AppScale.Scale(34);grid.RowTemplate.Height=AppScale.Scale(28);
         int selected=-1;
         foreach(var member in members)

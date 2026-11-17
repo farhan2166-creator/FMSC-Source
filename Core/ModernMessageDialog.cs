@@ -181,10 +181,7 @@ public static class ModernMessageDialog
                 if(family)
                     column.SortMode=DataGridViewColumnSortMode.NotSortable; // Keep the totals row last.
                 if (column.ValueType == typeof(decimal))
-                {
                     column.DefaultCellStyle.Format = "#,##0.##";
-                    column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
-                }
             }
             void StyleTotalsRow()
             {
@@ -198,9 +195,11 @@ public static class ModernMessageDialog
             grid.ColumnAdded += (_, e) => FormatColumn(e.Column);
             grid.DataBindingComplete += (_, _) => {
                 foreach (DataGridViewColumn column in grid.Columns) FormatColumn(column);
+                UiHelper.AlignDialogGrid(grid);
                 StyleTotalsRow();
             };
             grid.DataSource = records;
+            UiHelper.AlignDialogGrid(grid);
             if(family){grid.ShowCellToolTips=false;StyleTotalsRow();}
             grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCellsExceptHeaders;
             grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;

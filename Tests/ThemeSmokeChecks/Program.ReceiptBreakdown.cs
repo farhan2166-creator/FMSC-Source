@@ -62,6 +62,24 @@ internal static partial class Program
                 {
                     dialog.ClientSize=size;history.CurrentCell=history.Rows[family].Cells["ReceiptNumber"];Application.DoEvents();
                     var details=Field<TableLayoutPanel>("paymentHistoryDetails");var grid=details.Controls.OfType<DataGridView>().Single();
+                    foreach(string name in new[]{"PaymentDate","ReceiptNumber","TransactionType","ReceiptTotal","Amount","BalanceThen","PaymentMethod"})
+                    {
+                        var column=history.Columns[name];
+                        Check(column.DefaultCellStyle.Alignment==DataGridViewContentAlignment.MiddleCenter &&
+                              column.HeaderCell.InheritedStyle.Alignment==DataGridViewContentAlignment.MiddleCenter,
+                            "Recent Payments modal aligns "+name+" with its centered heading");
+                    }
+                    Check(history.Columns["ChargeType"].DefaultCellStyle.Alignment==DataGridViewContentAlignment.MiddleLeft,
+                        "Longer payment descriptions remain left aligned");
+                    foreach(string name in new[]{"Original","Adjusted","Net","Status"})
+                    {
+                        var column=grid.Columns[name];
+                        Check(column.DefaultCellStyle.Alignment==DataGridViewContentAlignment.MiddleCenter &&
+                              column.HeaderCell.InheritedStyle.Alignment==DataGridViewContentAlignment.MiddleCenter,
+                            "Receipt breakdown aligns "+name+" with its centered heading");
+                    }
+                    Check(grid.Columns["Student"].DefaultCellStyle.Alignment==DataGridViewContentAlignment.MiddleLeft,
+                        "The student name column remains left aligned in the receipt breakdown");
                     Check(grid.Rows.Count==3&&Convert.ToDecimal(grid.Rows[1].Cells["Original"].Value)==7600m&&Convert.ToDecimal(grid.Rows[1].Cells["Net"].Value)==0m,"A reversed child retains the original share beside the current zero");
                     Check(Convert.ToDecimal(grid.Rows[0].Cells["Net"].Value)==7500m&&Convert.ToDecimal(grid.Rows[2].Cells["Net"].Value)==6900m,"Unaffected siblings keep their own recorded payments");
                     Check(details.Text.Contains("22,000")&&details.Text.Contains("7,600")&&details.Text.Contains("14,400"),"The original receipt total and current family adjustments are distinct");

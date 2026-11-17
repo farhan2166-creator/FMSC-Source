@@ -106,8 +106,11 @@ internal static partial class Program
                     UiHelper.FitColumnsToWidth(grid);
                     Check(ReferenceEquals(grid.DataSource, rows) && (decimal)grid.Rows[0].Cells[2].Value == 1000.25m,
                         "Record presentation preserves exact source values");
-                    Check(grid.Columns[2].DefaultCellStyle.Alignment == DataGridViewContentAlignment.MiddleRight,
-                        "Amounts align to the right for comparison");
+                    Check(grid.Columns[2].DefaultCellStyle.Alignment == DataGridViewContentAlignment.MiddleCenter &&
+                          grid.Columns[2].HeaderCell.InheritedStyle.Alignment == DataGridViewContentAlignment.MiddleCenter &&
+                          grid.Columns["Admission No."].DefaultCellStyle.Alignment == DataGridViewContentAlignment.MiddleCenter &&
+                          grid.Columns["Student"].DefaultCellStyle.Alignment == DataGridViewContentAlignment.MiddleLeft,
+                        "Dialog tables center amounts and short identifiers while keeping student names left aligned");
                     Check(grid.Columns[2].DefaultCellStyle.Format == "#,##0.##",
                         "Presentation retains decimal precision without changing stored amounts");
                     dialog.Close();
