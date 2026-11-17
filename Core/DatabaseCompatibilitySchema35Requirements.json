@@ -69,6 +69,46 @@
       "schema": "msg",
       "name": "TR_AutomaticAuthorizationImmutable",
       "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "SchoolNotice",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "SchoolNoticeMember",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "ApproveSchoolNotice",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "RevokeSchoolNotice",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "ReadSchoolNotices",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "NoticeCandidateEligible",
+      "type": "IF"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_SchoolNoticeImmutable",
+      "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_SchoolNoticeMemberImmutable",
+      "type": "TR"
     }
   ],
   "columns": [
@@ -367,6 +407,210 @@
       "type": "bit",
       "maxLength": 1,
       "precision": 1,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "NoticeId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": true,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "EventCode",
+      "type": "varchar",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "Title",
+      "type": "nvarchar",
+      "maxLength": 240,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "NoticeText",
+      "type": "nvarchar",
+      "maxLength": 2000,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "LanguageCode",
+      "type": "varchar",
+      "maxLength": 2,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "SourceReference",
+      "type": "nvarchar",
+      "maxLength": 320,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "CampusId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "ClassId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "ExpiresUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "SourceHash",
+      "type": "binary",
+      "maxLength": 32,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "ApprovedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "ApprovedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "RevokedBy",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "RevokedUtc",
+      "type": "datetime2",
+      "maxLength": 7,
+      "precision": 23,
+      "scale": 3,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNotice",
+      "name": "RevocationReason",
+      "type": "nvarchar",
+      "maxLength": 400,
+      "precision": 0,
+      "scale": 0,
+      "isNullable": true,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNoticeMember",
+      "name": "NoticeId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isNullable": false,
+      "isIdentity": false,
+      "isComputed": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "SchoolNoticeMember",
+      "name": "AdmissionId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
       "scale": 0,
       "isNullable": false,
       "isIdentity": false,

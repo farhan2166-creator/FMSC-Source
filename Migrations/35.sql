@@ -26,6 +26,169 @@ ALTER TABLE msg.AutomationRule ADD AuthorizationId uniqueidentifier NULL
 ALTER TABLE msg.PlannedWork ADD EventDataHash binary(32) NULL,FamilyToken binary(32) NULL,RequestedReviewBy int NULL,RequestedReviewUtc datetime2(3) NULL;
 ALTER TABLE msg.PlannedWork ADD CONSTRAINT FK_MsgWorkAuthorization FOREIGN KEY(AuthorizationId) REFERENCES msg.AutomaticAuthorization(AuthorizationId);
 ALTER TABLE msg.AutomationCandidate ADD ReviewOnly bit NOT NULL CONSTRAINT DF_MsgCandidateReviewOnly DEFAULT(0);
+
+-- Explicitly approved school-issued notices are the only announcement and
+-- examination/result sources. Existing marks sheets are not results records.
+-- Record the eligible roster when approved; later admissions cannot silently
+-- join an old announcement.
+CREATE TABLE msg.SchoolNotice(
+ NoticeId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_MsgSchoolNotice PRIMARY KEY,
+ EventCode varchar(32) NOT NULL CONSTRAINT FK_MsgSchoolNoticeEvent REFERENCES msg.AutomationRule(EventCode),
+ Title nvarchar(120) NOT NULL,NoticeText nvarchar(1000) NOT NULL,
+ LanguageCode varchar(2) NOT NULL,SourceReference nvarchar(160) NULL,
+ CampusId int NOT NULL,ClassId int NOT NULL,ExpiresUtc datetime2(3) NOT NULL,
+ SourceHash binary(32) NOT NULL,ApprovedBy int NOT NULL,
+ ApprovedUtc datetime2(3) NOT NULL CONSTRAINT DF_MsgSchoolNoticeApproved DEFAULT SYSUTCDATETIME(),
+ RevokedBy int NULL,RevokedUtc datetime2(3) NULL,RevocationReason nvarchar(200) NULL,
+ CONSTRAINT CK_MsgSchoolNoticeKind CHECK(EventCode IN('Announcement','ExaminationResult')),
+ CONSTRAINT CK_MsgSchoolNoticeLanguage CHECK(LanguageCode IN('en','ur')),
+ CONSTRAINT CK_MsgSchoolNoticeScope CHECK(CampusId>=0 AND ClassId>=0 AND (ClassId=0 OR CampusId>0)),
+ CONSTRAINT CK_MsgSchoolNoticeText CHECK(LEN(LTRIM(RTRIM(Title)))>0 AND LEN(LTRIM(RTRIM(NoticeText)))>0),
+ CONSTRAINT CK_MsgSchoolNoticeReference CHECK(EventCode<>'ExaminationResult' OR LEN(LTRIM(RTRIM(ISNULL(SourceReference,N''))))>=5),
+ CONSTRAINT CK_MsgSchoolNoticeRevoked CHECK((RevokedUtc IS NULL AND RevokedBy IS NULL AND RevocationReason IS NULL)
+  OR (RevokedUtc IS NOT NULL AND RevokedBy IS NOT NULL AND LEN(LTRIM(RTRIM(RevocationReason)))>=8))
+);
+CREATE TABLE msg.SchoolNoticeMember(
+ NoticeId bigint NOT NULL CONSTRAINT FK_MsgNoticeMemberNotice REFERENCES msg.SchoolNotice(NoticeId),
+ AdmissionId int NOT NULL CONSTRAINT FK_MsgNoticeMemberStudent REFERENCES dbo.Students(AdmissionId),
+ CONSTRAINT PK_MsgSchoolNoticeMember PRIMARY KEY(NoticeId,AdmissionId)
+);
+CREATE INDEX IX_MsgSchoolNoticeActive ON msg.SchoolNotice(EventCode,ApprovedUtc,ExpiresUtc);
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ApproveSchoolNotice
+ @UserId int,@EventCode varchar(32),@Title nvarchar(120),@NoticeText nvarchar(1000),
+ @LanguageCode varchar(2),@SourceReference nvarchar(160)=NULL,@ExpiresUtc datetime2(3),
+ @ExpectedCampusId int,@ExpectedClassId int
+AS BEGIN
+ SET NOCOUNT ON;SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ EXEC dbo.RequirePermission @UserId,N''Students.View'';
+ IF NOT EXISTS(SELECT 1 FROM dbo.Roles O WHERE O.RoleName=N''Administrator'' AND
+ (EXISTS(SELECT 1 FROM dbo.Users U WHERE U.UserId=@UserId AND U.RoleId=O.RoleId)
+ OR EXISTS(SELECT 1 FROM dbo.UserRoles UR WHERE UR.UserId=@UserId AND UR.RoleId=O.RoleId)))
+  THROW 51450,''Only an administrator may approve an official school notice.'',1;
+ IF @EventCode NOT IN(''Announcement'',''ExaminationResult'') OR @LanguageCode NOT IN(''en'',''ur'')
+  OR LEN(LTRIM(RTRIM(ISNULL(@Title,N''''))))=0 OR LEN(LTRIM(RTRIM(ISNULL(@NoticeText,N''''))))=0
+  OR LEN(@Title)>120 OR LEN(@NoticeText)>1000
+  OR CHARINDEX(N''['',ISNULL(@Title,N''''))>0 OR CHARINDEX(N'']'',ISNULL(@Title,N''''))>0
+  OR CHARINDEX(N''['',ISNULL(@NoticeText,N''''))>0 OR CHARINDEX(N'']'',ISNULL(@NoticeText,N''''))>0
+  OR (@EventCode=''ExaminationResult'' AND LEN(LTRIM(RTRIM(ISNULL(@SourceReference,N''''))))<5)
+  OR @ExpiresUtc IS NULL OR @ExpiresUtc<=DATEADD(minute,2,SYSUTCDATETIME()) OR @ExpiresUtc>DATEADD(day,30,SYSUTCDATETIME())
+  THROW 51450,''Provide the notice text, approved language, valid expiry and official examination source reference.'',1;
+ BEGIN TRANSACTION;
+ DECLARE @Campus int,@Class int,@Mode varchar(10);
+ SELECT @Campus=CampusId,@Class=ClassId,@Mode=Mode
+ FROM msg.AutomationRule WITH(UPDLOCK,HOLDLOCK) WHERE EventCode=@EventCode;
+ IF @Campus IS NULL OR @Mode=''Off'' OR @ExpectedCampusId IS NULL OR @ExpectedClassId IS NULL
+  OR @Campus<>@ExpectedCampusId OR @Class<>@ExpectedClassId
+  THROW 51450,''Enable notice review and refresh the approved audience before publishing.'',1;
+ DECLARE @Hash binary(32)=CONVERT(binary(32),HASHBYTES(''SHA2_256'',CONCAT(@EventCode,N''|'',@Title,N''|'',@NoticeText,
+  N''|'',@LanguageCode,N''|'',ISNULL(@SourceReference,N''''),N''|'',@Campus,N''|'',@Class,N''|'',CONVERT(varchar(33),@ExpiresUtc,126))));
+ INSERT msg.SchoolNotice(EventCode,Title,NoticeText,LanguageCode,SourceReference,CampusId,ClassId,ExpiresUtc,SourceHash,ApprovedBy)
+ VALUES(@EventCode,LTRIM(RTRIM(@Title)),LTRIM(RTRIM(@NoticeText)),@LanguageCode,NULLIF(LTRIM(RTRIM(@SourceReference)),N''''),
+  @Campus,@Class,@ExpiresUtc,@Hash,@UserId);
+ DECLARE @NoticeId bigint=CONVERT(bigint,SCOPE_IDENTITY());
+ INSERT msg.SchoolNoticeMember(NoticeId,AdmissionId)
+ SELECT @NoticeId,S.AdmissionId
+ FROM dbo.Students S WITH(HOLDLOCK)
+ CROSS APPLY(SELECT TOP(1) E.Status,CCS.CampusId,CCS.ClassId FROM dbo.Enrollments E WITH(HOLDLOCK)
+  JOIN dbo.CampusClassSections CCS WITH(HOLDLOCK) ON CCS.ClassSectionId=E.ClassSectionId
+  WHERE E.AdmissionId=S.AdmissionId ORDER BY CASE WHEN E.Status=N''Active'' THEN 0 ELSE 1 END,E.EnrollmentId DESC) Placement
+ OUTER APPLY msg.RecordGuardian(S.AdmissionId) Guardian
+ WHERE S.Status=N''Active'' AND Placement.Status=N''Active'' AND Guardian.HasConsent=1 AND Guardian.PhoneE164 IS NOT NULL
+  AND (@Campus=0 OR Placement.CampusId=@Campus) AND (@Class=0 OR Placement.ClassId=@Class);
+ IF @@ROWCOUNT=0 THROW 51450,''No consenting active students are in the approved notice audience.'',1;
+ COMMIT;
+ SELECT @NoticeId NoticeId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.RevokeSchoolNotice @UserId int,@NoticeId bigint,@Reason nvarchar(200)
+AS BEGIN
+ SET NOCOUNT ON;SET XACT_ABORT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+ IF NOT EXISTS(SELECT 1 FROM dbo.Roles O WHERE O.RoleName=N''Administrator'' AND
+  (EXISTS(SELECT 1 FROM dbo.Users U WHERE U.UserId=@UserId AND U.RoleId=O.RoleId)
+   OR EXISTS(SELECT 1 FROM dbo.UserRoles UR WHERE UR.UserId=@UserId AND UR.RoleId=O.RoleId)))
+  THROW 51451,''Only an administrator can revoke a school notice.'',1;
+ IF @NoticeId IS NULL OR @NoticeId<=0 OR LEN(LTRIM(RTRIM(ISNULL(@Reason,N'''')))) NOT BETWEEN 8 AND 200
+  THROW 51451,''Explain why the approved notice is being revoked.'',1;
+ BEGIN TRANSACTION;
+ UPDATE msg.SchoolNotice SET RevokedBy=@UserId,RevokedUtc=SYSUTCDATETIME(),RevocationReason=LTRIM(RTRIM(@Reason))
+ WHERE NoticeId=@NoticeId AND RevokedUtc IS NULL;
+ IF @@ROWCOUNT<>1 THROW 51451,''This notice is unavailable or already revoked.'',1;
+ UPDATE W SET State=''Held'',ReasonCode=''SourceChanged'',UpdatedUtc=SYSUTCDATETIME()
+ FROM msg.PlannedWork W JOIN msg.AutomationCandidate C ON C.CandidateId=W.CandidateId
+ WHERE C.SourceRecordId=@NoticeId AND C.EventCode IN(''Announcement'',''ExaminationResult'')
+  AND W.State IN(''Pending'',''Preparing'');
+ UPDATE BS SET HoldForReview=1,UpdatedBy=@UserId,UpdatedUtc=SYSUTCDATETIME()
+ FROM msg.BatchSchedule BS JOIN msg.PlannedWork W ON W.BatchId=BS.BatchId
+ JOIN msg.AutomationCandidate C ON C.CandidateId=W.CandidateId
+ WHERE C.SourceRecordId=@NoticeId AND C.EventCode IN(''Announcement'',''ExaminationResult'');
+ COMMIT;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.ReadSchoolNotices @UserId int
+AS BEGIN
+ SET NOCOUNT ON;
+ EXEC dbo.RequirePermission @UserId,N''Communication.Configure'';
+ EXEC dbo.RequirePermission @UserId,N''Students.View'';
+ SELECT TOP(200) N.NoticeId,N.EventCode,N.Title,N.NoticeText,N.LanguageCode,N.SourceReference,
+ N.CampusId,N.ClassId,N.ExpiresUtc,N.ApprovedBy,N.ApprovedUtc,N.RevokedBy,N.RevokedUtc,N.RevocationReason,
+ (SELECT COUNT_BIG(*) FROM msg.SchoolNoticeMember M WHERE M.NoticeId=N.NoticeId) ApprovedAudience
+ FROM msg.SchoolNotice N ORDER BY N.ApprovedUtc DESC,N.NoticeId DESC;
+END');
+
+EXEC(N'CREATE OR ALTER FUNCTION msg.NoticeCandidateEligible(@CandidateId bigint)
+RETURNS TABLE AS RETURN
+(
+ SELECT C.CandidateId FROM msg.AutomationCandidate C WITH(HOLDLOCK)
+ JOIN msg.SchoolNotice N WITH(HOLDLOCK) ON N.NoticeId=C.SourceRecordId AND N.EventCode=C.EventCode
+ JOIN msg.SchoolNoticeMember Member WITH(HOLDLOCK) ON Member.NoticeId=N.NoticeId AND Member.AdmissionId=C.AdmissionId
+ JOIN msg.AutomationRule R WITH(HOLDLOCK) ON R.EventCode=N.EventCode AND (R.Mode IN(''Review'',''Automatic'') OR C.ReviewOnly=1)
+ JOIN dbo.Students S WITH(HOLDLOCK) ON S.AdmissionId=C.AdmissionId AND S.Status=N''Active''
+ CROSS APPLY(SELECT TOP(1) E.Status,CCS.CampusId,CCS.ClassId FROM dbo.Enrollments E WITH(HOLDLOCK)
+  JOIN dbo.CampusClassSections CCS WITH(HOLDLOCK) ON CCS.ClassSectionId=E.ClassSectionId
+  WHERE E.AdmissionId=C.AdmissionId ORDER BY CASE WHEN E.Status=N''Active'' THEN 0 ELSE 1 END,E.EnrollmentId DESC) Placement
+ CROSS APPLY msg.AutomationRecordInScope(C.AdmissionId,C.EventCode) RuleScope
+ OUTER APPLY msg.RecordGuardian(C.AdmissionId) Guardian
+ LEFT JOIN dbo.FamilyMembers FM WITH(HOLDLOCK) ON FM.AdmissionId=C.AdmissionId
+ WHERE C.CandidateId=@CandidateId AND C.State IN(''Pending'',''Prepared'')
+  AND N.RevokedUtc IS NULL AND N.ExpiresUtc>SYSUTCDATETIME()
+  AND (R.ActivationBaselineUtc IS NULL OR N.ApprovedUtc>=R.ActivationBaselineUtc)
+  AND Placement.Status=N''Active'' AND (N.CampusId=0 OR Placement.CampusId=N.CampusId)
+  AND (N.ClassId=0 OR Placement.ClassId=N.ClassId)
+  AND Guardian.HasConsent=1 AND Guardian.PhoneE164 IS NOT NULL
+  AND (R.Mode<>''Automatic'' OR C.ReviewOnly=1 OR EXISTS(SELECT 1 FROM msg.AutomaticAuthorization A
+    WHERE A.AuthorizationId=R.AuthorizationId AND A.LanguageCode=N.LanguageCode))
+  AND NOT EXISTS(SELECT 1 FROM msg.AutomationException X WITH(HOLDLOCK)
+    WHERE X.EventCode=C.EventCode AND (X.AdmissionId=C.AdmissionId OR X.FamilyId=FM.FamilyId)
+    AND X.RevokedUtc IS NULL AND (X.UntilUtc IS NULL OR X.UntilUtc>SYSUTCDATETIME()))
+);');
+
+EXEC(N'CREATE OR ALTER TRIGGER msg.TR_SchoolNoticeImmutable ON msg.SchoolNotice AFTER UPDATE,DELETE AS
+BEGIN
+ SET NOCOUNT ON;
+ IF EXISTS(SELECT 1 FROM deleted D LEFT JOIN inserted I ON I.NoticeId=D.NoticeId WHERE I.NoticeId IS NULL)
+  THROW 51452,''Approved school notices cannot be deleted.'',1;
+ IF EXISTS(SELECT 1 FROM deleted D JOIN inserted I ON I.NoticeId=D.NoticeId
+  WHERE I.EventCode<>D.EventCode OR I.Title<>D.Title OR I.NoticeText<>D.NoticeText
+   OR I.LanguageCode<>D.LanguageCode OR ISNULL(I.SourceReference,N'''')<>ISNULL(D.SourceReference,N'''')
+   OR I.CampusId<>D.CampusId OR I.ClassId<>D.ClassId OR I.ExpiresUtc<>D.ExpiresUtc
+   OR I.SourceHash<>D.SourceHash OR I.ApprovedBy<>D.ApprovedBy OR I.ApprovedUtc<>D.ApprovedUtc
+   OR D.RevokedUtc IS NOT NULL
+   OR (I.RevokedUtc IS NULL AND (I.RevokedBy IS NOT NULL OR I.RevocationReason IS NOT NULL))
+   OR (I.RevokedUtc IS NOT NULL AND (I.RevokedBy IS NULL OR LEN(LTRIM(RTRIM(I.RevocationReason)))<8)))
+  THROW 51452,''The approved source and revocation record are immutable.'',1;
+END');
+
+EXEC(N'CREATE OR ALTER TRIGGER msg.TR_SchoolNoticeMemberImmutable ON msg.SchoolNoticeMember AFTER UPDATE,DELETE AS
+BEGIN SET NOCOUNT ON;
+ IF EXISTS(SELECT 1 FROM deleted)
+  THROW 51452,''The approved notice roster is immutable.'',1;
+END');
+
 EXEC(N'CREATE OR ALTER FUNCTION msg.HasSchoolPermission(@UserId int,@Permission nvarchar(100))
 RETURNS TABLE AS RETURN
 (
