@@ -879,7 +879,7 @@ AS BEGIN
   ELSE BEGIN
    UPDATE W SET EventDataHash=COALESCE(P.SourceHash,N.SourceHash),FamilyToken=msg.FamilyBoundary(C.AdmissionId)
    FROM msg.PlannedWork W JOIN msg.AutomationCandidate C ON C.CandidateId=W.CandidateId
-   OUTER APPLY msg.PaymentEventSource(C.SourceRecordId) P
+   OUTER APPLY (SELECT * FROM msg.PaymentEventSource(C.SourceRecordId) WHERE C.EventCode=''PaymentReceived'') P
    LEFT JOIN msg.SchoolNotice N ON N.NoticeId=C.SourceRecordId AND N.EventCode=C.EventCode WHERE W.WorkId=@Work;
    SELECT W.WorkId,W.ClaimNonce,W.DueUtc,W.ExpiresUtc,W.SourceKind,W.RuleId,
     CASE WHEN C.EventCode IN(''OutstandingFees'',''UpcomingDue'',''OverdueFollowUp'') THEN ''FeeFamily''
@@ -890,7 +890,7 @@ AS BEGIN
     N.Title NoticeTitle,N.NoticeText NoticeText
    FROM msg.PlannedWork W JOIN msg.AutomationCandidate C ON C.CandidateId=W.CandidateId
    JOIN msg.AutomaticAuthorization A ON A.AuthorizationId=W.AuthorizationId
-   OUTER APPLY msg.PaymentEventSource(C.SourceRecordId) P
+   OUTER APPLY (SELECT * FROM msg.PaymentEventSource(C.SourceRecordId) WHERE C.EventCode=''PaymentReceived'') P
    LEFT JOIN msg.SchoolNotice N ON N.NoticeId=C.SourceRecordId AND N.EventCode=C.EventCode WHERE W.WorkId=@Work;
   END;
  END;
@@ -1307,6 +1307,128 @@ BEGIN
            @Body Body,CONVERT(varchar(32),NULL) ExclusionCode;
     COMMIT TRANSACTION;
 END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE msg.OpenManualHandoff @UserId int,@RecipientId bigint
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    EXEC dbo.RequirePermission @UserId,N''Communication.Send'';
+    IF @RecipientId IS NULL OR @RecipientId<=0 THROW 51114,''Invalid manual recipient.'',1;
+    BEGIN TRANSACTION;
+    DECLARE @BatchId uniqueidentifier,@State varchar(16),@Kind varchar(8),
+        @AdmissionId int,@StaffId int,@Snapshot varchar(16),@Live varchar(16),
+        @Audience varchar(20),@CampusId int,@ClassId int,@StudentId int,@TargetStaff int,
+        @Body nvarchar(1600),@Excluded varchar(32),@OpenCount int;
+    SELECT @BatchId=R.BatchId,@State=H.State,@Kind=R.RecipientKind,
+        @AdmissionId=R.AdmissionId,@StaffId=R.StaffId,@OpenCount=H.OpenCount,
+        @Snapshot=R.PhoneE164,@Body=B.Body,@Audience=B.Audience,
+        @CampusId=B.CampusId,@ClassId=B.ClassId,@StudentId=CASE WHEN B.Audience=''OutstandingFees'' AND B.SingleStudentScope=0 THEN 0 ELSE B.StudentId END,@TargetStaff=B.StaffId
+    FROM msg.ManualHandoff H WITH(UPDLOCK,HOLDLOCK)
+    JOIN msg.Recipient R WITH(UPDLOCK,HOLDLOCK) ON R.RecipientId=H.RecipientId
+    JOIN msg.ManualBatch M ON M.BatchId=R.BatchId
+    JOIN msg.Batch B ON B.BatchId=R.BatchId
+    WHERE H.RecipientId=@RecipientId AND B.Channel=''WhatsApp''
+      AND R.State=''Pending'' AND B.State IN (''Confirmed'',''Sending'');
+    IF @BatchId IS NULL OR @State NOT IN (''Pending'',''Opened'')
+        THROW 51114,''This handoff was already processed, cancelled or excluded.'',1;
+    IF NOT EXISTS(SELECT 1 FROM msg.ManualBatch WHERE BatchId=@BatchId AND CreatedBy=@UserId)
+        EXEC dbo.RequirePermission @UserId,N''Communication.View'';
+    IF msg.BatchRecoveryBlocked(@BatchId)=1
+        THROW 51341,''This message predates database recovery. Check prior WhatsApp conversations and review a new request before opening another chat.'',1;
+    -- Manual handoff remains operator-controlled while API automation is paused.
+    IF NOT EXISTS(SELECT 1 FROM msg.ChannelSettings WITH(HOLDLOCK)
+       WHERE Channel=''WhatsApp'' AND ProviderCode=''WhatsAppBusinessManual'' AND Enabled=1)
+        THROW 51114,''Free WhatsApp handoff is paused or no longer configured.'',1;
+    IF @Kind=''Staff'' EXEC dbo.RequirePermission @UserId,N''Staff.View'';
+    ELSE EXEC dbo.RequirePermission @UserId,N''Students.View'';
+    IF @Audience IN (''OutstandingFees'',''FeeStudent'',''FeeFamily'') EXEC dbo.RequirePermission @UserId,N''Fees.View'';
+
+    -- Source and scope checks mirror msg.ClaimRecipient. No snapshot is
+    -- usable when admission consent, placement, phone or opt-out changes.
+    IF @Kind=''Staff''
+    BEGIN
+        IF @Audience=''Staff'' AND @TargetStaff=@StaffId
+            SELECT @Live=msg.NormalizeMobile(T.ContactNumber)
+            FROM dbo.Staff T WITH(HOLDLOCK)
+            WHERE T.StaffId=@StaffId AND T.Status=N''Active'';
+    END
+    ELSE IF @Audience IN (''Student'',''Family'',''FeeStudent'',''FeeFamily'')
+    BEGIN
+        SELECT @Live=G.PhoneE164 FROM msg.RecordGuardian(@StudentId) G
+        WHERE G.AdmissionId=@AdmissionId AND G.HasConsent=1;
+    END
+    ELSE
+    BEGIN
+        SELECT @Live=Guardian.PhoneE164
+        FROM dbo.Students S WITH(HOLDLOCK)
+        OUTER APPLY msg.RecordGuardian(S.AdmissionId) Guardian
+        OUTER APPLY (
+          SELECT TOP(1) E.ClassSectionId,E.Status
+          FROM dbo.Enrollments E WITH(HOLDLOCK) WHERE E.AdmissionId=S.AdmissionId
+          ORDER BY CASE WHEN E.Status=N''Active'' THEN 0 ELSE 1 END,E.EnrollmentId DESC
+        ) E
+        LEFT JOIN dbo.CampusClassSections CCS WITH(HOLDLOCK)
+          ON CCS.ClassSectionId=E.ClassSectionId
+        OUTER APPLY (
+          SELECT SUM(dbo.GetFeeChargeBalance(BC.BillingChargeId)) Outstanding
+          FROM dbo.BillingCharges BC WITH(HOLDLOCK)
+          WHERE @Audience=''OutstandingFees'' AND BC.AdmissionId=S.AdmissionId
+            AND BC.Status<>N''Cancelled''
+        ) F
+        WHERE S.AdmissionId=@AdmissionId AND S.Status=N''Active''
+          AND Guardian.HasConsent=1 AND
+          (@Audience=''School''
+            OR (@Audience=''Campus'' AND E.Status=N''Active'' AND CCS.CampusId=@CampusId)
+            OR (@Audience=''Class'' AND E.Status=N''Active'' AND CCS.CampusId=@CampusId
+                AND CCS.ClassId=@ClassId)
+            OR (@Audience=''OutstandingFees'' AND E.Status=N''Active''
+                AND (@CampusId=0 OR CCS.CampusId=@CampusId)
+                AND (@ClassId=0 OR CCS.ClassId=@ClassId)
+                AND (@StudentId=0 OR S.AdmissionId=@StudentId) AND F.Outstanding>0));
+    END;
+    SET @Excluded=CASE
+      -- School-issued notice approvals remain source-bound after human review.
+      -- A revoked, expired, withdrawn or no-longer-consenting recipient cannot
+      -- open an old approved WhatsApp message by resuming its saved batch.
+      WHEN EXISTS(SELECT 1 FROM msg.AutomationCandidate C WITH(HOLDLOCK)
+        WHERE C.BatchId=@BatchId AND C.EventCode IN(''Announcement'',''ExaminationResult'')
+        AND NOT EXISTS(SELECT 1 FROM msg.NoticeCandidateEligible(C.CandidateId)))
+        THEN ''SourceChanged''
+      WHEN NOT EXISTS(SELECT 1 FROM msg.PreparedEventEligible(@BatchId)) THEN ''SourceChanged''
+      WHEN @Live IS NULL THEN ''NoLongerEligible''
+      WHEN @Live<>@Snapshot THEN ''DestinationChanged''
+      WHEN EXISTS(SELECT 1 FROM msg.Suppression O WITH(HOLDLOCK)
+                  WHERE O.Channel=''WhatsApp'' AND O.PhoneE164=@Live)
+           THEN ''ChannelOptOut''
+      WHEN @Audience=''FeeFamily'' AND
+        (EXISTS(SELECT AdmissionId FROM msg.ActiveFamilyFeeMembers(@StudentId)
+           EXCEPT SELECT AdmissionId FROM msg.ReviewedFeeStudent WHERE RecipientId=@RecipientId)
+         OR EXISTS(SELECT AdmissionId FROM msg.ReviewedFeeStudent WHERE RecipientId=@RecipientId
+           EXCEPT SELECT AdmissionId FROM msg.ActiveFamilyFeeMembers(@StudentId))) THEN ''FamilyChanged''
+      ELSE NULL END;
+    IF @Excluded IS NOT NULL
+    BEGIN
+        UPDATE msg.ManualHandoff SET State=''Excluded'',UpdatedUtc=SYSUTCDATETIME(),
+            ChangedBy=@UserId WHERE RecipientId=@RecipientId;
+        UPDATE msg.Recipient SET State=''Excluded'',ExclusionCode=@Excluded,
+            UpdatedUtc=SYSUTCDATETIME() WHERE RecipientId=@RecipientId;
+        -- Auto-excluding the final target completes the manual session too.
+        -- This records no send or delivery evidence.
+        IF NOT EXISTS(SELECT 1 FROM msg.ManualHandoff H
+            JOIN msg.Recipient R ON R.RecipientId=H.RecipientId
+            WHERE R.BatchId=@BatchId AND H.State IN (''Pending'',''Opened''))
+            UPDATE msg.Batch SET State=''Completed'' WHERE BatchId=@BatchId AND State=''Confirmed'';
+        SELECT CONVERT(bit,0) Opened,CONVERT(varchar(16),NULL) PhoneE164,
+          CONVERT(nvarchar(1600),NULL) Body,@Excluded ExclusionCode,@Audience Audience;
+        COMMIT TRANSACTION; RETURN;
+    END;
+    UPDATE msg.ManualHandoff SET State=''Opened'',ShellHandoffUtc=NULL,OpenCount=OpenCount+1,
+        LastOpenedUtc=SYSUTCDATETIME(),ChangedBy=@UserId,UpdatedUtc=SYSUTCDATETIME()
+    WHERE RecipientId=@RecipientId;
+    SELECT CONVERT(bit,1) Opened,@Live PhoneE164,@Body Body,
+        CONVERT(varchar(32),NULL) ExclusionCode,@Audience Audience,@OpenCount+1 OpenCount;
+    COMMIT TRANSACTION;
+END;');
 
 EXEC(N'CREATE OR ALTER TRIGGER msg.TR_AutomaticAuthorizationImmutable ON msg.AutomaticAuthorization AFTER UPDATE,DELETE
 AS BEGIN SET NOCOUNT ON;
