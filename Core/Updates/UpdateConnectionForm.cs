@@ -43,7 +43,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
     // Startup incompatibility recovery is automatic only up to release discovery.
     // Installation and download remain explicit user actions.
     private bool _autoCheckPending;
-    private bool _startupSavedKeyCheckPending;
+    private bool _savedKeyVerificationPending;
     private bool _hasKey;
     private bool _hasAuthorization;
     private bool _verifyingAuthorization;
@@ -57,6 +57,16 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().First().InformationalVersion.Split('+')[0];
     private readonly CancellationTokenSource _lifetime = new();
 
+    // The dashboard command is a request to check for updates, not to begin
+    // the computer enrollment workflow. Saved access is verified live first;
+    // unapproved or missing keys still expose the existing setup controls.
+    internal static UpdateConnectionForm ForMenuUpdateCheck(
+        Func<(bool Enrolled, string PublicKey)>? authorization = null,
+        Func<bool>? networkAvailable = null,
+        Func<CancellationToken, Task>? verifyAuthorization = null) =>
+        new(authorization: authorization, networkAvailable: networkAvailable,
+            verifyAuthorization: verifyAuthorization, autoCheckOnVerifiedAccess: true);
+
     internal UpdateConnectionForm(Func<(bool Enrolled, string PublicKey)>? authorization = null, int? installedSchema = null,
         Func<bool>? networkAvailable = null, Func<CancellationToken, Task>? verifyAuthorization = null,
         Func<string>? generateEnrollment = null, bool autoCheckOnVerifiedAccess = false)
@@ -67,7 +77,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             UpdateDeviceKey.IsEnrolled ? UpdateDeviceKey.GetPublicKey() : ""));
         _autoVerifyOnOpen = authorization is null || autoCheckOnVerifiedAccess;
         _autoCheckPending = autoCheckOnVerifiedAccess;
-        _startupSavedKeyCheckPending = autoCheckOnVerifiedAccess;
+        _savedKeyVerificationPending = autoCheckOnVerifiedAccess;
         _verifyAuthorization = verifyAuthorization ?? VerifyLiveAuthorizationAsync;
         _generateEnrollment = generateEnrollment ?? (() => UpdateDeviceKey.GenerateEnrollment());
         Text = "FMSC — Check for Updates";
@@ -298,9 +308,9 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _verify.Enabled = _hasKey && !_hasAuthorization && !_verifyingAuthorization;
             _check.Enabled = _hasAuthorization;
             _publicKey.Text = state.PublicKey;
-            // A saved key on the blocked-startup path is reverified silently.
-            // Never flash its enrollment controls before that check completes.
-            bool checkingSavedKey = _startupSavedKeyCheckPending && _hasKey && !_hasAuthorization;
+            // A saved key is reverified silently, whether the operator opened
+            // updates from the menu or startup requires compatibility recovery.
+            bool checkingSavedKey = _savedKeyVerificationPending && _hasKey && !_hasAuthorization;
             _authorizationPanel.Visible = !_hasAuthorization && !checkingSavedKey;
             _check.Visible = !checkingSavedKey;
             SetContentSize(_authorizationPanel.Visible);
@@ -323,8 +333,8 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
                         "If none is available, contact your administrator. Do not downgrade or replace your school data." :
                         "Ask the administrator to authorize this computer before checking for a compatible application. Do not downgrade the database.");
             if (checkingSavedKey)
-                _status.Text = "Verifying this computer's saved update authorization before checking for a compatible release. " +
-                    "Your school database has not been changed.";
+                _status.Text = "Verifying this computer's saved update access. " +
+                    "The published release check will start automatically when access is confirmed.";
         }
         catch (Exception error) when (error is CryptographicException or IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -334,7 +344,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _verify.Enabled = false;
             _hasAuthorization = false;
             _accessButton.Text = "Authorization Unavailable";
-            _startupSavedKeyCheckPending = false;
+            _savedKeyVerificationPending = false;
             _authorizationPanel.Visible = true;
             _check.Visible = true;
             SetContentSize(true);
@@ -348,7 +358,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         try
         {
             // Newly generated keys must stay visible until the owner approves them.
-            _startupSavedKeyCheckPending = false;
+            _savedKeyVerificationPending = false;
             _ = _generateEnrollment();
             RefreshAuthorization();
         }
@@ -379,7 +389,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             await _verifyAuthorization(_lifetime.Token);
             if (IsDisposed || Disposing) return;
             _hasAuthorization = true;
-            _startupSavedKeyCheckPending = false;
+            _savedKeyVerificationPending = false;
             RefreshAuthorization();
             if (_autoCheckPending)
             {
@@ -401,10 +411,10 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _verifyingAuthorization = false;
             if (!IsDisposed && !Disposing)
             {
-                if (!_hasAuthorization && _startupSavedKeyCheckPending)
+                if (!_hasAuthorization && _savedKeyVerificationPending)
                 {
                     // A failed/offline recheck must expose the key and retry action.
-                    _startupSavedKeyCheckPending = false;
+                    _savedKeyVerificationPending = false;
                     _authorizationPanel.Visible = true;
                     _check.Visible = true;
                     SetContentSize(true);
