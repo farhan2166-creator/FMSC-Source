@@ -45,7 +45,7 @@ internal static class FamilyAdvanceReport
                 E("Style",E("VerticalAlign","Top"),E("PaddingLeft","4pt"),E("PaddingRight","4pt"),E("PaddingTop","1pt"),E("PaddingBottom","1pt")));
         XElement Cell(XElement box)=>E("TablixCell",E("CellContents",box));
         var heading=new[]{"Father / Parent","Children / Class","Advance","Family Total"}.Select((caption,i)=>{
-            var box=Box("AdvanceHeading"+i,caption,true,i>=2?"Right":"Left","8pt");
+            var box=Box("AdvanceHeading"+i,caption,true,"Center","8pt");
             box.Element(ns+"Style")!.Add(E("BottomBorder",E("Style","Solid"),E("Width","0.5pt"),E("Color","#000000")));
             return Cell(box);
         });
@@ -55,10 +55,10 @@ internal static class FamilyAdvanceReport
         var groupCells=new[]{Cell(Box("AdvanceParent","=Fields!C0.Value",true)),Cell(Box("AdvanceGroupBlank1","")),
             Cell(Box("AdvanceGroupBlank2","")),Cell(Box("AdvanceGroupBlank3",""))};
         var familyLabel=Box("AdvanceFamilyLabel","Family total",true);
-        var familyValue=Box("AdvanceFamilyTotal","=First(Fields!C3.Value, \"AdvanceFamily\")",true,"Right");
+        var familyValue=Box("AdvanceFamilyTotal","=First(Fields!C3.Value, \"AdvanceFamily\")",true,"Center");
         foreach(var box in new[]{familyLabel,familyValue})box.Element(ns+"Style")!.Add(
             E("BottomBorder",E("Style","Solid"),E("Width","0.5pt"),E("Color","#000000")));
-        var childAmount=Box("AdvanceChildAmount","=Fields!C2.Value",false,"Right");
+        var childAmount=Box("AdvanceChildAmount","=Fields!C2.Value",false,"Center");
         childBox.Add(E("Top","0in"),E("Left","1.8in"),E("Height","0.27in"),E("Width","3.3in"));
         childAmount.Add(E("Top","0in"),E("Left","5.1in"),E("Height","0.27in"),E("Width","0.85in"));
         var childBlock=E("Rectangle",new XAttribute("Name","AdvanceChildBlock"),E("ReportItems",childBox,childAmount),
@@ -66,7 +66,7 @@ internal static class FamilyAdvanceReport
             E("Style",E("BottomBorder",E("Style","Solid"),E("Width","0.25pt"),E("Color","#000000"))));
         var detailCells=new[]{E("TablixCell",E("CellContents",childBlock,E("ColSpan",4))),E("TablixCell"),E("TablixCell"),E("TablixCell")};
         var totalLabel=Box("AdvanceGrandLabel","Grand Total",true);
-        var totalValue=Box("AdvanceGrandValue","=\"Rs. \" & Format(Sum(Fields!AdvanceAmount.Value), \""+moneyFormat+"\")",true,"Right");
+        var totalValue=Box("AdvanceGrandValue","=\"Rs. \" & Format(Sum(Fields!AdvanceAmount.Value), \""+moneyFormat+"\")",true,"Center");
         foreach(var box in new[]{totalLabel,totalValue})
         {
             var style=box.Element(ns+"Style")!;style.Add(E("TopBorder",E("Style","Solid"),E("Width","0.8pt"),E("Color","#000000")));
