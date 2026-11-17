@@ -35,7 +35,7 @@ internal static class CollectionReceiptRdlc
                     : $"=\"Subtotal — \" & First(Fields!GroupLabel.Value, \"{group}\")")
                     : numeric[index] ? $"=Format(Sum(Fields!N{index}.Value{(grand ? "" : ", \"" + group + "\"")}), \"#,##0.##\")" : "";
                 var contents=E("CellContents",Text($"ReceiptTotal{band}_{index}_{grand}", value, true,
-                    numeric[index] ? "Right" : "Left"));
+                    numeric[index] ? "Center" : "Left"));
                 if(position==0&&labelSpan>1)contents.Add(E("ColSpan",labelSpan));
                 return E("TablixCell",contents);
             });
