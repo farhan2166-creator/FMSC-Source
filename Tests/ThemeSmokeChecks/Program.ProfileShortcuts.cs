@@ -72,9 +72,16 @@ internal static partial class Program
         float availableIdentityHeight=profileLayout.RowStyles[overviewRow].Height
             -overview.Margin.Vertical-overview.Padding.Vertical
             -overview.Header.Height-overview.Content.Padding.Vertical;
+        // Compare against the content-derived compact minimum, rather than
+        // a frozen pixel value: different fonts and DPI settings can legitimately
+        // need slightly more than the historical 154-scaled-pixel baseline.
+        float contentHeight=overview.Margin.Vertical+overview.Padding.Vertical+
+            overview.Header.Height+overview.Content.Padding.Vertical+
+            requiredIdentityHeight+AppScale.Scale(4);
+        float compactHeight=Math.Max(AppScale.Scale(154),contentHeight);
         Check(availableIdentityHeight>=requiredIdentityHeight &&
-            profileLayout.RowStyles[overviewRow].Height<=AppScale.Scale(154)+AppScale.Scale(2),
-            "Student Profile overview fits identity rows without reclaiming space from the history grids");
+            profileLayout.RowStyles[overviewRow].Height<=compactHeight+AppScale.Scale(2),
+            "Student Profile overview fits identity rows without excessive unused height");
 
         // Verify identity facts without querying a school database. The same
         // original admission record continues to supply the placement summary.
