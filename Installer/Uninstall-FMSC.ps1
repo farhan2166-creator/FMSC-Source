@@ -33,14 +33,15 @@ function Test-FmscNoLinks {
         }
     }
 }
-# Retain cloud recovery credentials and delivery evidence with encrypted backups.
+# Retain cloud recovery credentials and communication submission evidence.
 # OAuth tokens and general application settings are deliberately excluded.
 function Test-FmscCloudRecoveryArtifact {
     param([string]$RootPath,[string]$FilePath)
     if (-not $RootPath.TrimEnd('\').EndsWith('\AppData\Local\FMSC',
         [StringComparison]::OrdinalIgnoreCase)) { return $false }
     $relative = $FilePath.Substring($RootPath.TrimEnd('\').Length).TrimStart('\')
-    return $relative -match '^CloudBackups\\(?:recovery-key\.v1\.dpapi|queue\\[^\\]+\.fmscbackup\.dpapi|journal\\[^\\]+\.json)$'
+    return $relative -match '^CloudBackups\\(?:recovery-key\.v1\.dpapi|queue\\[^\\]+\.fmscbackup\.dpapi|journal\\[^\\]+\.json)$' -or
+        $relative -match '^Communication\\Attempts\\[A-Fa-f0-9]{32}\\[A-Fa-f0-9]{32}\\[a-f0-9]{32}\.(?:claim|result)\.dpapi$'
 }
 function Get-FmscProtectedFiles {
     param([Parameter(Mandatory=$true)][string]$Path)

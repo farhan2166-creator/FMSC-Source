@@ -1,0 +1,41 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "ReadDispatchEvidence",
+      "type": "P"
+    },
+    {
+      "schema": "msg",
+      "name": "TR_Attempt_RestoreGuard",
+      "type": "TR"
+    },
+    {
+      "schema": "msg",
+      "name": "ReadAttemptForReconciliation",
+      "type": "P"
+    }
+  ],
+  "parameters": [
+    {
+      "schema": "msg",
+      "objectName": "ReadDispatchEvidence",
+      "name": "@UserId",
+      "type": "int",
+      "maxLength": 4,
+      "precision": 10,
+      "scale": 0,
+      "isOutput": false
+    },
+    {
+      "schema": "msg",
+      "objectName": "ReadDispatchEvidence",
+      "name": "@RecipientId",
+      "type": "bigint",
+      "maxLength": 8,
+      "precision": 19,
+      "scale": 0,
+      "isOutput": false
+    }
+  ]
+}

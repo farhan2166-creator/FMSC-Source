@@ -89,7 +89,7 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         close.Click+=(_,_)=>Close();
         check.Click+=async(_,_)=>await RunAsync(async()=>{
             if(grid.CurrentRow?.DataBoundItem is not DataRowView selected || selected.Row.IsNull("AttemptId")
-                || selected.Row.IsNull("ProviderMessageId") || Convert.ToString(selected["ProviderCode"])!="Twilio")return;
+                || Convert.ToString(selected["ProviderCode"])!="Twilio")return;
             await this.operations.Reconcile(Convert.ToInt64(selected["AttemptId"]),cancellation!.Token);
             await RefreshAsync();
         });
@@ -218,7 +218,7 @@ internal sealed class CommunicationApiDispatchDialog : ApplicationWindowForm
         send.Enabled=!busy && !scheduleBlocked && Rows.Any(r=>Convert.ToString(r["State"])=="Pending");
         cancelPending.Enabled=!busy && Rows.Any(r=>Convert.ToString(r["State"])=="Pending");
         check.Enabled=!busy && selected is not null && Convert.ToString(selected["ProviderCode"])=="Twilio"
-            && !selected.IsNull("ProviderMessageId") && Convert.ToString(selected["State"]) is "Accepted" or "Submitted" or "Unknown";
+            && !selected.IsNull("AttemptId") && Convert.ToString(selected["State"]) is "Accepted" or "Submitted" or "Unknown";
         releaseHold.Enabled=!busy && CurrentUser.IsAdministrator &&
             Rows.Any(r=>r.Table.Columns.Contains("HoldForReview") &&
                 !r.IsNull("HoldForReview") && Convert.ToBoolean(r["HoldForReview"]));

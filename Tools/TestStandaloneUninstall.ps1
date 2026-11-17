@@ -74,6 +74,12 @@ try {
         New-Item -ItemType Directory -Path (Split-Path $file -Parent) -Force | Out-Null
         [IO.File]::WriteAllText($file,'synthetic cloud material for '+$file)
     }
+    $submissionFolder=Join-Path $profile ('Communication\Attempts\'+('A'*32)+'\'+('b'*32))
+    New-Item -ItemType Directory -Path $submissionFolder -Force | Out-Null
+    $submission=Join-Path $submissionFolder (('d'*32)+'.claim.dpapi')
+    $submissionResult=Join-Path $submissionFolder (('d'*32)+'.result.dpapi')
+    [IO.File]::WriteAllText($submission,'synthetic protected submission')
+    [IO.File]::WriteAllText($submissionResult,'synthetic protected provider reference')
     $roots = @(
         [pscustomobject]@{Label='Application';Path=$app},
         [pscustomobject]@{Label='Updater';Path=$updater},
@@ -83,8 +89,8 @@ try {
     $original = Get-FileHash -LiteralPath $appMdf -Algorithm SHA256
     $originalBackup = Get-FileHash -LiteralPath $updateBak -Algorithm SHA256
     $records = @(Save-FmscProtectedFiles -Roots $roots -PreservationDirectory $preserved)
-    if ($records.Count -ne 7) { throw "Expected seven protected files including cloud recovery state; found $($records.Count)." }
-    foreach ($file in @($package,$queuedKey,$journal,$recoveryKey)) {
+    if ($records.Count -ne 9) { throw "Expected SQL, cloud and communication recovery artifacts; found $($records.Count)." }
+    foreach ($file in @($package,$queuedKey,$journal,$recoveryKey,$submission,$submissionResult)) {
         if (@($records | Where-Object Source -eq $file).Count -ne 1) {
             throw "Missing encrypted cloud recovery artifact: $file"
         }

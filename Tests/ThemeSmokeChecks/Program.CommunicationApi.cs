@@ -5,6 +5,34 @@ internal static partial class Program
 {
     private static void CheckCommunicationApiWorkflow()
     {
+        string evidenceRoot=Path.Combine(Path.GetTempPath(),"Fmsc-Synthetic-Dispatch-"+Guid.NewGuid().ToString("N"));
+        byte[] entropy=System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        try
+        {
+            byte[] Seal(byte[] value)=>System.Security.Cryptography.ProtectedData.Protect(value,entropy,System.Security.Cryptography.DataProtectionScope.CurrentUser);
+            byte[] Open(byte[] value)=>System.Security.Cryptography.ProtectedData.Unprotect(value,entropy,System.Security.Cryptography.DataProtectionScope.CurrentUser);
+            var journal=new CommunicationAttemptJournal(evidenceRoot,Seal,Open);
+            var identity=new CommunicationAttemptJournal.Identity(new string('A',64),Guid.NewGuid(),"Student",42,
+                new string('B',64),"Sms","Twilio",new string('C',64));
+            var attempt=new CommunicationAttemptJournal.Attempt(1,Guid.NewGuid(),"Sms","Twilio");
+            var claim=journal.RecordClaim(identity,attempt);
+            journal.RecordResult(claim,"Accepted","SM"+new string('a',32));
+            var recovered=new CommunicationAttemptJournal(evidenceRoot,Seal,Open);
+            recovered.AssertConsistent(identity,new[]{attempt});
+            Check(recovered.ReadResult(identity,attempt.AttemptKey)?.State=="Accepted",
+                "Windows account protection preserves exact attempt and provider evidence across journal reopening");
+            bool unreadable=false;
+            var wrongContext=new CommunicationAttemptJournal(evidenceRoot,Seal,value=>System.Security.Cryptography.ProtectedData.Unprotect(
+                value,new byte[32],System.Security.Cryptography.DataProtectionScope.CurrentUser));
+            try{wrongContext.AssertConsistent(identity,new[]{attempt});}
+            catch(System.Security.Cryptography.CryptographicException){unreadable=true;}
+            Check(unreadable,"Windows refuses submission evidence opened with the wrong protection context");
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(entropy);
+            if(Directory.Exists(evidenceRoot))Directory.Delete(evidenceRoot,true);
+        }
         var balanceTemplate=new CommunicationMetaTransport.Template("synthetic_balance","en","Balance {{1}}.","","");
         using(var mapping=new CommunicationMetaTemplateDialog(new[]{balanceTemplate},"FeeReminder",allowStudentFields:false))
         {
@@ -63,7 +91,7 @@ internal static partial class Program
             var rows=new DataTable();
             foreach(string column in new[]{"RecipientName","PhoneE164","State","Channel","ProviderCode","ProviderMessageId","RenderedBody"})rows.Columns.Add(column);
             rows.Columns.Add("RecipientId",typeof(long));rows.Columns.Add("AttemptId",typeof(long));
-            rows.Rows.Add("Synthetic first","+923001234567",state,"Sms","Twilio",DBNull.Value,"Hello Synthetic first",1L,DBNull.Value);
+            rows.Rows.Add("Synthetic first","+923001234567",state,"Sms","Twilio",DBNull.Value,"Hello Synthetic first",1L,state=="Pending" ? DBNull.Value : 1L);
             rows.Rows.Add("Synthetic second","+923011234567","Pending","Sms","Twilio",DBNull.Value,"Hello Synthetic second",2L,DBNull.Value);
             return rows;
         }
@@ -96,6 +124,22 @@ internal static partial class Program
                 "Stopping preserves the uncertain first attempt and does not send the remaining recipient");
             Check(!Field<ModernButton>(sending,"retry").Enabled,"An uncertain recipient is not offered a retry approval");
             sending.Close();
+        }
+        int reconciles=0;
+        var recoveryOperations=operations with {Reconcile=(_,_)=>{
+            reconciles++;state="Accepted";return Task.FromResult("Accepted");
+        }};
+        using(var recovery=new CommunicationApiDispatchDialog(batch,operations:recoveryOperations))
+        {
+            recovery.Show();PumpUntil(()=>Field<DataGridView>(recovery,"grid").DataSource is DataTable
+                && !Field<bool>(recovery,"busy"),"Read uncertain saved API session");
+            Check(Field<ModernButton>(recovery,"check").Enabled,
+                "An uncertain SQL attempt can check independently retained provider evidence when its SQL reference was lost");
+            Field<ModernButton>(recovery,"check").PerformClick();
+            PumpUntil(()=>!Field<bool>(recovery,"busy"),"Reconcile retained provider reference");
+            Check(reconciles==1 && sends==1 && Convert.ToString(((DataTable)Field<DataGridView>(recovery,"grid").DataSource!).Rows[0]["State"])=="Accepted",
+                "Explicit reconciliation updates the saved outcome without invoking another send");
+            recovery.Close();
         }
     }
 }

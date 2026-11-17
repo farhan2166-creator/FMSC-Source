@@ -15,6 +15,7 @@ internal static class CommunicationFinancialSourceSqlChecks
         try
         {
             Sql.Query("UPDATE msg.ChannelSettings SET Enabled=1,ProviderCode=CASE Channel WHEN 'Sms' THEN 'Twilio' ELSE 'WhatsAppBusinessManual' END WHERE Channel IN ('Sms','WhatsApp')");
+            long reconciliationRecipient=0;
             foreach(bool manual in new[]{true,false})
             {
                 decimal due=Sql.Money("SELECT dbo.GetFeeChargeBalance(@Id)",Sql.P("@Id",charge));
@@ -94,6 +95,22 @@ internal static class CommunicationFinancialSourceSqlChecks
                     "Reviewing the current bill creates a new eligible message without modifying its accounting records.");
                 await r.Refused("Stale receipt evidence cannot be reused after a real refund",()=>{Reserve(request,original);return Task.CompletedTask;},51330);
                 byte[] corrected=Source();Guid fresh=Guid.NewGuid();Reserve(fresh,corrected);Guid correctedBatch=Confirm(fresh);
+                if(!manual)
+                {
+                    long correctedRecipient=Convert.ToInt64(Sql.Scalar("SELECT RecipientId FROM msg.Recipient WHERE BatchId=@Id",Sql.P("@Id",correctedBatch)));
+                    reconciliationRecipient=correctedRecipient;
+                    using var connection=DatabaseHelper.GetConnection();connection.Open();
+                    using var command=new SqlCommand("msg.ReadDispatchEvidence",connection){CommandType=CommandType.StoredProcedure};
+                    command.Parameters.AddRange(new[]{Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",correctedRecipient)});
+                    using var evidence=new DataSet();using var adapter=new SqlDataAdapter(command);adapter.Fill(evidence);
+                    r.Check(evidence.Tables.Count==2 && evidence.Tables[0].Rows.Count==1 && evidence.Tables[1].Rows.Count==0
+                        && (Guid)evidence.Tables[0].Rows[0]["ClientRequestId"]==fresh
+                        && evidence.Tables[0].Rows[0]["SchoolScope"] is Guid,
+                        "Dispatch recovery reads the exact school, reviewed request and attempt identities without creating an attempt.");
+                    await r.Refused("Unprivileged accounts cannot read submission recovery evidence",()=>{
+                        Sql.Proc("msg.ReadDispatchEvidence",Sql.P("@UserId",f.Restricted),Sql.P("@RecipientId",correctedRecipient));return Task.CompletedTask;
+                    },50003);
+                }
                 r.Check(!corrected.SequenceEqual(original) && Sql.Count("SELECT COUNT(*) FROM msg.PreparedEventEligible(@Id)",Sql.P("@Id",correctedBatch))==1,
                     "A freshly reviewed already-corrected historical receipt remains shareable without rewriting its original evidence.");
                 r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt")==attempts,
@@ -105,6 +122,7 @@ internal static class CommunicationFinancialSourceSqlChecks
                     && Sql.Count("SELECT COUNT(*) FROM msg.FinancialReviewProof WHERE ClientRequestId=@Id",Sql.P("@Id",fresh))==1,
                     "Bounded preview cleanup removes only abandoned unconfirmed proofs and preserves confirmed financial evidence.");
             }
+            await VerifyRecoveryAccess(f,r,reconciliationRecipient);
             VerifyBillScope(f,r,student);
         }
         finally
@@ -112,6 +130,34 @@ internal static class CommunicationFinancialSourceSqlChecks
             foreach(DataRow row in channels.Rows)Sql.Query("UPDATE msg.ChannelSettings SET Enabled=@Enabled,ProviderCode=@Provider WHERE Channel=@Channel",
                 Sql.P("@Enabled",row["Enabled"]),Sql.P("@Provider",row["ProviderCode"]),Sql.P("@Channel",row["Channel"]));
         }
+    }
+    private static async Task VerifyRecoveryAccess(Fixture f,Report r,long recipient)
+    {
+        using var claim=Sql.Proc("msg.ClaimRecipient",Sql.P("@UserId",f.Admin),Sql.P("@RecipientId",recipient),
+            Sql.P("@AttemptKey",Guid.NewGuid()),Sql.P("@ExpectedProviderCode","Twilio"));
+        r.Check(Convert.ToBoolean(claim.Rows[0]["Claimed"]),"The recovery fixture persists one genuine SQL claim without contacting a provider.");
+        long attempt=Convert.ToInt64(claim.Rows[0]["AttemptId"]);
+        using var read=Sql.Proc("msg.ReadAttemptForReconciliation",Sql.P("@UserId",f.Admin),Sql.P("@AttemptId",attempt));
+        r.Check(read.Rows.Count==1 && read.Rows[0].IsNull("ProviderMessageId") && Convert.ToInt64(read.Rows[0]["RecipientId"])==recipient,
+            "An authorized operator can reconcile a claimed Unknown attempt whose provider reference was lost from SQL.");
+        int limited=Sql.Count("""
+            INSERT dbo.Roles(RoleName) VALUES(N'msg_recovery_scope_fixture');
+            DECLARE @Role int=CONVERT(int,SCOPE_IDENTITY());
+            INSERT dbo.RolePermissions(RoleId,PermissionId)
+            SELECT @Role,PermissionId FROM dbo.Permissions
+             WHERE PermissionCode IN(N'Communication.Send',N'Communication.View',N'Students.View');
+            INSERT dbo.Users(Username,PasswordHash,PasswordSalt,RoleId,MustChangePassword)
+            SELECT N'msg_recovery_scope_fixture',PasswordHash,PasswordSalt,@Role,0 FROM dbo.Users WHERE UserId=@Admin;
+            DECLARE @User int=CONVERT(int,SCOPE_IDENTITY());
+            INSERT dbo.UserRoles(UserId,RoleId) VALUES(@User,@Role);
+            SELECT @User;
+            """,Sql.P("@Admin",f.Admin));
+        await r.Refused("Sending permission alone cannot reconcile another financial message without Fees.View",()=>{
+            Sql.Proc("msg.ReadAttemptForReconciliation",Sql.P("@UserId",limited),Sql.P("@AttemptId",attempt));return Task.CompletedTask;
+        },50003);
+        await r.Refused("Financial submission evidence requires financial scope even when sending and general viewing are permitted",()=>{
+            Sql.Proc("msg.ReadDispatchEvidence",Sql.P("@UserId",limited),Sql.P("@RecipientId",recipient));return Task.CompletedTask;
+        },50003);
     }
     private static void VerifyBillScope(Fixture f,Report r,int anchor)
     {

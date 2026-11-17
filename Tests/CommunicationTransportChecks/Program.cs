@@ -7,6 +7,7 @@ using FMSC_SMS.Core;
 int count=0;
 void Check(bool value,string description){if(!value)throw new Exception(description);count++;}
 void Refuse(Action action,string description){try{action();}catch(InvalidOperationException){count++;return;}throw new Exception(description);}
+AttemptJournalChecks.Run(Check);
 // School scheduling must not depend on the operator computer's timezone.
 var schoolZone=TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time");
 var schoolInstant=CommunicationSchoolTime.ToInstant(new DateTime(2030,1,15,10,30,0,DateTimeKind.Local),schoolZone);
