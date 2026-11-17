@@ -39,6 +39,11 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
     private readonly Func<string> _generateEnrollment;
     private readonly Func<CancellationToken, Task> _verifyAuthorization;
     private readonly bool _autoVerifyOnOpen;
+    private readonly bool _hadSavedKeyWhenOpened;
+    // Startup incompatibility recovery is automatic only up to release discovery.
+    // Installation and download remain explicit user actions.
+    private bool _autoCheckPending;
+    private bool _startupSavedKeyCheckPending;
     private bool _hasKey;
     private bool _hasAuthorization;
     private bool _verifyingAuthorization;
@@ -54,13 +59,15 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
 
     internal UpdateConnectionForm(Func<(bool Enrolled, string PublicKey)>? authorization = null, int? installedSchema = null,
         Func<bool>? networkAvailable = null, Func<CancellationToken, Task>? verifyAuthorization = null,
-        Func<string>? generateEnrollment = null)
+        Func<string>? generateEnrollment = null, bool autoCheckOnVerifiedAccess = false)
     {
         _networkAvailable = networkAvailable ?? System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable;
         _installedSchema = installedSchema ?? int.Parse(DatabaseHelper.RequiredDatabaseSchemaVersion);
         _authorization = authorization ?? (() => (UpdateDeviceKey.IsEnrolled,
             UpdateDeviceKey.IsEnrolled ? UpdateDeviceKey.GetPublicKey() : ""));
-        _autoVerifyOnOpen = authorization is null;
+        _autoVerifyOnOpen = authorization is null || autoCheckOnVerifiedAccess;
+        _autoCheckPending = autoCheckOnVerifiedAccess;
+        _startupSavedKeyCheckPending = autoCheckOnVerifiedAccess;
         _verifyAuthorization = verifyAuthorization ?? VerifyLiveAuthorizationAsync;
         _generateEnrollment = generateEnrollment ?? (() => UpdateDeviceKey.GenerateEnrollment());
         Text = "FMSC — Check for Updates";
@@ -177,6 +184,9 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         FormClosed += (_, _) => { _transferTimer.Stop(); _lifetime.Cancel(); };
         Disposed += (_, _) => { _lifetime.Cancel(); _transferTimer.Dispose(); };
         RefreshAuthorization();
+        // A key generated after construction must not be mistaken for an
+        // existing approved key by the deferred OnShown event.
+        _hadSavedKeyWhenOpened = _hasKey;
     }
 
     // Keep the download option completely out of the layout until checking the
@@ -208,7 +218,7 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         CenterOnOwnerScreen();
         // Recheck an existing key when the update dialog opens, not on app
         // startup. Local key existence is NOT proof of GitHub approval.
-        if (_autoVerifyOnOpen && _hasKey)
+        if (_autoVerifyOnOpen && _hadSavedKeyWhenOpened && _hasKey)
             BeginInvoke(new Action(async () => await VerifyAccessAsync()));
     }
 
@@ -288,9 +298,14 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _verify.Enabled = _hasKey && !_hasAuthorization && !_verifyingAuthorization;
             _check.Enabled = _hasAuthorization;
             _publicKey.Text = state.PublicKey;
-            _authorizationPanel.Visible = !_hasAuthorization;
-            SetContentSize(!_hasAuthorization);
-            _accessButton.Text = _hasAuthorization ? "Computer Authorized" :
+            // A saved key on the blocked-startup path is reverified silently.
+            // Never flash its enrollment controls before that check completes.
+            bool checkingSavedKey = _startupSavedKeyCheckPending && _hasKey && !_hasAuthorization;
+            _authorizationPanel.Visible = !_hasAuthorization && !checkingSavedKey;
+            _check.Visible = !checkingSavedKey;
+            SetContentSize(_authorizationPanel.Visible);
+            _accessButton.Text = checkingSavedKey ? "Verifying Computer Access" :
+                _hasAuthorization ? "Computer Authorized" :
                 _hasKey ? "Computer Key Ready" : "Authorize This Computer";
             _status.Text = _hasAuthorization ? "Select Check for Updates to contact the private update repository." :
                 _hasKey ? "Send this public key to the software owner. After approval, select Verify access." :
@@ -307,6 +322,9 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
                     (_hasAuthorization ? "Choose Check for Updates to look for a published application release compatible with your database. " +
                         "If none is available, contact your administrator. Do not downgrade or replace your school data." :
                         "Ask the administrator to authorize this computer before checking for a compatible application. Do not downgrade the database.");
+            if (checkingSavedKey)
+                _status.Text = "Verifying this computer's saved update authorization before checking for a compatible release. " +
+                    "Your school database has not been changed.";
         }
         catch (Exception error) when (error is CryptographicException or IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -316,6 +334,10 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             _verify.Enabled = false;
             _hasAuthorization = false;
             _accessButton.Text = "Authorization Unavailable";
+            _startupSavedKeyCheckPending = false;
+            _authorizationPanel.Visible = true;
+            _check.Visible = true;
+            SetContentSize(true);
             _status.Text = "This Windows user's protected authorization could not be read. " +
                 "Contact the software owner; no key was replaced. " + error.GetType().Name;
         }
@@ -325,6 +347,8 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
     {
         try
         {
+            // Newly generated keys must stay visible until the owner approves them.
+            _startupSavedKeyCheckPending = false;
             _ = _generateEnrollment();
             RefreshAuthorization();
         }
@@ -355,7 +379,13 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
             await _verifyAuthorization(_lifetime.Token);
             if (IsDisposed || Disposing) return;
             _hasAuthorization = true;
+            _startupSavedKeyCheckPending = false;
             RefreshAuthorization();
+            if (_autoCheckPending)
+            {
+                _autoCheckPending = false;
+                await CheckNowAsync();
+            }
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception error) when (error is CryptographicException or IOException or UnauthorizedAccessException
@@ -369,7 +399,19 @@ internal sealed class UpdateConnectionForm : ApplicationWindowForm
         finally
         {
             _verifyingAuthorization = false;
-            if (!IsDisposed && !Disposing) _verify.Enabled = _hasKey && !_hasAuthorization;
+            if (!IsDisposed && !Disposing)
+            {
+                if (!_hasAuthorization && _startupSavedKeyCheckPending)
+                {
+                    // A failed/offline recheck must expose the key and retry action.
+                    _startupSavedKeyCheckPending = false;
+                    _authorizationPanel.Visible = true;
+                    _check.Visible = true;
+                    SetContentSize(true);
+                    _accessButton.Text = "Computer Key Ready";
+                }
+                _verify.Enabled = _hasKey && !_hasAuthorization;
+            }
         }
     }
 

@@ -18,7 +18,8 @@ internal sealed class StartupUpdateController
     {
         _owner = owner;
         _content = content;
-        _createDialog = createDialog ?? (schema => new UpdateConnectionForm(installedSchema: schema));
+        _createDialog = createDialog ?? (schema => new UpdateConnectionForm(
+            installedSchema: schema, autoCheckOnVerifiedAccess: true));
         _validate = validate ?? (prepared => {
             UpdateInstallerHandoff.EnsureInstalledLocation();
             UpdateInstallerHandoff.Validate(prepared);
