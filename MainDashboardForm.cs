@@ -763,19 +763,13 @@ public sealed class MainDashboardForm : ApplicationWindowForm
                 "Staff Management",
                 "Staff.View"),
             Section("CERTIFICATES"),
-            // BUSINESS RULE: staff certificates belong with staff work. Do not duplicate
-            // this route in the student Certificates Center.
+            // Staff certificate types share one workspace and one selected staff
+            // member; their existing editors continue to own writes and printing.
             new(
-                "Teacher Certificate",
-                () => new RegularLecturerCertificatePage(),
+                "Teacher / Staff Certificates",
+                () => new StaffCertificatesWorkspacePage(),
                 "Staff",
-                "Regular Lecturer/Teacher Certificate",
-                "Certificates.Create"),
-            new(
-                "Bank Account Certificate",
-                () => new BankAccountOpeningCertificatePage(),
-                "Staff",
-                "Bank Account Opening Certificate",
+                "Teacher / Staff Certificates",
                 "Certificates.Create")
             });
         // Reports opens a single hub, like Certificates Center.
@@ -1389,11 +1383,11 @@ public sealed class MainDashboardForm : ApplicationWindowForm
         menu.Items.Add(new ToolStripMenuItem("Check for Updates", null, (_, _) => {
             var existingUpdate = Application.OpenForms.OfType<UpdateConnectionForm>().FirstOrDefault();
             if (existingUpdate is not null) { existingUpdate.Activate(); return; }
-            var updateDialog = new UpdateConnectionForm();
+            var updateDialog = UpdateConnectionForm.ForMenuUpdateCheck();
             updateDialog.InstallRequested += RequestUpdateInstallation;
             updateDialog.Show(this); // Keep the application usable during download/preparation.
         }) {
-            ToolTipText = "Authorize this computer and check the private FMSC update feed manually."
+            ToolTipText = "Check published FMSC updates automatically after verifying this computer's access."
         });
         menu.Items.Add(
             new ToolStripMenuItem(

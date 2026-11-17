@@ -31,8 +31,12 @@ internal static partial class Program
         {
             T Field<T>(string name)=>(T)typeof(FeeCollectionPage).GetField(name,flags)!.GetValue(collection)!;
             var use=Field<CheckBox>("useAvailableCredit");
-            Check(use.Checked&&use.Text=="Use student advance","Collection describes advance money while preserving its original checkbox default");
-            Check(FinanceHelp.Tooltip(collection,use).Contains("does not receive new money"),"Using advance explains that it is different from receiving cash");
+            Check(use.Checked&&use.Text.Contains("advance",StringComparison.OrdinalIgnoreCase),
+                "Advance is offered by default without pinning the changing single/family caption");
+            var scopeHelp=FinanceHelp.Tooltip(collection,use);
+            Check(scopeHelp.Contains("selected student",StringComparison.OrdinalIgnoreCase) &&
+                  scopeHelp.Contains("not new cash",StringComparison.OrdinalIgnoreCase),
+                "Advance help explains selected-student ownership and distinguishes credit from newly received cash");
             Check(FinanceHelp.Tooltip(collection,Field<ModernTextBox>("paymentAmount")).Contains("only the new money"),"Amount received excludes already held advance money");
         }
         using(var credit=new StudentCreditDialog(41,false))

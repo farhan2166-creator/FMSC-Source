@@ -83,10 +83,11 @@ internal static partial class Program
             Console.WriteLine($"PASS: {checks} synthetic WinForms capture checks.");
             return;
         }
-        if (args.Contains("--student-certificates-workspace"))
+        if (args.Contains("--student-certificates-workspace") || args.Contains("--staff-certificates-workspace"))
         {
-            CheckStudentCertificatesWorkspace();
-            Console.WriteLine($"PASS: {checks} student certificates workspace projection, identity, and permission checks (no database connection).");
+            if (args.Contains("--student-certificates-workspace")) CheckStudentCertificatesWorkspace();
+            CheckStaffCertificatesWorkspace();
+            Console.WriteLine($"PASS: {checks} student and staff certificate workspace identity, selection and permission checks (no database connection).");
             return;
         }
         if(args.Contains("--finance-report-async"))

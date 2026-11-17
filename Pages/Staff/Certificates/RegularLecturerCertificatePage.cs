@@ -2,8 +2,50 @@ using FMSC_SMS.Core;
 using Microsoft.Data.SqlClient;
 using static FMSC_SMS.Core.CertificateUi;
 namespace FMSC_SMS.Pages.Staff.Certificates;
-public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
+public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges, IStaffCertificateWorkspaceEditor
 {
+    private HumanCard workspaceDetails = null!;
+    private Action<int>? workspaceSaved;
+    HumanCard IStaffCertificateWorkspaceEditor.DetailsCard => workspaceDetails;
+    Label IStaffCertificateWorkspaceEditor.Feedback => StatusLabel;
+    int IStaffCertificateWorkspaceEditor.SelectedRecordId => selectedRegularLecturerCertificateId;
+    Action<int>? IStaffCertificateWorkspaceEditor.Saved { set => workspaceSaved = value; }
+
+    void IStaffCertificateWorkspaceEditor.ConfigureWorkspaceDetails(DataRow selectedStaff, bool editing)
+    {
+        StaffCertificateWorkspaceEditorUi.LockStaff(staff, selectedStaff);
+        clearButton.Visible = false;
+        createCertificateButton.Visible = !editing;
+        updateCertificateButton.Visible = editing;
+    }
+
+    void IStaffCertificateWorkspaceEditor.LoadWorkspaceSelection(DataRow selectedStaff, int recordId)
+    {
+        staff.SetStaff(selectedStaff);
+        StaffChanged();
+        if (recordId > 0)
+        {
+            if (CertificateCollectionFlow.Find(certificateResults, "RegularLecturerCertificateId", recordId) is null)
+                throw new InvalidOperationException("The selected teacher certificate is no longer available. Refresh the workspace.");
+            SelectCertificateById(recordId);
+        }
+        else
+        {
+            ClearCertificateSelection();
+            ClearCertificateFields();
+            Grid.ClearSelection();
+            try { Grid.CurrentCell = null; } catch (InvalidOperationException) { }
+            ApplyWorkflowState();
+        }
+    }
+
+    bool IStaffCertificateWorkspaceEditor.CanPrintFromWorkspace => printButton.Enabled;
+    bool IStaffCertificateWorkspaceEditor.CanCollectFromWorkspace => copyFlow.Collect.Enabled;
+    bool IStaffCertificateWorkspaceEditor.CanIssueAgainFromWorkspace => copyFlow.IssueAgain.Enabled;
+    void IStaffCertificateWorkspaceEditor.PrintFromWorkspace() => printButton.PerformClick();
+    void IStaffCertificateWorkspaceEditor.CollectFromWorkspace() => copyFlow.CollectFromWorkspace();
+    void IStaffCertificateWorkspaceEditor.IssueAgainFromWorkspace() => copyFlow.IssueAgainFromWorkspace();
+
     internal override bool FocusEntryField() => CertificateUi.FocusEntry(staff, Grid, certificateDate);
     private readonly StaffPicker staff = new();
     private readonly Func<SqlParameter[], DataTable> createCertificate;
@@ -95,7 +137,7 @@ public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
                 ResetToStart();
                 BindStaff();
             });
-        var details =
+        var details = workspaceDetails =
             HumanUi.Card(
                 UiText.Certificates.Details,
                 "Select staff; confirm designation and subject to create. Names come from the staff record; select a saved row to edit other details.");
@@ -396,6 +438,7 @@ public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
         /* Finding 12 - Info writes the status line, but the reload below calls Bind ("N record(s)") and ApplyWorkflowState after it. */
         string? successMessage =
             null;
+        int confirmedRecord = 0;
         try
         {
             if (staff.SelectedId <= 0)
@@ -429,6 +472,7 @@ public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
             CertificateRecordOrder.RequireSavedCopy(certificateResults, "RegularLecturerCertificateId", savedId);
             SelectSavedCertificate(savedId);
             successMessage = "Certificate created successfully.";
+            confirmedRecord = savedId;
         }
         catch (Exception ex)
         {
@@ -440,6 +484,7 @@ public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
             if (successMessage is not null)
             {
                 Info(successMessage);
+                if (confirmedRecord > 0) workspaceSaved?.Invoke(confirmedRecord);
             }
         }
     }
@@ -493,6 +538,7 @@ public sealed class RegularLecturerCertificatePage : V2Page, IUnsavedChanges
             if (successMessage is not null)
             {
                 Info(successMessage);
+                workspaceSaved?.Invoke(savedCertificateId);
             }
         }
     }

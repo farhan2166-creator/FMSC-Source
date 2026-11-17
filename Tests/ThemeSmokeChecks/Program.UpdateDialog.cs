@@ -110,6 +110,136 @@ internal static partial class Program
             Check(!viewport.HorizontalScroll.Visible && !viewport.VerticalScroll.Visible,
                 "Generate-key and rejected-authorization states do not introduce scrollbars");
         }
+        // Exercise the exact factory used by the dashboard's Check for Updates
+        // menu item; merely verifying a key must not leave an extra check click.
+        {
+            int probes = 0, authorizations = 0;
+            using var parent = new Form();
+            using var menuCheck = UpdateConnectionForm.ForMenuUpdateCheck(
+                authorization: () => (true, "ssh-rsa saved-menu-key"),
+                networkAvailable: () => ++probes == 1,
+                verifyAuthorization: _ => { authorizations++; return Task.CompletedTask; });
+            parent.Show();
+            menuCheck.Show(parent);
+            var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(menuCheck)!;
+            Check(!panel.Visible && !Find(menuCheck, "Check for Updates").Visible,
+                "Menu update checks start compact, without flashing the saved key or requiring a manual click");
+            PumpUntil(() => probes >= 2, "Menu check automatically enters release discovery");
+            var status = (Label)typeof(UpdateConnectionForm).GetField("_status", fields)!.GetValue(menuCheck)!;
+            Check(authorizations == 1 && probes == 2 &&
+                  status.Text.Contains("offline", StringComparison.OrdinalIgnoreCase),
+                "The menu command verifies saved access once, then immediately attempts an update check");
+            Check(!panel.Visible && Find(menuCheck, "Computer Authorized").Visible &&
+                  Find(menuCheck, "Check for Updates").Enabled,
+                "Offline update discovery retains compact authorized view and provides retry");
+            menuCheck.Close();
+        }
+        {
+            int authorizations = 0;
+            using var parent = new Form();
+            using var pending = UpdateConnectionForm.ForMenuUpdateCheck(
+                authorization: () => (true, "ssh-rsa unapproved-menu-key"),
+                networkAvailable: () => true,
+                verifyAuthorization: _ => {
+                    authorizations++;
+                    return Task.FromException(new IOException("Approval pending"));
+                });
+            parent.Show();
+            pending.Show(parent);
+            var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(pending)!;
+            Check(!panel.Visible, "Menu key stays hidden while live verification is pending");
+            var status = (Label)typeof(UpdateConnectionForm).GetField("_status", fields)!.GetValue(pending)!;
+            PumpUntil(() => status.Text.Contains("not been verified"), "Unapproved menu access shows key recovery");
+            Check(authorizations == 1 && panel.Visible &&
+                  Find(pending, "Verify access").Enabled &&
+                  !Find(pending, "Check for Updates").Enabled,
+                "Unapproved menu access reveals key approval controls and never checks for releases");
+            pending.Close();
+        }
+        {
+            using var parent = new Form();
+            using var enrollment = UpdateConnectionForm.ForMenuUpdateCheck(
+                authorization: () => (false, ""),
+                networkAvailable: () => true,
+                verifyAuthorization: _ => Task.CompletedTask);
+            parent.Show();
+            enrollment.Show(parent); Application.DoEvents();
+            var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(enrollment)!;
+            Check(panel.Visible && Find(enrollment, "Generate key").Enabled &&
+                  !Find(enrollment, "Check for Updates").Enabled,
+                "Menu update check preserves enrollment when the computer has no key");
+            enrollment.Close();
+        }
+        // A blocked startup with a saved key must not flash key enrollment.
+        // Once live authorization succeeds, discover an update without another click.
+        // The second offline probe prevents an actual Git operation in this test.
+        {
+            int probes = 0, authorizations = 0;
+            using var parent = new Form();
+            using var startup = new UpdateConnectionForm(
+                () => (true, "ssh-rsa saved-startup-key"),
+                networkAvailable: () => ++probes == 1,
+                verifyAuthorization: _ => { authorizations++; return Task.CompletedTask; },
+                autoCheckOnVerifiedAccess: true);
+            parent.Show();
+            startup.Show(parent);
+            var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(startup)!;
+            Check(!panel.Visible && !Find(startup, "Check for Updates").Visible,
+                "Saved startup authorization starts compact, without flashing enrollment or a manual update action");
+            PumpUntil(() => probes >= 2, "Startup automatically checks for updates after live authorization");
+            var status = (Label)typeof(UpdateConnectionForm).GetField("_status", fields)!.GetValue(startup)!;
+            Check(authorizations == 1 && probes == 2 && status.Text.Contains("offline", StringComparison.OrdinalIgnoreCase),
+                "Verified startup authorization automatically reaches release discovery without a click");
+            Check(!panel.Visible && Find(startup, "Computer Authorized").Visible &&
+                  Find(startup, "Check for Updates").Enabled,
+                "After an offline update check, authorized startup stays compact and allows manual retry");
+            startup.Close();
+        }
+        {
+            int authorizations = 0;
+            using var parent = new Form();
+            using var startup = new UpdateConnectionForm(
+                () => (true, "ssh-rsa still-pending-key"),
+                networkAvailable: () => true,
+                verifyAuthorization: _ => {
+                    authorizations++;
+                    return Task.FromException(new IOException("Approval pending"));
+                },
+                autoCheckOnVerifiedAccess: true);
+            parent.Show();
+            startup.Show(parent);
+            var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(startup)!;
+            Check(!panel.Visible, "Saved startup key starts hidden during verification");
+            var status = (Label)typeof(UpdateConnectionForm).GetField("_status", fields)!.GetValue(startup)!;
+            PumpUntil(() => status.Text.Contains("not been verified"), "Denied startup key presents access recovery");
+            Check(authorizations == 1 && panel.Visible && Find(startup, "Verify access").Enabled &&
+                  !Find(startup, "Check for Updates").Enabled,
+                "Denied startup authorization reveals the public key and never checks the repository");
+            startup.Close();
+        }
+        {
+            bool generated = false;
+            using var parent = new Form();
+            using var startup = new UpdateConnectionForm(
+                () => (generated, generated ? "ssh-rsa newly-generated-startup-key" : ""),
+                networkAvailable: () => true,
+                verifyAuthorization: _ => Task.CompletedTask,
+                generateEnrollment: () => { generated = true; return "ssh-rsa newly-generated-startup-key"; },
+                autoCheckOnVerifiedAccess: true);
+            parent.Show();
+            startup.Show(parent);
+            var panel = (Panel)typeof(UpdateConnectionForm).GetField("_authorizationPanel", fields)!.GetValue(startup)!;
+            Find(startup, "Generate key").PerformClick(); Application.DoEvents();
+            var newKey=(TextBox)typeof(UpdateConnectionForm).GetField("_publicKey", fields)!.GetValue(startup)!;
+            Check(newKey.Text=="ssh-rsa newly-generated-startup-key",
+                "New startup enrollment stores and displays the generated public key");
+            Check(panel.Visible, "New startup enrollment keeps the public-key panel visible");
+            Check(Find(startup, "Copy public key").Enabled,
+                "New startup enrollment keeps the public key copyable");
+            Check(!Find(startup, "Check for Updates").Enabled,
+                "New startup enrollment does not enable update checking without verified approval");
+            startup.Close();
+        }
         var prepared = new PreparedUpdate("1.2.0", "unused-stage", "unused-metadata", UpdateDownloadChoice.Full, false);
         foreach (string phase in new[] { "Prepared", "Migrating", "Activating", "Verified", "Completed", "Aborted" })
             Check(UpdateStartupGuard.RequiresRecovery(System.Text.Encoding.UTF8.GetBytes(

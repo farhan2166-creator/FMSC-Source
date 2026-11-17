@@ -4,42 +4,53 @@ internal static class CollectionCreditScopeChecks
 {
     internal static void Run(Action<bool,string> check)
     {
-        var balances=new Dictionary<int,decimal>{{163,5000m},{162,0m}};
-        var siblingFee=new[]{(1L,162,2300m)};
-        check(CollectionCreditAllocation.Build(siblingFee,balances,163).Count==0,
-            "A 5000 main-student advance cannot pay a sibling's 2300 fee");
-        check(CollectionCreditAllocation.Build(siblingFee,balances,162).Count==0,
-            "Changing the main student does not move the old main student's money");
-        var own=CollectionCreditAllocation.Build(new[]{(2L,163,2300m)},balances,163);
-        check(own[2]==2300m&&balances[163]-own.Values.Sum()==2700m,
-            "The main student's own fee is fully covered with 2700 advance left and zero new cash");
-        check(balances[163]==5000m&&balances[162]==0m,"Planning never posts or transfers advance");
-        balances[162]=1000m;
-        check(CollectionCreditAllocation.Build(siblingFee,balances,163).Count==0,
-            "Including a sibling does not silently opt in that sibling's advance");
-        check(CollectionCreditAllocation.Build(siblingFee,balances,162)[1]==1000m,
-            "Selecting that sibling as main uses only their own 1000, leaving 1300 payable");
-        balances[163]=2700m;balances[162]=2300m;
-        check(CollectionCreditAllocation.Build(siblingFee,balances,162)[1]==2300m,
-            "After an explicit transfer, the recipient selected as main can settle with zero cash");
-        check(CollectionCreditAllocation.Build(siblingFee,balances,163).Count==0,
-            "A transfer still requires collection under the recipient's own main-student selection");
-        var multiple=new[]{(3L,163,400m),(4L,163,2500m),(5L,162,400m)};
-        balances[163]=1000m;balances[162]=100m;
-        var plan=CollectionCreditAllocation.Build(multiple,balances,163);
-        check(plan.Count==2&&plan[3]==400m&&plan[4]==600m,"Ordered fees share the main student's advance without overspending");
-        check(!plan.ContainsKey(5),"A sibling's fee never borrows the unused or exhausted main advance");
-        plan=CollectionCreditAllocation.Build(new[]{(6L,163,1800m)},new Dictionary<int,decimal>{{163,5000m}},163);
-        check(plan[6]==1800m,"Advance is capped at the remaining fee after discount");
-        plan=CollectionCreditAllocation.Build(new[]{(0L,163,100m),(7L,163,0m),(8L,163,-100m),(9L,999,100m)},balances,163);
-        check(plan.Count==0,"Missing charges, settled fees, negative dues and unowned balances do not create applications");
-        check(CollectionCreditAllocation.Build(multiple,new Dictionary<int,decimal>{{163,-5m}},163).Count==0,
-            "Negative ledger balances are not spendable advance");
-        check(CollectionCreditAllocation.Build(multiple,balances,0).Count==0,"No main student means no ordinary advance application");
-        var counter=CollectionCreditAllocation.Build(multiple,balances,null);
-        check(counter[3]==400m&&counter[4]==600m&&counter[5]==100m,
-            "The fixed family counter retains separate per-child advance accounts");
-        check(counter.Values.Sum()==1100m&&balances[163]==1000m&&balances[162]==100m,
-            "Counter planning conserves each child's balance without changing the ledger");
+        // Realistic family scenario: advances remain per child, not a family wallet.
+        var balances=new Dictionary<int,decimal>{{162,500m},{163,300m},{291,900m},{423,2500m}};
+        var family=new[]{(1L,162,3000m),(2L,163,3500m),(3L,291,2500m),(4L,423,1800m)};
+        var plan=CollectionCreditAllocation.Build(family,balances);
+        check(plan.Count==4 && plan[1]==500m && plan[2]==300m &&
+              plan[3]==900m && plan[4]==1800m,
+            "Every selected sibling applies only their own available advance");
+        check(family.Sum(x=>x.Item3)-plan.Values.Sum()==7300m &&
+              balances[423]-plan[4]==700m,
+            "Family needs 7300 cash and Hamid retains 700 advance without transferring it");
+        check(balances[162]==500m && balances[163]==300m &&
+              balances[291]==900m && balances[423]==2500m,
+            "Planning never writes, spends or moves any student's ledger balance");
+
+        // Removing a sibling from the selected charges also removes their credit.
+        var selected=family.Where(x=>x.Item2 is 162 or 163).ToArray();
+        plan=CollectionCreditAllocation.Build(selected,balances);
+        check(plan.Count==2 && plan[1]==500m && plan[2]==300m &&
+              selected.Sum(x=>x.Item3)-plan.Values.Sum()==5700m,
+            "Unticked siblings are excluded from both dues and usable advance");
+        plan=CollectionCreditAllocation.Build(family,balances);
+        check(plan.Count==4 && plan.Values.Sum()==3500m,
+            "Reticking siblings restores their independent credit allocation");
+
+        var equal=CollectionCreditAllocation.Build(new[]{(5L,163,300m)},balances);
+        check(equal[5]==300m && 300m-equal[5]==0m,
+            "When a fee exactly equals its owner's advance, new cash required is zero");
+        var excess=CollectionCreditAllocation.Build(new[]{(6L,423,1800m)},balances);
+        check(excess[6]==1800m && balances[423]-excess[6]==700m,
+            "A student with more advance than due keeps the exact surplus");
+
+        var multiple=new[]{(10L,163,400m),(11L,163,2500m),(12L,162,400m)};
+        var smallerBalances=new Dictionary<int,decimal>{{163,1000m},{162,100m}};
+        plan=CollectionCreditAllocation.Build(multiple,smallerBalances);
+        check(plan.Count==3 && plan[10]==400m && plan[11]==600m && plan[12]==100m,
+            "Ordered charges independently cap advance for each child's account");
+        check(plan.Values.Sum()==1100m && smallerBalances[163]==1000m &&
+              smallerBalances[162]==100m,
+            "Separate credit ledgers conserve their balances without pooling");
+        plan=CollectionCreditAllocation.Build(
+            new[]{(0L,163,100m),(13L,163,0m),(14L,163,-100m),(15L,999,100m)},balances);
+        check(plan.Count==0,
+            "Invalid charges, settled fees, negative dues and missing owners do not create credit applications");
+        check(CollectionCreditAllocation.Build(multiple,
+            new Dictionary<int,decimal>{{163,-5m}}).Count==0,
+            "Negative ledger balances cannot be spent");
+        check(CollectionCreditAllocation.Build(Array.Empty<(long,int,decimal)>(),balances).Count==0,
+            "No selected charges means no advance is applied");
     }
 }
