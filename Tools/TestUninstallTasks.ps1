@@ -33,6 +33,17 @@ $script:tasks=@(
 )
 Remove-FmscCloudBackupTasks
 if($script:deleted.Count -ne 2 -or -not $script:deleted.Contains($owned) -or -not $script:deleted.Contains($communication)){throw 'Owned task cleanup removed an unrelated task or missed its own tasks.'}
+# One malformed FMSC task must abort before deleting any otherwise valid task.
+$before=$script:deleted.Count
+$script:tasks=@(
+    (TaskFixture $owned (Join-Path $AppDirectory 'FMSC_SMS.exe') '--cloud-backup-scheduled'),
+    (TaskFixture $communication (Join-Path $AppDirectory 'Other.exe') '--communication-queue-worker')
+)
+$refused=$false
+try { Remove-FmscCloudBackupTasks } catch { $refused=$_.Exception.Message -like '*unexpected action*' }
+if (-not $refused -or $script:deleted.Count -ne $before) {
+    throw 'Background task deletion was partial when a later task failed verification.'
+}
 $script:tasks=@();Remove-FmscCloudBackupTasks
 foreach($case in @(
     @((Join-Path $AppDirectory 'Other.exe'),'--cloud-backup-scheduled'),
@@ -48,4 +59,4 @@ $script:tasks=@((TaskFixture $communication (Join-Path $AppDirectory 'FMSC_SMS.e
 $refused=$false
 try{Remove-FmscCloudBackupTasks}catch{$refused=$_.Exception.Message -like '*unexpected action*'}
 if(-not $refused -or $script:deleted.Count -ne $before){throw 'Unexpected communication task action was not preserved for review.'}
-Write-Output 'PASS: uninstall removes only exact FMSC background tasks and refuses substituted executable actions.'
+Write-Output 'PASS: uninstall preflights all exact FMSC background tasks and refuses partial or substituted task deletions.'
