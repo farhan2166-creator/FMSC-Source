@@ -6,6 +6,7 @@ $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath,[ref]$tokens,[ref]$errors)
 if ($errors.Count -ne 0) { throw "Standalone uninstaller PowerShell parse failed: $($errors[0])" }
 foreach ($name in @('Test-FmscNoLinks','Test-FmscCloudRecoveryArtifact','Get-FmscProtectedFiles','Save-FmscProtectedFiles',
+    'Get-FmscPendingTransactionJournals','Assert-FmscNoPendingTransactions',
     'Assert-FmscProtectedCopies','Remove-FmscNonProtectedContents')) {
     $definition = $ast.Find({
         param($node)
@@ -46,9 +47,10 @@ try {
     $school = Join-Path $testRoot 'SchoolDatabase'
     $external = Join-Path $testRoot 'UnrelatedDocuments'
     $profile = Join-Path $testRoot 'Users\TestSchool\AppData\Local\FMSC'
+    $transactions = Join-Path $testRoot 'Users\TestSchool\AppData\Local\FMSC_SMS'
     $cloud = Join-Path $profile 'CloudBackups'
     $DataDirectory = $school
-    foreach ($folder in @($app,$updater,$school,$external,$cloud)) {
+    foreach ($folder in @($app,$updater,$school,$external,$cloud,$transactions)) {
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
     }
     $appMdf = Join-Path $app 'subdir\spare.mdf'
@@ -83,8 +85,34 @@ try {
     $roots = @(
         [pscustomobject]@{Label='Application';Path=$app},
         [pscustomobject]@{Label='Updater';Path=$updater},
-        [pscustomobject]@{Label='User-Synthetic';Path=$profile}
+        [pscustomobject]@{Label='User-Synthetic';Path=$profile},
+        [pscustomobject]@{Label='User-Transactions';Path=$transactions}
     )
+    # Real finance, admission and certificate operations persist these files
+    # precisely because an interrupted SQL write might already have committed.
+    # Uninstall must refuse rather than move/delete that safety interlock.
+    $pendingNames = @('PendingCollection.json','PendingQuickRegistration.json',
+        'PendingFeeAdjustment.json','PendingCharacterCertificateSave.json','PendingFutureMutation.json')
+    foreach ($name in $pendingNames) {
+        [IO.File]::WriteAllText((Join-Path $transactions $name),'synthetic unresolved transaction')
+    }
+    [IO.File]::WriteAllText((Join-Path $transactions 'PendingCollection.txt'),'unrelated file')
+    $detected = @(Get-FmscPendingTransactionJournals -Roots $roots)
+    if ($detected.Count -ne $pendingNames.Count) { throw 'Uninstall missed an unresolved financial/admission journal.' }
+    $rejected = $false
+    try { Assert-FmscNoPendingTransactions -Roots $roots } catch {
+        $rejected = $_.Exception.Message -like '*unresolved*recovery record*'
+    }
+    if (-not $rejected) { throw 'Uninstall must stop while a SQL save outcome is unresolved.' }
+    foreach ($name in $pendingNames) {
+        $path = Join-Path $transactions $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw 'Blocked uninstall deleted a pending transaction journal.'
+        }
+        # Simulate an administrator reviewing the SQL outcome in FMSC.
+        Remove-Item -LiteralPath $path -Force
+    }
+    Assert-FmscNoPendingTransactions -Roots $roots
     $preserved = Join-Path $school ('UninstallPreserved\'+[guid]::NewGuid().ToString('N'))
     $original = Get-FileHash -LiteralPath $appMdf -Algorithm SHA256
     $originalBackup = Get-FileHash -LiteralPath $updateBak -Algorithm SHA256
@@ -129,6 +157,7 @@ try {
     if (Test-Path -LiteralPath $app) { throw 'Synthetic application not removed.' }
     if (Test-Path -LiteralPath $updater) { throw 'Synthetic updater not removed.' }
     if (Test-Path -LiteralPath $profile) { throw 'Synthetic cloud cache and OAuth tokens were not removed.' }
+    if (Test-Path -LiteralPath $transactions) { throw 'Synthetic transaction settings were not removed after reconciliation.' }
     if (Test-Path -LiteralPath (Join-Path $school 'Install.log')) { throw 'Synthetic logs not removed.' }
     foreach ($name in @('FMSC_DB.mdf','FMSC_DB_log.ldf','Backups.bak')) {
         if (-not (Test-Path -LiteralPath (Join-Path $school $name))) {
@@ -152,6 +181,7 @@ try {
         }
     }
     Write-Host 'PASS: successful uninstalls close the window after acknowledgement; failure remains visible.'
+    Write-Host 'PASS: unresolved collection, admission and financial recovery journals prevent uninstall until reviewed.'
     Write-Host 'PASS: SQL and encrypted cloud recovery copies survive cleanup; new or changed artifacts block deletion.'
     Write-Host 'PASS: removable FMSC folders/logs can be cleared without deleting school data or unrelated files.'
 } finally {
