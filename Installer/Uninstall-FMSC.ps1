@@ -187,6 +187,8 @@ function Get-FmscPendingTransactionJournals {
     foreach ($root in $Roots) {
         if (-not $root.Path.TrimEnd('\').EndsWith('\AppData\Local\FMSC_SMS',
             [StringComparison]::OrdinalIgnoreCase)) { continue }
+        # Earlier profile roots may already have been removed in this pass.
+        if (-not (Test-Path -LiteralPath $root.Path -PathType Container)) { continue }
         Test-FmscNoLinks $root.Path
         foreach ($file in @(Get-ChildItem -LiteralPath $root.Path -File -Force -ErrorAction Stop |
             Where-Object { $_.Name -match '^Pending[A-Za-z][A-Za-z0-9]*\.json$' })) {
