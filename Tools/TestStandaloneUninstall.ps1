@@ -152,7 +152,13 @@ try {
     [IO.File]::WriteAllBytes($appMdf,[Text.Encoding]::UTF8.GetBytes('synthetic-database-'+$appMdf))
     Assert-FmscProtectedCopies -Roots $roots -Records $records
 
-    foreach ($root in $roots) { Remove-Item -LiteralPath $root.Path -Recurse -Force }
+    foreach ($root in $roots) {
+        Assert-FmscNoPendingTransactions -Roots $roots
+        Remove-Item -LiteralPath $root.Path -Recurse -Force
+    }
+    # The real uninstaller repeats its guard between deletions, even after
+    # some profile roots are gone. Missing roots must not produce a false error.
+    Assert-FmscNoPendingTransactions -Roots $roots
     Remove-FmscNonProtectedContents $school
     if (Test-Path -LiteralPath $app) { throw 'Synthetic application not removed.' }
     if (Test-Path -LiteralPath $updater) { throw 'Synthetic updater not removed.' }
