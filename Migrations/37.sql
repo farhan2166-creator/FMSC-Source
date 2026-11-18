@@ -170,18 +170,31 @@ BEGIN
  LEFT JOIN msg.ManualHandoff H ON H.RecipientId=R.RecipientId
  LEFT JOIN msg.ApiBatch A ON A.BatchId=B.BatchId
  WHERE EXISTS(SELECT 1 FROM msg.CanViewAudience(@UserId,B.Audience))
+ -- Retain prior History search behavior: each word matches any permitted
+ -- metadata or recipient field, independently of word order.
  AND (@Search IS NULL OR LTRIM(RTRIM(@Search))=N''''
- OR CHARINDEX(@Search,CONCAT(B.Channel,N'' '',B.Purpose,N'' '',B.Audience,N'' '',B.State,
-          N'' '',COALESCE(U.Username,N''''),N'' '',COALESCE(A.ProviderCode,N''''),
-          N'' '',CONVERT(nvarchar(23),B.CreatedUtc,120)))>0
- OR EXISTS(SELECT 1 FROM msg.Recipient SearchRecipient
- LEFT JOIN dbo.Students SearchStudent ON SearchStudent.AdmissionId=SearchRecipient.AdmissionId
- LEFT JOIN dbo.Staff SearchStaff ON SearchStaff.StaffId=SearchRecipient.StaffId
- WHERE SearchRecipient.BatchId=B.BatchId
- AND CHARINDEX(@Search,CONCAT(COALESCE(SearchStudent.StudentName,SearchStaff.StaffName,N''''),N'' '',
-     COALESCE(SearchStudent.AdmissionNumber,SearchStaff.StaffNumber,N''''),N'' '',
-     COALESCE(SearchStudent.FatherName,SearchStaff.FatherName,N''''),N'' '',
-     COALESCE(SearchStudent.GuardianName,N'''')))>0))
+ OR NOT EXISTS(
+  SELECT 1
+  FROM STRING_SPLIT(REPLACE(REPLACE(REPLACE(@Search,NCHAR(9),N'' ''),NCHAR(10),N'' ''),NCHAR(13),N'' ''),N'' '') Term
+  WHERE Term.value<>N''''
+   AND CHARINDEX(LOWER(Term.value),LOWER(CONCAT(
+       B.Channel,N'' '',B.Purpose,N'' '',B.Audience,N'' '',B.State,
+       N'' '',COALESCE(U.Username,N''''),N'' '',COALESCE(A.ProviderCode,N''''),
+       N'' '',CASE WHEN M.BatchId IS NULL THEN N'''' ELSE N''manual'' END,
+       N'' '',CONVERT(nvarchar(23),B.CreatedUtc,120))))=0
+   AND NOT EXISTS(
+    SELECT 1 FROM msg.Recipient SearchRecipient
+    LEFT JOIN dbo.Students SearchStudent ON SearchStudent.AdmissionId=SearchRecipient.AdmissionId
+    LEFT JOIN dbo.Staff SearchStaff ON SearchStaff.StaffId=SearchRecipient.StaffId
+    WHERE SearchRecipient.BatchId=B.BatchId
+    AND CHARINDEX(LOWER(Term.value),LOWER(CONCAT(
+      COALESCE(SearchStudent.StudentName,SearchStaff.StaffName,N''''),N'' '',
+      COALESCE(SearchStudent.AdmissionNumber,SearchStaff.StaffNumber,N''''),N'' '',
+      COALESCE(SearchStudent.FatherName,SearchStaff.FatherName,N''''),N'' '',
+      COALESCE(SearchStudent.GuardianName,N''''),N'' '',
+      RIGHT(SearchRecipient.PhoneE164,4))))>0
+   )
+ ))
  GROUP BY B.BatchId,B.Channel,B.Purpose,B.State,B.CreatedUtc,B.ConfirmedUtc,B.CreatedBy,B.Audience,U.Username,M.BatchId,A.ProviderCode
  ORDER BY B.CreatedUtc DESC,B.BatchId DESC
  OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
