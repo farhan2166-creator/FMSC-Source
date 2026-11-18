@@ -43,7 +43,7 @@ internal sealed class CommunicationFeeReminderPolicyDialog : ApplicationWindowFo
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MinimizeBox = MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(AppScale.Scale(515), AppScale.Scale(405));
+        ClientSize = new Size(AppScale.Scale(535), AppScale.Scale(460));
         BackColor = AppTheme.PageBackground;
 
         eventChoice.Items.AddRange(new object[]
@@ -58,7 +58,7 @@ internal sealed class CommunicationFeeReminderPolicyDialog : ApplicationWindowFo
             Dock = DockStyle.Fill,
             AutoEllipsis = true,
             ForeColor = AppTheme.MutedText,
-            Text = "These limits reduce repeated fee reminders to the same registered family. They apply to Event Suggestions, not manually composed messages. Nothing is sent automatically."
+            Text = "These limits apply to fee reminders from Event Suggestions. Manual messages are unaffected."
         };
         var close = new ModernButton { Text = "Close", DialogResult = DialogResult.Cancel };
         CancelButton = close;
@@ -70,7 +70,8 @@ internal sealed class CommunicationFeeReminderPolicyDialog : ApplicationWindowFo
             Padding = new Padding(AppScale.Scale(16))
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        foreach (int height in new[] { 54, 50, 50, 50, 50, 52, 47 })
+        // Give shared caption/input fields their full standard height to prevent overlap.
+        foreach (int height in new[] { 52, 60, 60, 60, 60, 36, 52 })
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(height)));
         layout.Controls.Add(description, 0, 0);
         layout.Controls.Add(HumanUi.Field("Fee reminder type", eventChoice), 0, 1);

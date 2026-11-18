@@ -45,8 +45,8 @@ internal sealed class CommunicationSchoolNoticeDialog : ApplicationWindowForm
         actor=CurrentUser.UserId;
         Text="School Notices";StartPosition=FormStartPosition.CenterParent;
         ShowInTaskbar=MaximizeBox=MinimizeBox=false;BackColor=AppTheme.PageBackground;
-        ClientSize=new Size(AppScale.Scale(850),AppScale.Scale(700));
-        MinimumSize=new Size(AppScale.Scale(690),AppScale.Scale(590));
+        ClientSize=new Size(AppScale.Scale(850),AppScale.Scale(735));
+        MinimumSize=new Size(AppScale.Scale(690),AppScale.Scale(650));
         kind.Items.AddRange(new object[]{"School announcement","Examination / result notice"});kind.SelectedIndex=0;
         language.Items.AddRange(new object[]{"English","اردو / Urdu"});language.SelectedIndex=0;
         heading.PlaceholderText="Short title of this official notice";
@@ -56,15 +56,44 @@ internal sealed class CommunicationSchoolNoticeDialog : ApplicationWindowForm
         audience.ForeColor=AppTheme.MutedText;
         grid.Name="communicationSchoolNoticesGrid";
         grid.ReadOnly=true;grid.MultiSelect=false;grid.SelectionMode=DataGridViewSelectionMode.FullRowSelect;
+        grid.AutoGenerateColumns=false;
+        // Use readable, bounded columns instead of exposing raw SQL names across a wide grid.
+        foreach(var (name,title,width,weight) in new[]
+        {
+            ("EventCode","Type",115,95),("Title","Notice title",185,190),
+            ("ApprovedAudience","Audience",130,130),("ApprovedUtc","Approved (UTC)",120,110),
+            ("ExpiresUtc","Expires (UTC)",120,110),("RevokedUtc","Revoked (UTC)",120,110)
+        })
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name=name,DataPropertyName=name,HeaderText=title,MinimumWidth=AppScale.Scale(width),
+                AutoSizeMode=DataGridViewAutoSizeColumnMode.Fill,FillWeight=weight
+            });
+        foreach(string column in new[]{"ApprovedUtc","ExpiresUtc","RevokedUtc"})
+        {
+            grid.Columns[column]!.DefaultCellStyle.Format="dd MMM yy HH:mm";
+            grid.Columns[column]!.DefaultCellStyle.Alignment=DataGridViewContentAlignment.MiddleCenter;
+        }
+        grid.Columns["EventCode"]!.DefaultCellStyle.Alignment=DataGridViewContentAlignment.MiddleCenter;
+        grid.CellFormatting+=(_,e)=>
+        {
+            if(e.RowIndex<0 || e.ColumnIndex<0 || grid.Columns[e.ColumnIndex].Name!="EventCode")return;
+            if(e.Value is string code)
+            {
+                e.Value=code=="ExaminationResult"?"Exam / result":code=="Announcement"?"Announcement":code;
+                e.FormattingApplied=true;
+            }
+        };
         var root=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=9,
             Padding=new Padding(AppScale.Scale(12)),Margin=Padding.Empty};
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-        foreach(int fixedHeight in new[]{44,52,48,48,132,48,48,26})
+        // Shared field captions need enough height above the inputs, including at higher DPI.
+        foreach(int fixedHeight in new[]{42,64,34,64,140,64,54,30})
             root.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(fixedHeight)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         root.Controls.Add(new Label{Dock=DockStyle.Fill,AutoEllipsis=true,ForeColor=AppTheme.MutedText,
-            Text="Approve a real school-issued notice, then use Event Suggestions or separately authorized API automation. This does not generate examination results or send messages."},0,0);
-        var header=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2};
+            Text="Approve an official notice for Event Suggestions or authorized automation. Approval does not send a message."},0,0);
+        var header=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,Margin=Padding.Empty};
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,55));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,45));
         header.Controls.Add(HumanUi.Field("Notice type",kind,true),0,0);
@@ -73,17 +102,15 @@ internal sealed class CommunicationSchoolNoticeDialog : ApplicationWindowForm
         root.Controls.Add(audience,0,2);
         root.Controls.Add(HumanUi.Field("Notice title",heading,true),0,3);
         root.Controls.Add(HumanUi.Field("Official notice text",noticeText,true),0,4);
-        var options=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2};
+        var options=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,Margin=Padding.Empty};
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,67));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,33));
         options.Controls.Add(HumanUi.Field("Source reference (required for exam/result)",sourceReference),0,0);
         options.Controls.Add(HumanUi.Field("Valid for (hours)",expiryHours,true),1,0);
         root.Controls.Add(options,0,5);
-        var commands=new FlowLayoutPanel{Dock=DockStyle.Fill,WrapContents=false,Margin=Padding.Empty};
         var close=new ModernButton{Text="Close",Width=AppScale.Scale(95)};
         close.Click+=(_,_)=>Close();
-        commands.Controls.Add(approve);commands.Controls.Add(revoke);commands.Controls.Add(close);
-        root.Controls.Add(commands,0,6);
+        root.Controls.Add(HumanUi.DialogButtons(approve,revoke,close),0,6);
         root.Controls.Add(feedback,0,7);
         root.Controls.Add(grid,0,8);
         Controls.Add(root);
@@ -135,8 +162,6 @@ internal sealed class CommunicationSchoolNoticeDialog : ApplicationWindowForm
         var table=await DatabaseHelper.QueryUserAsync("msg.ReadSchoolNotices");
         if(IsDisposed || actor!=CurrentUser.UserId){table.Dispose();return;}
         var old=results;results=table;grid.DataSource=table;old?.Dispose();
-        foreach(DataGridViewColumn col in grid.Columns)
-            col.Visible=col.Name is "NoticeId" or "EventCode" or "Title" or "ApprovedAudience" or "ApprovedUtc" or "ExpiresUtc" or "RevokedUtc";
         UpdateActions();
     }
 
@@ -225,7 +250,7 @@ internal sealed class SchoolNoticeRevokeReasonDialog:ApplicationWindowForm
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,AppScale.Scale(48)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,AppMetrics.ButtonHeight+AppScale.Scale(12)));
-        root.Controls.Add(new Label{Dock=DockStyle.Fill,Text="Revocation stops future preparation. It cannot withdraw messages already submitted to a provider."},0,0);
+        root.Controls.Add(new Label{Dock=DockStyle.Fill,Text="Revocation stops future preparation, not messages already submitted."},0,0);
         root.Controls.Add(HumanUi.Field("Reason",input,true),0,1);
         root.Controls.Add(HumanUi.DialogButtons(accept,cancel),0,2);
         Controls.Add(root);

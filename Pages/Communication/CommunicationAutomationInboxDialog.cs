@@ -32,8 +32,9 @@ internal sealed class CommunicationAutomationInboxDialog : ApplicationWindowForm
     private readonly Label note=new()
     {
         Dock=DockStyle.Fill,AutoSize=false,ForeColor=AppTheme.MutedText,
-        Text="These are suggestions only. No messages are sent until you review and confirm each message."
+        Text="Select an event to prepare a message; sending still requires confirmation."
     };
+    private readonly TableLayoutPanel layout;
     private readonly Func<Task<IReadOnlyList<CommunicationAutomationInboxStore.Suggestion>>> load;
     private readonly Func<long,Task> dismissAction;
     private bool busy;
@@ -73,7 +74,8 @@ internal sealed class CommunicationAutomationInboxDialog : ApplicationWindowForm
         {
             DataPropertyName="AdmissionNumber",HeaderText="Admission no.",
             MinimumWidth=AppScale.Scale(140),
-            AutoSizeMode=DataGridViewAutoSizeColumnMode.Fill,FillWeight=80
+            AutoSizeMode=DataGridViewAutoSizeColumnMode.Fill,FillWeight=80,
+            DefaultCellStyle={Alignment=DataGridViewContentAlignment.MiddleCenter}
         });
         grid.CellFormatting+=(_,e)=>
         {
@@ -86,17 +88,8 @@ internal sealed class CommunicationAutomationInboxDialog : ApplicationWindowForm
             }
         };
 
-        var actions=new FlowLayoutPanel
-        {
-            Dock=DockStyle.Fill,FlowDirection=FlowDirection.RightToLeft,
-            WrapContents=false,Margin=Padding.Empty
-        };
-        foreach(var button in new[] { close,prepare,dismiss,refresh })
-        {
-            button.Height=AppMetrics.ButtonHeight;
-            actions.Controls.Add(button);
-        }
-        var layout=new TableLayoutPanel
+        var actions=HumanUi.DialogButtons(refresh,dismiss,prepare,close);
+        layout=new TableLayoutPanel
         {
             Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,
             Padding=new Padding(AppScale.Scale(12))
@@ -152,10 +145,11 @@ internal sealed class CommunicationAutomationInboxDialog : ApplicationWindowForm
         var rows=await load();
         if(IsDisposed)return;
         grid.DataSource=rows.ToList();
-        note.Text=rows.Count==0
-            ? "No new school events require review."
-            : rows.Count.ToString("N0")+
-              " school event suggestion(s). Select one to prepare a message using the normal confirmation flow.";
+        // The grid supplies the sole empty-state message; avoid saying "no records" twice.
+        note.ForeColor=AppTheme.MutedText;
+        note.Text=rows.Count==0 ? "" : "Select an event to prepare a message; sending still requires confirmation.";
+        note.Visible=rows.Count>0;
+        layout.RowStyles[0].Height=rows.Count==0 ? 0 : AppScale.Scale(48);
         UpdateActions();
     }
 
@@ -171,6 +165,8 @@ internal sealed class CommunicationAutomationInboxDialog : ApplicationWindowForm
             {
                 note.Text=DbMessage.UserMessage(ex);
                 note.ForeColor=AppTheme.Danger;
+                note.Visible=true;
+                layout.RowStyles[0].Height=AppScale.Scale(56);
             }
         }
         finally
