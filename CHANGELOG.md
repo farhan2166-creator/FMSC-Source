@@ -3,6 +3,15 @@
 Historical entries describe their own release state. Current versions and requirements come from `Installer/core.ps1`, the compatibility contracts and current code.
 
 
+## 1.0.41 — Communication Centre audit follow-up (schema 37)
+
+- Exclude archived admission, payment and birthday event identities before bounded intake selection, so old replay-prevention records never conceal newer eligible messages.
+- Keep source-suggestion SQL failures from stopping independently approved provider dispatch; retain audit diagnostics and all existing permission checks.
+- Search permission-scoped communication history across the database and navigate deterministic pages rather than searching only the newest 100 sessions.
+- Reconcile known Twilio message IDs using a worker-authorized, bounded status GET schedule without creating new provider requests, delivery claims or automatic retries; keep Meta acceptance distinct from verified delivery.
+- Retain immutable provider attempts, restored-school evidence and financial communication history; prune only disposable status-poll metadata and the existing safely terminal work.
+- Add synthetic SQL regressions for more than 300 archived admission identities, scoped history pagination and status-check authorization/backoff.
+
 ## Unreleased — One interactive app per computer
 
 - Refuse a second interactive FMSC process across Windows sessions, bring the existing window or its active dialog forward when possible, and release the guard on exit or crash. Scheduled backups and headless installation verification keep their existing behavior. Backup restore relaunches only after the previous interactive session releases its guard.

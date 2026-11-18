@@ -61,6 +61,35 @@ internal static class CommunicationWorkerClaimSqlChecks
             Sql.P("@Outcome","Accepted"),Sql.P("@ProviderMessageId","SM"+Guid.NewGuid().ToString("N")),Sql.P("@FailureCode",null));
         r.Check(Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE AttemptId=@Id AND ClaimedBy=@User AND ClaimKind='Worker' AND Outcome='Accepted'",
             Sql.P("@Id",attempt),Sql.P("@User",f.Admin))==1,"A provider response preserves original attempt identity and does not imply delivered.");
+        // Status reconciliation only schedules authenticated GET checks for a
+        // known Twilio SID; no HTTP call, send or receipt inference occurs here.
+        SqlParameter[] StatusArgs(Guid activeLease,byte[] proof,int size=3)=>new[]{
+            Sql.P("@UserId",f.Admin),Sql.P("@EnrollmentId",enrollment),
+            Sql.P("@WindowsSid",sid),Sql.P("@SecretHash",proof),
+            Sql.P("@LeaseNonce",activeLease),Sql.P("@MaxRows",size)
+        };
+        await r.Refused("Unbounded delivery-status polling is rejected",()=>{
+            Sql.Proc("msg.ClaimDueTwilioReceipts",StatusArgs(nonce,secretHash,6));
+            return Task.CompletedTask;
+        },51530);
+        await r.Refused("Only an enrolled processor may schedule a Twilio status GET",()=>{
+            Sql.Proc("msg.ClaimDueTwilioReceipts",StatusArgs(nonce,new byte[32]));
+            return Task.CompletedTask;
+        },51261);
+        Sql.Query("UPDATE msg.Attempt SET RequestUtc=DATEADD(minute,-3,RequestUtc) WHERE AttemptId=@Id",
+            Sql.P("@Id",attempt));
+        int receiptsBefore=Sql.Count("SELECT COUNT(*) FROM msg.Receipt");
+        using(var due=Sql.Proc("msg.ClaimDueTwilioReceipts",StatusArgs(nonce,secretHash)))
+            r.Check(due.AsEnumerable().Any(row=>Convert.ToInt64(row["AttemptId"])==attempt) &&
+                Sql.Count("SELECT PollCount FROM msg.AttemptStatusPoll WHERE AttemptId=@Id",
+                    Sql.P("@Id",attempt))==1,
+                "Only an authenticated lease can reserve a bounded provider-status check for a known SID.");
+        using(var repeated=Sql.Proc("msg.ClaimDueTwilioReceipts",StatusArgs(nonce,secretHash)))
+            r.Check(!repeated.AsEnumerable().Any(row=>Convert.ToInt64(row["AttemptId"])==attempt) &&
+                Sql.Count("SELECT COUNT(*) FROM msg.Receipt")==receiptsBefore &&
+                Sql.Count("SELECT COUNT(*) FROM msg.Attempt WHERE AttemptId=@Id AND Outcome='Accepted'",
+                    Sql.P("@Id",attempt))==1,
+                "Status claims back off without resending or fabricating delivery evidence.");
         await r.Refused("Existing enrollment cannot be rebound to another restore boundary",()=>{
             Sql.Query("UPDATE msg.BackgroundWorkerEnrollment SET RestoreBoundaryHash=HASHBYTES('SHA2_256',N'changed') WHERE EnrollmentId=@Id",Sql.P("@Id",enrollment));return Task.CompletedTask;
         },51344);

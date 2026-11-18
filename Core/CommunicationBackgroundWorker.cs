@@ -122,10 +122,19 @@ internal static class CommunicationBackgroundWorker
                         token, DatabaseHelper.Int("@UserId",enrollment.UserId));
                 }
             }
-            catch(SqlException ex) when(ex.Number==50003)
+            catch(SqlException ex)
+            {
+                // Source discovery is advisory and never authorizes dispatch.
+                // A malformed/locked source must not starve independently
+                // reviewed messages already in the durable Queue. Keep the
+                // failure visible for repair; SQL retains the bounded scan slot.
+                AppExceptionHandler.LogNonFatal(ex,
+                    "Communication event intake failed; reviewed dispatch continues");
+            }
+            catch(InvalidDataException ex)
             {
                 AppExceptionHandler.LogNonFatal(ex,
-                    "Communication event review scan needs renewed school permissions");
+                    "Communication event intake response invalid; reviewed dispatch continues");
             }
 
             // Current computer authorization is also required before preparing
@@ -236,6 +245,10 @@ internal static class CommunicationBackgroundWorker
                 }
                 if(deferredBatches.Count>=80) break;
             }
+            // Reconcile only known Twilio provider references using authenticated
+            // status GETs. The polling schedule is separate from the immutable
+            // submission journal, and cannot create another HTTP POST.
+            await RefreshTwilioReceiptsAsync(enrollment,leaseNonce,token);
             return 0;
         }
         catch(SqlException ex) when(ex.Number is 51261 or 51262 or 51263 or 51240 or 51241 or 51249 or 51250 or 51251 or 51293 or 51294)
@@ -268,6 +281,51 @@ internal static class CommunicationBackgroundWorker
                 }
             }
             if(signedIn)CurrentUser.SignOut();
+        }
+    }
+
+    private static async Task RefreshTwilioReceiptsAsync(
+        CommunicationBackgroundEnrollment.Enrollment enrollment,Guid lease,CancellationToken token)
+    {
+        // Avoid extending the short unattended pass indefinitely. SQL limits
+        // checks to five, 24 checks per attempt, and seven days after submission.
+        using var budget=CancellationTokenSource.CreateLinkedTokenSource(token);
+        budget.CancelAfter(TimeSpan.FromSeconds(12));
+        try
+        {
+            using var due=await DatabaseHelper.QueryUserAsync(
+                "msg.ClaimDueTwilioReceipts",budget.Token,
+                CommunicationBackgroundEnrollment.Proof(enrollment,lease)
+                    .Concat(new[]{DatabaseHelper.Int("@MaxRows",3)}).ToArray());
+            foreach(DataRow row in due.Rows)
+            {
+                if(budget.IsCancellationRequested) break;
+                if(enrollment.UserId!=CurrentUser.UserId)
+                    throw new UnauthorizedAccessException("Authorized processor identity changed.");
+                try
+                {
+                    // The existing reconciliation path independently checks
+                    // source permissions and verifies the actual Twilio GET.
+                    await CommunicationDispatchStore.ReconcileKnownAttemptAsync(
+                        Convert.ToInt64(row["AttemptId"]),budget.Token);
+                }
+                catch(OperationCanceledException) when(budget.IsCancellationRequested) { break; }
+                catch(Exception ex) when(ex is SqlException or CommunicationValidationException
+                    or HttpRequestException or InvalidOperationException)
+                {
+                    AppExceptionHandler.LogNonFatal(ex,
+                        "Twilio receipt status could not be verified; provider outcome unchanged");
+                }
+            }
+        }
+        catch(OperationCanceledException) when(budget.IsCancellationRequested) { }
+        catch(Exception ex) when(ex is SqlException or CommunicationValidationException
+            or InvalidOperationException)
+        {
+            // A status read never blocks unrelated sending or changes the
+            // immutable original provider submission.
+            AppExceptionHandler.LogNonFatal(ex,
+                "Deferred bounded Twilio delivery-status reconciliation");
         }
     }
 }

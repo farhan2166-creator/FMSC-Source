@@ -73,6 +73,12 @@ public sealed partial class CommunicationCenterPage
         }
     }
 
+    private const int HistoryPageSize = 100;
+    private int historyPage;
+    private bool historyHasMore;
+    private ModernTextBox? historySearch;
+    private ModernButton? historyPrevious, historyOlder;
+    private readonly System.Windows.Forms.Timer historySearchTimer = new() { Interval = 350 };
     private readonly ModernComboBox queueView = HumanUi.Combo();
     private readonly ModernButton eventSuggestionsButton =
         PageButton("communicationEventSuggestions","Event Suggestions",168);
@@ -139,7 +145,26 @@ public sealed partial class CommunicationCenterPage
             e.Handled = e.SuppressKeyPress = true;
             await OpenSessionAsync(grid.CurrentRow, unfinished);
         };
-        search.TextChanged += (_, _) => FilterSessions(grid, search.Text, unfinished);
+        if (unfinished || operations.ReadSessions is not null)
+            search.TextChanged += (_, _) => FilterSessions(grid, search.Text, unfinished);
+        else
+        {
+            historySearch = search;
+            search.TextChanged += (_, _) =>
+            {
+                historyPage = 0;
+                historySearchTimer.Stop();
+                historySearchTimer.Start();
+            };
+            historySearchTimer.Tick += async (_, _) =>
+            {
+                historySearchTimer.Stop();
+                if (IsDisposed || step != HistoryStep) return;
+                if (IsBusy) { historySearchTimer.Start(); return; }
+                await NavigateSessionsAsync(false);
+            };
+            Disposed += (_, _) => historySearchTimer.Dispose();
+        }
         grid.DataSourceChanged += (_, _) => FilterSessions(grid, search.Text, unfinished);
         bool allowExport = !unfinished && CurrentUser.HasPermission("Communication.View")
             && CurrentUser.HasPermission("Communication.Configure");
@@ -169,6 +194,31 @@ public sealed partial class CommunicationCenterPage
             export.Click += async (_, _) => await ExportHistoryAsync();
             toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(150)));
             toolbar.Controls.Add(export, 2, 0);
+        }
+        if (!unfinished && operations.ReadSessions is null)
+        {
+            historyPrevious = PageButton("communicationHistoryPrevious", "Newer messages", 155);
+            historyOlder = PageButton("communicationHistoryOlder", "Older messages", 155);
+            historyPrevious.Dock = historyOlder.Dock = DockStyle.Fill;
+            historyPrevious.Click += async (_, _) =>
+            {
+                if (IsBusy || historyPage == 0) return;
+                historyPage--;
+                await NavigateSessionsAsync(false);
+            };
+            historyOlder.Click += async (_, _) =>
+            {
+                if (IsBusy || !historyHasMore) return;
+                historyPage++;
+                await NavigateSessionsAsync(false);
+            };
+            toolbar.RowCount = 2;
+            toolbar.Height = 2 * (AppMetrics.ButtonHeight + AppScale.Scale(10));
+            toolbar.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            toolbar.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            toolbar.Controls.Add(historyPrevious, 0, 1);
+            toolbar.Controls.Add(historyOlder, 1, 1);
+            historyPrevious.Enabled = historyOlder.Enabled = false;
         }
         if(unfinished)
         {
@@ -309,7 +359,8 @@ public sealed partial class CommunicationCenterPage
             var read = operations.ReadSessions;
             DataTable table = await (read is not null ? read(unfinished) : unfinished
                 ? CommunicationManagementStore.ReadMyUnfinishedBatchesAsync()
-                : CommunicationManagementStore.ReadHistoryAsync());
+                : CommunicationManagementStore.ReadHistoryAsync(
+                    HistoryPageSize + 1, historySearch?.Text, historyPage * HistoryPageSize));
             if (IsDisposed || actor != CurrentUser.UserId)
             {
                 table.Dispose();
@@ -323,6 +374,19 @@ public sealed partial class CommunicationCenterPage
 
     private void BindSessions(DataTable table, bool unfinished)
     {
+        if (!unfinished && operations.ReadSessions is null)
+        {
+            historyHasMore = table.Rows.Count > HistoryPageSize;
+            while (table.Rows.Count > HistoryPageSize)
+                table.Rows[table.Rows.Count - 1].Delete();
+            table.AcceptChanges();
+            if (historyPrevious is not null)
+            {
+                historyPrevious.Enabled = historyPage > 0;
+                historyPrevious.Text = historyPage == 0 ? "Newer messages" : $"Newer · page {historyPage}";
+            }
+            if (historyOlder is not null) historyOlder.Enabled = historyHasMore;
+        }
         table.Columns.Add("MethodText", typeof(string));
         table.Columns.Add("AudienceText", typeof(string));
         table.Columns.Add("StateText", typeof(string));
@@ -383,6 +447,14 @@ public sealed partial class CommunicationCenterPage
         string statusClause = unfinished && queueView.SelectedIndex is 0 or 1
             ? "QueueStatus = '" + (queueView.SelectedIndex == 0 ? "Needs Attention" : "Upcoming") + "'"
             : "";
+        // History is searched and paginated in SQL, before the 100-row window.
+        // A second client-only filter could hide a valid server-side match.
+        if (!unfinished && operations.ReadSessions is null)
+        {
+            table.DefaultView.RowFilter = string.Empty;
+            grid.Invalidate();
+            return;
+        }
         if (query.Length == 0) table.DefaultView.RowFilter = statusClause;
         else
         {

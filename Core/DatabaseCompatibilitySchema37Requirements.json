@@ -1,0 +1,25 @@
+{
+  "objects": [
+    {
+      "schema": "msg",
+      "name": "ScanAutomationCandidates",
+      "type": "P "
+    },
+    {
+      "schema": "msg",
+      "name": "AutomationSourceTombstone",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "AttemptStatusPoll",
+      "type": "U "
+    },
+    {
+      "schema": "msg",
+      "name": "ClaimDueTwilioReceipts",
+      "type": "P "
+    }
+  ],
+  "triggers": []
+}

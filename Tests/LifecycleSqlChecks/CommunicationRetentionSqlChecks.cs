@@ -93,6 +93,81 @@ internal static class CommunicationRetentionSqlChecks
             r.Check(Convert.ToInt32(second.Rows[0]["PrunedTerminalPlans"])==0 &&
                 Convert.ToInt32(second.Rows[0]["ArchivedExpiredSuggestions"])==0,
                 "Repeated cleanup is idempotent and cannot erase older replay evidence.");
+
+        // More than TOP(300) historical archived admission identities must not
+        // starve two genuinely new admissions. Everything is rolled back on
+        // this isolated disposable SQL catalog; no live recipients are used.
+        int discovered = Sql.Count("""
+            SET NOCOUNT ON;
+            BEGIN TRY
+              BEGIN TRANSACTION;
+              DECLARE @Baseline int=ISNULL((SELECT MAX(AdmissionId) FROM dbo.Students),0);
+              UPDATE msg.AutomationRule
+                 SET Mode='Off' WHERE EventCode<>'Admission';
+              UPDATE msg.AutomationRule
+                 SET Mode='Review',CampusId=0,ClassId=0,BaselineAdmissionId=@Baseline
+               WHERE EventCode='Admission';
+              DECLARE @Inserted TABLE(AdmissionId int PRIMARY KEY);
+              ;WITH N AS (
+                SELECT TOP(310) ROW_NUMBER() OVER(ORDER BY A.object_id,B.object_id) Seq
+                FROM sys.all_objects A CROSS JOIN sys.all_objects B
+              )
+              INSERT dbo.Students(AdmissionNumber,AdmissionDate,AdmissionCampusId,
+                  StudentName,ContactNumber,Status,LegacySetupPending,
+                  SchoolMessageConsent,SchoolMessageConsentUtc,SchoolMessageConsentBy)
+                OUTPUT inserted.AdmissionId INTO @Inserted(AdmissionId)
+              SELECT CONVERT(nvarchar(40),900000000+Seq),CONVERT(date,SYSUTCDATETIME()),
+                  @Campus,CONCAT(N'Synthetic archived intake ',Seq),N'03008000281',
+                  N'Active',0,CONVERT(bit,1),SYSUTCDATETIME(),@Admin
+              FROM N;
+              ;WITH Ranked AS (
+                 SELECT AdmissionId,ROW_NUMBER() OVER(ORDER BY AdmissionId DESC) RankNew
+                 FROM @Inserted
+              )
+              INSERT msg.AutomationSourceTombstone(EventCode,SourceKey)
+              SELECT 'Admission',CONCAT('AD:',AdmissionId) FROM Ranked WHERE RankNew>2;
+              DECLARE @Scanned TABLE(NewSuggestions int);
+              INSERT @Scanned EXEC msg.ScanAutomationCandidates @UserId=@Admin;
+              DECLARE @Found int=(
+                  SELECT COUNT(*) FROM msg.AutomationCandidate C
+                  JOIN @Inserted I ON I.AdmissionId=C.AdmissionId
+                  WHERE C.EventCode='Admission'
+              );
+              IF (SELECT TOP(1) NewSuggestions FROM @Scanned)<>2
+                SET @Found=-1;
+              ROLLBACK TRANSACTION;
+              SELECT @Found;
+            END TRY
+            BEGIN CATCH
+              IF @@TRANCOUNT>0 ROLLBACK TRANSACTION;
+              THROW;
+            END CATCH;
+            """, Sql.P("@Admin",f.Admin),Sql.P("@Campus",f.Campus));
+        r.Check(discovered==2,
+            "Archived histories larger than the bounded intake window cannot conceal newly eligible admissions.");
+
+        // History is searched before pagination in SQL, not restricted to
+        // the first hundred in-memory rows. Search is permission-scoped.
+        using (var none = Sql.Proc("msg.ReadHistory",
+            Sql.P("@UserId",f.Admin),Sql.P("@Limit",101),
+            Sql.P("@Search","no-synthetic-message-can-match-"+Guid.NewGuid().ToString("N")),
+            Sql.P("@Offset",0)))
+            r.Check(none.Rows.Count==0,
+                "History queries with no school-record match do not return unrelated sessions.");
+        using (var firstPage = Sql.Proc("msg.ReadHistory",
+            Sql.P("@UserId",f.Admin),Sql.P("@Limit",1),Sql.P("@Offset",0)))
+        using (var secondPage = Sql.Proc("msg.ReadHistory",
+            Sql.P("@UserId",f.Admin),Sql.P("@Limit",1),Sql.P("@Offset",1)))
+            r.Check(firstPage.Rows.Count<=1 && secondPage.Rows.Count<=1 &&
+                (firstPage.Rows.Count==0 || secondPage.Rows.Count==0 ||
+                (Guid)firstPage.Rows[0]["BatchId"]!=(Guid)secondPage.Rows[0]["BatchId"]),
+                "Communication history pages do not repeat batches at adjacent offsets.");
+        await r.Refused("History pagination cannot bypass Communication.View authorization",()=>{
+            Sql.Proc("msg.ReadHistory",Sql.P("@UserId",f.Restricted),
+                Sql.P("@Limit",101),Sql.P("@Search","student"),Sql.P("@Offset",0));
+            return Task.CompletedTask;
+        },50003);
+
         r.Check(schoolBefore==Sql.Count("SELECT COUNT(*) FROM dbo.Students") &&
             feesBefore==Sql.Count("SELECT COUNT(*) FROM dbo.FeePayments") &&
             batchesBefore==Sql.Count("SELECT COUNT(*) FROM msg.Batch") &&
