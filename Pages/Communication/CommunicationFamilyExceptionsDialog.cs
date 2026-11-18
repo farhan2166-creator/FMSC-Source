@@ -26,7 +26,8 @@ internal sealed class CommunicationFamilyExceptionsDialog : ApplicationWindowFor
     private readonly Label status=new()
     {
         Dock=DockStyle.Fill,AutoSize=false,ForeColor=AppTheme.MutedText,
-        Text="Select one student in the family, the event and a reason."
+        // Guidance is already supplied by the field captions; reserve this area for results/errors.
+        Text=""
     };
     private readonly ModernButton save=new()
     {
@@ -53,7 +54,7 @@ internal sealed class CommunicationFamilyExceptionsDialog : ApplicationWindowFor
     internal CommunicationFamilyExceptionsDialog()
     {
         Text="Family Communication Exceptions";
-        ClientSize=new Size(AppScale.Scale(780),AppScale.Scale(565));
+        ClientSize=new Size(AppScale.Scale(780),AppScale.Scale(535));
         StartPosition=FormStartPosition.CenterParent;
         ShowInTaskbar=false;
         MinimizeBox=MaximizeBox=false;
@@ -99,6 +100,8 @@ internal sealed class CommunicationFamilyExceptionsDialog : ApplicationWindowFor
             DataPropertyName="Reason",MinimumWidth=AppScale.Scale(180),
             AutoSizeMode=DataGridViewAutoSizeColumnMode.Fill,FillWeight=140
         });
+        grid.Columns["EventCode"]!.DefaultCellStyle.Alignment=DataGridViewContentAlignment.MiddleCenter;
+        grid.Columns["ExpiryDisplay"]!.DefaultCellStyle.Alignment=DataGridViewContentAlignment.MiddleCenter;
         grid.CellFormatting+=(_,e)=>
         {
             if(e.RowIndex<0 || e.ColumnIndex<0 ||
@@ -123,15 +126,7 @@ internal sealed class CommunicationFamilyExceptionsDialog : ApplicationWindowFor
         };
         expiryRow.Controls.Add(hasExpiry);
         expiryRow.Controls.Add(until);
-        var actions=new FlowLayoutPanel
-        {
-            Dock=DockStyle.Fill,WrapContents=false,FlowDirection=FlowDirection.RightToLeft
-        };
-        foreach(var button in new[]{close,revoke,save})
-        {
-            button.Height=AppMetrics.ButtonHeight;
-            actions.Controls.Add(button);
-        }
+        var actions=HumanUi.DialogButtons(save,revoke,close);
         var layout=new TableLayoutPanel
         {
             Dock=DockStyle.Fill,ColumnCount=1,RowCount=6,

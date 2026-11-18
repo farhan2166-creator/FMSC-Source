@@ -102,16 +102,9 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         preferenceRow.Controls.Add(savePreferred,1,0);
         layout.Controls.Add(preferenceRow,0,3);
         layout.Controls.Add(feedback, 0, 4);
-        var footer = new Panel { Dock = DockStyle.Fill };
-        block.Dock = DockStyle.Left;
-        block.Width = AppScale.Scale(175);
-        close.Dock = DockStyle.Right;
-        close.Width = AppScale.Scale(100);
-        messageLanguage.Dock = DockStyle.Left;
-        messageLanguage.Width = AppScale.Scale(180);
+        // Shared FMSC footer keeps dialog actions centered and ordered at every supported scale.
         messageLanguage.Enabled = useLivePreferences;
-        footer.Controls.AddRange(new Control[] { block, messageLanguage, close });
-        layout.Controls.Add(footer, 0, 5);
+        layout.Controls.Add(HumanUi.DialogButtons(messageLanguage, block, close), 0, 5);
         var sendingTab = new TabPage("Sending") { BackColor = AppTheme.PageBackground };
         sendingTab.Controls.Add(layout);
         settingsTabs.TabPages.Add(sendingTab);
@@ -162,24 +155,43 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         return field;
     }
 
+    private static TableLayoutPanel CenteredSettingRow(ModernButton button, Label state)
+    {
+        var centered = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty
+        };
+        centered.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        centered.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        centered.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        var controls = new FlowLayoutPanel
+        {
+            AutoSize = true, FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false, Margin = Padding.Empty
+        };
+        button.Height = AppMetrics.ButtonHeight;
+        state.Margin = new Padding(AppScale.Scale(12), AppScale.Scale(9), 0, 0);
+        controls.Controls.Add(button);
+        controls.Controls.Add(state);
+        centered.Controls.Add(controls, 1, 0);
+        return centered;
+    }
+
     private TabPage BuildQueueTab()
     {
         var page = new TabPage("Queue & Schedule") { BackColor = AppTheme.PageBackground };
         var content = new TableLayoutPanel
         {
-            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 8,
+            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 9,
             Padding = new Padding(AppScale.Scale(15)), Margin = Padding.Empty
         };
         content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        for (int i = 0; i < 8; i++)
-            content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(i == 0 ? 58 : 65)));
+        foreach (int height in new[] { 58, 60, 60, 60, 60, 52, 52, 60, 42 })
+            content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(height)));
 
-        var masterRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
         masterToggle.Width = AppScale.Scale(190);
-        masterToggle.Height = AppMetrics.ButtonHeight;
-        masterRow.Controls.Add(masterToggle);
-        masterRow.Controls.Add(masterState);
+        var masterRow = CenteredSettingRow(masterToggle, masterState);
         content.Controls.Add(masterRow, 0, 0);
         content.SetColumnSpan(masterRow, 2);
 
@@ -188,7 +200,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         content.Controls.Add(Labelled("Sending starts", startTime), 0, 1);
         content.Controls.Add(Labelled("Sending ends", endTime), 1, 1);
         content.Controls.Add(Labelled("Maximum API sends per minute", speed), 0, 2);
-        var hoursHint = new Label { Dock = DockStyle.Fill, Text = "Sending hours use this computer's local time until the school timezone is configured.", AutoSize = false, ForeColor = AppTheme.MutedText };
+        var hoursHint = new Label { Dock = DockStyle.Fill, Text = "Times use this computer until a school timezone is set.", AutoSize = false, ForeColor = AppTheme.MutedText };
         content.Controls.Add(hoursHint, 1, 2);
 
         quotaProvider.Items.AddRange(new object[] { "SMS · Twilio", "WhatsApp · Meta API" });
@@ -211,13 +223,9 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         takeover.Enabled = new[] { "Communication.Configure", "Communication.Send",
             "Communication.View", "Students.View", "Staff.View", "Fees.View" }
             .All(CurrentUser.HasPermission);
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true };
-        foreach (var button in new[] { saveWindow, saveQuota, calendarButton, takeover })
-        {
-            button.Width = AppScale.Scale(button == calendarButton ? 200 : button == takeover ? 150 : 165);
-            button.Height = AppMetrics.ButtonHeight;
-            actions.Controls.Add(button);
-        }
+        // Two centered rows avoid the clipped horizontal button strip.
+        var actions = HumanUi.DialogButtons(saveWindow, saveQuota);
+        var moreActions = HumanUi.DialogButtons(calendarButton, takeover);
         takeover.Click += (_, _) =>
         {
             if (busy || !takeover.Enabled) return;
@@ -231,14 +239,13 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
         };
         content.Controls.Add(actions, 0, 5);
         content.SetColumnSpan(actions, 2);
-        var workerRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true };
+        content.Controls.Add(moreActions, 0, 6);
+        content.SetColumnSpan(moreActions, 2);
         workerToggle.Width = AppScale.Scale(235);
-        workerToggle.Height = AppMetrics.ButtonHeight;
-        workerRow.Controls.Add(workerToggle);
-        workerRow.Controls.Add(workerState);
-        content.Controls.Add(workerRow, 0, 6);
+        var workerRow = CenteredSettingRow(workerToggle, workerState);
+        content.Controls.Add(workerRow, 0, 7);
         content.SetColumnSpan(workerRow, 2);
-        content.Controls.Add(queueFeedback, 0, 7);
+        content.Controls.Add(queueFeedback, 0, 8);
         content.SetColumnSpan(queueFeedback, 2);
 
         masterToggle.Click += async (_, _) => await RunAsync(async () =>
@@ -351,7 +358,7 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             content.RowStyles.Add(new RowStyle(SizeType.Absolute, AppScale.Scale(height)));
         content.Controls.Add(new Label
         {
-            Text = "Each event starts Off. Prepare for Review requires an operator; Send Automatically needs a separate administrator approval for its API method, template and limits.",
+            Text = "Events start Off. Review mode needs confirmation; automatic API sending requires separate administrator approval.",
             Dock = DockStyle.Fill, ForeColor = AppTheme.MutedText, AutoSize = false
         }, 0, 0);
         var rule = Labelled("School event", automationEvent);
@@ -371,23 +378,13 @@ internal sealed class CommunicationSendingOptionsDialog : ApplicationWindowForm
             Name = "communicationFeeReminderLimits", Text = "Fee Reminder Limits…",
             ThemeRole = "Secondary", Width = AppScale.Scale(187)
         };
-        var automationActions = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty
-        };
-        save.Height = exceptions.Height = feeLimits.Height = AppMetrics.ButtonHeight;
-        automationActions.Controls.Add(save);
-        automationActions.Controls.Add(exceptions);
-        automationActions.Controls.Add(feeLimits);
-        content.Controls.Add(automationActions, 0, 3);
+        content.Controls.Add(HumanUi.DialogButtons(save, exceptions, feeLimits), 0, 3);
         var schoolNotices=new ModernButton
         {
             Name="communicationSchoolNotices",Text="School Notices…",
             ThemeRole="Secondary",Width=AppScale.Scale(185),Height=AppMetrics.ButtonHeight
         };
-        var noticeActions=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false,Margin=Padding.Empty};
-        noticeActions.Controls.Add(schoolNotices);
-        content.Controls.Add(noticeActions,0,4);
+        content.Controls.Add(HumanUi.DialogButtons(schoolNotices),0,4);
         content.Controls.Add(automationFeedback, 0, 5);
         schoolNotices.Click+=(_,_) =>
         {

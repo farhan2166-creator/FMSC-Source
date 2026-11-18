@@ -109,6 +109,8 @@ public sealed partial class CommunicationCenterPage
             });
         }
         grid.Columns["CreatedUtc"]!.DefaultCellStyle.Format = "dd MMM yyyy  HH:mm";
+        grid.Columns["CreatedUtc"]!.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+        grid.Columns["MethodText"]!.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
         if (unfinished)
         {
             grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -124,6 +126,8 @@ public sealed partial class CommunicationCenterPage
                 FillWeight = 95, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill
             });
             grid.Columns["DueLocal"]!.DefaultCellStyle.Format = "dd MMM yyyy HH:mm";
+            foreach (string column in new[] { "InProgress", "QueueStatus", "DueLocal" })
+                grid.Columns[column]!.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
         }
         var search = HumanUi.TextBox(false, 100);
         search.Name = unfinished ? "communicationUnfinishedSearch" : "communicationHistorySearch";
@@ -171,7 +175,7 @@ public sealed partial class CommunicationCenterPage
         var toolbar = new TableLayoutPanel
         {
             Dock = DockStyle.Top, Height = AppMetrics.ButtonHeight + AppScale.Scale(10),
-            ColumnCount = unfinished ? 4 : allowExport ? 3 : 2, RowCount = 1, Margin = Padding.Empty
+            ColumnCount = unfinished ? 3 : allowExport ? 3 : 2, RowCount = 1, Margin = Padding.Empty
         };
         if (unfinished)
         {
@@ -224,9 +228,6 @@ public sealed partial class CommunicationCenterPage
         {
             eventSuggestionsButton.Visible=CurrentUser.HasPermission("Communication.Configure")
                 && CurrentUser.HasPermission("Fees.View");
-            eventSuggestionsButton.Dock=DockStyle.Fill;
-            toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,AppScale.Scale(190)));
-            toolbar.Controls.Add(eventSuggestionsButton,3,0);
             var recurring=PageButton("communicationRecurringSchedules","Recurring Schedules…",185);
             recurring.Click+=async(_,_)=>{
                 using var schedules=new CommunicationRecurringSchedulesDialog();
@@ -235,7 +236,9 @@ public sealed partial class CommunicationCenterPage
             };
             toolbar.RowCount=2;toolbar.Height=2*(AppMetrics.ButtonHeight+AppScale.Scale(10));
             toolbar.RowStyles.Add(new RowStyle(SizeType.Percent,50));toolbar.RowStyles.Add(new RowStyle(SizeType.Percent,50));
-            toolbar.Controls.Add(recurring,0,1);toolbar.SetColumnSpan(recurring,2);
+            // Keep filters on the first row and center the related actions on the second.
+            var queueActions=HumanUi.DialogButtons(recurring,eventSuggestionsButton);
+            toolbar.Controls.Add(queueActions,0,1);toolbar.SetColumnSpan(queueActions,3);
 
             eventSuggestionsButton.Click+=(_,_)=>OpenAutomationInbox();
         }
