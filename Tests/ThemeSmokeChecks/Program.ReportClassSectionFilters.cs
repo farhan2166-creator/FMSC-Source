@@ -41,7 +41,7 @@ internal static partial class Program
         var filters = new ReportClassSectionFilters(campus, cls, section);
         filters.Bind(classes, sections, placements);
         static int[] Choices(LookupBox box) => box.Items.Cast<DataRowView>()
-            .Select(row => Convert.ToInt32(row[box.KeyColumn == "Id" ? box.ValueMember : box.KeyColumn]))
+            .Select(row => Convert.ToInt32(row[box.ValueMember]))
             .Where(id => id > 0).OrderBy(id => id).ToArray();
 
         Check(Choices(cls).SequenceEqual(new[] { 10, 20, 30 }) &&
