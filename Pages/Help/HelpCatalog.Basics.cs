@@ -102,7 +102,7 @@ internal static partial class HelpCatalog
             new[] { HelpRule.System, HelpRule.Recovery }, HelpOwner.CSharp | HelpOwner.Environment,
             new[] { "Core/DatabaseConnectionForm.cs#DatabaseConnectionForm" }, System.Array.Empty<string>(), ""),
         new("FAQ-063", "Database & Recovery", "How do I make a verified backup?",
-            "With Backup.Create permission, open Backup / Restore. Choose a local folder if local backups are enabled, configure the allowed Local and/or Dropbox destinations in Settings, then select Back Up Now. Review the result and Activity History: the SQL backup is verified, and a pending cloud upload is not yet a verified remote copy. Keep a protected separate recovery copy.",
+            "With Backup.Create permission, open Backup / Restore. Choose a local folder if local backups are enabled; an administrator with Backup.Restore permission configures Local and/or Dropbox destinations in Settings. Select Back Up Now. Review the result and Activity History: a pending cloud upload is not yet a verified remote copy. Keep a protected separate recovery copy.",
             "backup,bak,verify,copy", "Backup / Restore",
             new[] { HelpRule.System, HelpRule.Choice, HelpRule.Permission, HelpRule.Recovery }, HelpOwner.CSharp | HelpOwner.Environment,
             new[] { "Pages/Administration/BackupRestorePage.cs#BackupRestorePage", "Services/Backup/DatabaseBackupManager.cs" }, new[] { "FAQ-064" }, ""),
