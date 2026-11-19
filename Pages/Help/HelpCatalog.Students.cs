@@ -108,7 +108,7 @@ internal static partial class HelpCatalog
             new[] { "Pages/Staff/StaffManagementPage.cs#StaffManagementPage", "fmsc.dacpac#SaveStaffEmployment", "fmsc.dacpac#EndStaffEmployment" }, System.Array.Empty<string>(), ""),
         new("FAQ-056", "Staff", "Where are staff certificates located?",
             "Open Staff → Teacher / Staff Certificates to find the employee and choose an eligible Teacher/Lecturer or Bank Account certificate. Verify the selected employee, employment details and required permissions before issuing or printing. Student Certificates is a separate workspace.",
-            "teacher,bank,staff,certificate", "Staff",
+            "teacher,bank,staff,certificate", "Staff → Teacher / Staff Certificates",
             new[] { HelpRule.System, HelpRule.Permission }, HelpOwner.CSharp,
             new[] { "MainDashboardForm.cs#MainDashboardForm", "Pages/Staff/Certificates/RegularLecturerCertificatePage.cs#RegularLecturerCertificatePage", "Pages/Staff/Certificates/BankAccountOpeningCertificatePage.cs#BankAccountOpeningCertificatePage" }, System.Array.Empty<string>(), ""),
         new("FAQ-082", "Admissions", "Can I register a student without a phone number?",
