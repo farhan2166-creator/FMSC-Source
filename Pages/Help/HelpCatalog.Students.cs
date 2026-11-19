@@ -18,7 +18,7 @@ internal static partial class HelpCatalog
             new[] { "Pages/Students/Admissions/QuickRegistrationFormPage.cs#QuickRegistrationFormPage", "Pages/Students/Admissions/QuickRegistrationWriter.cs#QuickRegistrationWriter", "fmsc.dacpac#CompleteQuickAdmission" }, new[] { "FAQ-013", "FAQ-014", "FAQ-017", "FAQ-086" }, ""),
         new("FAQ-013", "Admissions", "Can a pending registration pay fees?",
             "Yes. Pending registrations may receive eligible payments, including family collection. They are excluded from ordinary monthly posting, promotion, and official certificates until confirmation.",
-            "pending,payment,quick,monthly", "Student Admissions → Admit Sibling",
+            "pending,payment,quick,monthly", "Daily Work → Pending Registrations / Fee Collection",
             new[] { HelpRule.System }, HelpOwner.SQL | HelpOwner.CSharp,
             new[] { "Pages/Students/Admissions/QuickRegistrationFormPage.cs#QuickRegistrationFormPage", "fmsc.dacpac#ProcessFeeTransaction", "fmsc.dacpac#PreviewMonthlyFees" }, new[] { "FAQ-039", "FAQ-053" }, ""),
         new("FAQ-014", "Admissions", "How do I finish a pending registration?",
