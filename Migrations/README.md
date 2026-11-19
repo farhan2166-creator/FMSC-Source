@@ -1,6 +1,6 @@
 # Production database migrations
 
-**Current source target (12 November 2026): FMSC application 1.0.32, database schema 18.** The committed consecutive production migration chain is `2.sql`–`18.sql`. Apply only scripts newer than the actual attached database's schema version, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
+**Current source target:** read `$AppVersion` and `$DatabaseVersion` in `Installer/core.ps1`; these values, not a dated guide or historical changelog entry, govern the application and SQL requirements. The committed production migration chain begins with `2.sql` and must remain consecutive through the installer-required schema (currently `37.sql`). Apply only scripts newer than the attached database's recorded schema, using the checked installer or the standalone migration tool below. This is source-state guidance, **not** proof of an installed/published release or authorization to update live school data.
 
 **Historical starting point:** The first production release used application **1.0.0**, database **1**.
 The schema-1 baseline contains the complete original production schema.
@@ -227,3 +227,15 @@ defaults to false for existing batches; no old unused picker ID becomes a new
 recipient restriction. The installer still owns the verified backup, exclusive
 migration lock, transaction and application compatibility checks. The schema-18
 contract is embedded in the application; no root DACPAC publish is needed.
+
+## Later Communication Centre migrations — schemas 19–37
+
+The earlier sections document historical milestones; **schema 18 is not the current chain endpoint**. The numbered migrations after 18 extend the same guarded upgrade path:
+
+- **19–22:** reviewed manual handoff and fee membership, explicitly enrolled API-provider batches, distinct Meta acceptance versus verified delivery, and family-contact resolution.
+- **23–27:** fail-closed dispatch and scheduling settings, opt-in background-worker infrastructure, review-only event/fee intake, language settings, and consent/contact consistency.
+- **28–33:** immutable financial review proof, database-restore holds and independent provider-attempt evidence, worker authorization, scoped event intake, and guarded administrator takeover.
+- **34–35:** reviewed recurring-work planning and explicitly approved automatic-event authorization; configuring these structures does not itself authorize sending.
+- **36–37:** bounded operational retention with permanent replay-prevention identities, followed by a correction preventing archived identities from starving new intake scans.
+
+Read the actual SQL files and the current compatibility manifests for the authoritative changes and prerequisites. Existing school, financial and messaging evidence is not disposable simply because an operational queue row is old. All upgrades continue to require verified backups, the migration transaction and exact-build compatibility checks.
