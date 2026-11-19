@@ -116,7 +116,7 @@ internal static partial class Program
                 Check(Math.Abs(feePolicyBounds.Top-signatureBounds.Top)<=2 &&
                     Math.Abs(feePolicyBounds.Bottom-signatureBounds.Bottom)<=2 &&
                     feePolicyBounds.Right<=signatureBounds.Left,
-                    $"School Profile Fee Policy and Principal Signature stay paired and aligned at {width}");
+                    $"School Profile Fee Policy and Principal Signature stay paired and aligned at {width}: fee={feePolicyBounds}, signature={signatureBounds}, pair={feePolicyCard.Parent?.ClientSize}, left={feePolicyCard.Parent?.Parent?.ClientSize}");
                 // At a short window height, the left-hand fields may extend
                 // below the viewport. The logo must fill its actual visible
                 // column, not an imaginary height based on offscreen controls.
