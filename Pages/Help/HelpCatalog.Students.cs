@@ -88,7 +88,7 @@ internal static partial class HelpCatalog
             new[] { "Pages/Students/Enrollment/StudentPlacementPage.cs#StudentPlacementPage", "fmsc.dacpac#BulkPromoteStudents" }, new[] { "FAQ-030", "FAQ-031", "FAQ-032", "FAQ-092", "FAQ-093" }, ""),
         new("FAQ-030", "Promotion", "Why is a promoted student not immediately billable next year?",
             "The new placement may await Confirm Return Admission. Complete that workflow before normal next-year billing; the system protects the distinction between a promoted candidate and a confirmed return. Promotion can carry the prior placement’s final monthly concession or reset it for return review; no new-year billing starts until return confirmation.",
-            "promotion,return,year,fees,billing", "Confirm Return Admission",
+            "promotion,return,year,fees,billing", "Student Admissions → Confirm Return",
             new[] { HelpRule.System }, HelpOwner.SQL | HelpOwner.CSharp,
             new[] { "Pages/Students/Enrollment/ConfirmReturnAdmissionPage.cs#ConfirmReturnAdmissionPage", "fmsc.dacpac#ConfirmPromotedAdmission" }, System.Array.Empty<string>(), ""),
         new("FAQ-031", "Promotion", "How do I review a past promotion?",
