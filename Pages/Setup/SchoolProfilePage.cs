@@ -139,7 +139,7 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         logoPanel.Controls.Add(logoButtons, 0, 2);
         logoCard.Content.Controls.Add(logoPanel);
         var feePolicyCard =
-            HumanUi.Card("Fee Policy", "Separate cutoffs for admission billing and transport changes.");
+            HumanUi.Card("Fee Policy", "Admission and transport cutoff days.");
         var feePolicyFields =
             new TableLayoutPanel {
                 Dock = DockStyle.Fill,
