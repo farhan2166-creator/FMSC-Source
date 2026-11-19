@@ -816,16 +816,12 @@ public partial class StudentReportsPage : V2Page
             bool classChanged = cls.SelectedId != classId;
             if (classes || sectionChanged || classChanged)
             {
-                var allowed = campusId > 0 || sectionId > 0
-                    ? ComboIds("ClassId", campusId, 0, sectionId)
-                    : null;
+                var allowed = ComboIds("ClassId", campusId, 0, sectionId);
                 RebindRestricted(cls, _allClasses, "ClassId", "ClassName", "All classes", allowed, classId);
             }
             if (sections || sectionChanged || classChanged)
             {
-                var allowed = campusId > 0 || classId > 0
-                    ? ComboIds("SectionId", campusId, classId, 0)
-                    : null;
+                var allowed = ComboIds("SectionId", campusId, classId, 0);
                 RebindRestricted(section, _allSections, "SectionId", "SectionName", "All sections", allowed, sectionId);
             }
         }
@@ -1082,6 +1078,7 @@ public partial class StudentReportsPage : V2Page
             try
             {
                 RebuildSortChoices();
+                RefreshClassSectionLists(classes: true, sections: true);
             }
             finally
             {
