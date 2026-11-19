@@ -93,7 +93,7 @@ public static class UiText
         public const string MatchesFilters = "Report matches the current filters.";
         public const string FiltersChanged = "Filters changed. Run the report again before exporting.";
     }
-    /// <summary>The nine certificate screens (character, leave, college leave, date of birth, no objection, provisional, regular student, sports, regular lecturer and bank account) are separate pages with the same shape.</summary>
+    /// <summary>Shared captions for ten certificate types across the student and staff certificate workspaces (character, leave, college leave, date of birth, no objection, provisional, regular student, sports, regular lecturer and bank account).</summary>
     public static class Certificates
     {
         /// <summary>Window title of a new certificate.</summary>
