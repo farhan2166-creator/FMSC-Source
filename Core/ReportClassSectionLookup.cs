@@ -2,16 +2,17 @@ using Microsoft.Data.SqlClient;
 
 namespace FMSC_SMS.Core;
 
-/// <summary>Reports retain historical placements after setup stops offering them for new enrollments.</summary>
+/// <summary>By default retain historical placements; report filter dropdowns can request current active assignments only.</summary>
 internal static class ReportClassSectionLookup
 {
-    internal static Task<DataTable> QueryAsync(int campusId = 0, int classId = 0, int sectionId = 0)
+    internal static Task<DataTable> QueryAsync(int campusId = 0, int classId = 0, int sectionId = 0, bool activeOnly = false)
     {
         SqlParameter[] parameters = {
             DatabaseHelper.Int("@UserId", CurrentUser.UserId),
             DatabaseHelper.Int("@CampusId", campusId),
             DatabaseHelper.Int("@ClassId", classId),
-            DatabaseHelper.Int("@SectionId", sectionId)
+            DatabaseHelper.Int("@SectionId", sectionId),
+            DatabaseHelper.Bit("@ActiveOnly", activeOnly)
         };
         const string sql = """
             EXEC dbo.RequireAuthenticatedUser @UserId;
@@ -24,6 +25,7 @@ internal static class ReportClassSectionLookup
             WHERE (@CampusId = 0 OR CCS.CampusId = @CampusId)
               AND (@ClassId = 0 OR CCS.ClassId = @ClassId)
               AND (@SectionId = 0 OR CCS.SectionId = @SectionId)
+              AND (@ActiveOnly = 0 OR CCS.IsActive = 1)
             ORDER BY CMP.CampusName, C.ClassName, S.SectionName, S.SectionId;
             """;
         return LookupDataCache.GetAsync("ReportClassSectionLookup", parameters,
