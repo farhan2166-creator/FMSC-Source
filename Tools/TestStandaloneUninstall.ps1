@@ -5,7 +5,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath,[ref]$tokens,[ref]$errors)
 if ($errors.Count -ne 0) { throw "Standalone uninstaller PowerShell parse failed: $($errors[0])" }
-foreach ($name in @('Test-FmscNoLinks','Test-FmscCloudRecoveryArtifact','Test-FmscPendingTransactionArtifact','Get-FmscProtectedFiles','Save-FmscProtectedFiles',
+foreach ($name in @('Test-FmscNoLinks','Test-FmscCloudRecoveryArtifact','Test-FmscPendingTransactionArtifact','Get-FmscPendingTransactionJournals','Assert-FmscNoPendingTransactions','Get-FmscProtectedFiles','Save-FmscProtectedFiles',
     'Assert-FmscProtectedCopies','Remove-FmscNonProtectedContents')) {
     $definition = $ast.Find({
         param($node)
@@ -99,6 +99,17 @@ try {
         [pscustomobject]@{Label='User-Synthetic';Path=$profile},
         [pscustomobject]@{Label='User-Transactions';Path=$transactionProfile}
     )
+    # Must refuse uninstall without removing the unresolved original SQL intents.
+    $discovered = @(Get-FmscPendingTransactionJournals -Roots $roots)
+    if ($discovered.Count -ne 3) { throw 'Pending SQL journal discovery was incomplete.' }
+    $blocked = $false
+    try { Assert-FmscNoPendingTransactions -Roots $roots } catch {
+        $blocked = $_.Exception.Message -like '*unresolved save recovery record*'
+    }
+    if (-not $blocked) { throw 'Uninstall did not refuse unknown SQL save outcomes.' }
+    foreach ($file in @($pendingCollection,$pendingRegistration,$pendingMutation)) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw 'Blocked uninstall removed a journal.' }
+    }
     $preserved = Join-Path $school ('UninstallPreserved\'+[guid]::NewGuid().ToString('N'))
     $original = Get-FileHash -LiteralPath $appMdf -Algorithm SHA256
     $originalBackup = Get-FileHash -LiteralPath $updateBak -Algorithm SHA256
@@ -153,7 +164,16 @@ try {
     [IO.File]::WriteAllBytes($appMdf,[Text.Encoding]::UTF8.GetBytes('synthetic-database-'+$appMdf))
     Assert-FmscProtectedCopies -Roots $roots -Records $records
 
-    foreach ($root in $roots) { Remove-Item -LiteralPath $root.Path -Recurse -Force }
+    # Synthetic operator reconciliation: the copies remain in the archive.
+    foreach ($file in @($pendingCollection,$pendingRegistration,$pendingMutation)) {
+        Remove-Item -LiteralPath $file -Force
+    }
+    Assert-FmscNoPendingTransactions -Roots $roots
+    foreach ($root in $roots) {
+        Assert-FmscNoPendingTransactions -Roots $roots
+        Remove-Item -LiteralPath $root.Path -Recurse -Force
+    }
+    Assert-FmscNoPendingTransactions -Roots $roots
     Remove-FmscNonProtectedContents $school
     if (Test-Path -LiteralPath $app) { throw 'Synthetic application not removed.' }
     if (Test-Path -LiteralPath $updater) { throw 'Synthetic updater not removed.' }
@@ -182,6 +202,7 @@ try {
         }
     }
     Write-Host 'PASS: successful uninstalls close the window after acknowledgement; failure remains visible.'
+    Write-Host 'PASS: unresolved SQL save journals block uninstall until reconciled.'
     Write-Host 'PASS: SQL, cloud and pending transaction recovery evidence survives; late or modified protected files block deletion.'
     Write-Host 'PASS: removable FMSC folders/logs can be cleared without deleting school data or unrelated files.'
 } finally {

@@ -188,6 +188,33 @@ function Get-FmscDeletionRoots {
     }
     return @($entries.ToArray())
 }
+# Unresolved SQL intents must remain at their active profile path: merely
+# archiving them elsewhere can bypass Check Save Outcome after reinstall.
+function Get-FmscPendingTransactionJournals {
+    param([object[]]$Roots)
+    $pending = New-Object System.Collections.Generic.List[string]
+    foreach ($root in $Roots) {
+        if (-not $root.Path.TrimEnd('\').EndsWith('\AppData\Local\FMSC_SMS',
+            [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if (-not (Test-Path -LiteralPath $root.Path -PathType Container)) { continue }
+        Test-FmscNoLinks $root.Path
+        foreach ($file in @(Get-ChildItem -LiteralPath $root.Path -File -Force -ErrorAction Stop |
+            Where-Object { $_.Name -match '^Pending[A-Za-z][A-Za-z0-9]*\.json$' })) {
+            $pending.Add($file.FullName)
+        }
+    }
+    return @($pending.ToArray())
+}
+function Assert-FmscNoPendingTransactions {
+    param([object[]]$Roots)
+    $pending = @(Get-FmscPendingTransactionJournals -Roots $Roots)
+    if ($pending.Count -gt 0) {
+        throw ('Uninstall refused: ' + $pending.Count +
+            ' unresolved save recovery record(s) remain. Open FMSC in the affected Windows ' +
+            'account, review Check Save Outcome or Payment History, and resolve each operation ' +
+            'before uninstalling. No pending records were deleted.')
+    }
+}
 function Assert-FmscUninstallReady {
     if (-not (Test-FmscAdministrator)) { throw 'Windows administrator permission is required.' }
     foreach ($process in @(Get-Process -Name 'FMSC_SMS','FMSC.Setup' -ErrorAction SilentlyContinue)) {
@@ -288,17 +315,20 @@ function Invoke-FmscUninstall {
         $roots = @(Get-FmscDeletionRoots)
         foreach ($root in $roots) { Test-FmscNoLinks $root.Path }
         Test-FmscNoLinks $DataDirectory
+        Assert-FmscNoPendingTransactions -Roots $roots
         Write-FmscUninstallStatus 'Checking protected school databases and backups...'
         $preserved = Join-Path $DataDirectory ('UninstallPreserved\' + (Get-Date -Format 'yyyyMMdd-HHmmss') +
             '-' + [guid]::NewGuid().ToString('N'))
         $protected = @(Save-FmscProtectedFiles -Roots $roots -PreservationDirectory $preserved)
         Assert-FmscProtectedCopies -Roots $roots -Records $protected
         Remove-FmscCloudBackupTasks
-        # Deleting the tasks prevents new runs; refuse any backup that started meanwhile.
+        # Prevent newly started backups or unresolved SQL save intents during cleanup.
         Assert-FmscUninstallReady
+        Assert-FmscNoPendingTransactions -Roots $roots
         Write-FmscUninstallStatus 'Removing application, updater and temporary files...'
         foreach ($root in $roots) {
             Test-FmscNoLinks $root.Path
+            Assert-FmscNoPendingTransactions -Roots $roots
             # Recheck the protected files in the current root before each deletion.
             Assert-FmscProtectedCopies -Roots @($root) -Records @($protected |
                 Where-Object { $_.Source.StartsWith($root.Path.TrimEnd('\')+'\',
