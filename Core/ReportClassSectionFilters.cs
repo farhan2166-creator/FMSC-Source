@@ -88,7 +88,8 @@ internal sealed class ReportClassSectionFilters
             if (displayedCampus != campusId)
             {
                 int previousClass = cls.SelectedId;
-                var allowed = campusId > 0 ? AssignedIds("ClassId", campusId, 0) : null;
+                // Even "All campuses" must omit unassigned/inactive catalog entries.
+                var allowed = AssignedIds("ClassId", campusId, 0);
                 Rebind(cls, Restrict(classes, "ClassId", allowed), "ClassId", "ClassName",
                     classBlank, previousClass);
                 displayedCampus = campusId;
@@ -99,9 +100,7 @@ internal sealed class ReportClassSectionFilters
             if (sectionCampus != campusId || displayedClass != classId)
             {
                 int previousSection = section.SelectedId;
-                var allowed = campusId > 0 || classId > 0
-                    ? AssignedIds("SectionId", campusId, classId)
-                    : null;
+                var allowed = AssignedIds("SectionId", campusId, classId);
                 Rebind(section, Restrict(sections, "SectionId", allowed), "SectionId", "SectionName",
                     sectionBlank, previousSection);
                 sectionCampus = campusId;
