@@ -64,7 +64,7 @@ internal static partial class HelpCatalog
             new[] { HelpRule.System, HelpRule.Permission, HelpRule.Recovery }, HelpOwner.CSharp | HelpOwner.Environment,
             new[] { "Pages/Security/RestoreExistingSchoolForm.cs", "Services/Backup/ReplacementSchoolRecovery.cs" }, new[] { "FAQ-134" }, ""),
         new("FAQ-137", "Installation & Updates", "How do I uninstall FMSC while keeping school records?",
-            "Close FMSC and use its registered entry in Windows Installed apps, or the installed FMSC.Uninstall.exe. Confirm the removal in the uninstaller. Application files, updater files, app settings, owned shortcuts and background tasks are removed. School MDF/LDF databases and backup files remain under C:\\ProgramData\\FMSC_Database; SQL Server LocalDB is not uninstalled. Do not manually delete the school database folder afterward.",
+            "Close FMSC and use its registered entry in Windows Installed apps, or the installed FMSC.Uninstall.exe. Confirm the removal in the uninstaller. Application files, updater files, app settings, owned shortcuts and background tasks are removed. The live school MDF/LDF remain in C:\\ProgramData\\FMSC_Database, and backups are kept in their existing locations or a verified preservation archive. SQL Server LocalDB is not uninstalled. Do not manually delete the school database folder afterward.",
             "uninstall,remove,keep,mdf,ldf,bak,school data,installed apps", "Windows Settings → Installed apps → FMSC School Management",
             new[] { HelpRule.System, HelpRule.Choice, HelpRule.Recovery }, HelpOwner.Environment,
             new[] { "Installer/Uninstall-FMSC.ps1", "Installer/FMSC.Uninstall.cs" }, new[] { "FAQ-077" }, ""),
