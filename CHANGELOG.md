@@ -2,6 +2,11 @@
 
 Historical entries describe their own release state. Current versions and requirements come from `Installer/core.ps1`, the compatibility contracts and current code.
 
+## Unreleased — final repository maintenance (no application behavior change)
+
+- Retire unreferenced one-off student-promotion and certificate data-cleanup scripts, the version-pinned historical installed-release probe, and an unnecessary migration placeholder. The version-neutral release acceptance policy and active synthetic tests remain.
+- Correct the current migration-guide endpoint and deployment-packaging guidance, and distinguish earlier historical policy numbering and design contracts from the current code and supported release gates.
+
 
 ## 1.0.41 — Communication Centre audit follow-up (schema 37)
 
