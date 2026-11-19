@@ -133,7 +133,7 @@ internal static partial class HelpCatalog
             new[] { "Pages/Finance/StudentAccounts/StudentFeeAssignmentsPanel.cs#StudentFeeAssignmentsPanel", "fmsc.dacpac#DeleteStudentFeeAssignment", "Pages/Finance/StudentAccounts/PaymentCorrectionReview.cs#PaymentCorrectionReview" }, System.Array.Empty<string>(), ""),
         new("FAQ-097", "Billing", "Why must I refresh a fee preview before applying it?",
             "Previews describe the records and amounts at the time you reviewed them. Another operator or a later edit can change eligibility, rates or bills. Refresh the preview and review the new totals before confirming; the application refuses stale plans rather than applying an old decision to changed records.",
-            "stale preview refresh plan fees changed", "Fee Posting / Fee Rate Setup",
+            "stale preview refresh plan fees changed", "Fees → Billing Center / Fee Rate Setup",
             new[] { HelpRule.System, HelpRule.Recovery }, HelpOwner.SQL | HelpOwner.CSharp,
             new[] { "Pages/Finance/StudentAccounts/FeeAssignmentPosting.cs#FeeAssignmentPosting", "fmsc.dacpac#ApplyFeeConfigurationPlan" }, System.Array.Empty<string>(), ""),
         new("FAQ-098", "Billing", "Can I post a missing fee from an earlier academic year?",
