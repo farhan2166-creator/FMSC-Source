@@ -238,8 +238,10 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
             Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
             Margin = Padding.Empty, Padding = Padding.Empty
         };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        // Keep the logo/action column wide enough for all three buttons on
+        // ordinary desktop widths; give the settings pair usable space.
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(340)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         int feePolicyHeight = AppMetrics.FieldCardHeight(1) + guidanceHeight;
@@ -281,7 +283,7 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         void ArrangeSettingsForWidth()
         {
             // Two columns below this width truncate action captions.
-            bool stack = leftColumn.ClientSize.Width < AppScale.Scale(950);
+            bool stack = leftColumn.ClientSize.Width < AppScale.Scale(850);
             if (settingsStacked == stack) return;
             settingsStacked = stack;
             leftColumn.SuspendLayout();
