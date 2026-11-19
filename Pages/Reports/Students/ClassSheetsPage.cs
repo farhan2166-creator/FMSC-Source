@@ -153,7 +153,7 @@ public sealed class ClassSheetsPage : V2Page
         {
             var campusTask = DatabaseHelper.QueryUserAsync("GetCampuses");
             var yearTask = DatabaseHelper.QueryUserAsync("GetAcademicYears");
-            var placementTask = ReportClassSectionLookup.QueryAsync();
+            var placementTask = ReportClassSectionLookup.QueryAsync(activeOnly: true);
             await Task.WhenAll(campusTask, yearTask, placementTask);
             if (IsDisposed) return;
             placements = await placementTask;
