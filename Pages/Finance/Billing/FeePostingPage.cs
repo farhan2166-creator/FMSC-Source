@@ -17,6 +17,7 @@ public sealed class FeePostingPage : V2Page, IBusyPage
     private readonly LookupBox campus = new();
     private readonly LookupBox klass = new();
     private readonly LookupBox section = new();
+    private readonly ReportClassSectionFilters locationFilters;
     /// <summary>LookupBox.Bind always inserts a blanket row with id 0 ("-- Select --") first.</summary>
     private readonly LookupBox feeType = new();
     /// <summary>The full preview result. Held here rather than read back off the grid, because the grid only ever contains the current page of it.</summary>
@@ -44,6 +45,7 @@ public sealed class FeePostingPage : V2Page, IBusyPage
             "Manual / Advance Posting",
             "Post missed or upcoming monthly fees. Review the charges before posting.")
     {
+        locationFilters = new ReportClassSectionFilters(campus, klass, section);
         Grid.ReadOnly = true;
 #if FMSC_LEVEL2
         Grid.AccessibleName = "Monthly posting preview";
@@ -87,7 +89,10 @@ public sealed class FeePostingPage : V2Page, IBusyPage
         /* any filter change drops the loaded preview, so Post can never send one filter's rows under another filter's label. */
         monthBox.SelectedIndexChanged += (_, _) => {
             if (!suppressFilterEvents)
+            {
+                RefreshThroughMonths();
                 InvalidatePreview();
+            }
         };
         throughMonth.SelectedIndexChanged += (_, _) => { if (!suppressFilterEvents) InvalidatePreview(); };
         student.UserSelectionChanged += (_, _) => InvalidatePreview();
@@ -107,6 +112,25 @@ public sealed class FeePostingPage : V2Page, IBusyPage
             if (Visible && lookupsReady && !posting) await ReloadMonthsAsync();
         };
     }
+    // Through Month must follow the selected From Month.
+    private void RefreshThroughMonths(int? preferredKey = null)
+    {
+        int previous = preferredKey ?? throughMonth.SelectedId;
+        int start = monthBox.SelectedId;
+        var available = postableMonths.Clone();
+        if (start > 0)
+            foreach (DataRow row in postableMonths.Rows)
+                if (Convert.ToInt32(row["MonthKey"]) >= start) available.ImportRow(row);
+        bool prior = suppressFilterEvents;
+        suppressFilterEvents = true;
+        try
+        {
+            throughMonth.Bind(available, "MonthKey", "Display", "Same as From Month");
+            throughMonth.SelectedValue = start > 0 && BillingMonthKey.IsListed(available, previous) ? previous : 0;
+        }
+        finally { suppressFilterEvents = prior; }
+    }
+
     private async Task ReloadMonthsAsync()
     {
         if (posting) return;
@@ -219,8 +243,7 @@ public sealed class FeePostingPage : V2Page, IBusyPage
                 monthBox.Bind(months, "MonthKey", "Display");
                 monthBox.SelectedValue = wanted;
                 postableMonths = months;
-                throughMonth.Bind(months, "MonthKey", "Display", "Same as From Month");
-                throughMonth.SelectedValue = BillingMonthKey.IsListed(months, previousThrough) ? previousThrough : 0;
+                RefreshThroughMonths(previousThrough);
             }
             finally
             {
@@ -267,15 +290,16 @@ public sealed class FeePostingPage : V2Page, IBusyPage
             Task<DataTable> campusesTask = DatabaseHelper.QueryUserAsync("GetCampuses");
             Task<DataTable> classesTask = DatabaseHelper.QueryUserAsync("GetClasses");
             Task<DataTable> sectionsTask = ReportUi.SectionFilterListAsync();
+            Task<DataTable> assignmentsTask = ReportClassSectionLookup.QueryAsync(activeOnly: true);
             Task<DataTable> feeTypesTask = DatabaseHelper.QueryUserAsync(
                 "GetFeeTypes");
-            await Task.WhenAll(yearsTask, campusesTask, classesTask, sectionsTask, feeTypesTask);
+            await Task.WhenAll(yearsTask, campusesTask, classesTask, sectionsTask, assignmentsTask, feeTypesTask);
             DataTable years = await yearsTask;
             HumanUi.BindCurrentAcademicYear(academicYear, years);
-            // Classes and Sections are global lists (they are not per-campus), so they are bound unscoped - the same as the Class/Section filters on the other fee pages.
+            // Choices follow active campus/class assignments; the posting SQL is unchanged.
             campus.Bind(await campusesTask, "CampusId", "CampusName", "All campuses");
-            klass.Bind(await classesTask, "ClassId", "ClassName", "All classes");
-            section.Bind(await sectionsTask, "SectionId", "SectionName", "All sections");
+            locationFilters.Bind(await classesTask, await sectionsTask, await assignmentsTask,
+                "All classes", "All sections");
             // GetFeeTypes returns active types ordered by DisplayOrder.
             feeType.Bind(await feeTypesTask, "FeeTypeId", "FeeTypeName", "All fee types");
             suppressFilterEvents = false;

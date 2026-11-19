@@ -8,6 +8,7 @@ public sealed class AdditionalFeePostingPage : V2Page, IBusyPage
     public bool IsBusy => posting;
     public string BusyMessage => "Additional fees are being posted. Wait for the result before leaving.";
     private readonly LookupBox year = new(), campus = new(), klass = new(), section = new(), fee = new();
+    private readonly ReportClassSectionFilters locationFilters;
     private readonly ModernDatePicker date = HumanUi.Date();
     private readonly ModernNumericTextBox amount = new() { Minimum = 0, Maximum = 100000000, WholeRupeesOnly = true, DecimalPlaces = 0, Dock = DockStyle.Fill };
     private readonly ModernTextBox reason = HumanUi.TextBox(false, 500);
@@ -34,6 +35,7 @@ public sealed class AdditionalFeePostingPage : V2Page, IBusyPage
     internal AdditionalFeePostingPage(Func<int,int,int,int,Task<DataTable>>? loadCandidates,bool initialize,AdditionalFeeRecovery recovery) : base("Post Additional Fee",
         "Choose a fee and amount, load students, then select who to charge.")
     {
+        locationFilters = new ReportClassSectionFilters(campus, klass, section);
         this.recovery=recovery;
         this.loadCandidates=loadCandidates ?? ((y,c,k,s)=>DatabaseHelper.QueryUserAsync("GetAdditionalFeeCandidates",
             DatabaseHelper.Int("@AcademicYearId",y),DatabaseHelper.Int("@CampusId",c),DatabaseHelper.Int("@ClassId",k),
@@ -115,16 +117,17 @@ public sealed class AdditionalFeePostingPage : V2Page, IBusyPage
             Task<DataTable> yearsTask = DatabaseHelper.QueryUserAsync("GetAcademicYears");
             Task<DataTable> campusesTask = DatabaseHelper.QueryUserAsync("GetCampuses");
             Task<DataTable> classesTask = DatabaseHelper.QueryUserAsync("GetClasses");
-            Task<DataTable> sectionsTask = DatabaseHelper.QueryUserAsync("GetSections");
+            Task<DataTable> sectionsTask = ReportUi.SectionFilterListAsync();
+            Task<DataTable> assignmentsTask = ReportClassSectionLookup.QueryAsync(activeOnly: true);
             Task<DataTable> feeTypesTask = DatabaseHelper.QueryUserAsync(
                 "GetFeeTypes");
-            await Task.WhenAll(yearsTask, campusesTask, classesTask, sectionsTask, feeTypesTask);
+            await Task.WhenAll(yearsTask, campusesTask, classesTask, sectionsTask, assignmentsTask, feeTypesTask);
             if(IsDisposed)return;
             DataTable years = await yearsTask;
             HumanUi.BindCurrentAcademicYear(year, years);
             campus.Bind(await campusesTask, "CampusId", "CampusName", "All campuses");
-            klass.Bind(await classesTask, "ClassId", "ClassName", "All classes");
-            section.Bind(await sectionsTask, "SectionId", "SectionName", "All sections");
+            locationFilters.Bind(await classesTask, await sectionsTask, await assignmentsTask,
+                "All classes", "All sections");
             DataTable feeTypes = await feeTypesTask;
             feeTypes.DefaultView.RowFilter = "DefaultFrequency = 'As Needed' AND FeeTypeCode NOT IN ('ADMISSION','TUITION','TRANSPORT')";
             fee.Bind(feeTypes.DefaultView.ToTable(), "FeeTypeId", "FeeTypeName");

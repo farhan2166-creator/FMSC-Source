@@ -7,6 +7,7 @@ public sealed class StudentSearchDialog : ApplicationWindowForm
     private readonly LookupBox searchCampus = new();
     private readonly LookupBox searchYear = new();
     private readonly LookupBox searchClass = new();
+    private readonly CampusClassFilters campusClasses;
     private readonly ModernComboBox searchStatus = HumanUi.Combo();
     private readonly DataGridView resultsGrid = HumanUi.Grid(false);
     private readonly ModernButton searchButton = new() {
@@ -56,6 +57,7 @@ public sealed class StudentSearchDialog : ApplicationWindowForm
         Func<string, SqlParameter[], Task<DataTable>> query)
     {
         this.query = query;
+        campusClasses = new CampusClassFilters(searchCampus, searchClass);
         this.officialAdmissionsOnly = officialAdmissionsOnly;
         Text = "Find Student";
         StartPosition = FormStartPosition.CenterParent;
@@ -264,7 +266,10 @@ public sealed class StudentSearchDialog : ApplicationWindowForm
             var results = await Task.WhenAll(
                 query("GetCampuses", Array.Empty<SqlParameter>()),
                 query("GetAcademicYears", Array.Empty<SqlParameter>()),
-                query("GetClasses", Array.Empty<SqlParameter>()));
+                query("GetClasses", Array.Empty<SqlParameter>()),
+                query("GetClassSections", new[] {
+                    DatabaseHelper.Int("@CampusId", 0), DatabaseHelper.Int("@ClassId", 0), DatabaseHelper.Int("@SectionId", 0)
+                }));
             if (IsDisposed) return;
             // Binding selects intermediate rows. It must not clear text typed while lookups loaded.
             updatingCriteria = true;
@@ -272,7 +277,7 @@ public sealed class StudentSearchDialog : ApplicationWindowForm
             {
                 searchCampus.Bind(results[0], "CampusId", "CampusName");
                 searchYear.Bind(results[1], "AcademicYearId", "YearName");
-                searchClass.Bind(results[2], "ClassId", "ClassName");
+                campusClasses.Bind(results[2], results[3]);
                 if (searchCampus.Items.Count > 0) searchCampus.SelectedIndex = 0;
                 if (searchYear.Items.Count > 0) searchYear.SelectedIndex = 0;
                 if (searchClass.Items.Count > 0) searchClass.SelectedIndex = 0;
