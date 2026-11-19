@@ -1,7 +1,12 @@
-# Family Admission & Fees — quick counter
+# Family Admission & Fees — historical counter reference
 
-An optional start-of-year counter workflow. It coordinates existing registration,
-return confirmation, fee review, collection and RDLC documents; it does not replace
+> Historical internal workflow documentation. The standalone Family Admission & Fees
+> navigation route is retired; current operator entry points are **Student Admissions**
+> and **Pending Registrations**. The retained workspace source and isolated tests are
+> reference material, not an instruction to look for an active Family Admission menu.
+
+The earlier optional start-of-year counter workflow coordinated registration,
+return confirmation, fee review, collection and RDLC documents. It did not replace
 full admission, student corrections or the normal finance screens.
 
 Family details and the children list stack in the left 40% of the workspace. The
