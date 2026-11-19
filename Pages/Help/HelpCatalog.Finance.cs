@@ -92,7 +92,7 @@ internal static partial class HelpCatalog
             new[] { HelpRule.System }, HelpOwner.SQL | HelpOwner.CSharp,
             new[] { "Pages/Finance/Collection/FeeCollectionPage.cs#FeeCollectionPage", "fmsc.dacpac#ProcessFeeTransaction" }, System.Array.Empty<string>(), ""),
         new("FAQ-050", "Reports", "How are a statement and Annual Fee Receipts different?",
-            "The Statement tab in Student Fee Account explains charges, payments and balances over an optional period. Annual Fee Receipts provides a year-specific receipt printout. Open Reports → Annual Receipts from the account or use Student Profile, then verify the student and academic year.",
+            "The Statement tab in Student Fee Account explains charges, payments and balances over an optional period. Annual Fee Receipts provides a year-specific receipt printout. In Fees → Student Fee Account, choose Annual Receipts, or open it from Student Profile; verify the student and academic year.",
             "receipts,annual,statement,difference", "Student Fee Account / Annual Fee Receipts",
             new[] { HelpRule.System }, HelpOwner.CSharp,
             new[] { "Pages/Reports/Finance/StudentAccountStatementPage.cs#StudentAccountStatementPage", "Pages/Reports/Finance/AnnualFeeReceiptsPage.cs#AnnualFeeReceiptsPage" }, System.Array.Empty<string>(), ""),
