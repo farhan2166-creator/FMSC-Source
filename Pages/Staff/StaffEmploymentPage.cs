@@ -6,6 +6,7 @@ public sealed class StaffEmploymentPage : MasterPage
     // Employment history is an active feature, separate from staff assignment
     // scheduling intentionally removed in the 2026-10-03 database cleanup.
     public event Action? EmploymentChanged;
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Func<bool>? SaveGuard { get; set; }
     private FormValidator? _employmentValidator;
     protected override bool ReserveEditorValidationSpace => true;

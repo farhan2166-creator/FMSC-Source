@@ -18,6 +18,7 @@ public abstract partial class AccessEditorPage : V2Page, IUnsavedChanges, IBusyP
     internal bool NeedsReload { get; private set; }
     internal bool Creating { get; private set; }
     internal bool HasEditor => Creating || Original is not null;
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Func<string, bool>? ConfirmForTests { get; set; }
     public bool IsBusy => loading || saving;
     public string BusyMessage => "Wait for the user/role operation to finish before leaving.";
