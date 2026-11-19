@@ -42,6 +42,7 @@ public abstract class CanonicalFinanceReportPage : V2Page
     private bool _lookupsReady;
     private readonly string _presetKey;
     private readonly ReportSavedViewsBar _savedViews;
+    private readonly ReportClassSectionFilters _locationFilters;
     private readonly ModernButton _columnsButton;
     private IReadOnlyList<ReportColumnDef>? _availableColumns;
     private string _boundColumnLayout="";
@@ -127,6 +128,7 @@ public abstract class CanonicalFinanceReportPage : V2Page
         SetContent(_savedViews.Wrap(content));
         Grid.Parent?.Controls.Add(_summary);
         Grid.BringToFront();
+        _locationFilters = new ReportClassSectionFilters(Campus, Class, Section);
         View.SelectedIndexChanged += (_, _) => { UpdateViewControls(); RefreshOrderChoices(); FiltersChanged(); };
         GroupBy.SelectedIndexChanged += (_, _) => { RefreshOrderChoices(); FiltersChanged(); };
         _orderBy.SelectedIndexChanged += (_, _) => FiltersChanged();
@@ -227,15 +229,15 @@ public abstract class CanonicalFinanceReportPage : V2Page
             Task<DataTable> yearsTask = DatabaseHelper.QueryUserAsync("GetAcademicYears");
             Task<DataTable> classesTask = DatabaseHelper.QueryUserAsync("GetClasses");
             Task<DataTable> sectionsTask = ReportUi.SectionFilterListAsync();
-            await Task.WhenAll(campusesTask, yearsTask, classesTask, sectionsTask);
+            Task<DataTable> placementsTask = ReportClassSectionLookup.QueryAsync();
+            await Task.WhenAll(campusesTask, yearsTask, classesTask, sectionsTask, placementsTask);
             if (IsDisposed) return;
             _applyingScope = true;
             try
             {
                 Campus.Bind(await campusesTask, "CampusId", "CampusName", "All");
                 Year.Bind(await yearsTask, "AcademicYearId", "YearName", "All");
-                Class.Bind(await classesTask, "ClassId", "ClassName", "All");
-                Section.Bind(await sectionsTask, "SectionId", "SectionName", "All");
+                _locationFilters.Bind(await classesTask, await sectionsTask, await placementsTask);
                 if (!_scopeEdited && _appliedSignature.Length == 0) RestoreLastScope();
                 _lookupsReady=true;
             }
