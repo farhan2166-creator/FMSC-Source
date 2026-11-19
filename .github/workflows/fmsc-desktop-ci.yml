@@ -36,7 +36,6 @@ on:
       - 'Tools/PublishPrivateUpdate.ps1'
       - 'Tools/TestInstallerMigrations.ps1'
       - 'Tools/ReleaseProbeAcceptance.ps1'
-      - 'Tools/VerifyInstalledFmscRelease.ps1'
       - 'Tools/PrepareWorkflow04Release.ps1'
       - 'Tools/AssertWorkflow04MigrationInventory.ps1'
       - 'Tools/ResolveWorkflow04Version.ps1'
