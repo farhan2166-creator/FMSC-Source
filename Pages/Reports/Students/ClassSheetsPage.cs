@@ -131,10 +131,9 @@ public sealed class ClassSheetsPage : V2Page
         UiHelper.SetGridPlaceholderMessage(Grid, "Choose a campus and year, then press Load Students.");
         foreach (var filter in new[] { campus, year, klass, section })
             filter.SelectedIndexChanged += (_, _) => InvalidateRoster();
-        campus.SelectedIndexChanged+=(_,_)=>{ if (savedViews.IsApplying) BindClasses(); };
-        klass.SelectedIndexChanged+=(_,_)=>{ if (savedViews.IsApplying) BindSections(); };
-        campus.UserSelectionChanged += (_, _) => BindClasses();
-        klass.UserSelectionChanged += (_, _) => BindSections();
+        // Programmatic resets, saved views and user picks must obey the same dependency.
+        campus.SelectedIndexChanged += (_, _) => BindClasses();
+        klass.SelectedIndexChanged += (_, _) => BindSections();
         UpdateSelection();
         Defer(LoadLookupsAsync);
     }
@@ -179,7 +178,13 @@ public sealed class ClassSheetsPage : V2Page
             foreach (DataRow row in placements.Rows)
                 if (campus.SelectedId > 0 && Convert.ToInt32(row["CampusId"]) == campus.SelectedId)
                     selected.ImportRow(row);
+            int previousClass = klass.SelectedId;
             klass.Bind(selected.DefaultView.ToTable(true, "ClassId", "ClassName"), "ClassId", "ClassName", "All classes");
+            if (previousClass > 0)
+            {
+                klass.SelectedValue = previousClass;
+                if (klass.SelectedId != previousClass) klass.SelectedIndex = 0;
+            }
         }
         finally { rebinding = false; }
         BindSections();
@@ -194,7 +199,13 @@ public sealed class ClassSheetsPage : V2Page
                 Convert.ToInt32(row["CampusId"]) == campus.SelectedId &&
                 (klass.SelectedId == 0 || Convert.ToInt32(row["ClassId"]) == klass.SelectedId))
                 selected.ImportRow(row);
+        int previousSection = section.SelectedId;
         section.Bind(selected.DefaultView.ToTable(true, "SectionId", "SectionName"), "SectionId", "SectionName", "All sections");
+        if (previousSection > 0)
+        {
+            section.SelectedValue = previousSection;
+            if (section.SelectedId != previousSection) section.SelectedIndex = 0;
+        }
     }
 
     private void InvalidateRoster()

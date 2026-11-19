@@ -8,6 +8,7 @@ internal static partial class Program
 {
     private static void CheckOutstandingBills()
     {
+        CheckReportClassSectionFilters();
         CheckOutstandingBillOrder();
         OutstandingBillScope Scope(BillBalanceComparison comparison,decimal amount=1000,decimal through=2000)=>new(0,0,0,0,comparison,amount,through);
         foreach(var comparison in Enum.GetValues<BillBalanceComparison>())
