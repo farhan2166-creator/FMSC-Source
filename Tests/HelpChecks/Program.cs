@@ -32,8 +32,11 @@ var entries = HelpCatalog.Entries;
 Check(entries.Count >= 60, "Preserve the retained help questions");
 Check(entries.Select(e => e.Id).Distinct().Count() == entries.Count, "Unique stable IDs");
 Check(entries.Select(e => e.Question).Distinct(StringComparer.OrdinalIgnoreCase).Count() == entries.Count, "No duplicate questions");
-Check(entries.Select(e => e.Category).Distinct().Count() == 14, "Retained topic coverage");
+Check(entries.Select(e => e.Category).Distinct().Count() >= 14 &&
+    entries.Any(e => e.Category == "Communication") &&
+    entries.Any(e => e.Category == "Installation & Updates"), "Retain legacy topics and cover current operations");
 for (int i = 1; i <= 77; i++) if (i < 68 || i > 74) Check(entries.Any(e => e.Id == $"FAQ-{i:000}"), "Preserve retained question ID " + i);
+for (int i = 126; i <= 141; i++) Check(entries.Any(e => e.Id == $"FAQ-{i:000}"), "Current workflow question " + i);
 foreach (var entry in entries)
 {
     Check(new[] { entry.Id, entry.Question, entry.Answer, entry.Category, entry.Keywords, entry.WhereToGo }.All(s => !string.IsNullOrWhiteSpace(s)), entry.Id + " complete content");
@@ -85,6 +88,15 @@ Contains("school setting", "FAQ-009");
 Contains("permission required", "FAQ-057");
 Contains("LocalDB", "FAQ-065");
 Contains("photo zoom", "FAQ-088");
+Contains("manual whatsapp", "FAQ-126");
+Contains("guardian consent", "FAQ-127");
+Contains("message queue", "FAQ-128");
+Contains("dropbox offline", "FAQ-135");
+Contains("replacement computer", "FAQ-136");
+Contains("uninstall", "FAQ-137");
+Contains("uninstall preserved", "FAQ-138");
+Contains("computer authorization", "FAQ-140");
+Contains("schema compatibility", "FAQ-065");
 Check(HelpCatalog.Find("stop transport", null).First().Id == "FAQ-095", "Title/keywords outrank incidental body matches");
 Check(!HelpCatalog.Find("controller", null).Any(), "No role/controller substring confusion");
 Check(!HelpCatalog.Find("zxqv school", null).Any(), "Unknown meaningful term is not discarded");
@@ -93,7 +105,12 @@ Check(HelpCatalog.Find(null, null).Count() == entries.Count, "Empty query has al
 Check(HelpCatalog.Find("  \t ", "All topics").Count() == entries.Count, "Whitespace query");
 Check(HelpCatalog.Find("the and", null).Count() == entries.Count, "Stopwords alone do not invent relevance");
 Check(HelpCatalog.Find("ＦＥＥ", null).Count() == 0, "No arbitrary fuzzy matching");
-Check(!HelpCatalog.Find("fees", "Communication").Any(), "Retired communication topic is unavailable");
+Check(HelpCatalog.Find("consent", "Communication").Any(e => e.Id == "FAQ-127"),
+    "Current communication topic is searchable");
+Check(HelpCatalog.Find("uninstall", "Installation & Updates").Any(e => e.Id == "FAQ-137"),
+    "Standalone uninstaller guidance is searchable");
+Check(!HelpCatalog.Entries.Any(e => e.Id == "FAQ-065" && e.Answer.Contains("schema version 6", StringComparison.OrdinalIgnoreCase)),
+    "No frozen obsolete schema version in compatibility help");
 var recovery = HelpCatalog.Find("payment", "Collection", HelpRule.Recovery).ToArray();
 Check(recovery.Length > 0 && recovery.All(e => e.Category == "Collection" && e.Rules.Contains(HelpRule.Recovery)), "Category, query and rule combine");
 foreach (var rule in Enum.GetValues<HelpRule>())
