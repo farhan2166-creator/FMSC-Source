@@ -293,7 +293,24 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
         _headerTitleLine.Controls.Add(content, 1, 0);
         _inlineHeaderContent = content;
         _inlineHeaderMinHeight = Math.Max(0, minimumHeight);
+        ReserveInlineHeaderTitleWidth();
         ScheduleHeaderFit();
+    }
+    // An AutoSize table column can collapse when the adjacent inline picker
+    // fills the remaining width. Reserve the heading's measured width instead.
+    private void ReserveInlineHeaderTitleWidth()
+    {
+        if (_inlineHeaderContent is null || _headerTitleLine is null || _titleLabel is null)
+            return;
+        int titleWidth = TextRenderer.MeasureText(_titleLabel.Text, _titleLabel.Font,
+            new Size(int.MaxValue, int.MaxValue),
+            TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width +
+            UiDesignSystem.Spacing.Md;
+        var column = _headerTitleLine.ColumnStyles[0];
+        if (column.SizeType != SizeType.Absolute)
+            column.SizeType = SizeType.Absolute;
+        if ((int)column.Width != titleWidth)
+            column.Width = titleWidth;
     }
     protected void SetHeaderGuidance(string? guidance)
     {
@@ -336,6 +353,7 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
             _pageHeader is null || !_pageHeader.Visible ||
             _headerTextLayout.ClientSize.Width <= 0)
             return;
+        ReserveInlineHeaderTitleWidth();
         int titleHeight = Math.Max(
             Math.Max(20, AppMetrics.TextHeight(AppTheme.PageTitleFont)),
             _inlineHeaderMinHeight);
