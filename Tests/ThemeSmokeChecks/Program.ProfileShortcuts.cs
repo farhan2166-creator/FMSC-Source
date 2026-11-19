@@ -54,6 +54,14 @@ internal static partial class Program
         Check(Descendants(picker).OfType<TextBox>()
                 .Any(input=>input.AccessibleName=="Student"),
             "Header search retains the accessible Student input identity");
+        var profileTitle=Descendants(page).OfType<Label>()
+            .Single(label=>label.Text=="Student Profile" && (string?)label.Tag=="ThemeHeaderTitle");
+        var headingRow=(TableLayoutPanel)profileTitle.Parent!;
+        Check(headingRow.GetPositionFromControl(profileTitle).Column==0 &&
+            headingRow.ColumnStyles[0].SizeType==SizeType.Absolute &&
+            headingRow.ColumnStyles[0].Width>0 &&
+            headingRow.Controls.OfType<Control>().Any(control=>control!=profileTitle),
+            "Student Profile title retains a reserved column beside the header search");
 
         var sectionLayout=(TableLayoutPanel)family.Parent!;
         Check(ReferenceEquals(overview.Parent,sectionLayout) &&
