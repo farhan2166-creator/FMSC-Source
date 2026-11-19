@@ -420,14 +420,14 @@ public partial class StudentReportsPage : V2Page
             if (!_suppress)
                 RebuildSortChoices();
         };
-        /* Campus, class and section narrow one another: a class the chosen campus does not have is not offered, and a section is only offered for the class (and campus) chosen. */
+        /* One-way cascade: Campus limits Classes; Campus and Class limit Sections. A selected Section must never hide a valid Class. */
         campus.SelectedIndexChanged += (_, _) => {
             OnParentChanged(classes: true, sections: true);
         };
         cls.SelectedIndexChanged += (_, _) => {
             OnParentChanged(classes: false, sections: true);
         };
-        section.SelectedIndexChanged += (_, _) => OnParentChanged(classes: true, sections: false);
+        section.SelectedIndexChanged += (_, _) => OnFilterChanged();
         /* Which change types to show is only a way of looking at the rows already loaded. */
         changeType.SelectedIndexChanged += (_, _) => OnViewChanged();
         search.TextChanged += (_, _) => {
@@ -814,9 +814,9 @@ public partial class StudentReportsPage : V2Page
             }
             bool sectionChanged = section.SelectedId != sectionId;
             bool classChanged = cls.SelectedId != classId;
-            if (classes || sectionChanged || classChanged)
+            if (classes || classChanged)
             {
-                var allowed = ComboIds("ClassId", campusId, 0, sectionId);
+                var allowed = ComboIds("ClassId", campusId, 0, 0);
                 RebindRestricted(cls, _allClasses, "ClassId", "ClassName", "All classes", allowed, classId);
             }
             if (sections || sectionChanged || classChanged)
@@ -1112,7 +1112,7 @@ public partial class StudentReportsPage : V2Page
             SelectId(cls, saved.Class);
             RefreshClassSectionLists(classes: false, sections: true);
             SelectId(section, saved.Class > 0 && cls.SelectedId == 0 ? 0 : saved.Section);
-            RefreshClassSectionLists(classes: true, sections: false);
+            RefreshClassSectionLists(classes: false, sections: false);
         }
         finally { _suppress = previous; }
         UpdateEnabledState();
@@ -1505,7 +1505,7 @@ public partial class StudentReportsPage : V2Page
             SelectId(cls, GetInt(state, "class"));
             RefreshClassSectionLists(classes: false, sections: true);
             SelectId(section, GetInt(state, "section"));
-            RefreshClassSectionLists(classes: true, sections: false);
+            RefreshClassSectionLists(classes: false, sections: false);
             SelectText(status, "Name", Get(state, "status"));
             SelectText(gender, "Name", Get(state, "gender"));
             SelectText(changeType, "Name", Get(state, "change"));
