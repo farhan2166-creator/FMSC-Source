@@ -43,13 +43,25 @@ function Test-FmscCloudRecoveryArtifact {
     return $relative -match '^CloudBackups\\(?:recovery-key\.v1\.dpapi|queue\\[^\\]+\.fmscbackup\.dpapi|journal\\[^\\]+\.json)$' -or
         $relative -match '^Communication\\Attempts\\[A-Fa-f0-9]{32}\\[A-Fa-f0-9]{32}\\[a-f0-9]{32}\.(?:claim|result)\.dpapi$'
 }
+# Unconfirmed SQL submissions must remain reviewable after reinstall. A small
+# pending intent is not a database backup, but deleting it could allow the same
+# collection, registration or other sensitive operation to be submitted twice.
+# Limit preservation to top-level FMSC_SMS pending journals in owned profiles.
+function Test-FmscPendingTransactionArtifact {
+    param([string]$RootPath,[string]$FilePath)
+    if (-not $RootPath.TrimEnd('\').EndsWith('\AppData\Local\FMSC_SMS',
+        [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $relative = $FilePath.Substring($RootPath.TrimEnd('\').Length).TrimStart('\')
+    return $relative -match '^Pending[A-Za-z][A-Za-z0-9]{0,80}\.json$'
+}
 function Get-FmscProtectedFiles {
     param([Parameter(Mandatory=$true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return @() }
     Test-FmscNoLinks $Path
     return @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction Stop |
         Where-Object { ($ProtectExtensions -contains $_.Extension.ToLowerInvariant()) -or
-            (Test-FmscCloudRecoveryArtifact -RootPath $Path -FilePath $_.FullName) })
+            (Test-FmscCloudRecoveryArtifact -RootPath $Path -FilePath $_.FullName) -or
+            (Test-FmscPendingTransactionArtifact -RootPath $Path -FilePath $_.FullName) })
 }
 function Save-FmscProtectedFiles {
     param([object[]]$Roots,[string]$PreservationDirectory)
@@ -238,6 +250,9 @@ function Remove-FmscCloudBackupTasks {
     $scheduler = New-Object -ComObject 'Schedule.Service'
     $scheduler.Connect()
     $folder = $scheduler.GetFolder('\')
+    # Validate the ENTIRE FMSC task set before deleting any task. A renamed,
+    # replaced or unexpected scheduled action must not cause partial removal.
+    $verified = [Collections.Generic.List[string]]::new()
     foreach ($task in @($folder.GetTasks(1))) {
         $backupTask = $task.Name -match '^FMSC Cloud Backup S-1-5-21-(?:[0-9]+-){3}[0-9]+$'
         $communicationTask = $task.Name -match '^FMSC Communication Queue S-1-5-21-(?:[0-9]+-){3}[0-9]+$'
@@ -249,8 +264,9 @@ function Remove-FmscCloudBackupTasks {
             $actions[0].Arguments.Trim() -cne $expected) {
             throw 'An FMSC-named scheduled task has an unexpected action. Uninstall stopped for review.'
         }
-        $folder.DeleteTask($task.Name, 0)
+        $verified.Add($task.Name)
     }
+    foreach ($name in $verified) { $folder.DeleteTask($name, 0) }
 }
 function Invoke-FmscUninstall {
     $mutex = New-Object Threading.Mutex($false,'Global\FMSCInstallerActivation')
@@ -312,7 +328,7 @@ function Invoke-FmscUninstall {
         if (Test-Path -LiteralPath $UninstallRegistryPath) {
             Remove-Item -LiteralPath $UninstallRegistryPath -Recurse -Force -ErrorAction Stop
         }
-        Write-FmscUninstallStatus ('Uninstall complete. School data and archived encrypted recovery material remain in ' + $DataDirectory)
+        Write-FmscUninstallStatus ('Uninstall complete. School data and archived recovery evidence remain in ' + $DataDirectory)
     } finally {
         if ($workerHeld) { $workerMutex.ReleaseMutex() }
         if ($workerMutex) { $workerMutex.Dispose() }
@@ -346,11 +362,11 @@ function Show-FmscUninstallWindow {
     $explanation.SetBounds(28,85,620,122)
     $explanation.Text = ('This removes the FMSC application, updater, temporary files, local settings and shortcuts.' +
         [Environment]::NewLine + [Environment]::NewLine +
-        'School databases and backups are kept; SQL Server LocalDB stays installed.' +
+        'School databases, backups and pending transaction evidence are kept.' +
         [Environment]::NewLine +
-        'Queued encrypted backups and their recovery metadata are archived, not deleted.' +
+        'Encrypted cloud recovery files and sending evidence are archived; LocalDB stays installed.' +
         [Environment]::NewLine +
-        'Cloud accounts are disconnected locally. Keep your recovery passphrase separately.')
+        'Local sign-ins are removed. Keep your recovery passphrase separately.')
     $explanation.ForeColor = [Drawing.Color]::FromArgb(50,60,75)
     $script:StatusText = New-Object Windows.Forms.Label
     $script:StatusText.SetBounds(28,219,625,55)
@@ -381,7 +397,7 @@ function Show-FmscUninstallWindow {
             Invoke-FmscUninstall
             $script:StatusText.ForeColor = [Drawing.Color]::FromArgb(20,132,70)
             [Windows.Forms.MessageBox]::Show($form,
-                'FMSC has been uninstalled. School data, backups and queued cloud recovery material were retained.' +
+                'FMSC has been uninstalled. School data, backups and recovery evidence were retained.' +
                 [Environment]::NewLine + $DataDirectory,
                 'FMSC Uninstall Complete','OK','Information') | Out-Null
             $uninstallSucceeded = $true

@@ -5,7 +5,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath,[ref]$tokens,[ref]$errors)
 if ($errors.Count -ne 0) { throw "Standalone uninstaller PowerShell parse failed: $($errors[0])" }
-foreach ($name in @('Test-FmscNoLinks','Test-FmscCloudRecoveryArtifact','Get-FmscProtectedFiles','Save-FmscProtectedFiles',
+foreach ($name in @('Test-FmscNoLinks','Test-FmscCloudRecoveryArtifact','Test-FmscPendingTransactionArtifact','Get-FmscProtectedFiles','Save-FmscProtectedFiles',
     'Assert-FmscProtectedCopies','Remove-FmscNonProtectedContents')) {
     $definition = $ast.Find({
         param($node)
@@ -47,8 +47,9 @@ try {
     $external = Join-Path $testRoot 'UnrelatedDocuments'
     $profile = Join-Path $testRoot 'Users\TestSchool\AppData\Local\FMSC'
     $cloud = Join-Path $profile 'CloudBackups'
+    $transactionProfile = Join-Path $testRoot 'Users\TestSchool\AppData\Local\FMSC_SMS'
     $DataDirectory = $school
-    foreach ($folder in @($app,$updater,$school,$external,$cloud)) {
+    foreach ($folder in @($app,$updater,$school,$external,$cloud,$transactionProfile)) {
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
     }
     $appMdf = Join-Path $app 'subdir\spare.mdf'
@@ -80,16 +81,29 @@ try {
     $submissionResult=Join-Path $submissionFolder (('d'*32)+'.result.dpapi')
     [IO.File]::WriteAllText($submission,'synthetic protected submission')
     [IO.File]::WriteAllText($submissionResult,'synthetic protected provider reference')
+    # These journals are the only durable evidence of unknown SQL commit outcomes.
+    # They must survive uninstall and be inspected before a transaction is retried.
+    $pendingCollection = Join-Path $transactionProfile 'PendingCollection.json'
+    $pendingRegistration = Join-Path $transactionProfile 'PendingQuickRegistration.json'
+    $pendingMutation = Join-Path $transactionProfile 'PendingFeeAdjustment.json'
+    $nonRecovery = Join-Path $transactionProfile 'preferences.json'
+    $nestedNonRecovery = Join-Path $transactionProfile 'Nested\PendingCollection.json'
+    foreach ($file in @($pendingCollection,$pendingRegistration,$pendingMutation,
+        $nonRecovery,$nestedNonRecovery)) {
+        New-Item -ItemType Directory -Path (Split-Path $file -Parent) -Force | Out-Null
+        [IO.File]::WriteAllText($file,'synthetic pending operation '+$file)
+    }
     $roots = @(
         [pscustomobject]@{Label='Application';Path=$app},
         [pscustomobject]@{Label='Updater';Path=$updater},
-        [pscustomobject]@{Label='User-Synthetic';Path=$profile}
+        [pscustomobject]@{Label='User-Synthetic';Path=$profile},
+        [pscustomobject]@{Label='User-Transactions';Path=$transactionProfile}
     )
     $preserved = Join-Path $school ('UninstallPreserved\'+[guid]::NewGuid().ToString('N'))
     $original = Get-FileHash -LiteralPath $appMdf -Algorithm SHA256
     $originalBackup = Get-FileHash -LiteralPath $updateBak -Algorithm SHA256
     $records = @(Save-FmscProtectedFiles -Roots $roots -PreservationDirectory $preserved)
-    if ($records.Count -ne 9) { throw "Expected SQL, cloud and communication recovery artifacts; found $($records.Count)." }
+    if ($records.Count -ne 12) { throw "Expected SQL, cloud, communication and pending transaction recovery artifacts; found $($records.Count)." }
     foreach ($file in @($package,$queuedKey,$journal,$recoveryKey,$submission,$submissionResult)) {
         if (@($records | Where-Object Source -eq $file).Count -ne 1) {
             throw "Missing encrypted cloud recovery artifact: $file"
@@ -98,6 +112,15 @@ try {
     if (@($records | Where-Object { $_.Source -eq $oauth -or $_.Source -eq $schedule }).Count -gt 0) {
         throw 'OAuth tokens or cloud settings must not be retained with school recovery data.'
     }
+    foreach ($file in @($pendingCollection,$pendingRegistration,$pendingMutation)) {
+        if (@($records | Where-Object Source -eq $file).Count -ne 1) {
+            throw "Missing pending SQL transaction evidence: $file"
+        }
+    }
+    if (@($records | Where-Object { $_.Source -eq $nonRecovery -or
+        $_.Source -eq $nestedNonRecovery }).Count -gt 0) {
+        throw 'Unrelated app settings or nested files must not be archived as pending SQL evidence.'
+    }
     Assert-FmscProtectedCopies -Roots $roots -Records $records
     $lateKey = Join-Path $cloud 'queue\late.fmscbackup.dpapi'
     [IO.File]::WriteAllText($lateKey,'new protected cloud key')
@@ -105,6 +128,12 @@ try {
     try { Assert-FmscProtectedCopies -Roots $roots -Records $records } catch { $rejected = $true }
     if (-not $rejected) { throw 'New cloud recovery credential was not detected.' }
     Remove-Item -LiteralPath $lateKey -Force
+    $lateTransaction = Join-Path $transactionProfile 'PendingStudentHold.json'
+    [IO.File]::WriteAllText($lateTransaction,'new pending SQL intent')
+    $rejected = $false
+    try { Assert-FmscProtectedCopies -Roots $roots -Records $records } catch { $rejected = $true }
+    if (-not $rejected) { throw 'Newly pending financial recovery journal was not detected.' }
+    Remove-Item -LiteralPath $lateTransaction -Force
     [IO.File]::WriteAllText($journal,'changed cloud delivery receipt')
     $rejected = $false
     try { Assert-FmscProtectedCopies -Roots $roots -Records $records } catch { $rejected = $true }
@@ -129,6 +158,7 @@ try {
     if (Test-Path -LiteralPath $app) { throw 'Synthetic application not removed.' }
     if (Test-Path -LiteralPath $updater) { throw 'Synthetic updater not removed.' }
     if (Test-Path -LiteralPath $profile) { throw 'Synthetic cloud cache and OAuth tokens were not removed.' }
+    if (Test-Path -LiteralPath $transactionProfile) { throw 'Synthetic transaction settings were not removed.' }
     if (Test-Path -LiteralPath (Join-Path $school 'Install.log')) { throw 'Synthetic logs not removed.' }
     foreach ($name in @('FMSC_DB.mdf','FMSC_DB_log.ldf','Backups.bak')) {
         if (-not (Test-Path -LiteralPath (Join-Path $school $name))) {
@@ -152,7 +182,7 @@ try {
         }
     }
     Write-Host 'PASS: successful uninstalls close the window after acknowledgement; failure remains visible.'
-    Write-Host 'PASS: SQL and encrypted cloud recovery copies survive cleanup; new or changed artifacts block deletion.'
+    Write-Host 'PASS: SQL, cloud and pending transaction recovery evidence survives; late or modified protected files block deletion.'
     Write-Host 'PASS: removable FMSC folders/logs can be cleared without deleting school data or unrelated files.'
 } finally {
     if (Test-Path -LiteralPath $testRoot) {
