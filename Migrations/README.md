@@ -110,8 +110,10 @@ Ordinary school records (student/staff contacts, Admissions, fees, access and
 permissions unrelated to the old module) are outside the deletion scope. Unknown
 legacy tables, external foreign keys / SQL dependencies, and unexpected guardian
 schema extensions are refused before retirement. Migrations 2–7 are unchanged.
-The installer provides a verified backup and the enclosing SQL transaction;
-if migration fails, recovery restores the previous working application/database.
+The installer verifies the pre-migration backup and protects SQL changes with
+its migration transaction and staged-install recovery. A failed migration stops
+the update; do not assume the backup is automatically restored into SQL. Keep it
+available for separately authorized recovery if necessary.
 **Do not apply this destructive retirement to any live school database without the owner's approved backup and release-specific restored-schema acceptance.** The prior schema-7 testing and the owner's successful local schema-10 upgrade do not authorize arbitrary future live migrations. The backup remains the only retention source for intentionally discarded old communication records.
 
 The new `msg` foundation in migration 9 starts with disabled channels and no
