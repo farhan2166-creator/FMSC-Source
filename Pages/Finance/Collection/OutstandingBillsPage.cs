@@ -11,6 +11,7 @@ public sealed class OutstandingBillsPage : V2Page,IBusyPage
     private readonly Label selectedSummary=new(){Dock=DockStyle.Fill,AutoSize=true,ForeColor=AppTheme.MutedText,Padding=new Padding(4,6,0,4)};
     private readonly ModernButton preview;
     private readonly BindingSource selectionSource=new();
+    private readonly ReportClassSectionFilters locationFilters;
     private readonly Func<OutstandingBillScope,Task<DataTable>> readBalances;
     private DataTable? roster;
     private OutstandingBillScope? loadedScope;
@@ -52,6 +53,7 @@ public sealed class OutstandingBillsPage : V2Page,IBusyPage
         Grid.DataSource=selectionSource;
         Grid.CurrentCellDirtyStateChanged+=(_,_)=>{if(Grid.IsCurrentCellDirty)Grid.CommitEdit(DataGridViewDataErrorContexts.Commit);};
         Grid.CellValueChanged+=(_,_)=>{if(!changingSelection)UpdateSummary();};
+        locationFilters=new ReportClassSectionFilters(campus,cls,section);
         foreach(var lookup in new[]{campus,year,cls,section})lookup.SelectedIndexChanged+=(_,_)=>FiltersChanged();
         comparison.SelectedIndexChanged+=(_,_)=>{UpdateAmountFields();FiltersChanged();};
         amount.TextChanged+=(_,_)=>FiltersChanged();through.TextChanged+=(_,_)=>FiltersChanged();
@@ -177,10 +179,10 @@ public sealed class OutstandingBillsPage : V2Page,IBusyPage
     private async Task BindFiltersAsync()
     {
         try {
-        var tasks=new[]{DatabaseHelper.QueryUserAsync("GetCampuses"),DatabaseHelper.QueryUserAsync("GetAcademicYears"),DatabaseHelper.QueryUserAsync("GetClasses"),ReportUi.SectionFilterListAsync()};
+        var tasks=new[]{DatabaseHelper.QueryUserAsync("GetCampuses"),DatabaseHelper.QueryUserAsync("GetAcademicYears"),DatabaseHelper.QueryUserAsync("GetClasses"),ReportUi.SectionFilterListAsync(),ReportClassSectionLookup.QueryAsync()};
         await Task.WhenAll(tasks);if(IsDisposed)return;
         campus.Bind(tasks[0].Result,"CampusId","CampusName","All");year.Bind(tasks[1].Result,"AcademicYearId","YearName","All");
-        cls.Bind(tasks[2].Result,"ClassId","ClassName","All");section.Bind(tasks[3].Result,"SectionId","SectionName","All");
+        locationFilters.Bind(tasks[2].Result,tasks[3].Result,tasks[4].Result);
         } catch(Exception ex){if(!IsDisposed)Fail(ex);}
     }
 }
