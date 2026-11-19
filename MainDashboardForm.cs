@@ -1797,11 +1797,16 @@ public sealed class MainDashboardForm : ApplicationWindowForm
         protected override bool ProcessMnemonic(char charCode)=>false;
         private bool _active;
         private bool _expanded;
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public Color AccentColor { get; set; } =
             AppTheme.Primary;
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool IsModule { get; set; }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool IsChild { get; set; }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool ShowChevron { get; set; }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool IsExpanded
         {
             get => _expanded;
@@ -1811,6 +1816,7 @@ public sealed class MainDashboardForm : ApplicationWindowForm
                 Invalidate();
             }
         }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool IsActive
         {
             get => _active;
