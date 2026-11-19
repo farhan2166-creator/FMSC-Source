@@ -229,7 +229,7 @@ public abstract class CanonicalFinanceReportPage : V2Page
             Task<DataTable> yearsTask = DatabaseHelper.QueryUserAsync("GetAcademicYears");
             Task<DataTable> classesTask = DatabaseHelper.QueryUserAsync("GetClasses");
             Task<DataTable> sectionsTask = ReportUi.SectionFilterListAsync();
-            Task<DataTable> placementsTask = ReportClassSectionLookup.QueryAsync();
+            Task<DataTable> placementsTask = ReportClassSectionLookup.QueryAsync(activeOnly: true);
             await Task.WhenAll(campusesTask, yearsTask, classesTask, sectionsTask, placementsTask);
             if (IsDisposed) return;
             _applyingScope = true;
