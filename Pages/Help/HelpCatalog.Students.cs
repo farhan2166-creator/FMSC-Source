@@ -107,7 +107,7 @@ internal static partial class HelpCatalog
             new[] { HelpRule.System, HelpRule.Permission }, HelpOwner.SQL | HelpOwner.CSharp,
             new[] { "Pages/Staff/StaffManagementPage.cs#StaffManagementPage", "fmsc.dacpac#SaveStaffEmployment", "fmsc.dacpac#EndStaffEmployment" }, System.Array.Empty<string>(), ""),
         new("FAQ-056", "Staff", "Where are staff certificates located?",
-            "Teacher/Lecturer and Bank Account certificates belong under Staff rather than Student Certificates. Verify the selected employee and saved details before producing the document.",
+            "Open Staff → Teacher / Staff Certificates to find the employee and choose an eligible Teacher/Lecturer or Bank Account certificate. Verify the selected employee, employment details and required permissions before issuing or printing. Student Certificates is a separate workspace.",
             "teacher,bank,staff,certificate", "Staff",
             new[] { HelpRule.System, HelpRule.Permission }, HelpOwner.CSharp,
             new[] { "MainDashboardForm.cs#MainDashboardForm", "Pages/Staff/Certificates/RegularLecturerCertificatePage.cs#RegularLecturerCertificatePage", "Pages/Staff/Certificates/BankAccountOpeningCertificatePage.cs#BankAccountOpeningCertificatePage" }, System.Array.Empty<string>(), ""),
