@@ -179,7 +179,7 @@ public sealed class OutstandingBillsPage : V2Page,IBusyPage
     private async Task BindFiltersAsync()
     {
         try {
-        var tasks=new[]{DatabaseHelper.QueryUserAsync("GetCampuses"),DatabaseHelper.QueryUserAsync("GetAcademicYears"),DatabaseHelper.QueryUserAsync("GetClasses"),ReportUi.SectionFilterListAsync(),ReportClassSectionLookup.QueryAsync()};
+        var tasks=new[]{DatabaseHelper.QueryUserAsync("GetCampuses"),DatabaseHelper.QueryUserAsync("GetAcademicYears"),DatabaseHelper.QueryUserAsync("GetClasses"),ReportUi.SectionFilterListAsync(),ReportClassSectionLookup.QueryAsync(activeOnly:true)};
         await Task.WhenAll(tasks);if(IsDisposed)return;
         campus.Bind(tasks[0].Result,"CampusId","CampusName","All");year.Bind(tasks[1].Result,"AcademicYearId","YearName","All");
         locationFilters.Bind(tasks[2].Result,tasks[3].Result,tasks[4].Result);
