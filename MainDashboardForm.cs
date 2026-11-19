@@ -782,8 +782,8 @@ public sealed class MainDashboardForm : ApplicationWindowForm
             "Reports",
             "Reports",
             "Reports.View");
-        // The new center is available for safe recipient previews and history.
-        // Sending stays disabled until provider acceptance is complete.
+        // This destination is permission-gated. Each manual or API sending method
+        // enforces its own configuration, consent, review and dispatch checks.
         AddMainNav(flow, "reports.png", "Communication Center", AppTheme.Primary,
             () => new CommunicationCenterPage(),
             "Communication", "Communication Center", access: () => CommunicationAccess.CanOpen(CurrentUser.HasPermission));
