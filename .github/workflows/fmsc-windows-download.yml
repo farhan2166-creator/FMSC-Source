@@ -223,6 +223,7 @@ jobs:
         run: |
           dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output out/windows-x64-app -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$env:GITHUB_WORKSPACE/out/prerequisites/MinGit" "-p:LocalDbMsiPath=$env:GITHUB_WORKSPACE/out/prerequisites/SqlLocalDB.msi" "-p:VcRedistPath=$env:GITHUB_WORKSPACE/out/prerequisites/vc_redist.x64.exe" "-p:BundledSqlCmdPath=$env:GITHUB_WORKSPACE/out/prerequisites/sqlcmd.exe" -p:PublishSingleFile=false -p:PublishTrimmed=false
           if ($LASTEXITCODE -ne 0) { throw "Windows publish failed." }
+          & .\Tools\AssertNet10SelfContained.ps1 -ApplicationDirectory 'out/windows-x64-app'
 
       - name: Verify ZIP contents and add build manifest
         shell: pwsh

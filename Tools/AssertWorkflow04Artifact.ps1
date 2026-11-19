@@ -87,4 +87,5 @@ if ($info -cnotmatch ('(?m)^Source commit: ' + [regex]::Escape($ExpectedSourceSh
     $info -cnotmatch ('(?m)^Application version: ' + [regex]::Escape($ExpectedVersion) + '\r?$')) {
     throw 'Downloaded build manifest does not match the exact approved Source SHA and version.'
 }
+& (Join-Path $PSScriptRoot 'AssertNet10SelfContained.ps1') -ApplicationDirectory $root
 Write-Output "Verified Workflow 04 artifact for $ExpectedVersion, schema $ExpectedSchema, SHA $ExpectedSourceSha."

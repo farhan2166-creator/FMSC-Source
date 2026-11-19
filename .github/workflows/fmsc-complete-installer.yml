@@ -154,6 +154,7 @@ jobs:
           )
           & dotnet @arguments
           if ($LASTEXITCODE -ne 0) { throw 'Full PortableRelease publishing failed.' }
+          & .\Tools\AssertNet10SelfContained.ps1 -ApplicationDirectory $application
           $tools = Join-Path $release 'Tools'
           New-Item -ItemType Directory -Path $tools -Force | Out-Null
           Copy-Item -LiteralPath (Join-Path $workspace 'out/prerequisites/sqlcmd.exe') -Destination (Join-Path $tools 'sqlcmd.exe') -Force
