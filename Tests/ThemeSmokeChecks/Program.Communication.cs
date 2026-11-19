@@ -464,11 +464,29 @@ internal static partial class Program
         using var campuses = new DataTable();
         campuses.Columns.Add("CampusId", typeof(int)); campuses.Columns.Add("CampusName");
         campuses.Rows.Add(42, "Synthetic campus");
+        campuses.Rows.Add(43, "Another campus");
+        using var assignedClasses = new DataTable();
+        assignedClasses.Columns.Add("ClassId", typeof(int)); assignedClasses.Columns.Add("ClassName");
+        assignedClasses.Rows.Add(501, "Grade One");assignedClasses.Rows.Add(502, "Grade Two");
+        using var activeAssignments = new DataTable();
+        activeAssignments.Columns.Add("CampusId",typeof(int));activeAssignments.Columns.Add("ClassId",typeof(int));
+        activeAssignments.Rows.Add(42,501);activeAssignments.Rows.Add(43,502);
         campus.Bind(campuses, "CampusId", "CampusName");
+        var cascade = (CampusClassFilters)typeof(CommunicationCenterPage)
+            .GetField("campusClasses",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(page)!;
+        cascade.Bind(assignedClasses,activeAssignments,"Select a class");
         Check(campusPanel.Visible && classPanel.Visible && Precedes(campusPanel, classPanel) && !classes.Enabled,
             "The Class scope shows campus first and waits for a campus before enabling class selection");
         campus.SelectedValue = 42;
         Check(classes.Enabled, "Selecting a campus enables class selection");
+        Check(classes.Items.Cast<DataRowView>().Where(row => Convert.ToInt32(row["ClassId"]) > 0)
+            .Select(row => Convert.ToInt32(row["ClassId"])).SequenceEqual(new[]{501}),
+            "Communication Center offers only assigned classes for its chosen campus");
+        classes.SelectedValue=501;campus.SelectedValue=43;
+        Check(classes.SelectedId==0 && classes.Items.Cast<DataRowView>()
+            .Where(row => Convert.ToInt32(row["ClassId"]) > 0)
+            .Select(row => Convert.ToInt32(row["ClassId"])).SequenceEqual(new[]{502}),
+            "Communication Center clears a previously selected class when campus changes");
         ChooseAudience(CommunicationAudience.OutstandingFees);
         Check(campus.SelectedId == 0 && classes.Enabled && studentPanel.Visible && Precedes(classPanel, studentPanel),
             "Outstanding fees starts with optional campus, class and student filters without inheriting the previous scope");

@@ -44,7 +44,10 @@ internal static partial class Program
             var classes = Lookup("ClassId", "ClassName", (606, "Fixture Class 6"), (607, "Fixture Class 7"));
             classes.Columns.Add("DisplayOrder",typeof(int));classes.Columns.Add("AcademicProgramId",typeof(int));
             for(int index=0;index<classes.Rows.Count;index++){classes.Rows[index]["DisplayOrder"]=index+6;classes.Rows[index]["AcademicProgramId"]=1;}
-            var sections = Lookup("SectionId", "SectionName", (17, "Fixture Section A"));
+            var sections = Lookup("SectionId", "SectionName", (17, "Fixture Section A"), (18, "Fixture Section B"));
+            var assignments = new DataTable();
+            assignments.Columns.Add("ClassId",typeof(int));assignments.Columns.Add("SectionId",typeof(int));
+            assignments.Rows.Add(606,17);assignments.Rows.Add(607,18);
             using var parent=new Form {ClientSize=new Size(1080,650),AutoScaleMode=AutoScaleMode.None};
             parent.Show();
             using var dialog=new ApplicationWindowForm {Text="Promotion History",ShowInTaskbar=false,StartPosition=FormStartPosition.CenterParent,Size=new Size(900,600)};
@@ -54,6 +57,7 @@ internal static partial class Program
                 if (procedure == "GetAcademicYears") return years;
                 if (procedure == "GetClasses") return classes;
                 if (procedure == "GetSections") return sections;
+                if (procedure == "GetClassSections") return assignments;
                 Check(procedure == "GetPromotionBatchesFiltered", "History retains its production read-only procedure contract");
                 reads.Add(parameters);
                 var batches = new DataTable(); batches.Columns.Add("PromotionBatchId", typeof(int));
@@ -74,6 +78,15 @@ internal static partial class Program
             Check(HistoryField<Label>("summary").Text.Contains("Repeated class: 1")
                 &&((DataGridView)typeof(V2Page).GetField("Grid",flags)!.GetValue(history)!).Columns["HeldBackCount"].HeaderText=="Repeated class",
                 "Promotion history gives repeat decisions a clear label in both the grid and summary");
+            var sourceClass = HistoryField<LookupBox>("cls");
+            var sourceSection = HistoryField<LookupBox>("section");
+            sourceClass.SelectedValue = 607;
+            Check(sourceSection.SelectedId == 0 && sourceSection.Items.Cast<DataRowView>()
+                .Where(row => Convert.ToInt32(row["SectionId"]) > 0)
+                .Select(row => Convert.ToInt32(row["SectionId"])).SequenceEqual(new[] { 18 }),
+                "Promotion History sections follow the selected source class without stale choices");
+            sourceClass.SelectedValue = 606;
+            sourceSection.SelectedValue = 17;
             HistoryField<LookupBox>("year").SelectedValue = 104;
             Check(!export.Enabled && reads.Count == 1, "Changing history filters requires a fresh Load before export");
             historyType.GetMethod("LoadData", flags)!.Invoke(history, null);

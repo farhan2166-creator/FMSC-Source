@@ -11,6 +11,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
 {
     private readonly ModernComboBox audience = HumanUi.Combo();
     private readonly LookupBox campus = new(), cls = new();
+    private readonly CampusClassFilters campusClasses;
     private readonly StudentPicker student = new();
     private readonly StaffPicker staff = new();
     private readonly ModernComboBox deliveryMethod = HumanUi.Combo();
@@ -109,6 +110,7 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
     internal CommunicationCenterPage(bool initialize, Operations? operations)
         : base("Communication Center", "")
     {
+        campusClasses = new CampusClassFilters(campus, cls);
         this.operations = operations ?? new Operations(CommunicationRecipientResolver.ReadAsync,
             CommunicationManualHandoffStore.IsEnabledAsync,
             (target, preview, body, key) => CommunicationBatchStore.ConfirmPreviewAsync(target, preview, body, key, manualWhatsApp: true),
@@ -1059,13 +1061,15 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
             int actor = CurrentUser.UserId;
             var campuses = DatabaseHelper.QueryUserAsync("GetCampuses");
             var classes = DatabaseHelper.QueryUserAsync("GetClasses");
-            await Task.WhenAll(campuses, classes);
+            var assignments = ReportClassSectionLookup.QueryAsync(activeOnly: true);
+            await Task.WhenAll(campuses, classes, assignments);
             using var campusRows = campuses.Result;
             using var classRows = classes.Result;
+            using var assignmentRows = assignments.Result;
             if (IsDisposed || actor != CurrentUser.UserId) return;
             bool optional = CurrentTarget().Audience == CommunicationAudience.OutstandingFees;
             campus.Bind(campusRows, "CampusId", "CampusName", optional ? "All campuses" : "Select a campus");
-            cls.Bind(classRows, "ClassId", "ClassName", optional ? "All classes" : "Select a class");
+            campusClasses.Bind(classRows, assignmentRows, optional ? "All classes" : "Select a class");
             UpdateClassSelection();
         }
         catch (CommunicationValidationException ex) { if (!IsDisposed) Warn(ex.Message); }

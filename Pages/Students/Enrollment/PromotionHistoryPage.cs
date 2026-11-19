@@ -7,6 +7,8 @@ public sealed class PromotionHistoryPage : V2Page
     private readonly LookupBox year = new();
     private readonly LookupBox cls = new();
     private readonly LookupBox section = new();
+    private DataTable? sectionCatalog, sourceAssignments;
+    private bool bindingSections;
     private readonly ModernButton exportButton;
     private readonly Func<string, SqlParameter[], DataTable> query;
     private readonly (int Year, int Class, int Section) initialFilters;
@@ -62,6 +64,7 @@ public sealed class PromotionHistoryPage : V2Page
         exportButton = export;
         SetReportActionsEnabled(false);
         /* The grid keeps showing the batches an earlier load produced, so a filter change has to be recorded here. */
+        cls.SelectedIndexChanged += (_, _) => RefreshSections();
         foreach (var filter in new[] { year, cls, section })
             filter.SelectedIndexChanged += (_, _) => OnFiltersChanged();
         Defer(() => {
@@ -98,13 +101,36 @@ public sealed class PromotionHistoryPage : V2Page
         else
             SetStatus("Filters changed. Use Load again before exporting.", true);
     }
+    private void RefreshSections()
+    {
+        if (bindingSections || sectionCatalog is null || sourceAssignments is null) return;
+        bindingSections = true;
+        try
+        {
+            int previous = section.SelectedId;
+            int classId = cls.SelectedId;
+            var allowed = sourceAssignments.AsEnumerable()
+                .Where(row => classId <= 0 || Convert.ToInt32(row["ClassId"]) == classId)
+                .Select(row => Convert.ToInt32(row["SectionId"])).ToHashSet();
+            var choices = sectionCatalog.Clone();
+            foreach (DataRow row in sectionCatalog.Rows)
+                if (allowed.Contains(Convert.ToInt32(row["SectionId"]))) choices.ImportRow(row);
+            section.Bind(choices, "SectionId", "SectionName");
+            section.SelectedValue = previous > 0 && allowed.Contains(previous) ? previous : 0;
+        }
+        finally { bindingSections = false; }
+    }
     private bool BindLookups()
     {
         try
         {
             year.Bind(query("GetAcademicYears", Array.Empty<SqlParameter>()), "AcademicYearId", "YearName");
             cls.Bind(query("GetClasses", Array.Empty<SqlParameter>()), "ClassId", "ClassName");
-            section.Bind(query("GetSections", Array.Empty<SqlParameter>()), "SectionId", "SectionName");
+            sectionCatalog = query("GetSections", Array.Empty<SqlParameter>());
+            sourceAssignments = query("GetClassSections", new[] {
+                DatabaseHelper.Int("@CampusId", 0), DatabaseHelper.Int("@ClassId", 0), DatabaseHelper.Int("@SectionId", 0)
+            });
+            RefreshSections();
             return true;
         }
         catch (Exception ex)
