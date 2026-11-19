@@ -427,7 +427,7 @@ public partial class StudentReportsPage : V2Page
         cls.SelectedIndexChanged += (_, _) => {
             OnParentChanged(classes: false, sections: true);
         };
-        section.SelectedIndexChanged += (_, _) => OnFilterChanged();
+        section.SelectedIndexChanged += (_, _) => { if (!_cascading) OnFilterChanged(); };
         /* Which change types to show is only a way of looking at the rows already loaded. */
         changeType.SelectedIndexChanged += (_, _) => OnViewChanged();
         search.TextChanged += (_, _) => {
