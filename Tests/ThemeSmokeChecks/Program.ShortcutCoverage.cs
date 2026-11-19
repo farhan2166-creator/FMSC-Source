@@ -150,7 +150,7 @@ internal static partial class Program
             Rectangle narrowSignature=signatureCard.RectangleToScreen(signatureCard.ClientRectangle);
             Check(narrowSignature.Top>=narrowFee.Bottom &&
                 Math.Abs(narrowSignature.Left-narrowFee.Left)<=2,
-                "School Profile stacks aligned settings cards on narrow windows");
+                $"School Profile stacks aligned settings cards on narrow windows: fee={narrowFee}, signature={narrowSignature}, pair={feePolicyCard.Parent?.ClientSize}, host={profileHost.ClientSize}");
             Rectangle narrowSignatureCard=signatureCard.RectangleToScreen(signatureCard.ClientRectangle);
             foreach(var button in signatureButtons)
                 Check(narrowSignatureCard.Contains(button.RectangleToScreen(button.ClientRectangle)),
