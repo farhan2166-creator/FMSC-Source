@@ -55,7 +55,7 @@ internal static partial class HelpCatalog
             new[] { "Pages/Administration/CloudBackupSettingsDialog.cs", "Services/Backup/CloudBackupSettings.cs" }, new[] { "FAQ-063" }, ""),
         new("FAQ-135", "Database & Recovery", "What happens to Dropbox backups while the computer is offline?",
             "When local backup is enabled, it continues independently of Dropbox. Encrypted pending uploads are kept in a bounded local queue, subject to the configured maximum queue size; a successful local backup does not mean the cloud upload succeeded. Review Activity History and backup status. When connectivity returns, use Retry Pending Uploads if available, and check the verified cloud result before relying on it.",
-            "offline,cloud,dropbox,queue,retry,upload,retention,backup", "Backup / Restore → Activity History / Retry Pending Uploads",
+            "offline,cloud,dropbox,queue,retry,upload,retention,backup", "Backup / Restore → Retry Pending Uploads / Activity History",
             new[] { HelpRule.System, HelpRule.Recovery }, HelpOwner.CSharp,
             new[] { "Services/Backup/CloudBackupCoordinator.cs", "Pages/Administration/BackupRestorePage.cs" }, new[] { "FAQ-134" }, ""),
         new("FAQ-136", "Database & Recovery", "How can I restore an existing school on a replacement computer?",
