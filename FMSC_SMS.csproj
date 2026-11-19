@@ -116,7 +116,7 @@
 		<!-- Local verification repositories and generated files are not application inputs. -->
 		<DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**</DefaultItemExcludes>
 		<OutputType>WinExe</OutputType>
-		<TargetFramework>net8.0-windows</TargetFramework>
+		<TargetFramework>net10.0-windows</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWindowsForms>true</UseWindowsForms>
