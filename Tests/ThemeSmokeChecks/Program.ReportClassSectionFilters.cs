@@ -17,6 +17,7 @@ internal static partial class Program
         classes.Rows.Add(10, "Play Group");
         classes.Rows.Add(20, "Grade One");
         classes.Rows.Add(30, "Grade Two");
+        classes.Rows.Add(40, "Unassigned Class");
 
         using var sections = new DataTable();
         sections.Columns.Add("SectionId", typeof(int));
@@ -24,6 +25,7 @@ internal static partial class Program
         sections.Rows.Add(100, "A");
         sections.Rows.Add(200, "B");
         sections.Rows.Add(300, "C");
+        sections.Rows.Add(400, "Unassigned Section");
 
         using var placements = new DataTable();
         placements.Columns.Add("CampusId", typeof(int));
@@ -46,7 +48,7 @@ internal static partial class Program
 
         Check(Choices(cls).SequenceEqual(new[] { 10, 20, 30 }) &&
             Choices(section).SequenceEqual(new[] { 100, 200, 300 }),
-            "All campuses offers the combined class and section catalog once each");
+            "All campuses offers only assigned classes/sections once, omitting unused catalog entries");
 
         campus.SelectedValue = 1;
         Check(Choices(cls).SequenceEqual(new[] { 10, 20 }) &&
@@ -73,6 +75,6 @@ internal static partial class Program
         campus.SelectedIndex = 0;
         Check(Choices(cls).SequenceEqual(new[] { 10, 20, 30 }) &&
             Choices(section).SequenceEqual(new[] { 100, 200, 300 }),
-            "Resetting to All campuses restores combined report options");
+            "Resetting to All campuses restores active assigned report options, not unassigned catalog entries");
     }
 }
