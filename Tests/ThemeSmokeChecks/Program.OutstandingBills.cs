@@ -35,6 +35,7 @@ internal static partial class Program
         try
         {
             CurrentUser.SignIn(990,"Bill fixture","Administrator",false,Array.Empty<string>());
+            CheckStudentReportParentCascade();
             using(var shell=new FMSC_SMS.MainDashboardForm((_,_)=>{}))
             {
                 var commands=(List<NavigationCommand>)typeof(FMSC_SMS.MainDashboardForm).GetField("navigationCommands",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(shell)!;
