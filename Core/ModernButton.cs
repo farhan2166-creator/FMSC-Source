@@ -4,8 +4,10 @@ namespace FMSC_SMS.Core
     public class ModernButton : Button
     {
         // Explicit semantics for commit buttons whose caption is not "Save".
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         internal bool SavesChanges { get; set; }
         private char? _shortcutLetter;
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         internal char? ShortcutLetter {
             get=>_shortcutLetter;
             set {if(_shortcutLetter==value)return;_shortcutLetter=value;Invalidate();}
@@ -32,6 +34,7 @@ namespace FMSC_SMS.Core
         private string _outlineBorderRole = "Fixed";
         private string _outlineTextRole = "Fixed";
         private string _outlineFillRole = "Fixed";
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public int CornerRadius
         {
             get => _radius;
@@ -42,6 +45,7 @@ namespace FMSC_SMS.Core
                 Invalidate();
             }
         }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public string ThemeRole
         {
             get => _themeRole;
@@ -54,6 +58,7 @@ namespace FMSC_SMS.Core
             }
         }
         /// <summary>False keeps the button out of the keyboard focus completely: Tab skips it and a click runs it without moving the focus off the field the operator was typing in.</summary>
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool TakesFocus
         {
             get => GetStyle(ControlStyles.Selectable);

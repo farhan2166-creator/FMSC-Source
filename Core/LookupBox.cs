@@ -3,6 +3,7 @@ namespace FMSC_SMS.Core;
 /// <summary>A consistently styled, data-bound lookup with a standard blank choice.</summary>
 public sealed class LookupBox : ModernComboBox
 {
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public string KeyColumn { get; set; } = "Id";
     public event EventHandler? UserSelectionChanged;
     internal event EventHandler? LookupBound;

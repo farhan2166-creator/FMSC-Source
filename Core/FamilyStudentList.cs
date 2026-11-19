@@ -26,7 +26,9 @@ internal sealed class FamilyStudentList : CheckedListBox
     private int LineHeight=>Font.Height+(CompactRows?2:4);
     private int LineGap=>CompactRows?0:2;
     /// <summary>Row clicks select for review; only the drawn checkbox changes inclusion.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal bool CheckBoxOnly { get; set; }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal bool CompactRows { get; set; }
     private bool _mouseOutsideCheckBox;
 
