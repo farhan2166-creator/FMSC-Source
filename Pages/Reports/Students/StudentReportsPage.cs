@@ -1060,10 +1060,10 @@ public partial class StudentReportsPage : V2Page
             _allSections = await sectionsTask;
             cls.Bind(_allClasses, "ClassId", "ClassName", "All classes");
             section.Bind(_allSections, "SectionId", "SectionName", "All sections");
-            /* Which classes and sections really exist together. If this cannot be read, the three lists simply stay independent - the report still works. */
+            /* Use active campus assignments for filter choices; the underlying reports still read historical records when scope is All. */
             try
             {
-                _combos = await ReportClassSectionLookup.QueryAsync();
+                _combos = await ReportClassSectionLookup.QueryAsync(activeOnly: true);
                 if (!_combos.Columns.Contains("CampusId") ||
                     !_combos.Columns.Contains("ClassId") ||
                     !_combos.Columns.Contains("SectionId"))
