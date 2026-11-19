@@ -22,8 +22,16 @@ internal static partial class Program
             "GetCampuses" => Lookup("CampusId", "CampusName"),
             "GetAcademicYears" => Lookup("AcademicYearId", "YearName"),
             "GetClasses" => Lookup("ClassId", "ClassName"),
+            "GetClassSections" => SearchAssignments(),
             _ => throw new InvalidOperationException("Unexpected fixture procedure: " + procedure)
         };
+        DataTable SearchAssignments()
+        {
+            var t = new DataTable();
+            t.Columns.Add("CampusId", typeof(int));t.Columns.Add("ClassId", typeof(int));
+            t.Rows.Add(11, 11);t.Rows.Add(12, 12);
+            return t;
+        }
         DataTable Students()
         {
             var table = new DataTable();
@@ -115,6 +123,16 @@ internal static partial class Program
             before = calls.Count; Finish(Search()); Check(calls.Count == before, "Blank criteria do not query every student");
             status.SelectedIndex = 1; Finish(Search());
             Check(grid.Rows.Count == 1 && Value("@CampusId") == 0, "Active Only is a usable filter on its own");
+            // Real Student Search events must cascade the class picker without executing a search.
+            campus.SelectedValue = 11;
+            Check(cls.Items.Cast<DataRowView>().Where(row => Convert.ToInt32(row["ClassId"]) > 0)
+                .Select(row => Convert.ToInt32(row["ClassId"])).SequenceEqual(new[] { 11 }),
+                "Student Search lists only classes assigned to the selected campus");
+            cls.SelectedValue = 11;
+            campus.SelectedValue = 12;
+            Check(cls.SelectedId == 0 && cls.Items.Cast<DataRowView>().Where(row => Convert.ToInt32(row["ClassId"]) > 0)
+                .Select(row => Convert.ToInt32(row["ClassId"])).SequenceEqual(new[] { 12 }),
+                "Student Search clears a stale class and immediately repopulates it for a new campus");
             dialog.Close();
 
             var lookupReplies = new Dictionary<string, TaskCompletionSource<DataTable>>();

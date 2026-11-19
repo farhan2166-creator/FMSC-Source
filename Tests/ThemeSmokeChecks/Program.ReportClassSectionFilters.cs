@@ -5,6 +5,7 @@ internal static partial class Program
 {
     private static void CheckReportClassSectionFilters()
     {
+        CheckCampusClassFilters();
         using var campuses = new DataTable();
         campuses.Columns.Add("CampusId", typeof(int));
         campuses.Columns.Add("CampusName", typeof(string));

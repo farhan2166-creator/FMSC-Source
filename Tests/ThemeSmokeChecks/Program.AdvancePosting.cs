@@ -32,6 +32,22 @@ internal static partial class Program
         string before = (string)signature.Invoke(page, null)!;
         picker.SetStudent(12, "Selected student");
         Check((string)signature.Invoke(page, null)! != before, "Student selection participates in stale-preview protection");
+        // Child month dropdown follows the selected starting month, preserving only valid choices.
+        var from = (LookupBox)typeof(FeePostingPage).GetField("monthBox", flags)!.GetValue(page)!;
+        var available = new DataTable();available.Columns.Add("MonthKey", typeof(int));available.Columns.Add("Display");
+        available.Rows.Add(202706, "June 2027"); available.Rows.Add(202707, "July 2027"); available.Rows.Add(202708, "August 2027");
+        typeof(FeePostingPage).GetField("postableMonths", flags)!.SetValue(page, available);
+        from.Bind(available, "MonthKey", "Display"); from.SelectedValue = 202707;
+        Check(through.Items.Cast<DataRowView>().Where(row => Convert.ToInt32(row["MonthKey"]) > 0)
+            .Select(row => Convert.ToInt32(row["MonthKey"])) .SequenceEqual(new[] { 202707, 202708 }),
+            "Through Month omits months earlier than From Month");
+        through.SelectedValue = 202708; from.SelectedValue = 202708;
+        Check(through.SelectedId == 202708, "Changing From Month keeps a valid end month");
+        from.SelectedValue = 202706; through.SelectedValue = 202706; from.SelectedValue = 202708;
+        Check(through.SelectedId == 0 && through.Items.Cast<DataRowView>()
+            .Where(row => Convert.ToInt32(row["MonthKey"]) > 0)
+            .Select(row => Convert.ToInt32(row["MonthKey"])).SequenceEqual(new[] { 202708 }),
+            "Changing From Month clears a stale earlier end month");
         typeof(FeePostingPage).GetField("loadedMonth", flags)!.SetValue(page, june);
         typeof(FeePostingPage).GetField("loadedThrough", flags)!.SetValue(page, august);
         Check((string)typeof(FeePostingPage).GetProperty("PeriodLabel", flags)!.GetValue(page)! == "June 2027 through August 2027", "Confirmation identifies the complete month range");
