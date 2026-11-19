@@ -93,6 +93,7 @@ internal static partial class Program
                     .Any(label=>label.Text==title));
             var detailsCard=CardWithTitle("School Identity");
             var logoCard=CardWithTitle("Logo");
+            var feePolicyCard=CardWithTitle("Fee Policy");
             var signatureCard=CardWithTitle("Principal Signature");
             var logoPreview=Descendants(logoCard).OfType<PictureBox>().Single();
             var signaturePreview=Descendants(signatureCard).OfType<PictureBox>().Single();
@@ -111,16 +112,19 @@ internal static partial class Program
                 Rectangle logoBounds=logoCard.RectangleToScreen(logoCard.ClientRectangle);
                 Rectangle detailsBounds=detailsCard.RectangleToScreen(detailsCard.ClientRectangle);
                 Rectangle signatureBounds=signatureCard.RectangleToScreen(signatureCard.ClientRectangle);
-                // At a short window height, the left-hand fields may extend
-                // below the viewport. The logo must fill its actual visible
-                // column, not an imaginary height based on offscreen controls.
-                Rectangle columnBounds=logoCard.Parent!.RectangleToScreen(
-                    logoCard.Parent.ClientRectangle);
-                Check(logoBounds.Top<=columnBounds.Top+2 &&
-                    logoBounds.Bottom>=columnBounds.Bottom-2 &&
-                    logoPreview.Height>signaturePreview.Height &&
-                    signatureCard.Height<detailsCard.Height,
-                    $"School Profile visible column at {width}: logo={logoBounds}, container={columnBounds}, details={detailsBounds}, signature={signatureBounds}, imageHeights={logoPreview.Height}/{signaturePreview.Height}");
+                Rectangle feePolicyBounds=feePolicyCard.RectangleToScreen(feePolicyCard.ClientRectangle);
+                Check(Math.Abs(feePolicyBounds.Top-signatureBounds.Top)<=2 &&
+                    Math.Abs(feePolicyBounds.Bottom-signatureBounds.Bottom)<=2 &&
+                    feePolicyBounds.Right<=signatureBounds.Left,
+                    $"School Profile Fee Policy and Principal Signature stay paired and aligned at {width}: fee={feePolicyBounds}, signature={signatureBounds}, pair={feePolicyCard.Parent?.ClientSize}, left={feePolicyCard.Parent?.Parent?.ClientSize}");
+                // Identity and Logo now share the upper row; the two settings
+                // cards share the full-width row below. Neither image may collapse.
+                Check(Math.Abs(logoBounds.Top-detailsBounds.Top)<=2 &&
+                    Math.Abs(logoBounds.Bottom-detailsBounds.Bottom)<=2 &&
+                    logoPreview.Width>0 && logoPreview.Height>0 &&
+                    signaturePreview.Width>0 && signaturePreview.Height>0 &&
+                    logoBounds.Bottom<=feePolicyBounds.Top+2,
+                    $"School Profile upper cards retain readable previews at {width}: logo={logoBounds}, identity={detailsBounds}, settings={feePolicyBounds}");
 
                 foreach(var (card,buttons) in new[]{
                     (Card:logoCard,Buttons:logoButtons),
@@ -137,6 +141,23 @@ internal static partial class Program
                     }
                 }
             }
+            // Narrow screens must stack the settings cards rather than clip
+            // their save/remove actions. This is a geometry contract, not a
+            // fixed-pixel screenshot comparison.
+            // Use a scaled narrow viewport, not an arbitrary pixel width:
+            // the 1024-pixel host still has enough content width for pairing.
+            profileHost.ClientSize=new Size(AppScale.Scale(850),850);
+            Application.DoEvents();
+            Rectangle narrowFee=feePolicyCard.RectangleToScreen(feePolicyCard.ClientRectangle);
+            Rectangle narrowSignature=signatureCard.RectangleToScreen(signatureCard.ClientRectangle);
+            Check(feePolicyCard.Parent!.ClientSize.Width<AppScale.Scale(850) &&
+                narrowSignature.Top>=narrowFee.Bottom &&
+                Math.Abs(narrowSignature.Left-narrowFee.Left)<=2,
+                $"School Profile stacks aligned settings cards on narrow windows: fee={narrowFee}, signature={narrowSignature}, pair={feePolicyCard.Parent?.ClientSize}, host={profileHost.ClientSize}");
+            Rectangle narrowSignatureCard=signatureCard.RectangleToScreen(signatureCard.ClientRectangle);
+            foreach(var button in signatureButtons)
+                Check(narrowSignatureCard.Contains(button.RectangleToScreen(button.ClientRectangle)),
+                    "Narrow School Profile retains its visible signature action: "+button.Text);
             profileHost.Close();
             Check(!students.IsHandleCreated && !bills.IsHandleCreated,"Real-page shortcut coverage does not start database initialization");
         }
