@@ -144,11 +144,14 @@ internal static partial class Program
             // Narrow screens must stack the settings cards rather than clip
             // their save/remove actions. This is a geometry contract, not a
             // fixed-pixel screenshot comparison.
-            profileHost.ClientSize=new Size(1024,850);
+            // Use a scaled narrow viewport, not an arbitrary pixel width:
+            // the 1024-pixel host still has enough content width for pairing.
+            profileHost.ClientSize=new Size(AppScale.Scale(850),850);
             Application.DoEvents();
             Rectangle narrowFee=feePolicyCard.RectangleToScreen(feePolicyCard.ClientRectangle);
             Rectangle narrowSignature=signatureCard.RectangleToScreen(signatureCard.ClientRectangle);
-            Check(narrowSignature.Top>=narrowFee.Bottom &&
+            Check(feePolicyCard.Parent!.ClientSize.Width<AppScale.Scale(850) &&
+                narrowSignature.Top>=narrowFee.Bottom &&
                 Math.Abs(narrowSignature.Left-narrowFee.Left)<=2,
                 $"School Profile stacks aligned settings cards on narrow windows: fee={narrowFee}, signature={narrowSignature}, pair={feePolicyCard.Parent?.ClientSize}, host={profileHost.ClientSize}");
             Rectangle narrowSignatureCard=signatureCard.RectangleToScreen(signatureCard.ClientRectangle);
