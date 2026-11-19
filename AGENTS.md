@@ -33,10 +33,14 @@ markers: these remain necessary business and recovery records.
 
 The owner removed certificate cancel/void from the application because it adds
 unnecessary complexity and can imply deleting a record or undoing leaving and
-fees. Do not reintroduce it without a new explicit owner decision. The owner subsequently approved permanently dropping the cancellation columns
-from code and SQL after restoring a clean schema-48 database. Migration 52 removes
-them; refuse other snapshots containing cancelled copies rather than reviving them. The normal flow uses Create, Save Changes before collection,
-Print, Mark Collected and Issue Again.
+fees. Do not reintroduce it without a new explicit owner decision. The owner
+subsequently approved dropping cancellation columns after review of a clean
+historical schema-48 snapshot; the earlier implementation record called this
+migration 52. **Those are pre-consolidation history labels, not the current
+production schema or migration number.** Use the numbered scripts in `Migrations`
+and `Installer/core.ps1` for current deployment requirements. Preserve the
+existing refusal to revive cancelled copies. The normal certificate flow uses
+Create, Save Changes before collection, Print, Mark Collected and Issue Again.
 
 
 # Regression tests must validate behavior, not incidental UI wording
