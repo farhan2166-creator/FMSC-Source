@@ -1,7 +1,10 @@
 # Communication Centre — final upgrade contract (decisions 1–64)
 
-> Status: implementation contract, **not** proof that a feature has shipped. Do not
-> mark this document complete until the relevant executable tests and Sandbox gate pass.
+> Status: **historical implementation and acceptance contract**. This records
+> owner-approved design constraints, not a current feature inventory or evidence
+> that any specific release was installed. Use the present C#/SQL implementation,
+> compatibility contracts, executable tests, exact-commit Sandbox acceptance and
+> publication gate to determine the scope and acceptance of a release.
 
 ## Product boundary
 

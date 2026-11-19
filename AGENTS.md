@@ -1,14 +1,16 @@
 # Established release packaging decision
 
-The user supplies the latest detached `FMSC_DB.mdf` and `FMSC_DB_log.ldf` in the
-`Database` folder adjacent to the project folder (`../Database`) when preparing
-a release package. The publish configuration validates and ships that pair.
-This is an established, user-owned release preparation step.
+For an actual fresh-school installation, the owner supplies an approved,
+verified **detached** `FMSC_DB.mdf` and `FMSC_DB_log.ldf` pair. A local complete
+release may take these from the sibling `../Database` folder and validate/copy
+both when supplied. The GitHub Actions complete-installer artifact is deliberately
+**database-free**; the owner adds the pair privately to its `Database` folder
+after download. Application-only updates do not replace the school's database.
 
-Do not treat the absence of those files during development or a readiness review
-as a release blocker, an overlooked requirement, or something to repeatedly ask
-the user to provide. Check their presence and validity when actually preparing
-or validating the release package.
+Do not treat a missing MDF/LDF pair during development, CI packaging, or a
+readiness review as a release blocker. Verify both files and their compatibility
+when the fresh-installation folder is actually assembled for deployment. Do not
+publish school database files or backups in a GitHub Actions artifact.
 
 Assess database migration requirements against the intended deployment scenario
 and the supplied snapshot. An empty migration folder alone does not establish
@@ -33,10 +35,14 @@ markers: these remain necessary business and recovery records.
 
 The owner removed certificate cancel/void from the application because it adds
 unnecessary complexity and can imply deleting a record or undoing leaving and
-fees. Do not reintroduce it without a new explicit owner decision. The owner subsequently approved permanently dropping the cancellation columns
-from code and SQL after restoring a clean schema-48 database. Migration 52 removes
-them; refuse other snapshots containing cancelled copies rather than reviving them. The normal flow uses Create, Save Changes before collection,
-Print, Mark Collected and Issue Again.
+fees. Do not reintroduce it without a new explicit owner decision. The owner
+subsequently approved dropping cancellation columns after review of a clean
+historical schema-48 snapshot; the earlier implementation record called this
+migration 52. **Those are pre-consolidation history labels, not the current
+production schema or migration number.** Use the numbered scripts in `Migrations`
+and `Installer/core.ps1` for current deployment requirements. Preserve the
+existing refusal to revive cancelled copies. The normal certificate flow uses
+Create, Save Changes before collection, Print, Mark Collected and Issue Again.
 
 
 # Regression tests must validate behavior, not incidental UI wording

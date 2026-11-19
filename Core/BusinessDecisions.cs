@@ -6,6 +6,10 @@ link concise comments at implementation sites to the rationale here. These are
 maintenance constraints, not additional runtime validation. C# and SQL jointly
 enforce behavior; a UI check never replaces a writer's permissions/transaction.
 Later dated decisions supersede earlier rollout descriptions, not saved history.
+The migration numbers cited in this 2 November policy history refer to earlier
+pre-consolidation work; they are not the current production migration sequence.
+For the active schema target and ordered SQL scripts, use Installer/core.ps1 and
+Migrations/*.sql. Preserve the underlying business decisions, not stale numbers.
 
 ADMISSION AND PLACEMENT
 
