@@ -80,6 +80,8 @@ Contains("tution", "FAQ-085");
 Contains("enrolment", "FAQ-091");
 Contains("pending siblings", "FAQ-083");
 Contains("family payment", "FAQ-101");
+Contains("sibling advance", "FAQ-101");
+Contains("staff certificates", "FAQ-056");
 Contains("payment refresh", "FAQ-044");
 Contains("correction unknown", "FAQ-103");
 Contains("academic year dates", "FAQ-009");
