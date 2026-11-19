@@ -232,18 +232,9 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         signatureCard.Content.Controls.Add(signatureFields);
 
         int gap = UiDesignSystem.Spacing.Md;
-        // School Identity and Logo keep their established columns; the two
-        // settings cards share a row at full width and stack on narrow windows.
-        var root = new TableLayoutPanel {
-            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
-            Margin = Padding.Empty, Padding = Padding.Empty
-        };
-        // Keep the logo/action column wide enough for all three buttons on
-        // ordinary desktop widths; give the settings pair usable space.
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(340)));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
+        // The settings cards must use the full page width. Placing both inside
+        // the identity column left only about 630 px on laptop-sized windows,
+        // so they could not actually sit side by side without clipped actions.
         int feePolicyHeight = AppMetrics.FieldCardHeight(1) + guidanceHeight;
         int signatureRowHeight = signatureCard.Header.Height +
             signatureCard.Padding.Vertical + signatureCard.Content.Padding.Vertical +
@@ -263,30 +254,33 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
         settingsPair.Controls.Add(feePolicyCard, 0, 0);
         settingsPair.Controls.Add(signatureCard, 1, 0);
 
-        var leftColumn = new TableLayoutPanel {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
-            Margin = new Padding(0, 0, gap, 0), Padding = Padding.Empty
+        var root = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2,
+            Margin = Padding.Empty, Padding = Padding.Empty,
+            AutoScroll = true
         };
-        leftColumn.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        leftColumn.RowStyles.Add(new RowStyle(
-            SizeType.Absolute, AppMetrics.FieldCardHeight(3) + gap));
-        leftColumn.RowStyles.Add(new RowStyle(SizeType.Absolute, pairedRowHeight));
-        leftColumn.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        details.Margin = new Padding(0, 0, 0, gap);
-        logoCard.Margin = Padding.Empty;
-        leftColumn.Controls.Add(details, 0, 0);
-        leftColumn.Controls.Add(settingsPair, 0, 1);
-        root.Controls.Add(leftColumn, 0, 0);
+        // Retain the School Identity / Logo relationship above the settings.
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, pairedRowHeight));
+        details.Margin = new Padding(0, 0, gap, gap);
+        logoCard.Margin = new Padding(0, 0, 0, gap);
+        root.Controls.Add(details, 0, 0);
         root.Controls.Add(logoCard, 1, 0);
+        root.Controls.Add(settingsPair, 0, 1);
+        root.SetColumnSpan(settingsPair, 2);
+        root.MinimumSize = new Size(0, AppMetrics.FieldCardHeight(3) + gap + pairedRowHeight);
 
         bool settingsStacked = false;
         void ArrangeSettingsForWidth()
         {
-            // Two columns below this width truncate action captions.
-            bool stack = leftColumn.ClientSize.Width < AppScale.Scale(850);
+            // The threshold applies to the full settings row, not just the
+            // School Identity column. Keep button captions readable.
+            bool stack = settingsPair.ClientSize.Width < AppScale.Scale(850);
             if (settingsStacked == stack) return;
             settingsStacked = stack;
-            leftColumn.SuspendLayout();
+            root.SuspendLayout();
             settingsPair.SuspendLayout();
             if (stack)
             {
@@ -298,7 +292,7 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
                 settingsPair.RowStyles[1].Height = signatureRowHeight;
                 feePolicyCard.Margin = new Padding(0, 0, 0, gap);
                 settingsPair.SetCellPosition(signatureCard, new TableLayoutPanelCellPosition(0, 1));
-                leftColumn.RowStyles[1].Height = feePolicyHeight + gap + signatureRowHeight;
+                root.RowStyles[1].Height = feePolicyHeight + gap + signatureRowHeight;
             }
             else
             {
@@ -310,12 +304,14 @@ public sealed class SchoolProfilePage : V2Page, IUnsavedChanges
                 settingsPair.RowStyles[1].Height = 0;
                 feePolicyCard.Margin = new Padding(0, 0, gap, 0);
                 settingsPair.SetCellPosition(signatureCard, new TableLayoutPanelCellPosition(1, 0));
-                leftColumn.RowStyles[1].Height = pairedRowHeight;
+                root.RowStyles[1].Height = pairedRowHeight;
             }
+            root.MinimumSize = new Size(0,
+                AppMetrics.FieldCardHeight(3) + gap + (int)root.RowStyles[1].Height);
             settingsPair.ResumeLayout(true);
-            leftColumn.ResumeLayout(true);
+            root.ResumeLayout(true);
         }
-        leftColumn.SizeChanged += (_, _) => ArrangeSettingsForWidth();
+        settingsPair.SizeChanged += (_, _) => ArrangeSettingsForWidth();
 
         SetContent(
             root,
