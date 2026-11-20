@@ -302,10 +302,13 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
     {
         if (_inlineHeaderContent is null || _headerTitleLine is null || _titleLabel is null)
             return;
+        // Account for glyph overhang and scaled text metrics before allocating the
+        // inline selector's remaining space. The title must never be ellipsized.
         int titleWidth = TextRenderer.MeasureText(_titleLabel.Text, _titleLabel.Font,
             new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width +
-            UiDesignSystem.Spacing.Md;
+            Math.Max(UiDesignSystem.Spacing.Xl, AppScale.Scale(28));
+        _titleLabel.AutoSize = false;
         var column = _headerTitleLine.ColumnStyles[0];
         if (column.SizeType != SizeType.Absolute)
             column.SizeType = SizeType.Absolute;
