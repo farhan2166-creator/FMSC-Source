@@ -74,6 +74,9 @@ internal static class RdlcReportPreview
                     new Microsoft.Reporting.WinForms.ReportDataSource(dataSourceName, printData));
                 viewer.LocalReport.EnableExternalImages = true;
                 viewer.LocalReport.DisplayName = title;
+                // The old paper mode may have overridden the viewer's page setup.
+                // Restore the new RDLC margins for preview, PDF export and printing.
+                viewer.ResetPageSettings();
                 viewer.RefreshReport();
             });
         using var interactionLifetime = interactions;
@@ -239,14 +242,15 @@ internal static class RdlcReportPreview
         if (certificatePaper is not null)
         {
             certificatePaperChoice = new ModernComboBox {
-                Width = AppScale.Scale(286),
+                Width = AppScale.Scale(195),
                 Height = AppMetrics.InputControlHeight,
                 Margin = new Padding(0, 0, AppScale.Scale(8), 0),
-                AccessibleName = "Certificate paper"
+                AccessibleName = "Certificate paper",
+                AccessibleDescription = "Plain paper adds the school header and footer. Preprinted letterhead leaves those areas blank."
             };
             certificatePaperChoice.Items.AddRange(new object[] {
-                "Plain paper — print header and footer",
-                "Preprinted letterhead — content only"
+                "Plain paper",
+                "Preprinted letterhead"
             });
             certificatePaperChoice.SelectedIndex = displayedPaperMode == CertificatePaperMode.PlainPaper ? 0 : 1;
             certificatePaperChoice.SelectionChangeCommitted += (_, _) => {
@@ -273,7 +277,8 @@ internal static class RdlcReportPreview
                 if (!changed)
                     certificatePaperChoice.SelectedIndex = displayedPaperMode == CertificatePaperMode.PlainPaper ? 0 : 1;
             };
-            toolbar.Controls.Add(certificatePaperChoice);
+            // Keep the paper selector with the main print actions, not on a second toolbar row.
+            actions.Controls.Add(certificatePaperChoice);
         }
         void ApplyPageView()
         {
