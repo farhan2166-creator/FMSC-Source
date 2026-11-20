@@ -51,12 +51,35 @@ internal static partial class Program
             certificate,new DateTime(2026,11,9,12,0,0)).StartsWith("School Leaving Certificates_"),
             "Batch PDF does not falsely identify a single child");
         using var receipt=new DataTable();
-        foreach(string field in new[]{"AdmissionNumberText","StudentName","ReceiptNumber"})
+        foreach(string field in new[]{"AdmissionNumberText","StudentName","FatherName","ParentRelationLabel","ReceiptNumber"})
             receipt.Columns.Add(field);
-        receipt.Rows.Add("6578","Eman Do Shafaqat","R-2026-00057");
+        receipt.Rows.Add("6578","Eman","Shafaqat","D/O","FR-2026-00057");
+        Check(ReportDocumentNaming.DocumentExportFileName("Annual Fee Receipt","StudentReceipt.rdlc",receipt)
+            == "6578-Eman do Shafaqat (FR-2026-00057)",
+            "Single annual receipt PDF includes father name and the saved receipt number");
+        receipt.Rows[0]["ParentRelationLabel"]="S/O";
         Check(ReportDocumentNaming.DocumentExportFileName("Student Payment Receipt","StudentReceipt.rdlc",receipt)
-            == "6578-Eman Do Shafaqat (R-2026-00057)",
-            "Single receipt PDF uses the saved receipt reference");
+            == "6578-Eman so Shafaqat (FR-2026-00057)",
+            "Receipt PDF uses recorded son-of parent label");
+        receipt.Rows[0]["ParentRelationLabel"]="Father";
+        Check(ReportDocumentNaming.DocumentExportFileName("Annual Fee Receipt","StudentReceipt.rdlc",receipt)
+            == "6578-Eman sdo Shafaqat (FR-2026-00057)",
+            "Receipt PDF uses gender-neutral parent label when gender is not known");
+        receipt.Rows[0]["FatherName"]=DBNull.Value;
+        Check(ReportDocumentNaming.DocumentExportFileName("Annual Fee Receipt","StudentReceipt.rdlc",receipt)
+            == "6578-Eman (FR-2026-00057)",
+            "Receipt PDF does not invent a missing father name");
+        receipt.Rows[0]["FatherName"]="Shafaqat";
+        receipt.Rows[0]["ParentRelationLabel"]="D/O";
+        receipt.Rows.Add("6578","Eman","Shafaqat","D/O","FR-2026-00058");
+        Check(ReportDocumentNaming.DocumentExportFileName("Annual Fee Receipts","StudentReceipt.rdlc",
+            receipt,new DateTime(2026,11,9,12,0,0))
+            == "6578-Eman do Shafaqat (Annual Receipts)_2026-11-09_12-00-00",
+            "Several annual receipts for one student are identified by owner, never one receipt number");
+        receipt.Rows.Add("6579","Different Student","Different Father","S/O","FR-2026-00059");
+        Check(ReportDocumentNaming.DocumentExportFileName("Annual Fee Receipts","StudentReceipt.rdlc",
+            receipt,new DateTime(2026,11,9,12,0,0)).StartsWith("Annual Fee Receipts_"),
+            "Mixed-student receipts never claim a single child's identity");
         Check(ReportDocumentNaming.ReportExportFileName("Outstanding","Class 10-A",
             new DateTime(2026,11,9,12,0,0)).StartsWith("Outstanding (Class 10-A)_"),
             "Report PDFs include their selected scope");
