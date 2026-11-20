@@ -1,4 +1,4 @@
-name: '17 - Maintenance - Private Update Feed Health'
+name: '18 - Maintenance - Private Update Feed Health'
 
 on:
   push:

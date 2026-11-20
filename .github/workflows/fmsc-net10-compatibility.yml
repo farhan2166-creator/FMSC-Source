@@ -1,4 +1,4 @@
-name: '13 - CI - .NET 10 LTS Production Desktop Compatibility (no release)'
+name: '14 - CI - .NET 10 LTS Production Desktop Compatibility (no release)'
 
 # Check the actual production framework and publish profile; no disposable
 # retargeting, warning suppression, SQL writes or release/feed mutation.
