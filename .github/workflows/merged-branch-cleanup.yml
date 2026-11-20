@@ -1,4 +1,4 @@
-name: '15 - Maintenance - Merged Branch Cleanup'
+name: '16 - Maintenance - Merged Branch Cleanup'
 
 on:
   schedule:
