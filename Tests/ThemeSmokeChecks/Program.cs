@@ -491,7 +491,10 @@ internal static partial class Program
         if(args.Contains("--certificate-pdf-review"))
         {
             CheckCertificatePdfReview();
-            Console.WriteLine($"PASS: {checks} production certificate PDF rendering and bookmarked review checks.");
+            CheckReportCaptions(new[]{"BankAccountOpeningCertificate","CharacterCertificate","CollegeLeaveCertificate",
+                "DateOfBirthCertificate","LeaveCertificate","NoObjectionCertificate","ProvisionalCertificate",
+                "RegularLecturerCertificate","RegularStudentCertificate","SportsCertificate"});
+            Console.WriteLine($"PASS: {checks} production certificate PDFs, identical paper-mode geometry and single-page rendering checks.");
             return;
         }
         if(args.Contains("--certificate-headers"))
