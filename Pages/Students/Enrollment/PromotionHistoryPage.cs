@@ -83,6 +83,14 @@ public sealed class PromotionHistoryPage : V2Page
         }
         return true;
     }
+    protected override string ReportExportFileScope()
+    {
+        var parts = new List<string>();
+        if (year.SelectedId > 0) parts.Add("Year " + year.Text);
+        if (cls.SelectedId > 0) parts.Add("Class " + cls.Text);
+        if (section.SelectedId > 0) parts.Add("Section " + section.Text);
+        return string.Join(" - ", parts);
+    }
     private string FilterSignature() =>
         $"{year.SelectedId}|{cls.SelectedId}|{section.SelectedId}";
     private void SetReportActionsEnabled(bool enabled)
