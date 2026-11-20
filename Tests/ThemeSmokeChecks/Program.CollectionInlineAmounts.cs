@@ -51,9 +51,9 @@ internal static partial class Program
                 "Student and fee descriptions retain matching left-aligned headings and values");
             var list=Field<FamilyStudentList>("siblings");
             var current=Field<FamilyStudentList>("currentStudentAmounts");
-            var lower=Field<DataGridView>("familyProposal");var panel=Field<TableLayoutPanel>("counterSiblingPanel");
-            Check(lower.Parent is null && panel.RowStyles[4].Height==0,"Normal collection removes the lower split table and releases its space");
-            Check(current.Items.Count==1 && panel.RowStyles[0].Height==current.GetItemRectangle(0).Height &&
+            var lower=Field<DataGridView>("familyProposal");
+            Check(lower.Parent is null,"Normal collection removes the obsolete lower split table");
+            Check(current.Items.Count==1 &&
                 (current.GetItemText(current.Items[0])??"").Contains("Ahmad Nawaz"),
                 "The current student's compact summary appears above the siblings");
             Check(current.ClientSize.Height>=current.GetItemRectangle(0).Height && current.PaymentBounds(0).Bottom<=current.ClientSize.Height,

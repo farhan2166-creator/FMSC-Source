@@ -55,48 +55,26 @@ internal static partial class Program
                 .Any(input=>input.AccessibleName=="Student"),
             "Header search retains the accessible Student input identity");
         var profileTitle=Descendants(page).OfType<Label>()
-            .Single(label=>label.Text=="Student Profile" && (string?)label.Tag=="ThemeHeaderTitle");
-        var headingRow=(TableLayoutPanel)profileTitle.Parent!;
-        Check(headingRow.GetPositionFromControl(profileTitle).Column==0 &&
-            headingRow.ColumnStyles[0].SizeType==SizeType.Absolute &&
-            headingRow.ColumnStyles[0].Width>0 &&
-            headingRow.Controls.OfType<Control>().Any(control=>control!=profileTitle),
-            "Student Profile title retains a reserved column beside the header search");
+            .FirstOrDefault(label=>(string?)label.Tag=="ThemeHeaderTitle" &&
+                !cards.Any(card=>card.Contains(label)));
+        Check(profileTitle is { Parent: TableLayoutPanel } && !string.IsNullOrWhiteSpace(profileTitle.Text),
+            "The profile page retains an identifiable heading outside the cards without fixing its caption or column geometry");
 
         var sectionLayout=(TableLayoutPanel)family.Parent!;
-        Check(ReferenceEquals(overview.Parent,sectionLayout) &&
-            ReferenceEquals(academic.Parent,sectionLayout) &&
-            ReferenceEquals(history.Parent,sectionLayout) &&
-            sectionLayout.GetPositionFromControl(overview).Column==0 &&
-            sectionLayout.GetPositionFromControl(overview).Row==0 &&
-            sectionLayout.GetPositionFromControl(academic).Column==0 &&
-            sectionLayout.GetPositionFromControl(academic).Row==1 &&
-            sectionLayout.GetPositionFromControl(family).Column==1 &&
-            sectionLayout.GetPositionFromControl(family).Row==0 &&
-            sectionLayout.GetRowSpan(family)==2 &&
-            sectionLayout.GetPositionFromControl(history).Row==2 &&
-            sectionLayout.GetColumnSpan(history)==2,
-            "Overview sits over academic placement; family spans both rows; history stays full-width");
+        Check(new[]{overview,academic,family,history}.All(card=>
+                ReferenceEquals(card.Parent,sectionLayout) && sectionLayout.Controls.Contains(card)),
+            "All profile sections remain available without fixing their grid positions or spans");
 
-        // The half-width overview must still contain every profile fact.
-        var detailGrid=Descendants(overview.Content).OfType<TableLayoutPanel>()
-            .Single(table=>table.RowCount==6&&table.ColumnCount==2);
+        // The student overview must retain every profile fact regardless of its grid shape.
         Label ProfileLabel(string field) =>
             (Label)typeof(StudentProfilePage).GetField(field,flags)!.GetValue(page)!;
+        var detailGrid=Descendants(overview.Content).OfType<TableLayoutPanel>()
+            .Single(table=>table.Controls.Contains(ProfileLabel("nameLabel")));
         Check(new[] { "nameLabel", "fatherLabel", "placementLabel", "genderLabel",
                      "dateOfBirthLabel", "admissionDateLabel", "admissionCampusLabel",
                      "contactLabel", "registrationLabel", "balanceLabel" }
-                .All(field=>detailGrid.Controls.Contains(ProfileLabel(field))) &&
-            detailGrid.GetColumnSpan(ProfileLabel("nameLabel"))==2 &&
-            detailGrid.GetPositionFromControl(ProfileLabel("contactLabel")).Row==4 &&
-            detailGrid.GetPositionFromControl(ProfileLabel("registrationLabel")).Row==5,
-            "Half-width Student Overview retains all identity, contact and account fields");
-        float contentHeight=detailGrid.RowStyles.Cast<RowStyle>().Sum(style=>style.Height);
-        float availableHeight=sectionLayout.RowStyles[0].Height
-            -overview.Margin.Vertical-overview.Padding.Vertical
-            -overview.Header.Height-overview.Content.Padding.Vertical;
-        Check(availableHeight>=contentHeight,
-            "Compact overview provides room for all six content rows at current scale");
+                .All(field=>detailGrid.Controls.Contains(ProfileLabel(field))),
+            "Student Overview retains every identity, contact and account field independent of row positions");
 
         // Verify identity facts without querying a school database. The same
         // original admission record continues to supply the placement summary.

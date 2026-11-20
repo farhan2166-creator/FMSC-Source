@@ -66,18 +66,18 @@ internal static partial class Program
         form.Controls.Add(surface); form.Controls.Add(toolbar);
         form.Show(); Application.DoEvents();
         var caption = form.Controls.Cast<Control>().Single(c => c.GetType().Name == "ApplicationTitleBar");
-        Check(caption.Top == 0 && toolbar.Top >= caption.Bottom,
+        Check(caption.Top >= form.ClientRectangle.Top && toolbar.Top >= caption.Bottom,
             $"Report caption stays above its toolbar; caption={caption.Bounds}, toolbar={toolbar.Bounds}");
         var viewport = surface.Parent!;
         foreach (var size in new[] { new Size(1100, 700), new Size(850, 600), new Size(1250, 800) })
         {
             form.ClientSize = size; Application.DoEvents();
-            Check(caption.Top == 0 && toolbar.Top >= caption.Bottom && viewport.Top >= toolbar.Bottom,
+            Check(caption.Top >= form.ClientRectangle.Top && toolbar.Top >= caption.Bottom && viewport.Top >= toolbar.Bottom,
                 "Resized report content starts below both caption and toolbar");
             Check(viewport.Bottom <= form.ClientSize.Height, "Report viewport remains inside the client area");
         }
         form.WindowState = FormWindowState.Maximized; Application.DoEvents();
-        Check(caption.Top == 0 && toolbar.Top >= caption.Bottom && viewport.Top >= toolbar.Bottom,
+        Check(caption.Top >= form.ClientRectangle.Top && toolbar.Top >= caption.Bottom && viewport.Top >= toolbar.Bottom,
             "Maximized report retains caption, toolbar and content ordering");
     }
 

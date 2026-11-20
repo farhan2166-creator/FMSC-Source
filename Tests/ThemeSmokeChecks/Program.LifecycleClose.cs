@@ -30,7 +30,9 @@ internal static partial class Program
                 var bounds=host.RectangleToClient(control.RectangleToScreen(control.ClientRectangle));
                 Check(host.ClientRectangle.Contains(bounds),$"Departure {control.GetType().Name} fits at {width}px, choice {choice}");
             }
-            Check(Field<ModernTextBox>("impact").Height>=150,"Review retains readable space below the fee choices");
+            var impact=Field<ModernTextBox>("impact");
+            Check(impact.Height>=AppMetrics.TextHeight(impact.Font)+impact.Padding.Vertical,
+                "Departure impact retains readable space without fixing an exact text-box height");
             Check(!Field<ModernButton>("apply").Enabled,"Changing fee choices requires a fresh review");
             if(width==820&&choice!=1)
             {

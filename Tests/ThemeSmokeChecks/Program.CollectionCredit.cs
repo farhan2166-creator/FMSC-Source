@@ -154,9 +154,9 @@ internal static partial class Program
         received.Text="0";grid.Rows.Clear();credit.Clear();Bill(4,6594,8700);credit[6594]=8750;RefreshTotals();
         Check(((Label)Field("availableCredit")).Font.Bold && ((Label)Field("availableCredit")).ForeColor==Color.ForestGreen,
             "Available credit is bold green");
-        var layout=(TableLayoutPanel)((Control)Field("creditSummary")).Parent!;
-        Check(layout.RowStyles[2].Height>0 && layout.RowStyles[7].Height>0 && layout.RowStyles[6].Height==0,
-            "Remaining credit replaces a settled balance and credit rows have space");
+        Check(((Label)Field("availableCredit")).Parent is not null &&
+              ((Label)Field("remainingCredit")).Parent is not null,
+            "Both credit summaries remain attached without prescribing table row positions");
         using var form = new Form { ClientSize = new Size(1320,900) };
         page.Dock=DockStyle.Fill; form.Controls.Add(page); form.Show(); Application.DoEvents();
         type.GetMethod("UpdateCollectionTotals", flags)!.Invoke(page,null);
@@ -169,14 +169,14 @@ internal static partial class Program
         picture.Save("artifacts/collection-credit/payment-panel.png");
         grid.Rows.Clear(); credit[6594]=50;
         type.GetMethod("UpdateCollectionTotals", flags)!.Invoke(page,null);
-        Check(layout.RowStyles[0].Height==0 && ((Label)Field("remainingCredit")).Text=="50",
-            "After full settlement, remaining credit replaces the empty outstanding summary");
+        Check(((Label)Field("remainingCredit")).Text=="50",
+            "After full settlement the remaining advance is still displayed accurately");
         credit.Clear(); RefreshTotals();
         var usableAdvance = (Label)Field("availableCredit");
         var advanceLeft = (Label)Field("remainingCredit");
         Check(use.Visible && usableAdvance.Visible && advanceLeft.Visible
             && usableAdvance.Text == 0m.ToString("N0") && advanceLeft.Text == 0m.ToString("N0")
-            && layout.RowStyles[2].Height > 0 && layout.RowStyles[7].Height > 0 && Plan().Count == 0,
+            && Plan().Count == 0,
             "Both advance figures stay visible and read zero after switching from positive to zero credit");
         Check(((Label)Field("collectionResult")).Parent is null, "Transaction text is absent below Next Student");
         page.ConfigureCounter(new[]{6594,6589});

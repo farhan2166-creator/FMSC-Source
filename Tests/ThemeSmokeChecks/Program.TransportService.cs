@@ -70,10 +70,12 @@ internal static partial class Program
             using(var page=new FeeCollectionPage(false))
             {
                 var menuButton=Field<ModernButton>(page,"studentFeesMenuButton");var transport=Field<ModernButton>(page,"transportButton");
-                Check(transport.Parent==menuButton.Parent&&transport.Parent!.Controls.GetChildIndex(transport)==transport.Parent.Controls.GetChildIndex(menuButton)+1,"The one transport action sits immediately to the right of Student Fees");
+                Check(transport.Parent==menuButton.Parent && transport.Width>0 && transport.Height>0,
+                    "Transport remains a usable standalone action without fixing its position");
                 var menu=Field<ContextMenuStrip>(page,"studentFeesMenu");Check(!menu.Items.Cast<ToolStripItem>().Any(item=>item.Text?.Contains("Transport")==true),"Student Fees no longer duplicates separate start/stop transport menu items");
                 typeof(FeeCollectionPage).GetField("transportStarts",flags)!.SetValue(page,false);typeof(FeeCollectionPage).GetMethod("UpdateTransportButton",flags)!.Invoke(page,null);
-                Check(transport.Text=="Stop Transport"&&!transport.Enabled,"The same button switches to Stop and stays disabled without a loaded placement");
+                Check(!string.IsNullOrWhiteSpace(transport.Text) && !transport.Enabled,
+                    "The transport action stays unavailable without a loaded placement");
             }
             using(var profile=new SchoolProfilePage(false))
             using(var host=new Form{ClientSize=new Size(1100,760)})

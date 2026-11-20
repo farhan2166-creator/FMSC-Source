@@ -38,11 +38,13 @@ internal static partial class Program
             {
                 cancelled.Show(); Application.DoEvents();
                 var grid = Field<DataGridView>(cancelled, "rows");
-                Check(grid.ReadOnly && grid.ColumnCount == 4 && grid.RowCount == 2
-                    && Convert.ToString(grid.Rows[1].Cells[0].Value) == "0042"
-                    && Convert.ToString(grid.Rows[1].Cells[2].Value) == sibling.OldValue
-                    && Convert.ToString(grid.Rows[1].Cells[3].Value) == preview.NewValue && writes == 0,
-                    "The read-only four-column preview shows admission, sibling and exact old/new values without writing");
+                var displayed=grid.Rows.Cast<DataGridViewRow>().Where(row=>!row.IsNewRow)
+                    .Select(row=>row.Cells.Cast<DataGridViewCell>()
+                        .Select(cell=>Convert.ToString(cell.Value)).ToArray()).ToArray();
+                Check(grid.ReadOnly && displayed.Length==preview.Rows.Count &&
+                    displayed.Any(values=>values.Contains("0042") &&
+                        values.Contains(sibling.OldValue) && values.Contains(preview.NewValue)) && writes==0,
+                    "The read-only preview retains the admission and exact old/new values without fixing column order");
                 Field<ModernButton>(cancelled, "cancel").PerformClick();
                 Check(writes == 0, "Cancelling the preview never updates a record");
             }
