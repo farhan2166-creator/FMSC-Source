@@ -21,13 +21,32 @@ internal static partial class Program
         string filename=ReportDocumentNaming.ExportFileName("Collections / Receipts: Summary",new DateTime(2026,11,3,11,6,22));
         Check(filename.EndsWith("_2026-11-03_11-06-22")&&!filename.Any(c=>"<>:\"/\\|?*".Contains(c)),"Export names contain a readable title and safe date/time to seconds");
         using var certificate=new DataTable();
-        foreach(string field in new[]{"AdmissionNumber","StudentName","CertificateNumber"})
+        foreach(string field in new[]{"AdmissionNumber","StudentName","FatherName","Gender","CertificateNumber"})
             certificate.Columns.Add(field);
-        certificate.Rows.Add("6578","Eman Do Shafaqat","SLC-2026-00057");
+        certificate.Rows.Add("6578","Eman","Shafaqat","Female","SLC-2026-00057");
         Check(ReportDocumentNaming.DocumentExportFileName("School Leaving Certificate","LeaveCertificate.rdlc",certificate)
-            == "6578-Eman Do Shafaqat (SLC-2026-00057)",
-            "Single certificate PDF suggests admission, name and real certificate number");
-        certificate.Rows.Add("6579","Another Student","SLC-2026-00058");
+            == "6578-Eman do Shafaqat (SLC)",
+            "Female student's certificate PDF includes the father and short certificate type, not the issued serial");
+        certificate.Rows[0]["Gender"]="Male";
+        Check(ReportDocumentNaming.DocumentExportFileName("School Leaving Certificate","LeaveCertificate.rdlc",certificate)
+            == "6578-Eman so Shafaqat (SLC)",
+            "Male student's certificate PDF uses so");
+        certificate.Rows[0]["Gender"]="";
+        Check(ReportDocumentNaming.DocumentExportFileName("School Leaving Certificate","LeaveCertificate.rdlc",certificate)
+            == "6578-Eman sdo Shafaqat (SLC)",
+            "Unspecified gender in certificate PDF uses sdo without guessing gender");
+        certificate.Rows[0]["FatherName"]=DBNull.Value;
+        Check(ReportDocumentNaming.DocumentExportFileName("School Leaving Certificate","LeaveCertificate.rdlc",certificate)
+            == "6578-Eman (SLC)",
+            "Missing father name omits the relationship rather than inventing a parent");
+        certificate.Rows[0]["FatherName"]="Shafaqat";
+        certificate.Rows[0]["Gender"]="Female";
+        certificate.Rows[0]["CertificateNumber"]="DOB-2026-00057";
+        Check(ReportDocumentNaming.DocumentExportFileName("Date of Birth Certificate","DateOfBirthCertificate.rdlc",certificate)
+            == "6578-Eman do Shafaqat (DOB)",
+            "Other certificate types use their own short code with the same naming rule");
+        certificate.Rows[0]["CertificateNumber"]="SLC-2026-00057";
+        certificate.Rows.Add("6579","Another Student","Other Father","Male","SLC-2026-00058");
         Check(ReportDocumentNaming.DocumentExportFileName("School Leaving Certificates","LeaveCertificate.rdlc",
             certificate,new DateTime(2026,11,9,12,0,0)).StartsWith("School Leaving Certificates_"),
             "Batch PDF does not falsely identify a single child");
