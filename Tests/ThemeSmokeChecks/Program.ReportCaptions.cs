@@ -19,8 +19,9 @@ internal static partial class Program
             string path=Path.Combine(AppContext.BaseDirectory,"Reports",name+".rdlc");
             var document=XDocument.Load(path);XNamespace ns=document.Root!.Name.Namespace;
             bool certificate=name.EndsWith("Certificate",StringComparison.Ordinal);
-            if(certificate && !CertificateLetterhead.UsesPreprintedPad(path))
-                document=XDocument.Parse(CertificateLetterhead.Definition(path,school));
+            if(certificate)
+                document=XDocument.Parse(CertificateLetterhead.Definition(path,school,
+                    mode:CertificateLetterhead.DefaultMode(path)));
             if(certificate && !CertificateLetterhead.UsesPreprintedPad(path))
             {
                 var image=document.Descendants(ns+"Image").Single(element=>(string?)element.Attribute("Name")=="CertificateHeaderImage");
@@ -34,24 +35,45 @@ internal static partial class Program
                       artworkWidth>0 && artworkHeight>0 && artworkWidth<=printableWidth+0.02,
                     name+" keeps proportional certificate artwork within the printable page, regardless of header dimensions or margins.");
             }
-            if(CertificateLetterhead.UsesPreprintedPad(path))
-                Check(document.Descendants(ns+"TopMargin").Single().Value=="2in",name+" reserves two inches for preprinted letterhead.");
             if(certificate)
             {
+                double? bodyTop = null;
+                double? bodyBottomReservation = null;
                 foreach(var mode in new[]{ CertificatePaperMode.PlainPaper, CertificatePaperMode.PreprintedLetterhead })
                 {
                     var layout = XDocument.Parse(CertificateLetterhead.Definition(path,school,mode:mode));
                     var page = layout.Root!.Element(ns+"Page")!;
-                    bool pad = mode==CertificatePaperMode.PreprintedLetterhead;
-                    Check((page.Element(ns+"PageHeader") is null)==pad &&
-                        (page.Element(ns+"PageFooter") is null)==pad,
-                        name+" "+mode+" shows exactly the requested stationery.");
-                    Check(page.Element(ns+"TopMargin")?.Value==(pad?"2in":"0.4in") &&
-                        page.Element(ns+"BottomMargin")?.Value==(pad?"2.5in":"0.4in"),
-                        name+" "+mode+" reserves the correct printable margins.");
-                    if(pad && CertificateLetterhead.UsesPreprintedPad(path))
-                        Check(XNode.DeepEquals(XDocument.Load(path),layout),
-                            name+" preserves the approved preprinted leaving-certificate layout.");
+                    var header = page.Element(ns+"PageHeader");
+                    var footer = page.Element(ns+"PageFooter");
+                    bool preprinted = mode == CertificatePaperMode.PreprintedLetterhead;
+                    Check(header is not null && footer is not null,
+                        name+" "+mode+" reserves matching header and footer bands.");
+                    Check(page.Element(ns+"TopMargin")?.Value=="0.4in" &&
+                          page.Element(ns+"BottomMargin")?.Value=="0.4in",
+                        name+" "+mode+" has matching page margins.");
+                    Check(header!.Element(ns+"Height")?.Value=="3.1in" &&
+                          footer!.Element(ns+"Height")?.Value=="0.75in",
+                        name+" "+mode+" reserves the correct stationery geometry.");
+                    Check(header.Element(ns+"ReportItems")!.HasElements != preprinted &&
+                          footer.Element(ns+"ReportItems")!.HasElements != preprinted,
+                        name+" "+mode+" "+(preprinted?"prints no stationery artwork.":"prints school stationery."));
+                    double currentTop = ReportInches(page.Element(ns+"TopMargin")?.Value)
+                        + ReportInches(header.Element(ns+"Height")?.Value);
+                    double currentBottom = ReportInches(page.Element(ns+"BottomMargin")?.Value)
+                        + ReportInches(footer.Element(ns+"Height")?.Value);
+                    if(bodyTop is null) { bodyTop=currentTop; bodyBottomReservation=currentBottom; }
+                    else Check(Math.Abs(bodyTop.Value-currentTop)<0.001 &&
+                               Math.Abs(bodyBottomReservation!.Value-currentBottom)<0.001,
+                        name+" keeps body coordinates identical between both paper modes.");
+                    if(CertificateLetterhead.UsesPreprintedPad(path))
+                    {
+                        var copyLabel = layout.Descendants(ns+"Textbox").Single(
+                            element => (string?)element.Attribute("Name")=="txtCopyType");
+                        var values = copyLabel.Descendants(ns+"TextRun")
+                            .Select(run => (string?)run.Element(ns+"Value")).ToArray();
+                        Check(values.Length==1 && values[0]!.Contains("DUPLICATE COPY",StringComparison.Ordinal),
+                            name+" prints no stray red parentheses on an original and labels duplicates.");
+                    }
                 }
             }
             using var report=new LocalReport();report.LoadReportDefinition(new StringReader(document.ToString()));
