@@ -68,3 +68,14 @@ permission enforcement, finances, data integrity, admissions, cloud-backup
 recoverability, installer/updater recovery, publication exact-commit gates,
 consent, idempotency, and message delivery status. The audit script for legacy
 copy-coupled tests is advisory and must never substitute for these validations.
+
+# Test geometry is not a frozen UI design
+
+Do not gate legitimate layout changes on exact form/client widths or heights,
+fixed row or column indexes, identical button dimensions, control child order,
+or decorative alignment constants. Assert visible/usable controls, containment,
+non-overlap, keyboard access, preservation of values, and correct workflows.
+Exact scale ratios, printer paper/margins, and owner-approved certificate
+letterhead geometry are deliberate exceptions when protecting actual contracts.
+The UI presentation audit reports potential copy and geometry coupling for
+review and must remain advisory, not a release blocker.
