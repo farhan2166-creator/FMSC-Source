@@ -99,6 +99,7 @@ public sealed class ModernDatePicker : Panel, IValidationTarget, IAccessibleInpu
         }
         base.Dispose(disposing);
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool TimeOnly
     {
         get => _format == DateTimePickerFormat.Custom &&
@@ -123,17 +124,20 @@ public sealed class ModernDatePicker : Panel, IValidationTarget, IAccessibleInpu
             Invalidate();
         }
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public DateTime Value
     {
         get => _inner.Value;
         set => _inner.Value = value;
     }
     // plain pass-through to the inner DateTimePicker's own MinDate, same pattern as every other property on this control.
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public DateTime MinDate
     {
         get => _inner.MinDate;
         set => _inner.MinDate = value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public DateTime MaxDate
     {
         get => _inner.MaxDate;
@@ -144,27 +148,32 @@ public sealed class ModernDatePicker : Panel, IValidationTarget, IAccessibleInpu
         add => _inner.ValueChanged += value;
         remove => _inner.ValueChanged -= value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public DateTimePickerFormat Format
     {
         get => _format;
         set { _format = value; RefreshDisplayFormat(); }
     }
     [AllowNull]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public string CustomFormat
     {
         get => _customFormat!;
         set { _customFormat = value; RefreshDisplayFormat(); }
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool ShowUpDown
     {
         get => _inner.ShowUpDown;
         set => _inner.ShowUpDown = value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool ShowCheckBox
     {
         get => _inner.ShowCheckBox;
         set { _inner.ShowCheckBox = value; RefreshDisplayFormat(); }
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool Checked
     {
         get => _inner.Checked;
@@ -216,11 +225,13 @@ public sealed class ModernDatePicker : Panel, IValidationTarget, IAccessibleInpu
         Value = selected;
         if (ShowCheckBox) Checked = true;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Color CalendarMonthBackground
     {
         get => _inner.CalendarMonthBackground;
         set => _inner.CalendarMonthBackground = value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public new bool TabStop
     {
         get => _inner.TabStop;
@@ -231,6 +242,7 @@ public sealed class ModernDatePicker : Panel, IValidationTarget, IAccessibleInpu
     public new bool Focused =>
         _inner.Focused;
     /// <summary>Shared validation state (see <see cref="FormValidator"/>): a subtle danger-coloured border.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool IsInvalid
     {
         get => _invalid;

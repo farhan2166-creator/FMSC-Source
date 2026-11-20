@@ -87,6 +87,7 @@ public class StudentPicker : Panel, IValidationTarget, IAccessibleInput
     /// <summary>The operator edited the text away from the chosen student.</summary>
     public event EventHandler? SelectionCleared;
     /// <summary>Called before a user gesture replaces the committed identity.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Func<int, bool>? SelectionChangeGuard { get; set; }
     /// <summary>The list of matches changed.</summary>
     public event EventHandler? MatchesChanged;
@@ -182,13 +183,17 @@ public class StudentPicker : Panel, IValidationTarget, IAccessibleInput
     /// <summary>The admission id of the chosen student, or 0 when none is chosen.</summary>
     public int SelectedId => _selectedId;
     /// <summary>Optional extra rule for who may be offered.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Func<DataRow, bool>? RowFilter { get; set; }
     /// <summary>The column whose value SelectedId returns.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public string IdColumn { get; set; } =
         "AdmissionId";
     /// <summary>Writes the text shown in the box and list for a row.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Func<DataRow, string>? DisplayFormatter { get; set; }
     /// <summary>What the list says when nothing matches.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public string NoMatchText
     {
         get => _noMatchText;
@@ -199,6 +204,7 @@ public class StudentPicker : Panel, IValidationTarget, IAccessibleInput
                     : value;
     }
     /// <summary>Adds a drop-down arrow at the right of the box.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool ShowDropDownButton
     {
         get => _showDropDownButton;
@@ -256,6 +262,7 @@ public class StudentPicker : Panel, IValidationTarget, IAccessibleInput
             : _capped
                 ? $"{MaxRows}+ {EntityPlural} match - keep typing to narrow the list."
                 : $"{_matchCount} {EntityPlural} found. Click one, or use Up/Down and Enter.";
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public string PlaceholderText
     {
         get => _text.PlaceholderText;
@@ -293,6 +300,7 @@ public class StudentPicker : Panel, IValidationTarget, IAccessibleInput
     public new bool Focus() =>
         _text.Focus();
     /// <summary>Shared validation state (see <see cref="FormValidator"/>): a subtle danger-coloured border.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool IsInvalid
     {
         get => _invalid;
@@ -373,6 +381,7 @@ public class StudentPicker : Panel, IValidationTarget, IAccessibleInput
         DisplayFormatter?.Invoke(row) ??
         DisplayFor(row);
     /// <summary>Adds a Campus column to the popup list.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool ShowCampusColumn
     {
         get => _showCampusColumn;

@@ -149,10 +149,10 @@ jobs:
             throw 'Installer version or schema disagrees with the approved release.'
           }
 
-      - name: Install .NET 8 SDK
+      - name: Install .NET 10 SDK
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Install Python 3.12
         uses: actions/setup-python@v7
@@ -223,6 +223,7 @@ jobs:
         run: |
           dotnet publish FMSC_SMS.csproj -c Release -r win-x64 --self-contained true --output out/windows-x64-app -p:CIAppOnlyBundle=true "-p:BundledGitDirectory=$env:GITHUB_WORKSPACE/out/prerequisites/MinGit" "-p:LocalDbMsiPath=$env:GITHUB_WORKSPACE/out/prerequisites/SqlLocalDB.msi" "-p:VcRedistPath=$env:GITHUB_WORKSPACE/out/prerequisites/vc_redist.x64.exe" "-p:BundledSqlCmdPath=$env:GITHUB_WORKSPACE/out/prerequisites/sqlcmd.exe" -p:PublishSingleFile=false -p:PublishTrimmed=false
           if ($LASTEXITCODE -ne 0) { throw "Windows publish failed." }
+          & .\Tools\AssertNet10SelfContained.ps1 -ApplicationDirectory 'out/windows-x64-app'
 
       - name: Verify ZIP contents and add build manifest
         shell: pwsh
@@ -279,7 +280,7 @@ jobs:
             'FMSC_SMS - Windows x64 application-only download'
             'Source commit: ${{ needs.prepare.outputs.release_sha }}'
             'Build run: ${{ github.run_number }}'
-            'Built with: .NET 8 (self-contained, WinForms)'
+            'Built with: .NET 10 (self-contained, WinForms)'
             "Application version: $version"
             "Required database schema: $schema"
             ''
@@ -348,10 +349,10 @@ jobs:
           ref: ${{ needs.prepare.outputs.release_sha }}
           persist-credentials: false
 
-      - name: Install .NET 8 SDK for verified packaging tools
+      - name: Install .NET 10 SDK for verified packaging tools
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Download candidate artifact from this run
         uses: actions/download-artifact@v7

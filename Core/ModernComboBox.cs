@@ -21,6 +21,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
         _borderMotion.MoveTo(color, animate && Enabled && !_invalid);
         Invalidate();
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public int CornerRadius
     {
         get => _radius;
@@ -172,6 +173,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             }
         }
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public ComboBoxStyle DropDownStyle
     {
         get =>
@@ -180,6 +182,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             _inner.DropDownStyle =
                 value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public object? DataSource
     {
         get =>
@@ -188,6 +191,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             _inner.DataSource =
                 value is DataTable table ? LookupDisplayOrder.ForBinding(table, ValueMember) : value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public string ValueMember
     {
         get =>
@@ -196,6 +200,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             _inner.ValueMember =
                 value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public string DisplayMember
     {
         get =>
@@ -204,8 +209,10 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             _inner.DisplayMember =
                 value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool FormattingEnabled { get=>_inner.FormattingEnabled; set=>_inner.FormattingEnabled=value; }
     public event ListControlConvertEventHandler? Format { add=>_inner.Format+=value; remove=>_inner.Format-=value; }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public object? SelectedItem
     {
         get =>
@@ -214,6 +221,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             _inner.SelectedItem =
                 value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public object? SelectedValue
     {
         get =>
@@ -222,6 +230,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             _inner.SelectedValue =
                 value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public int SelectedIndex
     {
         get =>
@@ -232,6 +241,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
     }
     public ComboBox.ObjectCollection Items =>
         _inner.Items;
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public int DropDownWidth
     {
         get =>
@@ -240,6 +250,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             _inner.DropDownWidth =
                 value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public int SelectionStart
     {
         get =>
@@ -248,6 +259,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             _inner.SelectionStart =
                 value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public int SelectionLength
     {
         get =>
@@ -256,6 +268,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             _inner.SelectionLength =
                 value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool DroppedDown
     {
         get =>
@@ -267,6 +280,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
     public int FindStringExact(
         string s) =>
         _inner.FindStringExact(s);
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public AutoCompleteMode AutoCompleteMode
     {
         get =>
@@ -275,6 +289,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
             _inner.AutoCompleteMode =
                 value;
     }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public AutoCompleteSource AutoCompleteSource
     {
         get =>
@@ -287,6 +302,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
         _inner.SelectAll();
     public new bool Focus() =>
         _inner.Focus();
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public new bool TabStop
     {
         get => _inner.TabStop;
@@ -295,6 +311,7 @@ public class ModernComboBox : Panel, IValidationTarget, IAccessibleInput
     public new bool Focused =>
         _inner.Focused;
     /// <summary>Shared validation state (see <see cref="FormValidator"/>): a subtle danger-coloured border.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool IsInvalid
     {
         get => _invalid;

@@ -3,6 +3,7 @@ namespace FMSC_SMS.Core
     public class ModernCheckBox : CheckBox
     {
         private bool optionStyle;
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool OptionStyle
         {
             get => optionStyle;

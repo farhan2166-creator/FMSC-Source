@@ -11,6 +11,7 @@ namespace FMSC_SMS.Core
         private int _paintPathRadius;
         private Size _regionSize;
         private int _regionRadius = int.MinValue;
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public int CornerRadius
         {
             get => _radius;
@@ -21,6 +22,7 @@ namespace FMSC_SMS.Core
                 Invalidate();
             }
         }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public Color BorderColor
         {
             get => _borderColor;
@@ -30,6 +32,7 @@ namespace FMSC_SMS.Core
                 Invalidate();
             }
         }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool ShowBorder
         {
             get => _showBorder;

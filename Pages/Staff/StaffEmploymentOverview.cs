@@ -14,6 +14,7 @@ internal sealed class StaffEmploymentOverview : UserControl
     private int generation;
     private int activeId;
     internal event Action? EmploymentChanged;
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Func<bool>? CanOpenEditor { get; set; }
 
     internal StaffEmploymentOverview()

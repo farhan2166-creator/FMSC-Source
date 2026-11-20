@@ -18,6 +18,7 @@ public sealed class PlacementPicker : StudentPicker
 
     public event EventHandler? SelectedIndexChanged;
 
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public object SelectedValue
     {
         get => SelectedId;

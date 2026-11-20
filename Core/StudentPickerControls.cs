@@ -2,6 +2,7 @@ namespace FMSC_SMS.Core;
 
 internal sealed class StudentPickerHeaderStrip : Control
 {
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal IReadOnlyList<StudentPicker.ColumnSpec> Columns { get; set; } =
         Array.Empty<StudentPicker.ColumnSpec>();
 
@@ -33,6 +34,7 @@ internal sealed class StudentPickerHeaderStrip : Control
 
 internal sealed class StudentPickerTextBox : TextBox
 {
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Func<Keys, bool>? OwnsKey { get; set; }
 
     protected override bool IsInputKey(Keys keyData) =>

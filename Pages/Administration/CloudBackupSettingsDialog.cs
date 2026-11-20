@@ -32,6 +32,7 @@ internal sealed class CloudBackupSettingsDialog : ApplicationWindowForm
     private bool operationBusy;
     private bool closingAfterSave;
 
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Func<CloudProvider, CancellationToken, Task> ConnectAccountAsync { get; set; } =
         CloudBackupOAuth.ConnectAsync;
 

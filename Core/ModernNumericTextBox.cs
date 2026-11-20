@@ -24,6 +24,7 @@ namespace FMSC_SMS.Core
             TextChanged += (_, _) => { if (!_refreshingDisplay) _textEdited = true; };
             Disposed += (_, _) => _invalidValueTip.Dispose();
         }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public decimal Minimum
         {
             get => _minimum;
@@ -35,6 +36,7 @@ namespace FMSC_SMS.Core
                 Value = _value;
             }
         }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public decimal Maximum
         {
             get => _maximum;
@@ -46,6 +48,7 @@ namespace FMSC_SMS.Core
                 Value = _value;
             }
         }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public int DecimalPlaces
         {
             get => _decimalPlaces;
@@ -55,6 +58,7 @@ namespace FMSC_SMS.Core
                 RefreshDisplay();
             }
         }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool ThousandsSeparator
         {
             get => _thousandsSeparator;
@@ -65,13 +69,17 @@ namespace FMSC_SMS.Core
             }
         }
         // Preserve a fractional draft so write validation can reject it, never round it.
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool WholeRupeesOnly { get; set; } = true;
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public decimal Increment { get; set; } = 1m;
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool TrimTrailingZeros
         {
             get => _trimTrailingZeros;
             set { _trimTrailingZeros = value; RefreshDisplay(); }
         }
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public decimal Value
         {
             get
