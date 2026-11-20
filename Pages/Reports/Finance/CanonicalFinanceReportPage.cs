@@ -277,6 +277,29 @@ public abstract class CanonicalFinanceReportPage : V2Page
         ? NavigationTitle : $"{NavigationTitle} — {ViewName}";
     protected override string ReportExportSubtitle() =>
         _filterSummary.Length == 0 ? base.ReportExportSubtitle() : _filterSummary;
+    /// <summary>Only non-default selections belong in the filename, never the report's full explanatory subtitle.</summary>
+    protected virtual string AdditionalExportFileScope => "";
+    protected override string ReportExportFileScope()
+    {
+        var parts = new List<string>();
+        if (_usesDates && From.Enabled && (From.Checked || To.Checked))
+        {
+            string start = From.Checked ? From.Value.ToString("yyyy-MM-dd") : "";
+            string end = To.Checked ? To.Value.ToString("yyyy-MM-dd") : "";
+            parts.Add(From.Checked && To.Checked ? start + " to " + end
+                : From.Checked ? "from " + start : "to " + end);
+        }
+        if (_usesYear && Year.SelectedId > 0) parts.Add("Year " + Year.Text);
+        if (Campus.SelectedId > 0) parts.Add("Campus " + Campus.Text);
+        if (Class.SelectedId > 0) parts.Add("Class " + Class.Text);
+        if (Section.SelectedId > 0) parts.Add("Section " + Section.Text);
+        if (PaymentMethod.Enabled && MethodName.Length > 0) parts.Add(MethodName);
+        if (GroupBy.Enabled && GroupName.Length > 0 && GroupName != "Whole School")
+            parts.Add("by " + GroupName);
+        if (AdditionalExportFileScope.Length > 0) parts.Add(AdditionalExportFileScope);
+        if (_orderBy.SelectedIndex > 0) parts.Add("sorted " + _orderBy.Text);
+        return string.Join(" - ", parts);
+    }
     protected override string? ReportCampusContext => Campus.SelectedId>0?Campus.Text:null;
     protected void FiltersChanged()
     {
