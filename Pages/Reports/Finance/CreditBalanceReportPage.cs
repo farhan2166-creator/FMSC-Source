@@ -19,6 +19,8 @@ public sealed class CreditBalanceReportPage : CanonicalFinanceReportPage
         ?new[]{"Family / Student","Members","Student Advances","Available Credit"}:base.ReportRequiredColumnKeys;
     protected override IEnumerable<(string, Control)> AdditionalReportFilters() => new[] { ("Minimum advance per student (Rs.)",(Control)minimum) };
     protected override string AdditionalFilterSignature => NumericFilterSignature(minimum.Text);
+    protected override string AdditionalExportFileScope =>
+        minimum.Value > 0 ? "min Rs " + minimum.Value.ToString("#,##0.##") : "";
     protected override string AdditionalFilterDescription => (minimum.Value>0?$"Minimum advance per student: Rs. {minimum.Value:#,##0.##}. ":"")+"Only students matching the filters are included.";
     protected override IReadOnlyList<ReportColumnDef> DefineReportColumns()=>base.DefineReportColumns().Select(column=>column with {
         Header=column.Key switch {
