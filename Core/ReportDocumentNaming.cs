@@ -73,21 +73,12 @@ internal static class ReportDocumentNaming
                 @"^([A-Za-z]{2,4})-[0-9]{4}-[0-9]+$", RegexOptions.CultureInvariant);
             if (certificateCode.Success)
             {
-                string father = Name(data, "FatherName");
-                string person = student.Length > 0 ? student : staff;
-                if (father.Length > 0 && person.Length > 0)
-                {
-                    string relationship = Unique(data, "Gender").Trim().ToUpperInvariant() switch
-                    {
-                        "MALE" or "M" => "so",
-                        "FEMALE" or "F" => "do",
-                        _ => "sdo"
-                    };
-                    owner = string.Join("-", new[] { admission, person + " " + relationship + " " + father }
-                        .Where(value => value.Length > 0));
-                }
+                owner = AddFatherToOwner(data, admission, student.Length > 0 ? student : staff, owner);
                 return SafeStem(owner + " (" + certificateCode.Groups[1].Value.ToUpperInvariant() + ")");
             }
+            if (Path.GetFileName(reportPath).Equals("StudentReceipt.rdlc", StringComparison.OrdinalIgnoreCase)
+                && Unique(data, "ReceiptNumber").Length > 0)
+                owner = AddFatherToOwner(data, admission, student, owner);
             return SafeStem(owner + " (" + reference + ")");
         }
         return ExportFileName(title, at);
@@ -99,6 +90,24 @@ internal static class ReportDocumentNaming
         string meaningful = string.IsNullOrWhiteSpace(scope) ? title :
             title + " (" + scope.Replace("\r", " ").Replace("\n", " ").Trim() + ")";
         return ExportFileName(meaningful, at);
+    }
+
+    /// <summary>The PDF filename uses the student-to-parent relationship, but never guesses a gender.</summary>
+    private static string AddFatherToOwner(DataTable data, string admission, string person, string fallback)
+    {
+        string father = Name(data, "FatherName");
+        if (person.Length == 0 || father.Length == 0) return fallback;
+        string relation = Unique(data, "Gender").Trim().ToUpperInvariant();
+        if (relation.Length == 0)
+            relation = Unique(data, "ParentRelationLabel").Trim().ToUpperInvariant();
+        string shortRelation = relation switch
+        {
+            "MALE" or "M" or "BOY" or "S/O" => "so",
+            "FEMALE" or "F" or "GIRL" or "D/O" => "do",
+            _ => "sdo"
+        };
+        return string.Join("-", new[] { admission, person + " " + shortRelation + " " + father }
+            .Where(value => value.Length > 0));
     }
 
     private static string SafeStem(string title)
