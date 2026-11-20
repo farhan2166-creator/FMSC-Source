@@ -146,8 +146,18 @@ internal static partial class Program
                     alternate.DataSources.Add(new ReportDataSource(source.Name,source.Value));
                 byte[] alternatePdf = alternate.Render("PDF");
                 using var alternateDocument = UglyToad.PdfPig.PdfDocument.Open(alternatePdf);
-                Check(alternateDocument.NumberOfPages==1,
-                    name+" "+alternativeMode+" fits its content on one page.");
+                using var originalDocument = UglyToad.PdfPig.PdfDocument.Open(pdf);
+                Check(originalDocument.NumberOfPages==1 && alternateDocument.NumberOfPages==1,
+                    name+" fits on one physical sheet in both stationery modes.");
+                var originalTitle = originalDocument.GetPage(1).GetWords()
+                    .FirstOrDefault(word => word.Text.Contains("CERTIFICATE",StringComparison.OrdinalIgnoreCase));
+                var alternateTitle = alternateDocument.GetPage(1).GetWords()
+                    .FirstOrDefault(word => word.Text.Contains("CERTIFICATE",StringComparison.OrdinalIgnoreCase));
+                Check(originalTitle is not null && alternateTitle is not null,
+                    name+" keeps its certificate heading readable in both stationery modes.");
+                Check(Math.Abs(originalTitle!.BoundingBox.Bottom-alternateTitle!.BoundingBox.Bottom)<2.0 &&
+                      Math.Abs(originalTitle.BoundingBox.Left-alternateTitle.BoundingBox.Left)<2.0,
+                    name+" keeps the certificate heading at the same printed page coordinates.");
 
                 // Exercise both stationery modes with the real optional principal
                 // signature and preserve the approved unsigned layout unchanged.
