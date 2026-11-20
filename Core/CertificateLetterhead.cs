@@ -53,8 +53,9 @@ internal static class CertificateLetterhead
         {
             // Keep the empty header/footer regions as spacers; do not print
             // the school's artwork or contact details over preprinted stationery.
-            page.Element(ns + "PageHeader")!.Element(ns + "ReportItems")?.RemoveNodes();
-            page.Element(ns + "PageFooter")!.Element(ns + "ReportItems")?.RemoveNodes();
+            // RDLC permits absent ReportItems, but rejects empty ReportItems elements.
+            page.Element(ns + "PageHeader")!.Element(ns + "ReportItems")?.Remove();
+            page.Element(ns + "PageFooter")!.Element(ns + "ReportItems")?.Remove();
         }
         else
         {
