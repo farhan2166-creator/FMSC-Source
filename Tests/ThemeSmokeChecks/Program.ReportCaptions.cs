@@ -54,8 +54,8 @@ internal static partial class Program
                     Check(header!.Element(ns+"Height")?.Value=="3.1in" &&
                           footer!.Element(ns+"Height")?.Value=="0.75in",
                         name+" "+mode+" reserves the correct stationery geometry.");
-                    Check(header.Element(ns+"ReportItems")!.HasElements != preprinted &&
-                          footer.Element(ns+"ReportItems")!.HasElements != preprinted,
+                    Check((header.Element(ns+"ReportItems")?.HasElements ?? false) != preprinted &&
+                          (footer.Element(ns+"ReportItems")?.HasElements ?? false) != preprinted,
                         name+" "+mode+" "+(preprinted?"prints no stationery artwork.":"prints school stationery."));
                     double currentTop = ReportInches(page.Element(ns+"TopMargin")?.Value)
                         + ReportInches(header.Element(ns+"Height")?.Value);
