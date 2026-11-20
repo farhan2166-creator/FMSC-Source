@@ -369,8 +369,8 @@ internal static partial class Program
         foreach(string name in new[]{"SchoolName","AddressLine","City","ContactNumber","Email"})
             profile.Columns.Add(name,typeof(string));
         var institution=profile.Rows.Add("Fahim Model School & College","University Road","Peshawar","091-0000000","office@school.example");
-        if(!CertificateLetterhead.UsesPreprintedPad(path))
-            document=XDocument.Parse(CertificateLetterhead.Definition(path,institution,row,sample.Subjects));
+        document=XDocument.Parse(CertificateLetterhead.Definition(path,institution,row,sample.Subjects,
+            mode:CertificateLetterhead.DefaultMode(path)));
         using var printable=CertificateUi.PrintData(path,source);
         using var report=new LocalReport();
         report.EnableExternalImages=true;
