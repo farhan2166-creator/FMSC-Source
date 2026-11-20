@@ -80,9 +80,9 @@ internal static partial class Program
             "The total row remains emphasized and cannot be sorted among students");
         Check(grid.Rows[rows.Rows.Count-2].Cells["Student"].Value?.ToString()?.Contains("(this student)")==false,
             "Family rows do not duplicate the loaded-student label and identity");
-        Check(notice.Top>grid.Top && !notice.Font.Bold &&
-              notice.Text.Contains("saved immediately",StringComparison.OrdinalIgnoreCase),
-            "The compact warning follows the breakdown rather than dominating the summary");
+        Check(notice.Visible && notice.Width>0 && notice.Height>=AppMetrics.TextHeight(notice.Font) &&
+              notice.Text.Contains("immediately",StringComparison.OrdinalIgnoreCase),
+            "The payment consequence remains a readable, visible warning without fixed positioning");
         Check(grid.RectangleToScreen(grid.ClientRectangle).Bottom<=
               viewport.RectangleToScreen(viewport.ClientRectangle).Bottom,
             "All four students and the total row fit above the decision buttons");
