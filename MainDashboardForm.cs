@@ -717,7 +717,7 @@ public sealed class MainDashboardForm : ApplicationWindowForm
         AddModule(flow, "academics.png", "Daily Work", AppTheme.Primary,
             workPages.Where(item => item.Title is PageTitles.Admissions or "Pending Registrations"
                 or "Student Profile" or "Fee Collection" or PageTitles.OutstandingBills
-                or "Daily Collection Closing").ToArray(), expandInitially: true);
+                or "Daily Collection Closing" or PageTitles.StudentCertificates).ToArray(), expandInitially: true);
         var feeRateSetup = new NavigationItem(PageTitles.FeeRateSetup,
             () => FeeConfigurationWorkspace.Create(), "Finance", PageTitles.FeeRateSetup, "Fees.Configuration.Manage");
         var feePages = workPages.Where(item => item.Module == "Finance").Prepend(feeRateSetup).ToArray();
