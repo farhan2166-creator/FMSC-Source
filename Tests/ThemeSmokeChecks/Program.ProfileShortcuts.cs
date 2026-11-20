@@ -55,9 +55,10 @@ internal static partial class Program
                 .Any(input=>input.AccessibleName=="Student"),
             "Header search retains the accessible Student input identity");
         var profileTitle=Descendants(page).OfType<Label>()
-            .Single(label=>(string?)label.Tag=="ThemeHeaderTitle");
-        Check(profileTitle.Parent is TableLayoutPanel && !string.IsNullOrWhiteSpace(profileTitle.Text),
-            "The profile page retains an identifiable heading without fixing its column geometry");
+            .FirstOrDefault(label=>(string?)label.Tag=="ThemeHeaderTitle" &&
+                !cards.Any(card=>card.Contains(label)));
+        Check(profileTitle is { Parent: TableLayoutPanel } && !string.IsNullOrWhiteSpace(profileTitle.Text),
+            "The profile page retains an identifiable heading outside the cards without fixing its caption or column geometry");
 
         var sectionLayout=(TableLayoutPanel)family.Parent!;
         Check(new[]{overview,academic,family,history}.All(card=>
