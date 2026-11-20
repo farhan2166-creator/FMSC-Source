@@ -50,7 +50,8 @@ internal static class ReportDocumentNaming
     /// <summary>Use a saved person's reference and actual issued document number when unique.</summary>
     internal static string DocumentExportFileName(string title, string reportPath, DataTable data, DateTime? at = null)
     {
-        string reference = Unique(data, "CertificateNumber");
+        string certificateReference = Unique(data, "CertificateNumber");
+        string reference = certificateReference;
         if (reference.Length == 0) reference = Unique(data, "ReceiptNumber");
         if (reference.Length == 0) reference = Unique(data, "BillNumber");
         if (reference.Length == 0) reference = Unique(data, "DocumentNumber");
@@ -66,6 +67,27 @@ internal static class ReportDocumentNaming
             string owner = string.Join("-", new[] { admission, student.Length > 0 ? student : staff }
                 .Where(value => value.Length > 0));
             if (owner.Length == 0) owner = title.Split('—')[0].Trim();
+            // Issued certificate numbers remain in the database and on the document;
+            // only the suggested PDF filename uses the short certificate type.
+            var certificateCode = Regex.Match(certificateReference,
+                @"^([A-Za-z]{2,4})-[0-9]{4}-[0-9]+$", RegexOptions.CultureInvariant);
+            if (certificateCode.Success)
+            {
+                string father = Name(data, "FatherName");
+                string person = student.Length > 0 ? student : staff;
+                if (father.Length > 0 && person.Length > 0)
+                {
+                    string relationship = Unique(data, "Gender").Trim().ToUpperInvariant() switch
+                    {
+                        "MALE" or "M" => "so",
+                        "FEMALE" or "F" => "do",
+                        _ => "sdo"
+                    };
+                    owner = string.Join("-", new[] { admission, person + " " + relationship + " " + father }
+                        .Where(value => value.Length > 0));
+                }
+                return SafeStem(owner + " (" + certificateCode.Groups[1].Value.ToUpperInvariant() + ")");
+            }
             return SafeStem(owner + " (" + reference + ")");
         }
         return ExportFileName(title, at);
