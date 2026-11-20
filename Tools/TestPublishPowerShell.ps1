@@ -65,7 +65,7 @@ try {
     if ($env:PSModulePath -ne (Join-Path $PSHOME 'Modules')) {
         throw 'Validation changed the parent PowerShell module path.'
     }
-    & (Join-Path $ProjectDirectory 'Tools/AssertNet10SelfContained.ps1') -ApplicationDirectory $application
+    & (Join-Path $ProjectDirectory 'Tools/AssertNet8SelfContained.ps1') -ApplicationDirectory $application
     foreach ($relative in @('FMSC_SMS/FMSC_SMS.exe', 'FMSC_SMS/FMSC_SMS.dll',
         'FMSC_SMS/FMSC_SMS.deps.json', 'FMSC_SMS/FMSC_SMS.runtimeconfig.json',
         'FMSC_SMS/UpdateSupport/core.ps1', 'FMSC_SMS/UpdateSupport/UpdateRecovery.ps1',
