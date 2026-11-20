@@ -302,13 +302,17 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
     {
         if (_inlineHeaderContent is null || _headerTitleLine is null || _titleLabel is null)
             return;
-        // Account for glyph overhang and scaled text metrics before allocating the
-        // inline selector's remaining space. The title must never be ellipsized.
+        // Keep the label AutoSize-enabled: disabling it after it was docked in the
+        // title row can leave its paint bounds empty and hide the heading entirely.
+        // A measured minimum and an absolute column keep the inline picker from
+        // taking any of the title's width.
         int titleWidth = TextRenderer.MeasureText(_titleLabel.Text, _titleLabel.Font,
             new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width +
             Math.Max(UiDesignSystem.Spacing.Xl, AppScale.Scale(28));
-        _titleLabel.AutoSize = false;
+        _titleLabel.AutoSize = true;
+        if (_titleLabel.MinimumSize.Width != titleWidth)
+            _titleLabel.MinimumSize = new Size(titleWidth, 0);
         var column = _headerTitleLine.ColumnStyles[0];
         if (column.SizeType != SizeType.Absolute)
             column.SizeType = SizeType.Absolute;

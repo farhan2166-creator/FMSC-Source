@@ -59,6 +59,16 @@ internal static partial class Program
                 !cards.Any(card=>card.Contains(label)));
         Check(profileTitle is { Parent: TableLayoutPanel } && !string.IsNullOrWhiteSpace(profileTitle.Text),
             "The profile page retains an identifiable heading outside the cards without fixing its caption or column geometry");
+        // An inline picker must not blank the heading. Test the size contract
+        // relative to the live font, rather than fixing pixels or caption text.
+        var headerLine=(TableLayoutPanel)profileTitle!.Parent!;
+        int requiredTitleWidth=TextRenderer.MeasureText(profileTitle.Text, profileTitle.Font,
+            new Size(int.MaxValue,int.MaxValue),
+            TextFormatFlags.SingleLine|TextFormatFlags.NoPadding).Width;
+        Check(profileTitle.AutoSize && profileTitle.MinimumSize.Width>=requiredTitleWidth &&
+                headerLine.ColumnStyles[0].SizeType==SizeType.Absolute &&
+                headerLine.ColumnStyles[0].Width>=profileTitle.MinimumSize.Width,
+            "Inline student search preserves a non-collapsing, auto-sized profile heading");
 
         var sectionLayout=(TableLayoutPanel)family.Parent!;
         Check(new[]{overview,academic,family,history}.All(card=>
