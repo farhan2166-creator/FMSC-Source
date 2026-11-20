@@ -5,10 +5,8 @@ internal static partial class Program
 {
     private sealed class ModalGuardFixture : Control,IBusyPage,IUnsavedChanges
     {
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool IsBusy{get;set;}
         public string BusyMessage=>"Operation pending";
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool HasUnsavedChanges{get;set;}
         public string UnsavedChangesMessage=>"Discard this draft?";
     }

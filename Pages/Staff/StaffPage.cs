@@ -7,7 +7,6 @@ public sealed class StaffProfilePage : MasterPage
     public event Action<Selection>? StaffSelected;
     public event Action<Selection>? StaffSaved;
     public event Action? StaffSelectionCleared;
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Func<bool>? ContextChangeGuard { get; set; }
     protected override bool CanChangeRecord() => ContextChangeGuard?.Invoke() != false;
     private FormValidator? _staffValidator;

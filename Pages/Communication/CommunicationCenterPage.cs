@@ -83,7 +83,6 @@ public sealed partial class CommunicationCenterPage : V2Page, IBusyPage
         new(CommunicationAudience.FeeStudent, "One student's fees"), new(CommunicationAudience.FeeFamily, "Family fee balance"),
         new(CommunicationAudience.Staff, "One staff member", "Staff.View")
     };
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal CommunicationAudience SelectedAudience
     {
         get => (audience.SelectedItem as AudienceOption)?.Scope ?? CommunicationAudience.Class;

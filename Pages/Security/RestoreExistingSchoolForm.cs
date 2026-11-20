@@ -35,18 +35,13 @@ internal sealed class RestoreExistingSchoolForm : ApplicationWindowForm
     private readonly LinkLabel toggle = new() { Text = "Show technical details", Dock = DockStyle.Fill };
     private bool busy;
     private CancellationTokenSource? connectionCancellation;
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Func<CloudProvider, CancellationToken, Task> ConnectAccountAsync { get; set; } =
         CloudBackupOAuth.ConnectForReplacementRecoveryAsync;
 
     // Internal delegates keep modal behavior testable without SQL, credentials or browser sign-in.
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Func<bool> ConfirmRecovery { get; set; }
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Action ShowRecoveryComplete { get; set; }
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Action<string> ShowRecoveryFailure { get; set; }
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Func<string?, CloudRemoteBackup?, string, string, string,
         IProgress<BackupProgressUpdate>, IReadOnlyList<CloudRemoteBackup>, Task> RecoveryAction { get; set; } =
         (local, remote, key, name, password, progress, alternatives) =>

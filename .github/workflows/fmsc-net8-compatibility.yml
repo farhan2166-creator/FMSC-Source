@@ -1,4 +1,4 @@
-name: '14 - CI - .NET 10 LTS Production Desktop Compatibility (no release)'
+name: '14 - CI - .NET 8 Production Desktop Compatibility (no release)'
 
 # Check the actual production framework and publish profile; no disposable
 # retargeting, warning suppression, SQL writes or release/feed mutation.
@@ -11,19 +11,19 @@ on:
       - 'Tools/**/*.csproj'
       - 'Properties/PublishProfiles/PortableRelease.pubxml'
       - 'Tools/TestPublishPowerShell.ps1'
-      - 'Tools/AssertNet10SelfContained.ps1'
-      - '.github/workflows/fmsc-net10-compatibility.yml'
+      - 'Tools/AssertNet8SelfContained.ps1'
+      - '.github/workflows/fmsc-net8-compatibility.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: fmsc-net10-production-${{ github.ref }}
+  group: fmsc-net8-production-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   desktop-compatibility:
-    name: Actual .NET 10 WinForms, RDLC, exports and self-contained publish
+    name: Actual .NET 8 WinForms, RDLC, exports and self-contained publish
     runs-on: windows-2022
     timeout-minutes: 55
     steps:
@@ -32,67 +32,67 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install .NET 10 SDK
+      - name: Install .NET 8 SDK
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '8.0.x'
 
-      - name: Reject non-.NET-10 production and test target frameworks
+      - name: Reject non-.NET-8 production and test target frameworks
         shell: pwsh
         run: |
           $projects = @(Get-ChildItem -Path . -Recurse -Filter '*.csproj' -File |
             Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' })
-          if ($projects.Count -lt 20) { throw 'Incomplete project inventory for .NET 10 migration.' }
+          if ($projects.Count -lt 20) { throw 'Incomplete project inventory for .NET 8 migration.' }
           foreach ($project in $projects) {
             [xml]$xml = Get-Content -LiteralPath $project.FullName -Raw
             $nodes = @($xml.SelectNodes('/Project/PropertyGroup/TargetFramework'))
-            if ($nodes.Count -ne 1 -or $nodes[0].InnerText -notin @('net10.0','net10.0-windows')) {
-              throw "SDK target framework does not match .NET 10: $($project.FullName)"
+            if ($nodes.Count -ne 1 -or $nodes[0].InnerText -notin @('net8.0','net8.0-windows')) {
+              throw "SDK target framework does not match .NET 8: $($project.FullName)"
             }
           }
           [xml]$publish = Get-Content -LiteralPath 'Properties/PublishProfiles/PortableRelease.pubxml' -Raw
-          if ($publish.Project.PropertyGroup.TargetFramework -cne 'net10.0-windows') {
-            throw 'Production PortableRelease profile is not .NET 10 Windows.'
+          if ($publish.Project.PropertyGroup.TargetFramework -cne 'net8.0-windows') {
+            throw 'Production PortableRelease profile is not .NET 8 Windows.'
           }
 
       - name: Restore and build production application with normal diagnostics
         shell: pwsh
         run: |
           dotnet restore FMSC_SMS.sln
-          if ($LASTEXITCODE -ne 0) { throw '.NET 10 restore failed.' }
+          if ($LASTEXITCODE -ne 0) { throw '.NET 8 restore failed.' }
           dotnet build FMSC_SMS.sln -c Release --no-restore
-          if ($LASTEXITCODE -ne 0) { throw '.NET 10 desktop compilation failed.' }
+          if ($LASTEXITCODE -ne 0) { throw '.NET 8 desktop compilation failed.' }
           dotnet build Tests/ThemeSmokeChecks/ThemeSmokeChecks.csproj -c Release
-          if ($LASTEXITCODE -ne 0) { throw '.NET 10 WinForms regression test compilation failed.' }
+          if ($LASTEXITCODE -ne 0) { throw '.NET 8 WinForms regression test compilation failed.' }
 
-      - name: Execute Windows desktop, PDF and permission contracts under .NET 10
+      - name: Execute Windows desktop, PDF and permission contracts under .NET 8
         shell: pwsh
         timeout-minutes: 20
         run: |
-          $dll = 'Tests/ThemeSmokeChecks/bin/Release/net10.0-windows/ThemeSmokeChecks.dll'
+          $dll = 'Tests/ThemeSmokeChecks/bin/Release/net8.0-windows/ThemeSmokeChecks.dll'
           if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
-            throw 'Expected .NET 10 WinForms test assembly is missing.'
+            throw 'Expected .NET 8 WinForms test assembly is missing.'
           }
           foreach ($mode in @(
             '--communication-workflow', '--report-captions', '--report-student-identity',
             '--certificate-pdf-review', '--update-dialog', '--post-fix'
           )) {
             & dotnet $dll $mode
-            if ($LASTEXITCODE -ne 0) { throw ".NET 10 compatibility failed for $mode." }
+            if ($LASTEXITCODE -ne 0) { throw ".NET 8 compatibility failed for $mode." }
           }
           dotnet run --project Tests/ReportReadChecks/ReportReadChecks.csproj -c Release
-          if ($LASTEXITCODE -ne 0) { throw '.NET 10 report projection failed.' }
+          if ($LASTEXITCODE -ne 0) { throw '.NET 8 report projection failed.' }
           dotnet run --project Tests/ReportRdlcChecks/ReportRdlcChecks.csproj -c Release
-          if ($LASTEXITCODE -ne 0) { throw '.NET 10 RDLC expression execution failed.' }
+          if ($LASTEXITCODE -ne 0) { throw '.NET 8 RDLC expression execution failed.' }
           dotnet run --project Tools/UpdatePackages/UpdatePackages.csproj -c Release -- --self-test
-          if ($LASTEXITCODE -ne 0) { throw '.NET 10 update-package integrity failed.' }
+          if ($LASTEXITCODE -ne 0) { throw '.NET 8 update-package integrity failed.' }
 
-      - name: Verify actual production PortableRelease is self-contained .NET 10 win-x64
+      - name: Verify actual production PortableRelease is self-contained .NET 8 win-x64
         shell: pwsh
         timeout-minutes: 25
         run: |
           & .\Tools\TestPublishPowerShell.ps1 -ProjectDirectory .
-          if ($LASTEXITCODE -ne 0) { throw 'Production .NET 10 portable publish validation failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Production .NET 8 portable publish validation failed.' }
 
 # Real signed prerequisites, historical SQL fixtures, interrupt recovery,
 # Sandbox attestation and exact-SHA Workflow 04 publication remain separate,

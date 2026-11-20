@@ -84,10 +84,10 @@ jobs:
           Write-Host "Checked-out Source revision: $revision"
           "Source revision: $revision" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
-      - name: Install .NET 10 SDK
+      - name: Install .NET 8 SDK
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '8.0.x'
 
       - name: Install Python 3.12
         uses: actions/setup-python@v7
@@ -154,7 +154,7 @@ jobs:
           )
           & dotnet @arguments
           if ($LASTEXITCODE -ne 0) { throw 'Full PortableRelease publishing failed.' }
-          & .\Tools\AssertNet10SelfContained.ps1 -ApplicationDirectory $application
+          & .\Tools\AssertNet8SelfContained.ps1 -ApplicationDirectory $application
           $tools = Join-Path $release 'Tools'
           New-Item -ItemType Directory -Path $tools -Force | Out-Null
           Copy-Item -LiteralPath (Join-Path $workspace 'out/prerequisites/sqlcmd.exe') -Destination (Join-Path $tools 'sqlcmd.exe') -Force
@@ -276,7 +276,7 @@ jobs:
             'A missing version stops before backup or SQL changes; newer databases refuse.'
             'For a fresh install, supply the latest compatible detached database pair.'
             ''
-            'Includes the self-contained .NET 10 app and signed Microsoft Visual C++ v14 x64,'
+            'Includes the self-contained .NET 8 app and signed Microsoft Visual C++ v14 x64,'
             'SQL LocalDB 2022 MSI, pinned Microsoft sqlcmd tool and installer core.ps1.'
             'Includes pinned Git for Windows MinGit and OpenSSH; no Git PATH setup needed.'
             'Installed application retains Microsoft-signed VC++ and LocalDB installers and verified sqlcmd for offline update/recovery.'

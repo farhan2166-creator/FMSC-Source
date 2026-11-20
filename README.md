@@ -1,6 +1,6 @@
 # FMSC_SMS — School Management System
 
-Windows school-management application built with C#, .NET 10 Windows Forms and SQL Server Express LocalDB. Includes admissions, placement history, staff records, fees, reporting, certificates, communication and backup/recovery.
+Windows school-management application built with C#, .NET 8 Windows Forms and SQL Server Express LocalDB. Includes admissions, placement history, staff records, fees, reporting, certificates, communication and backup/recovery.
 
 ## Source and operating guidance
 
@@ -15,7 +15,7 @@ The application version and required database schema are separate values maintai
 
 ## Build
 
-On Windows with the .NET 10 SDK:
+On Windows with the .NET 8 SDK:
 
 ```powershell
 dotnet restore FMSC_SMS.sln

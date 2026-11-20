@@ -116,7 +116,7 @@
 		<!-- Local verification repositories and generated files are not application inputs. -->
 		<DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**</DefaultItemExcludes>
 		<OutputType>WinExe</OutputType>
-		<TargetFramework>net10.0-windows</TargetFramework>
+		<TargetFramework>net8.0-windows</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWindowsForms>true</UseWindowsForms>
@@ -201,7 +201,10 @@
 	</ItemGroup>
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
-		<PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+		<!-- Align SQL client DPAPI dependency and patched transitive cryptography packages. -->
+        <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.15" />
+        <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.15" />
+        <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.15" />
 		<PackageReference Include="PdfPig" Version="0.1.16" />
 		<PackageReference Include="PDFsharp-MigraDoc-GDI" Version="6.2.4" />
 		<PackageReference Include="ReportViewerCore.WinForms" Version="15.1.33" />
