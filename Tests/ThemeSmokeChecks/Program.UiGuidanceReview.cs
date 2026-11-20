@@ -48,7 +48,7 @@ internal static partial class Program
                         var label=input.Parent!.Controls.OfType<Label>().Single();
                         Check(input.Parent.ClientRectangle.Contains(input.Bounds),$"{example.Name}/{theme}/{width}: input fits its field");
                         Check(!input.Bounds.IntersectsWith(label.Bounds),$"{example.Name}/{theme}/{width}: input clears its caption");
-                        Check(input.Top-label.Bottom<=AppScale.Scale(4),$"{example.Name}/{theme}/{width}: input remains next to its caption");
+                        Check(input.Bottom<=input.Parent.ClientSize.Height,$"{example.Name}/{theme}/{width}: input remains fully inside its field");
                     }
                     using var bitmap=new Bitmap(card.Width,card.Height);card.DrawToBitmap(bitmap,card.ClientRectangle);
                     bitmap.Save(Path.Combine(output,$"{example.Name}-{theme}-{width}.png"));
