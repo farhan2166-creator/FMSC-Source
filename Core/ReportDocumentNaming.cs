@@ -81,6 +81,20 @@ internal static class ReportDocumentNaming
                 owner = AddFatherToOwner(data, admission, student, owner);
             return SafeStem(owner + " (" + reference + ")");
         }
+        // An annual sheet can contain several different receipts for one student.
+        // Identify the student, not any one receipt; retain a timestamp for repeat exports.
+        if (Path.GetFileName(reportPath).Equals("StudentReceipt.rdlc", StringComparison.OrdinalIgnoreCase)
+            && title.Contains("Annual", StringComparison.OrdinalIgnoreCase)
+            && Values(data, "ReceiptNumber").Length > 1)
+        {
+            string admission = Unique(data, "AdmissionNumberText");
+            string student = Name(data, "StudentName");
+            if (admission.Length > 0 && student.Length > 0)
+            {
+                string owner = AddFatherToOwner(data, admission, student, admission + "-" + student);
+                return ExportFileName(owner + " (Annual Receipts)", at);
+            }
+        }
         return ExportFileName(title, at);
     }
 
