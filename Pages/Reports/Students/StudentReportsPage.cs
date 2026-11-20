@@ -938,6 +938,23 @@ public partial class StudentReportsPage : V2Page
             ? text
             : ModeContext(_mode);
     }
+    protected override string ReportExportFileScope()
+    {
+        // Keep applied filter choices, but exclude result counts and explanatory text.
+        // Those belong under the PDF title and can make the filename excessively long.
+        return string.Join(" - ", _filterText.Split("  |  ", StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => {
+                string concise = part.Trim();
+                int explanation = concise.IndexOf(" (contact,", StringComparison.OrdinalIgnoreCase);
+                if (explanation >= 0) concise = concise[..explanation];
+                if (concise.StartsWith("Placements: ", StringComparison.Ordinal))
+                    return concise["Placements: ".Length..];
+                if (concise.StartsWith("Compared with: ", StringComparison.Ordinal))
+                    return "vs " + concise["Compared with: ".Length..];
+                return concise.Replace(": ", " ");
+            })
+            .Where(part => part.Length > 0));
+    }
     protected override bool ReportLayoutNeedsReload(IReadOnlyList<string> keys) =>
         IsRegisterMode(_mode) &&
         _raw is not null &&
