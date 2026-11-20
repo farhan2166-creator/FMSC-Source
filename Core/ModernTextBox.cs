@@ -11,11 +11,9 @@ namespace FMSC_SMS.Core
         private bool _invalid;
         private bool _selectAllOnMouseUp;
         /// <summary>Select existing search text on entry; subsequent clicks can position the caret.</summary>
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool SelectAllOnFocus { get; set; }
         private bool _zeroAsPlaceholder;
         /// <summary>Show an empty numeric editor while retaining zero for existing text-based parsers.</summary>
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool ZeroAsPlaceholder
         {
             get => _zeroAsPlaceholder;
@@ -33,7 +31,6 @@ namespace FMSC_SMS.Core
         private bool _isHovered;
         private bool _blendWithParent;
         private Control? _backgroundParent;
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool BlendWithParent
         {
             get => _blendWithParent;
@@ -63,13 +60,11 @@ namespace FMSC_SMS.Core
             if (_backgroundParent is not null) _backgroundParent.BackColorChanged += ParentBackgroundChanged;
             UpdateBlendedBackground();
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public HorizontalAlignment TextAlign
         {
             get => _inner.TextAlign;
             set => _inner.TextAlign = value;
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public int CornerRadius
         {
             get => _radius;
@@ -167,7 +162,6 @@ namespace FMSC_SMS.Core
             }
         }
         /// <summary>A multiline field must accept Enter as a new line. Setting it with Multiline fixes every multiline field at once, including the shared ones built by HumanUi.TextBox.</summary>
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool Multiline
         {
             get => _inner.Multiline;
@@ -178,19 +172,16 @@ namespace FMSC_SMS.Core
                 Reposition();
             }
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public ScrollBars ScrollBars
         {
             get => _inner.ScrollBars;
             set => _inner.ScrollBars = value;
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public int MaxLength
         {
             get => _inner.MaxLength;
             set => _inner.MaxLength = value;
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public string PlaceholderText
         {
             get => _inner.PlaceholderText;
@@ -221,13 +212,11 @@ namespace FMSC_SMS.Core
             Reposition();
             return button;
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool UseSystemPasswordChar
         {
             get => _inner.UseSystemPasswordChar;
             set => _inner.UseSystemPasswordChar = value;
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool ReadOnly
         {
             get => _inner.ReadOnly;
@@ -239,7 +228,6 @@ namespace FMSC_SMS.Core
             }
         }
         /// <summary>Proxies the inner text box's TabStop so a display-only field can be kept out of the keyboard path.</summary>
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public new bool TabStop
         {
             get => _inner.TabStop;
@@ -249,13 +237,11 @@ namespace FMSC_SMS.Core
                 base.TabStop = value;
             }
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public int SelectionStart
         {
             get => _inner.SelectionStart;
             set => _inner.SelectionStart = value;
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public int SelectionLength
         {
             get => _inner.SelectionLength;
@@ -266,7 +252,6 @@ namespace FMSC_SMS.Core
         public new bool Focus() => _inner.Focus();
         public new bool Focused => _inner.Focused;
         /// <summary>Shared validation state (see <see cref="FormValidator"/>): a subtle danger-coloured border, nothing else. The fill, font and layout are untouched.</summary>
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public bool IsInvalid
         {
             get => _invalid;
@@ -295,7 +280,6 @@ namespace FMSC_SMS.Core
             if (string.IsNullOrEmpty(_inner.AccessibleDescription) && !string.IsNullOrEmpty(AccessibleDescription))
                 _inner.AccessibleDescription = AccessibleDescription;
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public AutoCompleteMode AutoCompleteMode
         {
             get => _autoCompleteMode;
@@ -315,13 +299,11 @@ namespace FMSC_SMS.Core
                 }
             }
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public AutoCompleteSource AutoCompleteSource
         {
             get => _inner.AutoCompleteSource;
             set => _inner.AutoCompleteSource = value;
         }
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public AutoCompleteStringCollection AutoCompleteCustomSource
         {
             get => _inner.AutoCompleteCustomSource;
