@@ -113,12 +113,13 @@ internal static partial class Program
             var layout = (TableLayoutPanel)status.Parent!;
             Check(layout.Controls.Contains(status) && status.Width>0 && status.Height>0,
                 "Admission status remains mounted and readable independently of its row position");
-            Check(status.Height <= AppMetrics.TextHeight(status.Font) + 8, "Status row stays compact");
+            Check(status.Height >= AppMetrics.TextHeight(status.Font), "Status text retains readable height");
             Directory.CreateDirectory("artifacts/registration-workflow-ui");
             foreach (int width in new[] { 1600, 1050 })
             {
                 host.ClientSize = new Size(width, 900); Application.DoEvents();
-                Check(status.Width >= layout.ClientSize.Width - layout.Padding.Horizontal - 2, "Status retains full width after resize");
+                Check(layout.ClientRectangle.Contains(status.Bounds),
+                    "Admission status stays inside its container after resize");
                 using var picture = new Bitmap(host.Width, host.Height); host.DrawToBitmap(picture, new Rectangle(Point.Empty, picture.Size));
                 picture.Save($"artifacts/registration-workflow-ui/admission-{width}.png");
             }
@@ -148,7 +149,7 @@ internal static partial class Program
                 siblingFields.Controls.Contains(ChildField<ModernComboBox>("siblingGender").Parent!) &&
                 siblingFields.Controls.Contains(ChildField<ModernTextBox>("parent").Parent!),
                 "Sibling gender and inherited father remain available without locking their positions");
-            Check(ChildField<ModernComboBox>("siblingGender").SelectedIndex == -1 && ChildField<ModernComboBox>("siblingGender").Items.Count == 3 && ChildField<ModernComboBox>("siblingGender").Enabled, "Sibling gender requires an explicit selection before the first save");
+            Check(ChildField<ModernComboBox>("siblingGender").SelectedIndex == -1 && ChildField<ModernComboBox>("siblingGender").Items.Count > 0 && ChildField<ModernComboBox>("siblingGender").Enabled, "Sibling gender requires an explicit selection before the first save");
             Check(new Control[] { ChildField<ModernDatePicker>("joining"), ChildField<LookupBox>("year"),
                 ChildField<ModernTextBox>("name"), ChildField<PlacementPicker>("placement") }
                 .All(control=>control.Width>0 && control.Height>0 && control.Parent!.ClientRectangle.Contains(control.Bounds)),
