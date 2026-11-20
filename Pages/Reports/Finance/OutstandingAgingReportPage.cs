@@ -46,6 +46,21 @@ public sealed class OutstandingAgingReportPage : CanonicalFinanceReportPage
     protected override string AdditionalFilterSignature => $"{dueStatus.Text}|{NumericFilterSignature(minimumBalance.Text)}|{minimumDays.Text}|{maximumDays.Text}";
     protected override string AdditionalFilterDescription => ViewName == "Aging" ? "" :
         $"Due status: {dueStatus.Text}   Minimum outstanding: Rs. {minimumBalance.Value:N0}   Days overdue: {(minimumDays.Text.Trim().Length == 0 ? "Any" : minimumDays.Text)} to {(maximumDays.Text.Trim().Length == 0 ? "Any" : maximumDays.Text)}";
+    protected override string AdditionalExportFileScope
+    {
+        get
+        {
+            if (ViewName == "Aging") return "";
+            var parts = new List<string>();
+            if (dueStatus.Text != "None") parts.Add(dueStatus.Text);
+            if (minimumBalance.Value > 0) parts.Add("min Rs " + minimumBalance.Value.ToString("#,##0.##"));
+            string first = minimumDays.Text.Trim(), last = maximumDays.Text.Trim();
+            if (first.Length > 0 || last.Length > 0)
+                parts.Add(first.Length > 0 && last.Length > 0 ? "days " + first + " to " + last
+                    : first.Length > 0 ? "days from " + first : "days to " + last);
+            return string.Join(" - ", parts);
+        }
+    }
     protected override void UpdateViewControls()
     {
         base.UpdateViewControls();

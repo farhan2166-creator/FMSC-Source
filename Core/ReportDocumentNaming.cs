@@ -50,7 +50,8 @@ internal static class ReportDocumentNaming
     /// <summary>Use a saved person's reference and actual issued document number when unique.</summary>
     internal static string DocumentExportFileName(string title, string reportPath, DataTable data, DateTime? at = null)
     {
-        string reference = Unique(data, "CertificateNumber");
+        string certificateReference = Unique(data, "CertificateNumber");
+        string reference = certificateReference;
         if (reference.Length == 0) reference = Unique(data, "ReceiptNumber");
         if (reference.Length == 0) reference = Unique(data, "BillNumber");
         if (reference.Length == 0) reference = Unique(data, "DocumentNumber");
@@ -66,7 +67,33 @@ internal static class ReportDocumentNaming
             string owner = string.Join("-", new[] { admission, student.Length > 0 ? student : staff }
                 .Where(value => value.Length > 0));
             if (owner.Length == 0) owner = title.Split('—')[0].Trim();
+            // Issued certificate numbers remain in the database and on the document;
+            // only the suggested PDF filename uses the short certificate type.
+            var certificateCode = Regex.Match(certificateReference,
+                @"^([A-Za-z]{2,4})-[0-9]{4}-[0-9]+$", RegexOptions.CultureInvariant);
+            if (certificateCode.Success)
+            {
+                owner = AddFatherToOwner(data, admission, student.Length > 0 ? student : staff, owner);
+                return SafeStem(owner + " (" + certificateCode.Groups[1].Value.ToUpperInvariant() + ")");
+            }
+            if (Path.GetFileName(reportPath).Equals("StudentReceipt.rdlc", StringComparison.OrdinalIgnoreCase)
+                && Unique(data, "ReceiptNumber").Length > 0)
+                owner = AddFatherToOwner(data, admission, student, owner);
             return SafeStem(owner + " (" + reference + ")");
+        }
+        // An annual sheet can contain several different receipts for one student.
+        // Identify the student, not any one receipt; retain a timestamp for repeat exports.
+        if (Path.GetFileName(reportPath).Equals("StudentReceipt.rdlc", StringComparison.OrdinalIgnoreCase)
+            && title.Contains("Annual", StringComparison.OrdinalIgnoreCase)
+            && Values(data, "ReceiptNumber").Length > 1)
+        {
+            string admission = Unique(data, "AdmissionNumberText");
+            string student = Name(data, "StudentName");
+            if (admission.Length > 0 && student.Length > 0)
+            {
+                string owner = AddFatherToOwner(data, admission, student, admission + "-" + student);
+                return ExportFileName(owner + " (Annual Receipts)", at);
+            }
         }
         return ExportFileName(title, at);
     }
@@ -77,6 +104,24 @@ internal static class ReportDocumentNaming
         string meaningful = string.IsNullOrWhiteSpace(scope) ? title :
             title + " (" + scope.Replace("\r", " ").Replace("\n", " ").Trim() + ")";
         return ExportFileName(meaningful, at);
+    }
+
+    /// <summary>The PDF filename uses the student-to-parent relationship, but never guesses a gender.</summary>
+    private static string AddFatherToOwner(DataTable data, string admission, string person, string fallback)
+    {
+        string father = Name(data, "FatherName");
+        if (person.Length == 0 || father.Length == 0) return fallback;
+        string relation = Unique(data, "Gender").Trim().ToUpperInvariant();
+        if (relation.Length == 0)
+            relation = Unique(data, "ParentRelationLabel").Trim().ToUpperInvariant();
+        string shortRelation = relation switch
+        {
+            "MALE" or "M" or "BOY" or "S/O" => "so",
+            "FEMALE" or "F" or "GIRL" or "D/O" => "do",
+            _ => "sdo"
+        };
+        return string.Join("-", new[] { admission, person + " " + shortRelation + " " + father }
+            .Where(value => value.Length > 0));
     }
 
     private static string SafeStem(string title)

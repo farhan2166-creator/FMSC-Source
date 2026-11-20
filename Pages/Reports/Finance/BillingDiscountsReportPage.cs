@@ -16,6 +16,8 @@ public sealed class BillingDiscountsReportPage : CanonicalFinanceReportPage
     { this.reportReader=reportReader;asOf.ValueChanged += (_,_) => FiltersChanged(); }
     protected override IEnumerable<(string,Control)> AdditionalReportFilters() => new[] { ("Concession summary as of",(Control)asOf) };
     protected override string AdditionalFilterSignature => ViewName=="Concession Summary" ? asOf.Value.Date.ToString("yyyy-MM-dd") : "";
+    protected override string AdditionalExportFileScope => ViewName == "Concession Summary"
+        ? "as of " + asOf.Value.ToString("yyyy-MM-dd") : "";
     protected override void UpdateViewControls()
     {
         base.UpdateViewControls();

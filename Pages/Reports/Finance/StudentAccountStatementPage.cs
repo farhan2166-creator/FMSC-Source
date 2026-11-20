@@ -4,6 +4,25 @@ namespace FMSC_SMS.Pages.Reports.Finance;
 // Receipts access must not grant statement SQL/export; retain each reader and correction writer's permissions.
 public sealed partial class StudentAccountStatementPage : V2Page, IBusyPage
 {
+    protected override string ReportExportFileScope()
+    {
+        var selected = GetSelectedAdmissionIds();
+        string identity = selected.Count switch
+        {
+            0 => "",
+            1 => studentNames.GetValueOrDefault(selected[0], studentSearch.Text),
+            _ => selected.Count + " students"
+        };
+        // StudentPicker may show an extended description; retain a compact identity.
+        if (identity.Length > 60) identity = identity[..60].TrimEnd();
+        var parts = new List<string>();
+        if (identity.Length > 0) parts.Add(identity);
+        if (from.Checked || to.Checked)
+            parts.Add(from.Checked && to.Checked
+                ? from.Value.ToString("yyyy-MM-dd") + " to " + to.Value.ToString("yyyy-MM-dd")
+                : from.Checked ? "from " + from.Value.ToString("yyyy-MM-dd") : "to " + to.Value.ToString("yyyy-MM-dd"));
+        return string.Join(" - ", parts);
+    }
     private readonly StudentPicker studentSearch = new();
     private readonly ModernDatePicker from =
         new ModernDatePicker {

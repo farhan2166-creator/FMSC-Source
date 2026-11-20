@@ -59,6 +59,21 @@ public sealed class CertificateIssueRegisterPage : V2Page
         type.Text,recipient.Text,entry.Text,collection.Text,search.Text.Trim(),from.Checked,from.Value.Date,to.Checked,to.Value.Date,orderBy.Text);
     protected override string ReportFilterSignature() => Signature();
     protected override string ReportExportSubtitle() => subtitle;
+    protected override string ReportExportFileScope()
+    {
+        var parts = new List<string>();
+        if (type.Text != "All") parts.Add(type.Text);
+        if (recipient.Text != "All") parts.Add(recipient.Text);
+        if (entry.Text != "All") parts.Add(entry.Text);
+        if (collection.Text != "All") parts.Add(collection.Text);
+        if (from.Checked || to.Checked)
+            parts.Add(from.Checked && to.Checked
+                ? from.Value.ToString("yyyy-MM-dd") + " to " + to.Value.ToString("yyyy-MM-dd")
+                : from.Checked ? "from " + from.Value.ToString("yyyy-MM-dd") : "to " + to.Value.ToString("yyyy-MM-dd"));
+        if (search.Text.Trim().Length > 0) parts.Add("find " + search.Text.Trim());
+        if (orderBy.SelectedIndex > 0) parts.Add("sorted " + orderBy.Text);
+        return string.Join(" - ", parts);
+    }
     protected override string ReportLayoutKey => "certificates.issue-register.columns";
     protected override IReadOnlyList<ReportColumnDef>? ReportColumnCatalog => availableColumns;
     // Less horizontal scrolling for new users; existing column choices and saved views win.
