@@ -8,6 +8,18 @@ public sealed class StudentProfilePage : V2Page
 {
     private readonly Action<Func<Control>, string, string>? navigate;
     private readonly StudentPicker student = new();
+    private bool searchFocusQueued;
+    // The student finder is the primary action when this page is opened or reactivated.
+    private void FocusStudentSearchAfterLayout()
+    {
+        if (searchFocusQueued || IsDisposed || !IsHandleCreated || !Visible) return;
+        searchFocusQueued = true;
+        BeginInvoke(new Action(() => {
+            searchFocusQueued = false;
+            if (IsDisposed || !Visible || !student.CanFocus) return;
+            if (student.Focus()) student.SelectAll();
+        }));
+    }
     private readonly List<ModernButton> studentShortcuts=new();
     private readonly Dictionary<ModernButton, (Func<bool> Allowed, bool RequireStudent)> shortcutAccess = new();
     private void UpdateStudentShortcuts()
@@ -141,6 +153,8 @@ public sealed class StudentProfilePage : V2Page
             SetStatus("Select a student to view their profile.");
         };
         student.SearchFailed += ex => Fail(ex);
+        Load += (_, _) => FocusStudentSearchAfterLayout();
+        VisibleChanged += (_, _) => { if (Visible) FocusStudentSearchAfterLayout(); };
         if(initialize)StudentSearchCache.Warm();
         UiHelper.SetGridPlaceholderMessage(contextGrid, UiText.EmptyGrid.SelectStudent);
         UiHelper.SetGridPlaceholderMessage(familyGrid, UiText.EmptyGrid.SelectStudent);
@@ -227,14 +241,20 @@ public sealed class StudentProfilePage : V2Page
             RowCount = 1,
             Margin = Padding.Empty
         };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(96)));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(126)));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var photoHost = new Panel {
             Dock = DockStyle.Fill,
             Margin = new Padding(0, 0, UiDesignSystem.Spacing.Md, 0)
         };
+        // Keep the portrait compact instead of stretching its frame to the full card height.
+        // PictureBoxSizeMode.Zoom preserves the original image proportions.
+        photo.Dock = DockStyle.None;
+        photo.Size = new Size(AppScale.Scale(108), AppScale.Scale(116));
         photoHost.Controls.Add(photo);
+        photoHost.Resize += (_, _) =>
+            photo.Left = Math.Max(0, (photoHost.ClientSize.Width - photo.Width) / 2);
 
         // Two facts columns fit the half-width card; full-width name/father
         // rows remain readable while preserving all admission and fee facts.
@@ -493,6 +513,12 @@ public sealed class StudentProfilePage : V2Page
         catch (Exception ex)
         {
             if (Current()) { profileReads.Cancel(); Fail(ex); }
+        }
+        finally
+        {
+            // Grids and other data-bound controls can take focus while the profile renders.
+            // Restore it only for the latest selected student, after the read completes.
+            if (Current()) FocusStudentSearchAfterLayout();
         }
     }
     private void RenderIdentity(DataTable students, int admissionId)
