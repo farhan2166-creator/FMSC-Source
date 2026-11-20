@@ -1039,6 +1039,8 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
     protected virtual string ReportExportTitle() => NavigationTitle;
     /// <summary>The line printed under the PDF title. Defaults to the page's header context.</summary>
     protected virtual string ReportExportSubtitle() => _contextText;
+    /// <summary>Compact filename scope; full report subtitles remain unchanged inside PDFs.</summary>
+    protected virtual string ReportExportFileScope() => ReportExportSubtitle();
     protected virtual string? ReportCampusContext => null;
     private protected virtual IReadOnlyList<ReportPrintMetric>? ReportPrintMetrics() => null;
     /// <summary>True when the chosen columns include data the report has not loaded yet.</summary>
@@ -1575,7 +1577,7 @@ public abstract class V2Page : UserControl, IWorkspaceStateHost
         using var dialog = new SaveFileDialog {
             Filter = $"PDF file (*.pdf)|*.pdf|{CsvExportLabel}|*.csv|Excel workbook (*.xlsx)|*.xlsx",
             FilterIndex = 1,
-            FileName = ReportDocumentNaming.ReportExportFileName(ReportExportTitle(), ReportExportSubtitle()),
+            FileName = ReportDocumentNaming.ReportExportFileName(ReportExportTitle(), ReportExportFileScope()),
             DefaultExt = "pdf",
             AddExtension = true,
             OverwritePrompt = true
