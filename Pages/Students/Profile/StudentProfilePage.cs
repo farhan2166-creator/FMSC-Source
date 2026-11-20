@@ -16,7 +16,7 @@ public sealed class StudentProfilePage : V2Page
         searchFocusQueued = true;
         BeginInvoke(new Action(() => {
             searchFocusQueued = false;
-            if (IsDisposed || !Visible || !student.CanFocus) return;
+            if (IsDisposed || !Visible) return;
             if (student.Focus()) student.SelectAll();
         }));
     }
