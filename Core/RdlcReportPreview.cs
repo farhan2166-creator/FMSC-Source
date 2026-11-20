@@ -74,6 +74,9 @@ internal static class RdlcReportPreview
                     new Microsoft.Reporting.WinForms.ReportDataSource(dataSourceName, printData));
                 viewer.LocalReport.EnableExternalImages = true;
                 viewer.LocalReport.DisplayName = title;
+                // The old paper mode may have overridden the viewer's page setup.
+                // Restore the new RDLC margins for preview, PDF export and printing.
+                viewer.ResetPageSettings();
                 viewer.RefreshReport();
             });
         using var interactionLifetime = interactions;
