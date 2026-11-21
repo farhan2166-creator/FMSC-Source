@@ -20,6 +20,37 @@ internal static partial class Program
         Check(ReportDocumentNaming.PreviewTitle("Student Fee Bill","StudentBill.rdlc",bills)==batch,"Fee lines do not inflate the document count");
         string filename=ReportDocumentNaming.ExportFileName("Collections / Receipts: Summary",new DateTime(2026,11,3,11,6,22));
         Check(filename.EndsWith("_2026-11-03_11-06-22")&&!filename.Any(c=>"<>:\"/\\|?*".Contains(c)),"Export names contain a readable title and safe date/time to seconds");
+        using var admissionForm=new DataTable();
+        foreach(string field in new[]{"AdmissionNumber","StudentName","FatherName","GenderText"})
+            admissionForm.Columns.Add(field);
+        admissionForm.Rows.Add("3451","Muhammad Salar","Ali Khan","Male");
+        Check(ReportDocumentNaming.DocumentExportFileName("Student Admission Form","AdmissionForm.rdlc",admissionForm)
+            == "3451-Muhammad Salar so Ali Khan (Admission)",
+            "Admission form PDF has the student's number, name and father, not a timestamp");
+        admissionForm.Rows[0]["GenderText"]="Female";
+        Check(ReportDocumentNaming.DocumentExportFileName("Student Admission Form","AdmissionForm.rdlc",admissionForm)
+            == "3451-Muhammad Salar do Ali Khan (Admission)",
+            "Admission form uses do for recorded female gender");
+        admissionForm.Rows[0]["GenderText"]="-";
+        Check(ReportDocumentNaming.DocumentExportFileName("Student Admission Form","AdmissionForm.rdlc",admissionForm)
+            == "3451-Muhammad Salar sdo Ali Khan (Admission)",
+            "Admission form uses sdo when gender is unspecified");
+        admissionForm.Rows[0]["FatherName"]="-";
+        Check(ReportDocumentNaming.DocumentExportFileName("Student Admission Form","AdmissionForm.rdlc",admissionForm)
+            == "3451-Muhammad Salar (Admission)",
+            "Admission form does not add a relationship when the father name is missing");
+        admissionForm.Rows[0]["FatherName"]="Ali Khan";
+        admissionForm.Rows[0]["AdmissionNumber"]="-";
+        Check(ReportDocumentNaming.DocumentExportFileName("Student Admission Form","AdmissionForm.rdlc",
+            admissionForm,new DateTime(2026,11,21,12,6,38))
+            == "Student Admission Form_2026-11-21_12-06-38",
+            "Admission form must not claim an official number when it is unavailable");
+        admissionForm.Rows[0]["AdmissionNumber"]="3451";
+        admissionForm.Rows.Add("3452","Another Student","Other Parent","Female");
+        Check(ReportDocumentNaming.DocumentExportFileName("Student Admission Form","AdmissionForm.rdlc",
+            admissionForm,new DateTime(2026,11,21,12,6,38))
+            == "Student Admission Form_2026-11-21_12-06-38",
+            "An unexpected multi-student admission dataset never identifies a single child");
         using var certificate=new DataTable();
         foreach(string field in new[]{"AdmissionNumber","StudentName","FatherName","Gender","CertificateNumber"})
             certificate.Columns.Add(field);

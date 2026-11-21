@@ -50,6 +50,20 @@ internal static class ReportDocumentNaming
     /// <summary>Use a saved person's reference and actual issued document number when unique.</summary>
     internal static string DocumentExportFileName(string title, string reportPath, DataTable data, DateTime? at = null)
     {
+        // The admission form is saved before it receives any issued certificate number.
+        // Identify its one student using the same safe owner format as certificates.
+        if (Path.GetFileName(reportPath).Equals("AdmissionForm.rdlc", StringComparison.OrdinalIgnoreCase)
+            && data.Rows.Count == 1)
+        {
+            string admission = Unique(data, "AdmissionNumber");
+            string student = Name(data, "StudentName");
+            if (admission.Length > 0 && admission != "-" && student.Length > 0 && student != "-")
+            {
+                string owner = AddFatherToOwner(data, admission, student, admission + "-" + student);
+                return SafeStem(owner + " (Admission)");
+            }
+        }
+
         string certificateReference = Unique(data, "CertificateNumber");
         string reference = certificateReference;
         if (reference.Length == 0) reference = Unique(data, "ReceiptNumber");
@@ -110,8 +124,10 @@ internal static class ReportDocumentNaming
     private static string AddFatherToOwner(DataTable data, string admission, string person, string fallback)
     {
         string father = Name(data, "FatherName");
-        if (person.Length == 0 || father.Length == 0) return fallback;
+        if (person.Length == 0 || father.Length == 0 || father == "-") return fallback;
         string relation = Unique(data, "Gender").Trim().ToUpperInvariant();
+        if (relation.Length == 0)
+            relation = Unique(data, "GenderText").Trim().ToUpperInvariant();
         if (relation.Length == 0)
             relation = Unique(data, "ParentRelationLabel").Trim().ToUpperInvariant();
         string shortRelation = relation switch
