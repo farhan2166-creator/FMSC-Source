@@ -15,7 +15,7 @@ internal static class SiblingFieldSyncSql
         ? "CASE WHEN S.SchoolMessageConsent IS NULL THEN N'Not recorded' WHEN S.SchoolMessageConsent=1 THEN N'Yes' ELSE N'No' END"
         : $"ISNULL(S.[{Column(field)}],N'')";
 
-    internal static string Read(string field) => $"""
+    internal static string Read(string field) => $$"""
         SET NOCOUNT ON;
         EXEC dbo.RequirePermission @UserId,N'Students.View';
         EXEC dbo.RequirePermission @UserId,N'Students.Administer';
@@ -31,7 +31,7 @@ internal static class SiblingFieldSyncSql
 
     internal static string Apply(string field) => field == "SchoolMessageConsent" ? ConsentApply : ApplyText(field);
 
-    private static string ApplyText(string field) => $"""
+    private static string ApplyText(string field) => $$"""
         SET NOCOUNT ON;
         SET XACT_ABORT ON;
         EXEC dbo.RequirePermission @UserId,N'Students.View';
