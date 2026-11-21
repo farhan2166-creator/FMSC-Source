@@ -445,8 +445,19 @@ public sealed class StudentTransferReadmissionPage : V2Page
     {
         try
         {
-            year.Bind(
-                DatabaseHelper.QueryUser("GetAcademicYears"), "AcademicYearId", "YearName");
+            var allYears = DatabaseHelper.QueryUser("GetAcademicYears");
+            var currentYears = allYears.Clone();
+            var today = DateTime.Today;
+            foreach (DataRow candidate in allYears.Rows)
+            {
+                if (candidate.Field<bool>("IsCurrent")
+                    && candidate.Field<DateTime>("StartDate").Date <= today
+                    && candidate.Field<DateTime>("EndDate").Date >= today)
+                    currentYears.ImportRow(candidate);
+            }
+            // Only current operational returns belong in Re-Admit.
+            // Earlier academic years are recorded through historical placement correction.
+            year.Bind(currentYears, "AcademicYearId", "YearName");
         }
         catch (Exception ex)
         {
@@ -1005,6 +1016,7 @@ public sealed class StudentTransferReadmissionPage : V2Page
         {
             UiHelper.SetFieldCaption(classSectionField, "New Class & Section");
             fields.Add(campusField);
+            UiHelper.SetFieldCaption(yearField, "Current Academic Year", true);
             fields.Add(yearField);
             fields.Add(clsField);
             fields.Add(classSectionField);
@@ -1030,6 +1042,11 @@ public sealed class StudentTransferReadmissionPage : V2Page
         if (selectedOperation == "Re-Admit" && !CanReadmitSelected())
         {
             Warn("Readmission is for officially admitted former students who left or became inactive. Cancelled pending registrations use Reopen Registration; holds use Lift Hold / Resume.");
+            return;
+        }
+        if (selectedOperation == "Re-Admit" && year.SelectedId <= 0)
+        {
+            Warn("No current academic year is available. Set the current year in Academic Years; use historical placement correction for past years.");
             return;
         }
         if (!ValidateRequiredInputs())
