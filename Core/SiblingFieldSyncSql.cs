@@ -7,25 +7,31 @@ internal static class SiblingFieldSyncSql
     private static string Column(string field) => field switch
     {
         "Address" or "ContactNumber" or "AlternateContactNumber" or "FatherName" or "PreviousSchool"
-            or "FatherOccupation" or "CasteTribe" => field,
+            or "FatherOccupation" or "CasteTribe" or "PlaceOfBirth" or "SchoolMessageConsent" => field,
         _ => throw new ArgumentException("Unsupported sibling field.", nameof(field))
     };
 
-    internal static string Read(string field) => $$"""
+    private static string ReadValue(string field) => field == "SchoolMessageConsent"
+        ? "CASE WHEN S.SchoolMessageConsent IS NULL THEN N'Not recorded' WHEN S.SchoolMessageConsent=1 THEN N'Yes' ELSE N'No' END"
+        : $"ISNULL(S.[{Column(field)}],N'')";
+
+    internal static string Read(string field) => $"""
         SET NOCOUNT ON;
         EXEC dbo.RequirePermission @UserId,N'Students.View';
         EXEC dbo.RequirePermission @UserId,N'Students.Administer';
         DECLARE @FamilyId int=(SELECT FamilyId FROM dbo.FamilyMembers WHERE AdmissionId=@Anchor);
         SELECT ISNULL(@FamilyId,0) FamilyId,S.AdmissionId,
             COALESCE(S.AdmissionNumber,S.QuickReference,CONVERT(nvarchar(40),S.AdmissionId)) AdmissionNumber,
-            S.StudentName,ISNULL(S.[{{Column(field)}}],N'') OldValue
+            S.StudentName,{{ReadValue(field)}} OldValue
         FROM dbo.Students S
         WHERE S.AdmissionId=@Anchor OR S.AdmissionId IN
             (SELECT AdmissionId FROM dbo.FamilyMembers WHERE FamilyId=@FamilyId)
         ORDER BY CASE WHEN S.AdmissionId=@Anchor THEN 0 ELSE 1 END,S.StudentName,S.AdmissionId;
         """;
 
-    internal static string Apply(string field) => $$"""
+    internal static string Apply(string field) => field == "SchoolMessageConsent" ? ConsentApply : ApplyText(field);
+
+    private static string ApplyText(string field) => $"""
         SET NOCOUNT ON;
         SET XACT_ABORT ON;
         EXEC dbo.RequirePermission @UserId,N'Students.View';
@@ -62,6 +68,60 @@ internal static class SiblingFieldSyncSql
             UPDATE S SET [{{Column(field)}}]=@NewValue,UpdatedAt=SYSDATETIME()
             FROM dbo.Students S JOIN @Expected E ON E.AdmissionId=S.AdmissionId
             WHERE CONVERT(varbinary(max),ISNULL(S.[{{Column(field)}}],N''))<>CONVERT(varbinary(max),@NewValue);
+            DECLARE @Changed int=@@ROWCOUNT;
+            COMMIT TRANSACTION;
+            SELECT @Changed Changed;
+        END TRY
+        BEGIN CATCH
+            IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+            THROW;
+        END CATCH;
+        """;
+
+    // Consent is a nullable bit with its own actor, timestamp and audit trail.
+    // Never convert "Not recorded" into an affirmative choice; only a reviewed
+    // Yes/No can be applied, and every changed admission receives evidence.
+    private const string ConsentApply = """
+        SET NOCOUNT ON;
+        SET XACT_ABORT ON;
+        EXEC dbo.RequirePermission @UserId,N'Students.View';
+        EXEC dbo.RequirePermission @UserId,N'Students.Administer';
+        IF @Anchor<=0 OR @FamilyId<=0 OR @NewValue IS NULL
+            OR @NewValue COLLATE Latin1_General_100_BIN2 NOT IN(N'Yes',N'No')
+            OR ISJSON(@Reviewed)<>1
+            THROW 51210,'Select an explicit Yes or No and review the linked siblings.',1;
+        DECLARE @Consent bit=CASE WHEN @NewValue=N'Yes' THEN 1 ELSE 0 END;
+        DECLARE @Expected TABLE(AdmissionId int NOT NULL PRIMARY KEY,OldValue nvarchar(max) NOT NULL);
+        INSERT @Expected SELECT AdmissionId,OldValue FROM OPENJSON(@Reviewed)
+            WITH(AdmissionId int,OldValue nvarchar(max));
+        IF (SELECT COUNT(*) FROM @Expected)<2 OR NOT EXISTS(SELECT 1 FROM @Expected WHERE AdmissionId=@Anchor)
+            THROW 51210,'Review the saved student and linked siblings before updating.',1;
+        BEGIN TRY
+            BEGIN TRANSACTION;
+            DECLARE @CurrentFamily int;
+            SELECT @CurrentFamily=FamilyId FROM dbo.FamilyMembers WITH(UPDLOCK,HOLDLOCK) WHERE AdmissionId=@Anchor;
+            IF @CurrentFamily IS NULL OR @CurrentFamily<>@FamilyId
+                THROW 51210,'Family links changed. Close and reopen the preview.',1;
+            DECLARE @Members TABLE(AdmissionId int PRIMARY KEY);
+            INSERT @Members SELECT AdmissionId FROM dbo.FamilyMembers WITH(UPDLOCK,HOLDLOCK) WHERE FamilyId=@FamilyId;
+            IF EXISTS(SELECT AdmissionId FROM @Members EXCEPT SELECT AdmissionId FROM @Expected)
+                OR EXISTS(SELECT AdmissionId FROM @Expected EXCEPT SELECT AdmissionId FROM @Members)
+                THROW 51210,'Family links changed. Close and reopen the preview.',1;
+            IF EXISTS(
+                SELECT 1 FROM @Expected E
+                LEFT JOIN dbo.Students S WITH(UPDLOCK,HOLDLOCK) ON S.AdmissionId=E.AdmissionId
+                CROSS APPLY (VALUES(CASE WHEN S.SchoolMessageConsent IS NULL THEN N'Not recorded'
+                    WHEN S.SchoolMessageConsent=1 THEN N'Yes' ELSE N'No' END)) V(OldValue)
+                WHERE S.AdmissionId IS NULL
+                    OR (CONVERT(varbinary(max),V.OldValue)<>CONVERT(varbinary(max),E.OldValue)
+                        AND CONVERT(varbinary(max),V.OldValue)<>CONVERT(varbinary(max),@NewValue)))
+                THROW 51210,'A reviewed consent choice changed. Close and reopen the preview.',1;
+            UPDATE S SET SchoolMessageConsent=@Consent,
+                SchoolMessageConsentUtc=SYSUTCDATETIME(),SchoolMessageConsentBy=@UserId
+            OUTPUT inserted.AdmissionId,inserted.SchoolMessageConsent,@UserId
+                INTO msg.ConsentAudit(AdmissionId,Consent,ActorUserId)
+            FROM dbo.Students S JOIN @Expected E ON E.AdmissionId=S.AdmissionId
+            WHERE S.SchoolMessageConsent IS NULL OR S.SchoolMessageConsent<>@Consent;
             DECLARE @Changed int=@@ROWCOUNT;
             COMMIT TRANSACTION;
             SELECT @Changed Changed;
