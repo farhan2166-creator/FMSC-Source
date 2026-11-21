@@ -27,6 +27,7 @@ public sealed class StudentTransferReadmissionPage : V2Page
     private int currentEnrollmentClassSectionId;
     private readonly LookupBox campus = new();
     private readonly LookupBox year = new();
+    private DateTime? readmissionYearStart;
     private readonly LookupBox cls = new();
     private readonly LookupBox classSection = new();
     private readonly ModernComboBox readmissionNumberChoice = new() { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -445,8 +446,23 @@ public sealed class StudentTransferReadmissionPage : V2Page
     {
         try
         {
-            year.Bind(
-                DatabaseHelper.QueryUser("GetAcademicYears"), "AcademicYearId", "YearName");
+            var allYears = DatabaseHelper.QueryUser("GetAcademicYears");
+            var currentYears = allYears.Clone();
+            var today = DateTime.Today;
+            foreach (DataRow candidate in allYears.Rows)
+            {
+                if (candidate.Field<bool>("IsCurrent")
+                    && candidate.Field<DateTime>("StartDate").Date <= today
+                    && candidate.Field<DateTime>("EndDate").Date >= today)
+                    currentYears.ImportRow(candidate);
+            }
+            // Only current operational returns belong in Re-Admit.
+            // Earlier academic years are recorded through historical placement correction.
+            readmissionYearStart = currentYears.Rows.Count > 0
+                ? currentYears.AsEnumerable().Min(row => row.Field<DateTime>("StartDate").Date)
+                : null;
+            year.Bind(currentYears, "AcademicYearId", "YearName");
+            if (selectedOperation == "Re-Admit") SetReadmissionDateBounds();
         }
         catch (Exception ex)
         {
@@ -961,6 +977,18 @@ public sealed class StudentTransferReadmissionPage : V2Page
             $"so they were placed in section " +
             $"{sectionName} instead.");
     }
+    private void SetReadmissionDateBounds()
+    {
+        var today = DateTime.Today;
+        var start = readmissionYearStart ?? DateTimePicker.MinimumDateTime;
+        bool changed = date.ShowCheckBox || date.MinDate != start || date.MaxDate != today;
+        date.ShowCheckBox = false;
+        date.Checked = true;
+        date.MaxDate = today;
+        date.MinDate = start;
+        if (changed || date.Value.Date < start || date.Value.Date > today)
+            date.Value = today;
+    }
     private void UpdateVisibility()
     {
         bool transferSection =
@@ -971,13 +999,7 @@ public sealed class StudentTransferReadmissionPage : V2Page
             selectedOperation == "Transfer Campus";
         bool reAdmit =
             selectedOperation == "Re-Admit";
-        if(reAdmit&&(date.ShowCheckBox||date.MinDate!=DateTimePicker.MinimumDateTime))
-        {
-            date.ShowCheckBox=false;date.Checked=true;
-            date.MinDate=DateTimePicker.MinimumDateTime;
-            date.MaxDate=DateTime.Today;
-            date.Value=DateTime.Today;
-        }
+        if (reAdmit) SetReadmissionDateBounds();
         UiHelper.SetFieldCaption(dateField, "Effective Date");
         UiHelper.SetFieldCaption(remarksField, "Remarks", false);
         var fields =
@@ -1005,6 +1027,7 @@ public sealed class StudentTransferReadmissionPage : V2Page
         {
             UiHelper.SetFieldCaption(classSectionField, "New Class & Section");
             fields.Add(campusField);
+            UiHelper.SetFieldCaption(yearField, "Current Academic Year", true);
             fields.Add(yearField);
             fields.Add(clsField);
             fields.Add(classSectionField);
@@ -1030,6 +1053,11 @@ public sealed class StudentTransferReadmissionPage : V2Page
         if (selectedOperation == "Re-Admit" && !CanReadmitSelected())
         {
             Warn("Readmission is for officially admitted former students who left or became inactive. Cancelled pending registrations use Reopen Registration; holds use Lift Hold / Resume.");
+            return;
+        }
+        if (selectedOperation == "Re-Admit" && year.SelectedId <= 0)
+        {
+            Warn("No current academic year is available. Set the current year in Academic Years; use historical placement correction for past years.");
             return;
         }
         if (!ValidateRequiredInputs())

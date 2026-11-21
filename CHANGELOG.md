@@ -2,6 +2,13 @@
 
 Historical entries describe their own release state. Current versions and requirements come from `Installer/core.ps1`, the compatibility contracts and current code.
 
+## 1.0.57 — Readmission chronology safeguard (schema 38)
+
+- Restrict operational readmission to the academic year marked current and containing today's date; retain today as the default effective date and allow a genuine within-year earlier date.
+- Reject historical-year readmission in SQL before adding an enrollment, switching current student status, creating fee assignments, or posting charges. Prior-year records belong in historical placement correction.
+- Cover the direct procedure and admission-number-choice entry point with disposable-LocalDB regression checks verifying unchanged status, enrollment and charges on refusal.
+- Existing historical records and finances are not rewritten by this migration; individual erroneous postings require a separately reviewed correction.
+
 ## Unreleased — final repository maintenance (no application behavior change)
 
 - Retire unreferenced one-off student-promotion and certificate data-cleanup scripts, the version-pinned historical installed-release probe, and an unnecessary migration placeholder. The version-neutral release acceptance policy and active synthetic tests remain.

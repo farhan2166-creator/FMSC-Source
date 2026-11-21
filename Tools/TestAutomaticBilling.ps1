@@ -309,6 +309,49 @@ WHERE R.RoleName=N'Accountant'
  Check ((Number "SELECT COUNT(*) FROM dbo.BillingCharges WHERE AdmissionId=$lateId AND FeeTypeId=1 AND BillingMonth=DATEADD(month,-1,DATEFROMPARTS(YEAR(GETDATE()),MONTH(GETDATE()),1));") -eq 0) 'Transfer on cutoff does not create current-month tuition for a next-month starter.'
  $returning=Query "DECLARE @Start date=DATEADD(month,-2,DATEFROMPARTS(YEAR(GETDATE()),MONTH(GETDATE()),1)),@Left date=DATEADD(day,-1,DATEFROMPARTS(YEAR(GETDATE()),MONTH(GETDATE()),1)); INSERT dbo.Students(AdmissionNumber,RegistrationNumber,AdmissionDate,AdmissionCampusId,StudentName,Status,LegacySetupPending) VALUES('4000',N'TEST-4000',@Start,1,N'Returning fixture',N'Active',0); DECLARE @Id int=SCOPE_IDENTITY(); INSERT dbo.Enrollments(AdmissionId,AcademicYearId,ClassSectionId,EnrollmentDate,BillingStartDate,Status,BillingReady,PlacementConfirmedAt) VALUES(@Id,1,1,@Start,@Start,N'Active',1,SYSDATETIME()); DECLARE @E int=SCOPE_IDENTITY(); INSERT dbo.StudentFeeAssignments(EnrollmentId,AdmissionId,FeeTypeId,Amount,DiscountAmount,Frequency,ConcessionLabel) VALUES(@E,@Id,1,10000,1000,N'Monthly',N'Scholarship'); UPDATE dbo.Enrollments SET Status=N'Left',LeavingDate=@Left,BillingReady=0 WHERE EnrollmentId=@E; UPDATE dbo.Students SET Status=N'Left',WithdrawalDate=@Left WHERE AdmissionId=@Id; SELECT @Id AdmissionId;"
  $returnId=[int]$returning.Tables[0].Rows[0].AdmissionId
+ # A historical return cannot create a current student or backdated financial debt.
+ # Exercise both the core procedure and the UI's admission-number-choice entry point.
+ $historicalReturn=Query @'
+DECLARE @CurrentStart date=(SELECT StartDate FROM dbo.AcademicYears WHERE AcademicYearId=1);
+DECLARE @PastStart date=DATEADD(year,-1,@CurrentStart);
+DECLARE @OlderStart date=DATEADD(year,-2,@CurrentStart);
+INSERT dbo.AcademicYears(YearName,StartDate,EndDate,IsCurrent)
+ VALUES(N'Prior return year',@PastStart,DATEADD(day,-1,@CurrentStart),0);
+DECLARE @PastYear int=SCOPE_IDENTITY();
+INSERT dbo.AcademicYears(YearName,StartDate,EndDate,IsCurrent)
+ VALUES(N'Older return year',@OlderStart,DATEADD(day,-1,@PastStart),0);
+DECLARE @OlderYear int=SCOPE_IDENTITY();
+INSERT dbo.Students(AdmissionNumber,RegistrationNumber,AdmissionDate,AdmissionCampusId,StudentName,Status,WithdrawalDate,LegacySetupPending)
+ VALUES(N'4100',N'RETURN-HISTORY-4100',@OlderStart,1,N'Former student fixture',N'Left',DATEADD(day,-1,@PastStart),0);
+DECLARE @Student int=SCOPE_IDENTITY();
+INSERT dbo.Enrollments(AdmissionId,AcademicYearId,ClassSectionId,EnrollmentDate,LeavingDate,Status,BillingReady)
+ VALUES(@Student,@OlderYear,1,@OlderStart,DATEADD(day,-1,@PastStart),N'Left',0);
+DECLARE @Rates nvarchar(max)=(SELECT FC.FeeTypeId,FC.Amount,FC.Frequency
+ FROM dbo.FeeConfigurations FC JOIN dbo.FeeTypes FT ON FT.FeeTypeId=FC.FeeTypeId
+ WHERE FC.CampusId=1 AND FC.ClassId=1 AND FT.IsTransportLinked=0 FOR JSON PATH);
+DECLARE @BaseError int=0,@ChoiceError int=0;
+BEGIN TRY
+ EXEC dbo.ReAdmitStudent @UserId=1,@AdmissionId=@Student,@CampusId=1,
+  @AcademicYearId=@PastYear,@ClassSectionId=1,@EnrollmentDate=@PastStart,
+  @Reason=N'Blocked historical operation',@UsesTransport=0,
+  @MonthlyStartMonth=@PastStart,@ChargeYearlyFees=0,@ReviewedRates=@Rates;
+END TRY BEGIN CATCH SET @BaseError=ERROR_NUMBER(); END CATCH;
+BEGIN TRY
+ EXEC dbo.ReAdmitStudentWithNumberChoice @UserId=1,@AdmissionId=@Student,@CampusId=1,
+  @AcademicYearId=@PastYear,@ClassSectionId=1,@EnrollmentDate=@PastStart,
+  @Reason=N'Blocked historical operation',@UsesTransport=0,
+  @MonthlyStartMonth=@PastStart,@ChargeYearlyFees=0,@ReviewedRates=@Rates,
+  @AllotNewAdmissionNumber=0;
+END TRY BEGIN CATCH SET @ChoiceError=ERROR_NUMBER(); END CATCH;
+SELECT @BaseError CoreError,@ChoiceError NumberChoiceError,@Student HistoricalStudentId;
+'@
+ $historicalId=[int]$historicalReturn.Tables[0].Rows[0].HistoricalStudentId
+ Check ([int]$historicalReturn.Tables[0].Rows[0].CoreError -eq 57109) 'Core readmission rejects an older academic year.'
+ Check ([int]$historicalReturn.Tables[0].Rows[0].NumberChoiceError -eq 57109) 'Admission-number-choice readmission also rejects a historical year.'
+ Check ((Number "SELECT COUNT(*) FROM dbo.Enrollments WHERE AdmissionId=$historicalId;") -eq 1) 'Refused historical readmission adds no enrollment.'
+ Check ((Number "SELECT COUNT(*) FROM dbo.StudentFeeAssignments WHERE AdmissionId=$historicalId;") -eq 0) 'Refused historical readmission creates no fee assignments.'
+ Check ((Number "SELECT COUNT(*) FROM dbo.BillingCharges WHERE AdmissionId=$historicalId;") -eq 0) 'Refused historical readmission posts no charges.'
+ Check ((Number "SELECT COUNT(*) FROM dbo.Students WHERE AdmissionId=$historicalId AND Status=N'Left';") -eq 1) 'Refused historical readmission preserves former-student status.'
  [void](Query "DECLARE @R uniqueidentifier=NEWID(); EXEC dbo.ProcessStudentCredit @UserId=1,@AdmissionId=$returnId,@Action=N'Deposit',@Amount=1000,@RequestId=@R,@Reason=N'Fictional existing credit before return';")
  [void](Query "DECLARE @Date date=CONVERT(date,GETDATE()),@Start date=dbo.GetMonthlyBillingStartDate(CONVERT(date,GETDATE())),@Rates nvarchar(max)=(SELECT FC.FeeTypeId,FC.Amount,FC.Frequency FROM dbo.FeeConfigurations FC JOIN dbo.FeeTypes F ON F.FeeTypeId=FC.FeeTypeId WHERE FC.CampusId=1 AND FC.ClassId=1 AND F.IsTransportLinked=0 FOR JSON PATH); SET @Start=DATEFROMPARTS(YEAR(@Start),MONTH(@Start),1); EXEC dbo.ReAdmitStudent @UserId=1,@AdmissionId=$returnId,@CampusId=1,@AcademicYearId=1,@ClassSectionId=1,@EnrollmentDate=@Date,@Reason=N'Fictional readmission',@UsesTransport=0,@MonthlyStartMonth=@Start,@ChargeYearlyFees=1,@ReviewedRates=@Rates;")
  Check ((Number "SELECT COUNT(*) FROM dbo.Enrollments WHERE AdmissionId=$returnId AND Status=N'Active' AND BillingReady=1 AND PlacementConfirmedAt IS NOT NULL;") -eq 1) 'Readmission confirms a new billing placement on the same student.'
