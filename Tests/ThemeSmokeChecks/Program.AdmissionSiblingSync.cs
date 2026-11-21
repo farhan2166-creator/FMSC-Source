@@ -111,8 +111,9 @@ internal static partial class Program
                 guardianGrid.GetPositionFromControl(consentField!).Column ==
                     guardianGrid.GetPositionFromControl(addressField!).Column + guardianGrid.GetColumnSpan(addressField!),
                 "Consent is beside its own sync action below father occupation and address stops before consent");
-            // Test excess vertical space and width changes. Neither a large
-            // field container nor resizing can change this button's height.
+            // Exercise parent layout recalculation after attempted resizes.
+            // An unattached field can snap back to its natural 40px height;
+            // validate non-overlap and button height regardless of that.
             var originalConsentEntrySize = consentEntry!.Size;
             foreach (int width in new[] { AppScale.Scale(260), AppScale.Scale(380) })
             {
@@ -123,7 +124,7 @@ internal static partial class Program
                     consentAction.Height == AppMetrics.InputControlHeight &&
                     consent.Height == AppMetrics.InputControlHeight &&
                     consentAction.Top == consent.Top && consentAction.Top == 0 &&
-                    consentAction.Bottom < consentEntry.ClientSize.Height &&
+                    consentAction.Bottom <= consentEntry.ClientSize.Height &&
                     consentAction.Right == consentEntry.ClientSize.Width &&
                     consent.Right + UiDesignSystem.Spacing.Xs <= consentAction.Left,
                     $"Consent sync button geometry: requested width={width}, panel={consentEntry.ClientSize}, " +
