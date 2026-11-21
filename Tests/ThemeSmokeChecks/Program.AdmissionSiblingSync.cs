@@ -126,7 +126,9 @@ internal static partial class Program
                     consentAction.Bottom < consentEntry.ClientSize.Height &&
                     consentAction.Right == consentEntry.ClientSize.Width &&
                     consent.Right + UiDesignSystem.Spacing.Xs <= consentAction.Left,
-                    "Consent sync button is single-line and aligned under taller and resized field containers");
+                    $"Consent sync button geometry: requested width={width}, panel={consentEntry.ClientSize}, " +
+                    $"combo={consent.Bounds}, button={consentAction.Bounds}, " +
+                    $"button dock={consentAction.Dock}, combo dock={consent.Dock}, expected height={AppMetrics.InputControlHeight}");
             }
             consentEntry.Size = originalConsentEntrySize;
             Call("UpdateSiblingSyncActions");
