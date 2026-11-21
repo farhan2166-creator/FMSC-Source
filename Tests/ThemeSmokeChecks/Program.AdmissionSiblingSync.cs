@@ -96,7 +96,7 @@ internal static partial class Program
                 "Each shared text field, including place of birth, owns an inline sync icon");
             var consent = Get<ModernComboBox>("schoolMessagesConsent");
             var consentAction = Get<ModernButton>("consentSyncButton");
-            var consentEntry = consent.Parent as TableLayoutPanel;
+            var consentEntry = consent.Parent as Panel;
             var consentField = consentEntry?.Parent;
             var guardianGrid = consentField?.Parent as TableLayoutPanel;
             var fatherField = Get<ModernTextBox>("fatherOccupation").Parent;
@@ -111,16 +111,26 @@ internal static partial class Program
                 guardianGrid.GetPositionFromControl(consentField!).Column ==
                     guardianGrid.GetPositionFromControl(addressField!).Column + guardianGrid.GetColumnSpan(addressField!),
                 "Consent is beside its own sync action below father occupation and address stops before consent");
-            // Reproduce a field whose container has spare vertical room: the
-            // sync action must stay level with the single-line dropdown.
+            // Exercise parent layout recalculation after attempted resizes.
+            // An unattached field can snap back to its natural 40px height;
+            // validate non-overlap and button height regardless of that.
             var originalConsentEntrySize = consentEntry!.Size;
-            consentEntry.Size = new Size(Math.Max(originalConsentEntrySize.Width, AppScale.Scale(260)),
-                AppMetrics.InputControlHeight * 2);
-            consentEntry.PerformLayout();
-            Check(consentAction.Height > 0 && consent.Height > 0 &&
-                Math.Abs(consentAction.Height - consent.Height) <= AppScale.Scale(2) &&
-                Math.Abs(consentAction.Top - consent.Top) <= AppScale.Scale(2),
-                "Consent sync action remains aligned to the dropdown, even in a taller field container");
+            foreach (int width in new[] { AppScale.Scale(260), AppScale.Scale(380) })
+            {
+                consentEntry.Size = new Size(width, AppMetrics.InputControlHeight * 3);
+                consentEntry.PerformLayout();
+                Check(consentEntry is not TableLayoutPanel &&
+                    consentAction.Dock == DockStyle.None && consent.Dock == DockStyle.None &&
+                    consentAction.Height == AppMetrics.InputControlHeight &&
+                    consent.Height == AppMetrics.InputControlHeight &&
+                    consentAction.Top == consent.Top && consentAction.Top == 0 &&
+                    consentAction.Bottom <= consentEntry.ClientSize.Height &&
+                    consentAction.Right == consentEntry.ClientSize.Width &&
+                    consent.Right + UiDesignSystem.Spacing.Xs <= consentAction.Left,
+                    $"Consent sync button geometry: requested width={width}, panel={consentEntry.ClientSize}, " +
+                    $"combo={consent.Bounds}, button={consentAction.Bounds}, " +
+                    $"button dock={consentAction.Dock}, combo dock={consent.Dock}, expected height={AppMetrics.InputControlHeight}");
+            }
             consentEntry.Size = originalConsentEntrySize;
             Call("UpdateSiblingSyncActions");
             Check(editors.All(editor => !editor.Controls.OfType<Button>().Single().Enabled) && !consentAction.Enabled,
@@ -192,6 +202,27 @@ internal static partial class Program
                 AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.Consent, "No") == "No" &&
                 AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.PlaceOfBirth, "islamabad") == "Islamabad",
                 "Sync accepts only explicit Yes/No consent and applies the normal birthplace text policy");
+            // Exercise the real Admission page while visible, not only the
+            // detached control tree. This catches layout after the host scales.
+            using (var visibleHost = new ApplicationWindowForm {
+                ClientSize = new Size(AppScale.Scale(1280), AppScale.Scale(860)),
+                ShowInTaskbar = false
+            })
+            {
+                page.Dock = DockStyle.Fill;
+                visibleHost.Controls.Add(page);
+                visibleHost.Show();
+                Application.DoEvents();
+                Check(consentEntry.Width > 0 &&
+                    consentAction.Height == AppMetrics.InputControlHeight &&
+                    consent.Height == AppMetrics.InputControlHeight &&
+                    consentAction.Top == consent.Top &&
+                    consentAction.Bottom <= consentEntry.ClientSize.Height &&
+                    consentAction.Right == consentEntry.ClientSize.Width,
+                    "The visible Admission page keeps the consent sync button at dropdown height");
+                visibleHost.Controls.Remove(page);
+                visibleHost.Close();
+            }
             CurrentUser.SignIn(7202, "Synthetic viewer", "Fixture", false, new[] { "Students.View" });
             Call("UpdateSiblingSyncActions");
             Check(!AdmissionSiblingSyncData.CanUse, "Student viewers do not gain shared-record editing permission");
