@@ -13,6 +13,8 @@ internal static class AdmissionSiblingSyncData
     internal static readonly Field PreviousSchool = new("PreviousSchool", "Previous School", SchemaLengths.StudentPreviousSchool);
     internal static readonly Field FatherOccupation = new("FatherOccupation", "Father Occupation", SchemaLengths.StudentFatherOccupation);
     internal static readonly Field CasteTribe = new("CasteTribe", "Caste / Tribe", SchemaLengths.StudentCasteTribe);
+    internal static readonly Field PlaceOfBirth = new("PlaceOfBirth", "Place of Birth", SchemaLengths.StudentPlaceOfBirth, true);
+    internal static readonly Field Consent = new("SchoolMessageConsent", "Message Consent", 3);
     internal sealed record Row(int AdmissionId, string AdmissionNumber, string StudentName, string OldValue);
     internal sealed record Preview(int Actor, int Anchor, int FamilyId, Field Field, string NewValue, IReadOnlyList<Row> Rows)
     {
@@ -28,11 +30,16 @@ internal static class AdmissionSiblingSyncData
             "Address" => Address, "ContactNumber" => PrimaryPhone, "AlternateContactNumber" => AlternatePhone,
             "FatherName" => FatherName, "PreviousSchool" => PreviousSchool,
             "FatherOccupation" => FatherOccupation, "CasteTribe" => CasteTribe,
+            "PlaceOfBirth" => PlaceOfBirth, "SchoolMessageConsent" => Consent,
             _ => throw new ArgumentException("Unsupported sibling field.")
         };
         if (field != known) throw new ArgumentException("Unsupported sibling field definition.");
         _ = SiblingFieldSyncSql.Read(field.Column);
         value = value.Trim();
+        // A blank/unknown choice is never permission to infer or clear consent.
+        if (field == Consent)
+            return value is "Yes" or "No" ? value
+                : throw new InvalidOperationException("Select Yes or No before syncing message consent.");
         if (value.Length > field.MaxLength || (field.Required && value.Length == 0))
             throw new InvalidOperationException($"Enter a valid {field.Label} before syncing.");
         if (field.Phone && !PakistanPhoneNumber.IsValidOptional(value))
