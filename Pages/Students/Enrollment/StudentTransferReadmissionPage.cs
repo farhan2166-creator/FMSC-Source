@@ -27,6 +27,7 @@ public sealed class StudentTransferReadmissionPage : V2Page
     private int currentEnrollmentClassSectionId;
     private readonly LookupBox campus = new();
     private readonly LookupBox year = new();
+    private DateTime? readmissionYearStart;
     private readonly LookupBox cls = new();
     private readonly LookupBox classSection = new();
     private readonly ModernComboBox readmissionNumberChoice = new() { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -457,7 +458,11 @@ public sealed class StudentTransferReadmissionPage : V2Page
             }
             // Only current operational returns belong in Re-Admit.
             // Earlier academic years are recorded through historical placement correction.
+            readmissionYearStart = currentYears.Rows.Count > 0
+                ? currentYears.AsEnumerable().Min(row => row.Field<DateTime>("StartDate").Date)
+                : null;
             year.Bind(currentYears, "AcademicYearId", "YearName");
+            if (selectedOperation == "Re-Admit") SetReadmissionDateBounds();
         }
         catch (Exception ex)
         {
@@ -972,6 +977,18 @@ public sealed class StudentTransferReadmissionPage : V2Page
             $"so they were placed in section " +
             $"{sectionName} instead.");
     }
+    private void SetReadmissionDateBounds()
+    {
+        var today = DateTime.Today;
+        var start = readmissionYearStart ?? DateTimePicker.MinimumDateTime;
+        bool changed = date.ShowCheckBox || date.MinDate != start || date.MaxDate != today;
+        date.ShowCheckBox = false;
+        date.Checked = true;
+        date.MaxDate = today;
+        date.MinDate = start;
+        if (changed || date.Value.Date < start || date.Value.Date > today)
+            date.Value = today;
+    }
     private void UpdateVisibility()
     {
         bool transferSection =
@@ -982,13 +999,7 @@ public sealed class StudentTransferReadmissionPage : V2Page
             selectedOperation == "Transfer Campus";
         bool reAdmit =
             selectedOperation == "Re-Admit";
-        if(reAdmit&&(date.ShowCheckBox||date.MinDate!=DateTimePicker.MinimumDateTime))
-        {
-            date.ShowCheckBox=false;date.Checked=true;
-            date.MinDate=DateTimePicker.MinimumDateTime;
-            date.MaxDate=DateTime.Today;
-            date.Value=DateTime.Today;
-        }
+        if (reAdmit) SetReadmissionDateBounds();
         UiHelper.SetFieldCaption(dateField, "Effective Date");
         UiHelper.SetFieldCaption(remarksField, "Remarks", false);
         var fields =
