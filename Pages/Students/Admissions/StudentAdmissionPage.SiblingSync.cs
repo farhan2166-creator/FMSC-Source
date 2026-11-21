@@ -6,6 +6,7 @@ public sealed partial class StudentAdmissionPage
 {
     private readonly List<Button> siblingSyncButtons = new();
     private bool readingSiblingSync;
+    private readonly ModernButton consentSyncButton = new() { Text = "\uE895", ThemeRole = "Secondary" };
 
     private void ConfigureSiblingSync()
     {
@@ -18,6 +19,16 @@ public sealed partial class StudentAdmissionPage
         Add(prevSchool, AdmissionSiblingSyncData.PreviousSchool);
         Add(fatherOccupation, AdmissionSiblingSyncData.FatherOccupation);
         Add(casteTribe, AdmissionSiblingSyncData.CasteTribe);
+        Add(placeOfBirthInput, AdmissionSiblingSyncData.PlaceOfBirth);
+        schoolMessagesConsent.Name = "admissionSchoolMessageConsent";
+        consentSyncButton.Name = "syncSiblingSchoolMessageConsent";
+        consentSyncButton.Font = new Font("Segoe MDL2 Assets", AppScale.Scale(13));
+        consentSyncButton.AccessibleName = "Sync Message Consent with siblings";
+        consentSyncButton.AccessibleDescription = "Review every linked student's current consent and the explicit Yes/No choice before updating records.";
+        tips.SetToolTip(consentSyncButton, consentSyncButton.AccessibleName);
+        consentSyncButton.Click += async (_, _) =>
+            await SyncSiblingFieldAsync(schoolMessagesConsent, AdmissionSiblingSyncData.Consent);
+        siblingSyncButtons.Add(consentSyncButton);
         void Add(ModernTextBox input, AdmissionSiblingSyncData.Field field)
         {
             input.Name = "admission" + field.Column;
@@ -39,11 +50,16 @@ public sealed partial class StudentAdmissionPage
         }
     }
 
-    internal async Task SyncSiblingFieldAsync(ModernTextBox input, AdmissionSiblingSyncData.Field field,
+    internal async Task SyncSiblingFieldAsync(Control input, AdmissionSiblingSyncData.Field field,
         Func<int, AdmissionSiblingSyncData.Field, string, Task<AdmissionSiblingSyncData.Preview?>>? read = null)
     {
         if (readingSiblingSync || IsBusy || currentAdmissionId <= 0 || unconfirmedAdmission is not null || IsCancelledRegistration
             || !AdmissionSiblingSyncData.CanUse) return;
+        if (input is ModernComboBox combo && combo.SelectedIndex is not (1 or 2))
+        {
+            Warn("Select Yes or No before syncing message consent.");
+            return;
+        }
         int anchor = currentAdmissionId, version = admissionLoadVersion;
         string value = input.Text;
         bool ownsSaveBusy = false;
@@ -80,15 +96,22 @@ public sealed partial class StudentAdmissionPage
         }
     }
 
-    private void AcceptSyncedField(ModernTextBox input, string value)
+    private void AcceptSyncedField(Control input, string value)
     {
-        input.Text = value;
+        if (input is ModernComboBox consent)
+        {
+            consent.SelectedIndex = value == "Yes" ? 1 : 2;
+            loadedSchoolMessageConsent = value == "Yes";
+        }
+        else input.Text = value;
         // This field (including the displayed student) was committed independently.
         // Keep every other draft edit and pending photo dirty; never recapture the entire form.
         if (_admissionBaseline is { } baseline)
         {
             int index = baseline.FindIndex(part => part.Where == input.Name);
-            if (index >= 0) baseline[index] = new AdmissionPart(input.Name, value);
+            if (index >= 0)
+                baseline[index] = new AdmissionPart(input.Name,
+                    input is ModernComboBox combo ? value + "~" + combo.SelectedIndex : value);
         }
         _admissionDifferenceReported = false;
     }

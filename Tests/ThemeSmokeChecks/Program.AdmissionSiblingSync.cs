@@ -90,18 +90,43 @@ internal static partial class Program
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
             T Get<T>(string name) => (T)type.GetField(name, flags)!.GetValue(page)!;
             void Call(string name, params object[] args) => type.GetMethod(name, flags)!.Invoke(page, args);
-            var editors = new[] { "address", "contact", "altContact", "fatherName", "prevSchool", "fatherOccupation", "casteTribe" }
+            var editors = new[] { "address", "contact", "altContact", "fatherName", "prevSchool", "fatherOccupation", "casteTribe", "placeOfBirthInput" }
                 .Select(Get<ModernTextBox>).ToArray();
             Check(editors.All(editor => editor.Controls.OfType<Button>().Count() == 1),
-                "Each shared field owns a separate inline sync icon");
+                "Each shared text field, including place of birth, owns an inline sync icon");
+            var consent = Get<ModernComboBox>("schoolMessagesConsent");
+            var consentAction = Get<ModernButton>("consentSyncButton");
+            var consentEntry = consent.Parent as TableLayoutPanel;
+            var consentField = consentEntry?.Parent;
+            var guardianGrid = consentField?.Parent as TableLayoutPanel;
+            var fatherField = Get<ModernTextBox>("fatherOccupation").Parent;
+            var addressField = Get<ModernTextBox>("address").Parent;
+            Check(consentEntry is not null && consentEntry.Controls.Contains(consentAction) &&
+                guardianGrid is not null && ReferenceEquals(guardianGrid, fatherField?.Parent) &&
+                ReferenceEquals(guardianGrid, addressField?.Parent) &&
+                guardianGrid.GetPositionFromControl(consentField!).Column ==
+                    guardianGrid.GetPositionFromControl(fatherField!).Column &&
+                guardianGrid.GetPositionFromControl(consentField!).Row ==
+                    guardianGrid.GetPositionFromControl(fatherField!).Row + 1 &&
+                guardianGrid.GetPositionFromControl(consentField!).Column ==
+                    guardianGrid.GetPositionFromControl(addressField!).Column + guardianGrid.GetColumnSpan(addressField!),
+                "Consent is beside its own sync action below father occupation and address stops before consent");
             Call("UpdateSiblingSyncActions");
-            Check(editors.All(editor => !editor.Controls.OfType<Button>().Single().Enabled),
-                "Unsaved admissions cannot update sibling records");
+            Check(editors.All(editor => !editor.Controls.OfType<Button>().Single().Enabled) && !consentAction.Enabled,
+                "Unsaved admissions cannot update sibling records or consent");
             type.GetField("currentAdmissionId", flags)!.SetValue(page, 41);
             Call("UpdateSiblingSyncActions");
-            Check(editors.All(editor => editor.Controls.OfType<Button>().Single().Enabled),
-                "Saved records expose their own field action to student administrators");
+            Check(editors.All(editor => editor.Controls.OfType<Button>().Single().Enabled) && consentAction.Enabled,
+                "Saved records expose text and consent sync actions to student administrators");
             Call("CaptureAdmissionBaseline");
+            consent.SelectedIndex = 1;
+            Call("AcceptSyncedField", consent, "Yes");
+            Check(!page.HasUnsavedChanges && consent.SelectedIndex == 1 && Get<bool?>("loadedSchoolMessageConsent") == true,
+                "Consent synchronization commits the selected combo choice without leaving a false unsaved edit");
+            consent.SelectedIndex = 2;
+            Check(page.HasUnsavedChanges, "Changing a synced consent choice still counts as an unsaved edit");
+            consent.SelectedIndex = 1;
+            Check(!page.HasUnsavedChanges, "Re-selecting the committed consent choice clears the draft difference");
             Get<ModernTextBox>("name").Text = "Other Unsaved Change";
             editors[0].Text = preview.NewValue;
             Call("AcceptSyncedField", editors[0], preview.NewValue);
@@ -148,6 +173,14 @@ internal static partial class Program
             Check(AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.FatherOccupation, "math teacher") == "Math Teacher"
                 && AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.CasteTribe, "abbasi") == "Abbasi",
                 "Father occupation and caste use their existing admission text rules");
+            bool rejectsUnknownConsent = false;
+            try { AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.Consent, "Not recorded"); }
+            catch (InvalidOperationException) { rejectsUnknownConsent = true; }
+            Check(rejectsUnknownConsent &&
+                AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.Consent, "Yes") == "Yes" &&
+                AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.Consent, "No") == "No" &&
+                AdmissionSiblingSyncData.Normalize(AdmissionSiblingSyncData.PlaceOfBirth, "islamabad") == "Islamabad",
+                "Sync accepts only explicit Yes/No consent and applies the normal birthplace text policy");
             CurrentUser.SignIn(7202, "Synthetic viewer", "Fixture", false, new[] { "Students.View" });
             Call("UpdateSiblingSyncActions");
             Check(!AdmissionSiblingSyncData.CanUse, "Student viewers do not gain shared-record editing permission");

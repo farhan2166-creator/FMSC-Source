@@ -1143,7 +1143,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         var guardianGrid = new TableLayoutPanel {
             Dock = DockStyle.Fill,
             ColumnCount = 4,
-            RowCount = 3,
+            RowCount = 2,
             Padding = Padding.Empty,
             Margin = new Padding(0)
         };
@@ -1155,7 +1155,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                     25F));
         }
         /* Add fields in keyboard-entry order. */
-        for (int row = 0; row < 3; row++)
+        for (int row = 0; row < 2; row++)
         {
             guardianGrid.RowStyles.Add(
                 new RowStyle(
@@ -1198,21 +1198,36 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
             1);
         guardianGrid.SetColumnSpan(
             addressField,
-            3);
+            2);
         guardianGrid.Controls.Add(
             AdmissionField(
                 "Alternate Phone",
                 altContact),
             3,
             1);
-        var schoolConsentField = AdmissionField(
-            "School messages (SMS / WhatsApp, notices and fees)", schoolMessagesConsent);
-        guardianGrid.Controls.Add(schoolConsentField, 0, 2);
-        guardianGrid.SetColumnSpan(schoolConsentField, 2);
+        // The consent dropdown needs a separate sync action; unlike a text box,
+        // the combo has no inline action slot. Keep the button beside the choice.
+        var consentEntry = new TableLayoutPanel {
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+            Padding = Padding.Empty, Margin = Padding.Empty
+        };
+        consentEntry.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        consentEntry.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(32)));
+        consentEntry.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        schoolMessagesConsent.Dock = DockStyle.Fill;
+        schoolMessagesConsent.Margin = Padding.Empty;
+        consentSyncButton.Dock = DockStyle.Fill;
+        consentSyncButton.Margin = new Padding(UiDesignSystem.Spacing.Xs, 0, 0, 0);
+        consentEntry.Controls.Add(schoolMessagesConsent, 0, 0);
+        consentEntry.Controls.Add(consentSyncButton, 1, 0);
+        UiAccessibility.Describe(schoolMessagesConsent, "Message Consent",
+            "School messages (SMS / WhatsApp, notices and fees). Not recorded is not permission to send.");
+        var schoolConsentField = AdmissionField("Message Consent", consentEntry);
+        guardianGrid.Controls.Add(schoolConsentField, 2, 1);
         int studentInfoHeight =
             AdmissionFieldRowHeight * 3;
         int guardianInfoHeight =
-            AdmissionFieldRowHeight * 3;
+            AdmissionFieldRowHeight * 2;
         /* Separate student and parent fields with headings. */
         int informationHeight =
             studentInfoHeight +
