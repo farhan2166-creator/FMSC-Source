@@ -1213,7 +1213,9 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         };
         consentEntry.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         consentEntry.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(32)));
-        consentEntry.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        // Keep the sync action at the dropdown's native height, not the full
+        // guardian field height (which made it a tall, narrow button).
+        consentEntry.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.InputControlHeight));
         schoolMessagesConsent.Dock = DockStyle.Fill;
         schoolMessagesConsent.Margin = Padding.Empty;
         consentSyncButton.Dock = DockStyle.Fill;
