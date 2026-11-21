@@ -111,6 +111,17 @@ internal static partial class Program
                 guardianGrid.GetPositionFromControl(consentField!).Column ==
                     guardianGrid.GetPositionFromControl(addressField!).Column + guardianGrid.GetColumnSpan(addressField!),
                 "Consent is beside its own sync action below father occupation and address stops before consent");
+            // Reproduce a field whose container has spare vertical room: the
+            // sync action must stay level with the single-line dropdown.
+            var originalConsentEntrySize = consentEntry!.Size;
+            consentEntry.Size = new Size(Math.Max(originalConsentEntrySize.Width, AppScale.Scale(260)),
+                AppMetrics.InputControlHeight * 2);
+            consentEntry.PerformLayout();
+            Check(consentAction.Height > 0 && consent.Height > 0 &&
+                Math.Abs(consentAction.Height - consent.Height) <= AppScale.Scale(2) &&
+                Math.Abs(consentAction.Top - consent.Top) <= AppScale.Scale(2),
+                "Consent sync action remains aligned to the dropdown, even in a taller field container");
+            consentEntry.Size = originalConsentEntrySize;
             Call("UpdateSiblingSyncActions");
             Check(editors.All(editor => !editor.Controls.OfType<Button>().Single().Enabled) && !consentAction.Enabled,
                 "Unsaved admissions cannot update sibling records or consent");
