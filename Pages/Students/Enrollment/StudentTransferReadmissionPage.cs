@@ -354,10 +354,25 @@ public sealed class StudentTransferReadmissionPage : V2Page
             actionCard.Content.Controls.Remove(operationField);
             studentCard.Content.Controls.Add(operationField);
             actionCard.Content.Controls.Remove(actionButtonRow);
-            var footer = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 1, RowCount = 2 };
+            // Keep the status text from resizing the footer when validation fails.
+            // Its allotted lines and the action row must remain independent.
+            int statusHeight = AppMetrics.TextHeight(StatusLabel.Font) * 3 + StatusLabel.Padding.Vertical;
+            var footer = new TableLayoutPanel {
+                Dock = DockStyle.Bottom,
+                AutoSize = false,
+                Height = statusHeight + AppMetrics.ButtonRowHeight,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, statusHeight));
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.ButtonRowHeight));
             StatusLabel.Dock = DockStyle.Fill;
-            StatusLabel.AutoSize = true;
-            StatusLabel.MaximumSize = new Size(AppScale.Scale(660), 0);
+            StatusLabel.AutoSize = false;
+            StatusLabel.MaximumSize = Size.Empty;
+            StatusLabel.TextAlign = ContentAlignment.MiddleLeft;
             footer.Controls.Add(StatusLabel, 0, 0);
             actionButtonRow.Dock = DockStyle.Fill;
             footer.Controls.Add(actionButtonRow, 0, 1);
