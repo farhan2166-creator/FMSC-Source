@@ -21,6 +21,19 @@ internal static partial class Program
             void Refresh()=>typeof(ToolStripDropDown).GetMethod("OnOpening",flags)!.Invoke(menu,new object[]{new CancelEventArgs()});
             ToolStripItem Item(string caption)=>menu.Items.Cast<ToolStripItem>().Single(i=>i.Text==caption);
             Set("currentAdmissionId",41);Set("pendingPlacementId",0);Set("_workspaceStudentStatus","Active");Set("_hasOfficialAdmissionNumber",true);
+            var leavingIndicator=(Label)type.GetField("withdrawalDateIndicator",flags)!.GetValue(page)!;
+            var identityRow=(TableLayoutPanel)leavingIndicator.Parent!;
+            Check(identityRow.GetColumn(leavingIndicator)==2 && identityRow.ColumnStyles[2].SizeType==SizeType.Percent,
+                "Leaving date occupies the flexible center, not the status or identity columns");
+            Set("_workspaceWithdrawalDate",new DateTime(2024,11,21));
+            var refreshWorkspace=type.GetMethod("UpdateStudentWorkspace",flags)!;
+            refreshWorkspace.Invoke(page,null);
+            Check(string.IsNullOrEmpty(leavingIndicator.Text),"Active students do not show a stale leaving date");
+            Set("_workspaceStudentStatus","Left");refreshWorkspace.Invoke(page,null);
+            Check(leavingIndicator.Text=="Date Left: 21 Nov 2024","Left students show the recorded withdrawal date");
+            Set("studentPostingHeld",true);refreshWorkspace.Invoke(page,null);
+            Check(string.IsNullOrEmpty(leavingIndicator.Text),"An on-hold student is not shown as departed");
+            Set("studentPostingHeld",false);Set("_workspaceStudentStatus","Active");refreshWorkspace.Invoke(page,null);
             Set("placementYearStart",DateTime.Today.AddMonths(-1));Set("placementYearEnd",DateTime.Today.AddMonths(10));Refresh();
             Check(Item("Put on Hold…").Available&&Item("Record Departure…").Available&&!Item("Re-Admit…").Available,"Active menu presents current-student actions");
             var transfer=(ToolStripMenuItem)Item("Transfer");
