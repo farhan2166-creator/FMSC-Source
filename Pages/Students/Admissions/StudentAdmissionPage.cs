@@ -81,6 +81,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
     private readonly BindingList<FeeSelectionRow> _selectedFees = new();
     private List<FeeConfigOption> _availableFeeOptions = new();
     private string _workspaceStudentStatus = string.Empty;
+    private DateTime? _workspaceWithdrawalDate;
     private bool _hasOfficialAdmissionNumber;
     private bool studentPostingHeld;
     /* The student's status (Active, Left, New Admission ...). */
@@ -89,6 +90,17 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         Font = AppTheme.ButtonFont,
         TextAlign = ContentAlignment.MiddleCenter,
         AutoEllipsis = true
+    };
+    /* Occupy only the flexible gap of the admission identity header. */
+    private readonly Label withdrawalDateIndicator = new() {
+        Dock = DockStyle.Fill,
+        AutoSize = false,
+        Font = AppTheme.NormalFont,
+        ForeColor = AppTheme.MutedText,
+        TextAlign = ContentAlignment.MiddleCenter,
+        AutoEllipsis = true,
+        Margin = Padding.Empty,
+        Visible = false
     };
     /* Quick find - type an admission no, name or registration no and pick the student to load the record here. It sits in the toolbar beside the Find Student button. */
     private readonly StudentPicker quickStudent = new();
@@ -1005,6 +1017,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         identityRow.Resize += (_, _) => FitStatusColumn();
         AlignStatusBadge();
         identityRow.Controls.Add(statusHost, 1, 0);
+        identityRow.Controls.Add(withdrawalDateIndicator, 2, 0);
         var registrationIdentity = new TableLayoutPanel {
             Tag = "ThemeHeaderContainer", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
@@ -2218,6 +2231,16 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         studentStatusBadge.Text = text;
         studentStatusBadge.ForeColor = AppTheme.StatusText(color);
         studentStatusBadge.BackColor = AppTheme.Tint(color, 0.88f);
+        // Only a departed student with an actual recorded date gets a leaving date.
+        // Never carry a date into Active, On Hold or new-admission headers.
+        string storedStatus = _workspaceStudentStatus.Trim();
+        bool departed = storedStatus.Equals("Left", StringComparison.OrdinalIgnoreCase)
+            || storedStatus.Equals("Withdrawn", StringComparison.OrdinalIgnoreCase)
+            || storedStatus.Equals("Inactive", StringComparison.OrdinalIgnoreCase);
+        bool showDate = currentAdmissionId > 0 && unconfirmedAdmission is null
+            && !studentPostingHeld && departed && _workspaceWithdrawalDate.HasValue;
+        withdrawalDateIndicator.Text = showDate ? $"Date Left: {_workspaceWithdrawalDate:dd MMM yyyy}" : string.Empty;
+        withdrawalDateIndicator.Visible = showDate;
     }
     private async Task OpenStudentSearchDialog()
     {
@@ -2282,6 +2305,7 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
         pendingPlacementId = 0;
         currentAdmissionId = 0;
         _workspaceStudentStatus = string.Empty;
+        _workspaceWithdrawalDate = null;
         _hasOfficialAdmissionNumber = false;
         studentPostingHeld = false;
         _editEnrollmentId = 0;
@@ -2936,6 +2960,8 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                 row["Status"] != DBNull.Value
                     ? Convert.ToString(row["Status"]) ?? string.Empty
                     : string.Empty;
+            _workspaceWithdrawalDate = row.Table.Columns.Contains("WithdrawalDate")
+                && row["WithdrawalDate"] is DateTime withdrawn ? withdrawn.Date : null;
             _hasOfficialAdmissionNumber = row.Table.Columns.Contains("AdmissionNumber")
                 && row["AdmissionNumber"] != DBNull.Value
                 && !string.IsNullOrWhiteSpace(Convert.ToString(row["AdmissionNumber"]));
@@ -4772,6 +4798,7 @@ admissionParameters.First(parameter=>parameter.ParameterName=="@AdmissionNumber"
         feeStructureLoadVersion++;
         admissionValidator?.ClearAll();
         currentAdmissionId = 0;
+        _workspaceWithdrawalDate = null;
         /* Clear the previous record's quick-find text. */
         quickStudent.Clear();
         UpdateAdmissionIdDisplay();

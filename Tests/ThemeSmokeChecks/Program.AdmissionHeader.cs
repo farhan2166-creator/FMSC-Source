@@ -18,7 +18,8 @@ internal static partial class Program
         badge.BackColor = AppTheme.Tint(Color.Green, .88f);
         var row = (TableLayoutPanel)badge.Parent!.Parent!;
         var header = (Panel)row.Parent!;
-        var title = row.Controls.OfType<Label>().Single();
+        var leavingDate = Field<Label>("withdrawalDateIndicator");
+        var title = row.Controls.OfType<Label>().Single(label => !ReferenceEquals(label, leavingDate));
         Check(!string.IsNullOrWhiteSpace(title.Text) && badge.Text == "Active",
             "Admission header displays the title and current student status");
         using var host = new Form { AutoScaleMode = AutoScaleMode.None, ShowInTaskbar = false,
