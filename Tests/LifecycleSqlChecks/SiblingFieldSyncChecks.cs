@@ -18,7 +18,7 @@ internal static class SiblingFieldSyncChecks
             Sql.P("@UserId", actor ?? f.Admin), Sql.P("@Anchor", anchor), Sql.P("@FamilyId", rows.Rows[0]["FamilyId"]),
             Sql.P("@Reviewed", JsonSerializer.Serialize(expected ?? Expected(rows))), Sql.P("@NewValue", value));
         string OtherFields(string field) => Convert.ToString(Sql.Scalar($"""
-            SELECT AdmissionId,{string.Join(",", new[] { "Address", "ContactNumber", "AlternateContactNumber", "FatherName", "PreviousSchool", "FatherOccupation", "CasteTribe" }
+            SELECT AdmissionId,{string.Join(",", new[] { "Address", "ContactNumber", "AlternateContactNumber", "FatherName", "PreviousSchool", "FatherOccupation", "CasteTribe", "PlaceOfBirth" }
                 .Where(name => name != field).Select(name => "[" + name + "]"))},SchoolMessageConsent,Status
             FROM dbo.Students WHERE AdmissionId IN (@A,@B,@C,@D) ORDER BY AdmissionId FOR JSON PATH,INCLUDE_NULL_VALUES
             """, Sql.P("@A", anchor), Sql.P("@B", sibling), Sql.P("@C", second), Sql.P("@D", outsider))) ?? "";
@@ -26,7 +26,8 @@ internal static class SiblingFieldSyncChecks
         {
             ("Address", "Owner's Street, Fictional Town"), ("ContactNumber", "03001234567"),
             ("AlternateContactNumber", "0911234567"), ("FatherName", "Shared Fictional Parent"), ("PreviousSchool", "Fictional Previous School"),
-            ("FatherOccupation", "Fictional Teacher"), ("CasteTribe", "Fictional Tribe")
+            ("FatherOccupation", "Fictional Teacher"), ("CasteTribe", "Fictional Tribe"),
+            ("PlaceOfBirth", "Fictional Birth Town")
         })
         {
             using var rows = Read(field);
@@ -41,6 +42,51 @@ internal static class SiblingFieldSyncChecks
             using var retry = Apply(field, rows, value);
             r.Check(Convert.ToInt32(retry.Rows[0]["Changed"]) == 0, "An exact retry after a lost reply is harmless and idempotent.");
         }
+
+        // Consent is NOT a free-text field: the source can only explicitly
+        // copy Yes/No, and each actual change must retain the admission audit.
+        Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin),
+            Sql.P("@AdmissionId", anchor), Sql.P("@Consent", false), Sql.P("@Authority", "Students.Administer"));
+        Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin),
+            Sql.P("@AdmissionId", sibling), Sql.P("@Consent", true), Sql.P("@Authority", "Students.Administer"));
+        using var consentRows = Read("SchoolMessageConsent");
+        r.Check(consentRows.Rows.Count == 3 &&
+            consentRows.AsEnumerable().Any(row => row.Field<int>("AdmissionId") == anchor && row.Field<string>("OldValue") == "No") &&
+            consentRows.AsEnumerable().Any(row => row.Field<int>("AdmissionId") == sibling && row.Field<string>("OldValue") == "Yes") &&
+            consentRows.AsEnumerable().Any(row => row.Field<int>("AdmissionId") == second && row.Field<string>("OldValue") == "Not recorded"),
+            "Consent preview distinguishes Not recorded, Yes and No without inferring approval.");
+        int auditBefore = Sql.Count("SELECT COUNT(*) FROM msg.ConsentAudit WHERE AdmissionId IN (@A,@B,@C);",
+            Sql.P("@A", anchor), Sql.P("@B", sibling), Sql.P("@C", second));
+        using var consentApplied = Apply("SchoolMessageConsent", consentRows, "Yes");
+        r.Check(Convert.ToInt32(consentApplied.Rows[0]["Changed"]) == 2 &&
+            Sql.Count("SELECT COUNT(*) FROM dbo.Students WHERE AdmissionId IN (@A,@B,@C) AND SchoolMessageConsent=1 AND SchoolMessageConsentBy=@Actor AND SchoolMessageConsentUtc IS NOT NULL;",
+                Sql.P("@A", anchor), Sql.P("@B", sibling), Sql.P("@C", second), Sql.P("@Actor", f.Admin)) == 3 &&
+            Sql.Count("SELECT COUNT(*) FROM msg.ConsentAudit WHERE AdmissionId IN (@A,@B,@C);",
+                Sql.P("@A", anchor), Sql.P("@B", sibling), Sql.P("@C", second)) == auditBefore + 2,
+            "Only changed family consent choices gain new authority evidence and audit entries.");
+        r.Check(Sql.Count("SELECT COUNT(*) FROM dbo.Students WHERE AdmissionId=@Id AND SchoolMessageConsent IS NULL;",
+            Sql.P("@Id", outsider)) == 1, "Consent sync cannot change an unrelated student.");
+        using var consentRetry = Apply("SchoolMessageConsent", consentRows, "Yes");
+        r.Check(Convert.ToInt32(consentRetry.Rows[0]["Changed"]) == 0 &&
+            Sql.Count("SELECT COUNT(*) FROM msg.ConsentAudit WHERE AdmissionId IN (@A,@B,@C);",
+                Sql.P("@A", anchor), Sql.P("@B", sibling), Sql.P("@C", second)) == auditBefore + 2,
+            "An exact consent retry creates neither extra changes nor duplicate audit evidence.");
+        await r.Refused("Not recorded cannot be propagated as consent",
+            () => { Apply("SchoolMessageConsent", consentRows, "Not recorded"); return Task.CompletedTask; }, 51210);
+        using var staleConsent = Read("SchoolMessageConsent");
+        Sql.Proc("msg.RecordAdmissionConsent", Sql.P("@UserId", f.Admin),
+            Sql.P("@AdmissionId", sibling), Sql.P("@Consent", false), Sql.P("@Authority", "Students.Administer"));
+        int auditAfterConcurrent = Sql.Count("SELECT COUNT(*) FROM msg.ConsentAudit WHERE AdmissionId IN (@A,@B,@C);",
+            Sql.P("@A", anchor), Sql.P("@B", sibling), Sql.P("@C", second));
+        await r.Refused("Concurrent consent changes abort an entire reviewed family update",
+            () => { Apply("SchoolMessageConsent", staleConsent, "Yes"); return Task.CompletedTask; }, 51210);
+        r.Check(Sql.Count("SELECT COUNT(*) FROM msg.ConsentAudit WHERE AdmissionId IN (@A,@B,@C);",
+                Sql.P("@A", anchor), Sql.P("@B", sibling), Sql.P("@C", second)) == auditAfterConcurrent &&
+            Sql.Count("SELECT COUNT(*) FROM dbo.Students WHERE AdmissionId=@Id AND SchoolMessageConsent=0;",
+                Sql.P("@Id", sibling)) == 1,
+            "A stale consent preview cannot overwrite a new refusal or fabricate audit records.");
+        await r.Refused("Consent sync requires student administrator permission",
+            () => { Apply("SchoolMessageConsent", staleConsent, "No", f.Restricted); return Task.CompletedTask; }, 50003);
         using var stale = Read("Address");
         Sql.Query("UPDATE dbo.Students SET Address=N'Changed elsewhere' WHERE AdmissionId=@Id", Sql.P("@Id", sibling));
         string before = Value(anchor, "Address");
