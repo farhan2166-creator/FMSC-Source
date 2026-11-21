@@ -1205,23 +1205,30 @@ public sealed partial class StudentAdmissionPage : ContextPage, IUnsavedChanges,
                 altContact),
             3,
             1);
-        // The consent dropdown needs a separate sync action; unlike a text box,
-        // the combo has no inline action slot. Keep the button beside the choice.
-        var consentEntry = new TableLayoutPanel {
-            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
-            Padding = Padding.Empty, Margin = Padding.Empty
-        };
-        consentEntry.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        consentEntry.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, AppScale.Scale(32)));
-        // Keep the sync action at the dropdown's native height, not the full
-        // guardian field height (which made it a tall, narrow button).
-        consentEntry.RowStyles.Add(new RowStyle(SizeType.Absolute, AppMetrics.InputControlHeight));
-        schoolMessagesConsent.Dock = DockStyle.Fill;
+        // A free-height field container must never stretch the consent sync button.
+        // Use explicit input-size bounds, not table-row percentages or DockStyle.Fill.
+        var consentEntry = new Panel { Dock = DockStyle.Fill, Padding = Padding.Empty, Margin = Padding.Empty };
+        int consentInputHeight = AppMetrics.InputControlHeight;
+        int consentActionWidth = AppScale.Scale(32);
+        int consentActionGap = UiDesignSystem.Spacing.Xs;
+        schoolMessagesConsent.Dock = DockStyle.None;
         schoolMessagesConsent.Margin = Padding.Empty;
-        consentSyncButton.Dock = DockStyle.Fill;
-        consentSyncButton.Margin = new Padding(UiDesignSystem.Spacing.Xs, 0, 0, 0);
-        consentEntry.Controls.Add(schoolMessagesConsent, 0, 0);
-        consentEntry.Controls.Add(consentSyncButton, 1, 0);
+        consentSyncButton.Dock = DockStyle.None;
+        consentSyncButton.Margin = Padding.Empty;
+        consentSyncButton.AutoSize = false;
+        consentSyncButton.MaximumSize = new Size(0, consentInputHeight);
+        consentEntry.Controls.Add(schoolMessagesConsent);
+        consentEntry.Controls.Add(consentSyncButton);
+        void AlignConsentEntry()
+        {
+            int buttonX = Math.Max(0, consentEntry.ClientSize.Width - consentActionWidth);
+            schoolMessagesConsent.SetBounds(0, 0,
+                Math.Max(0, buttonX - consentActionGap), consentInputHeight);
+            consentSyncButton.SetBounds(buttonX, 0,
+                Math.Min(consentActionWidth, consentEntry.ClientSize.Width), consentInputHeight);
+        }
+        consentEntry.Resize += (_, _) => AlignConsentEntry();
+        AlignConsentEntry();
         UiAccessibility.Describe(schoolMessagesConsent, "Message Consent",
             "School messages (SMS / WhatsApp, notices and fees). Not recorded is not permission to send.");
         var schoolConsentField = AdmissionField("Message Consent", consentEntry);
