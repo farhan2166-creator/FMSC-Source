@@ -152,7 +152,7 @@ internal static partial class HelpCatalog
             new[] { HelpRule.System, HelpRule.Choice, HelpRule.Permission }, HelpOwner.SQL | HelpOwner.CSharp,
             new[] { "Pages/Students/Enrollment/StudentTransferReadmissionPage.cs#StudentTransferReadmissionPage", "fmsc.dacpac#TransferEnrollmentClassSection", "fmsc.dacpac#TransferEnrollmentCampus" }, System.Array.Empty<string>(), ""),
         new("FAQ-090", "Students & Families", "Should a returning former student be admitted as a new person?",
-            "Find the existing student and use Transfers / Re-Admission → Re-Admit. The supported workflow keeps the student identity and registration number and offers an admission-number choice where applicable. Review the new placement and return-fee decisions. Do not create a duplicate student to obtain a fresh placement.",
+            "Find the existing student and use Transfers / Re-Admission → Re-Admit for an actual return in the current academic year. Earlier years belong in historical placement correction, not readmission, and must not generate new fees or set a misleading current status. Readmission keeps the student identity and registration number and offers an admission-number choice where applicable. Review the new placement and return-fee decisions. Do not create a duplicate student.",
             "readmit re admit returning former registration retain number", "Student Admissions → Actions → Transfer / Re-Admit",
             new[] { HelpRule.System, HelpRule.Choice, HelpRule.Permission }, HelpOwner.SQL | HelpOwner.CSharp,
             new[] { "Pages/Students/Enrollment/StudentTransferReadmissionPage.cs#StudentTransferReadmissionPage", "fmsc.dacpac#ReAdmitStudentWithNumberChoice" }, System.Array.Empty<string>(), ""),
