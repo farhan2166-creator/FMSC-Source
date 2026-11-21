@@ -316,10 +316,10 @@ DECLARE @CurrentStart date=(SELECT StartDate FROM dbo.AcademicYears WHERE Academ
 DECLARE @PastStart date=DATEADD(year,-1,@CurrentStart);
 DECLARE @OlderStart date=DATEADD(year,-2,@CurrentStart);
 INSERT dbo.AcademicYears(YearName,StartDate,EndDate,IsCurrent)
- VALUES(N'Previous readmission fixture',@PastStart,DATEADD(day,-1,@CurrentStart),0);
+ VALUES(N'Prior return year',@PastStart,DATEADD(day,-1,@CurrentStart),0);
 DECLARE @PastYear int=SCOPE_IDENTITY();
 INSERT dbo.AcademicYears(YearName,StartDate,EndDate,IsCurrent)
- VALUES(N'Older readmission fixture',@OlderStart,DATEADD(day,-1,@PastStart),0);
+ VALUES(N'Older return year',@OlderStart,DATEADD(day,-1,@PastStart),0);
 DECLARE @OlderYear int=SCOPE_IDENTITY();
 INSERT dbo.Students(AdmissionNumber,RegistrationNumber,AdmissionDate,AdmissionCampusId,StudentName,Status,WithdrawalDate,LegacySetupPending)
  VALUES(N'4100',N'RETURN-HISTORY-4100',@OlderStart,1,N'Former student fixture',N'Left',DATEADD(day,-1,@PastStart),0);
